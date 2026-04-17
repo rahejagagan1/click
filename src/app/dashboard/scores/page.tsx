@@ -2,8 +2,6 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
 import ManagerRatingForm from "@/components/scores/manager-rating-form";
 import UserAvatar from "@/components/ui/user-avatar";
 
@@ -77,18 +75,6 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 export default function ScoreHubPage() {
-    const { data: session, status } = useSession();
-    const router = useRouter();
-    const sessionUser = session?.user as any;
-    const canAccess = sessionUser?.orgLevel === "ceo" || sessionUser?.isDeveloper === true || sessionUser?.orgLevel === "manager" || sessionUser?.orgLevel === "hod";
-
-    useEffect(() => {
-        if (status === "loading") return;
-        if (!canAccess) {
-            router.replace("/dashboard/youtube");
-        }
-    }, [status, canAccess]);
-
     const [data, setData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [showRatingForm, setShowRatingForm] = useState(false);
@@ -121,9 +107,6 @@ export default function ScoreHubPage() {
         });
         if (!res.ok) throw new Error("Failed to submit rating");
     };
-
-    if (status === "loading") return null;
-    if (!canAccess) return null;
 
     if (loading) {
         return (

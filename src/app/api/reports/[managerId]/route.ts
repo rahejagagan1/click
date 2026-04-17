@@ -10,12 +10,35 @@ export async function GET(
     { params }: { params: { managerId: string } }
 ) {
     try {
-        const { errorResponse } = await requireAuth();
+        const { session, errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
         const managerId = parseInt(params.managerId);
         if (isNaN(managerId)) {
             return NextResponse.json({ error: "Invalid manager ID" }, { status: 400 });
+        }
+
+        // Access check: admins/CEOs can view any report; others only their own or
+        // reports they've been granted access to via UserReportAccess
+        const requestingUser = session!.user as any;
+        const isFullAccess =
+            requestingUser.orgLevel === "ceo" ||
+            requestingUser.orgLevel === "special_access" ||
+            requestingUser.isDeveloper === true;
+
+        if (!isFullAccess) {
+            const isSelf = requestingUser.dbId === managerId;
+            if (!isSelf) {
+                // Check UserReportAccess grant
+                const grant = await prisma.$queryRaw`
+                    SELECT 1 FROM "UserReportAccess"
+                    WHERE "userId" = ${requestingUser.dbId} AND "managerId" = ${managerId}
+                    LIMIT 1
+                ` as any[];
+                if (!grant.length) {
+                    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+                }
+            }
         }
 
         // Get manager info (raw so reportAccess works before prisma client is regenerated)
