@@ -6,7 +6,6 @@ import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { serverError } from "@/lib/api-auth";
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
-import { getUserQuarterContributionsByChannelId } from "@/lib/youtube/quarter-user-contribution";
 
 export const dynamic = "force-dynamic";
 
@@ -118,28 +117,6 @@ export async function GET(request: NextRequest) {
         const prevQuarter = (y: number, q: number): { year: number; quarter: number } =>
             q <= 1 ? { year: y - 1, quarter: 4 } : { year: y, quarter: q - 1 };
 
-        const dbUserId = (session.user as { dbId?: number }).dbId;
-        let contributionsByChannelId = new Map<
-            string,
-            { videoCount: number; viewsOnVideos: number }
-        >();
-        if (typeof dbUserId === "number" && Number.isFinite(dbUserId)) {
-            const quarterStart = new Date(`${startStr}T00:00:00.000Z`);
-            const quarterEnd = new Date(`${endStr}T23:59:59.999Z`);
-            try {
-                contributionsByChannelId = await getUserQuarterContributionsByChannelId(
-                    dbUserId,
-                    year,
-                    quarter,
-                    quarterStart,
-                    quarterEnd,
-                    configs
-                );
-            } catch (e) {
-                console.error("[youtube/quarterly] user contribution:", e);
-            }
-        }
-
         let prevByChannel = new Map<string, number | null>();
         if (!quarterMetricsTableMissing && channelIds.length > 0) {
             const pq = prevQuarter(year, quarter);
@@ -169,17 +146,12 @@ export async function GET(request: NextRequest) {
                 viewsGainedInQuarter != null && viewsPreviousQuarter != null
                     ? viewsGainedInQuarter - viewsPreviousQuarter
                     : null;
-            const me = contributionsByChannelId.get(c.channelId) ?? {
-                videoCount: 0,
-                viewsOnVideos: 0,
-            };
             return {
                 name: c.name,
                 channelId: c.channelId,
                 viewsGainedInQuarter,
                 viewsPreviousQuarter,
                 quarterOverQuarterDelta,
-                me,
                 error: null as string | null,
             };
         });
