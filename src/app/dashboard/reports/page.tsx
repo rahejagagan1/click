@@ -10,18 +10,13 @@ export default function AllReportsPage() {
     const router = useRouter();
     const sessionUser = session?.user as any;
     const isCeoOrAdmin = sessionUser?.orgLevel === "ceo" || sessionUser?.isDeveloper === true || sessionUser?.orgLevel === "special_access";
-    const canAccessReports = isCeoOrAdmin || sessionUser?.orgLevel === "manager" || sessionUser?.orgLevel === "hod";
 
     const [allowedManagerIds, setAllowedManagerIds] = useState<number[]>([]);
     const [accessChecked, setAccessChecked] = useState(false);
 
-    // Redirect users who don't have access
+    // Fetch explicit access for non-CEO/admin users
     useEffect(() => {
         if (status === "loading") return;
-        if (!canAccessReports) {
-            router.replace("/dashboard");
-            return;
-        }
         if (isCeoOrAdmin) { setAccessChecked(true); return; }
         if (!sessionUser?.dbId) return;
 
@@ -40,7 +35,7 @@ export default function AllReportsPage() {
                 setAccessChecked(true);
                 router.replace(`/dashboard/reports/${sessionUser.dbId}`);
             });
-    }, [status, canAccessReports, isCeoOrAdmin, sessionUser?.dbId]);
+    }, [status, isCeoOrAdmin, sessionUser?.dbId]);
 
     const [reports, setReports] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);

@@ -1,4 +1,4 @@
-import { serverError } from "@/lib/api-auth";
+import { requireAuth, serverError } from "@/lib/api-auth";
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
@@ -9,6 +9,9 @@ export async function GET(
     request: Request,
     { params }: { params: { id: string } }
 ) {
+    const { errorResponse } = await requireAuth();
+    if (errorResponse) return errorResponse;
+
     try {
         const id = parseInt(params.id);
         if (isNaN(id)) {
@@ -36,7 +39,7 @@ export async function GET(
                 youtubeStats: {
                     select: {
                         viewCount: true, likeCount: true, commentCount: true, last30DaysViews: true,
-                        youtubeVideoId: true, videoUrl: true, videoTitle: true, publishedAt: true,
+                        ctr: true, youtubeVideoId: true, videoUrl: true, videoTitle: true, publishedAt: true,
                     },
                 },
                 productionList: {
