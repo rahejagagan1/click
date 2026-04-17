@@ -1,0 +1,892 @@
+"use client";
+import { useState, useEffect } from "react";
+import useSWR, { mutate } from "swr";
+import { fetcher } from "@/lib/swr";
+import { useSession } from "next-auth/react";
+import Link from "next/link";
+import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, Scissors } from "lucide-react";
+
+// ── Tab config ────────────────────────────────────────────────────────────────
+const TOP_TABS = [
+  { key: "home",             label: "HOME",               href: "/dashboard/hr/analytics"  },
+  { key: "attendance",       label: "ATTENDANCE",         href: "/dashboard/hr/attendance" },
+  { key: "leave",            label: "LEAVE",              href: "/dashboard/hr/leaves"     },
+  { key: "performance",      label: "PERFORMANCE",        href: "/dashboard/hr/goals"      },
+  { key: "expenses",         label: "EXPENSES & TRAVEL",  href: "/dashboard/hr/expenses"   },
+  { key: "helpdesk",         label: "HELPDESK",           href: "/dashboard/hr/tickets"    },
+  { key: "apps",             label: "APPS",               href: "/dashboard/hr/apps"       },
+];
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmtMins(m: number) { return `${Math.floor(m / 60)}h ${m % 60}m`; }
+
+// ── Timeline bar (same proportional grid as Keka) ────────────────────────────
+function TimelineBar({ clockIn, clockOut }: { clockIn?: string; clockOut?: string }) {
+  const START_H = 7, SPAN = 15; // 07:00 → 22:00
+  if (!clockIn) return <span className="text-[11px] text-slate-400">—</span>;
+  const toFrac = (iso: string) => {
+    const d = new Date(iso);
+    return Math.max(0, Math.min(1, ((d.getHours() + d.getMinutes() / 60) - START_H) / SPAN));
+  };
+  const left = toFrac(clockIn);
+  const right = clockOut ? toFrac(clockOut) : left + 0.02;
+  return (
+    <div className="relative w-full max-w-[280px] h-2 bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
+      <div className="absolute h-full bg-[#00BCD4] rounded-full"
+        style={{ left: `${left * 100}%`, width: `${Math.max((right - left) * 100, 1)}%` }} />
+    </div>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+const C = {
+  card:    "bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl",
+  t1:      "text-slate-800 dark:text-white",
+  t2:      "text-slate-600 dark:text-slate-300",
+  t3:      "text-slate-400 dark:text-slate-500",
+};
+
+function RegularizeModal({ onClose }: { onClose: () => void }) {
+  const [form, setForm] = useState({ date: "", requestedIn: "", requestedOut: "", reason: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  const submit = async () => {
+    setErr("");
+    if (!form.date || !form.reason) return setErr("Date and reason are required");
+    setSaving(true);
+    const payload: any = { date: form.date, reason: form.reason };
+    if (form.requestedIn)  payload.requestedIn  = `${form.date}T${form.requestedIn}:00`;
+    if (form.requestedOut) payload.requestedOut = `${form.date}T${form.requestedOut}:00`;
+    const res = await fetch("/api/hr/attendance/regularize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const data = await res.json();
+    if (!res.ok) { setErr(data.error || "Failed"); setSaving(false); return; }
+    mutate((k: string) => typeof k === "string" && k.includes("/api/hr/attendance/regularize"));
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.08] rounded-2xl w-full max-w-md shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06]">
+          <h3 className="text-[14px] font-bold text-slate-800 dark:text-white">Request Punch Correction</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-white"><X size={18} /></button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          {err && <p className="text-[12px] text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
+          <div>
+            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>
+            <input type="date" value={form.date} onChange={e => set("date", e.target.value)}
+              className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Clock In</label>
+              <input type="time" value={form.requestedIn} onChange={e => set("requestedIn", e.target.value)}
+                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Clock Out</label>
+              <input type="time" value={form.requestedOut} onChange={e => set("requestedOut", e.target.value)}
+                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none" />
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Reason *</label>
+            <textarea value={form.reason} onChange={e => set("reason", e.target.value)} rows={3}
+              placeholder="Explain why you need a punch correction..."
+              className="mt-1 w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none resize-none" />
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-white/[0.06]">
+          <button onClick={onClose} className="h-8 px-4 text-[13px] font-medium text-slate-500">Cancel</button>
+          <button onClick={submit} disabled={saving}
+            className="h-8 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50">
+            {saving ? "Submitting..." : "Submit Request"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WFHModal({ onClose }: { onClose: () => void }) {
+  const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), reason: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async () => {
+    setErr("");
+    if (!form.reason) return setErr("Reason is required");
+    setSaving(true);
+    const res = await fetch("/api/hr/attendance/wfh", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+    const data = await res.json();
+    if (!res.ok) { setErr(data.error || "Failed"); setSaving(false); return; }
+    mutate((k: string) => typeof k === "string" && k.includes("/api/hr/attendance/wfh"));
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.08] rounded-2xl w-full max-w-md shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06]">
+          <h3 className="text-[14px] font-bold text-slate-800 dark:text-white">Work From Home Request</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-white"><X size={18} /></button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          {err && <p className="text-[12px] text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
+          <div>
+            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>
+            <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+              className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]" />
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Reason *</label>
+            <textarea value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} rows={3}
+              placeholder="Why are you working from home today?"
+              className="mt-1 w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none resize-none" />
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-white/[0.06]">
+          <button onClick={onClose} className="h-8 px-4 text-[13px] text-slate-500">Cancel</button>
+          <button onClick={submit} disabled={saving}
+            className="h-8 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50">
+            {saving ? "Submitting..." : "Submit"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OnDutyModal({ onClose }: { onClose: () => void }) {
+  const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), fromTime: "", toTime: "", purpose: "", location: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  const submit = async () => {
+    setErr("");
+    if (!form.purpose) return setErr("Purpose is required");
+    setSaving(true);
+    const res = await fetch("/api/hr/attendance/on-duty", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+    const data = await res.json();
+    if (!res.ok) { setErr(data.error || "Failed"); setSaving(false); return; }
+    mutate((k: string) => typeof k === "string" && k.includes("/api/hr/attendance/on-duty"));
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.08] rounded-2xl w-full max-w-md shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06]">
+          <h3 className="text-[14px] font-bold text-slate-800 dark:text-white">On Duty Request</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-white"><X size={18} /></button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          {err && <p className="text-[12px] text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
+          <div>
+            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>
+            <input type="date" value={form.date} onChange={e => set("date", e.target.value)}
+              className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">From Time</label>
+              <input type="time" value={form.fromTime} onChange={e => set("fromTime", e.target.value)}
+                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">To Time</label>
+              <input type="time" value={form.toTime} onChange={e => set("toTime", e.target.value)}
+                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none" />
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Purpose *</label>
+            <textarea value={form.purpose} onChange={e => set("purpose", e.target.value)} rows={2}
+              placeholder="Purpose of official duty..."
+              className="mt-1 w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none resize-none" />
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Location</label>
+            <input value={form.location} onChange={e => set("location", e.target.value)}
+              placeholder="e.g. Client office, Mumbai"
+              className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#008CFF]" />
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-white/[0.06]">
+          <button onClick={onClose} className="h-8 px-4 text-[13px] text-slate-500">Cancel</button>
+          <button onClick={submit} disabled={saving}
+            className="h-8 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50">
+            {saving ? "Submitting..." : "Submit"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function AttendancePage() {
+  const { data: session } = useSession();
+  const user = session?.user as any;
+  const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper || user?.orgLevel === "hr_manager";
+
+  const now = new Date();
+  const [month, setMonth] = useState(
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+  );
+  const [subTab, setSubTab] = useState<"log" | "calendar" | "requests" | "shift" | "overtime" | "shiftwo">("log");
+  const [reqType, setReqType] = useState<"punch" | "wfh" | "od">("punch");
+  const [clock, setClock] = useState<Date | null>(null);
+  const [use24, setUse24] = useState(false);
+  const [showRegModal, setShowRegModal] = useState(false);
+  const [showWFHModal, setShowWFHModal] = useState(false);
+  const [showODModal,  setShowODModal]  = useState(false);
+  const [regView, setRegView] = useState<"my" | "team">("my");
+
+  useEffect(() => {
+    setClock(new Date());
+    const t = setInterval(() => setClock(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const { data: myData }    = useSWR(`/api/hr/attendance?month=${month}`, fetcher);
+  const { data: boardData } = useSWR(`/api/hr/attendance/board`, fetcher);
+  const { data: regsData = [] } = useSWR(`/api/hr/attendance/regularize?view=${regView}`, fetcher);
+  const { data: wfhData  = [] } = useSWR(`/api/hr/attendance/wfh?view=${regView}`, fetcher);
+  const { data: odData   = [] } = useSWR(`/api/hr/attendance/on-duty?view=${regView}`, fetcher);
+
+  const clockIn  = async () => { const res = await fetch("/api/hr/attendance/clock-in",  { method: "POST" }); const d = await res.json(); if (!res.ok) return alert(d.error); mutate(`/api/hr/attendance?month=${month}`); };
+  const clockOut = async () => { const res = await fetch("/api/hr/attendance/clock-out", { method: "POST" }); const d = await res.json(); if (!res.ok) return alert(d.error); mutate(`/api/hr/attendance?month=${month}`); };
+
+  const todayRec  = myData?.todayRecord;
+  const summary   = myData?.summary || {};
+  const records   = myData?.records  || [];
+  const days      = ["M","T","W","T","F","S","S"];
+  const todayDow  = now.getDay() === 0 ? 6 : now.getDay() - 1;
+
+  const presentRecs = records.filter((r: any) => r.totalMinutes > 0);
+  const avgMins     = presentRecs.length > 0
+    ? Math.round(presentRecs.reduce((s: number, r: any) => s + r.totalMinutes, 0) / presentRecs.length) : 0;
+  const onTimePct   = summary.present > 0
+    ? Math.round(((summary.present - (summary.late || 0)) / summary.present) * 100) : 0;
+
+  const elapsedMins = todayRec?.clockIn && !todayRec?.clockOut && clock
+    ? Math.floor((clock.getTime() - new Date(todayRec.clockIn).getTime()) / 60000)
+    : todayRec?.totalMinutes || 0;
+  const elapsedStr  = fmtMins(elapsedMins);
+  const progressPct = Math.min((elapsedMins / 540) * 100, 100);
+
+  // Month period buttons (30 DAYS + last 6 months)
+  const periodBtns = ["30 DAYS", ...Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(); d.setMonth(d.getMonth() - i);
+    return d.toLocaleString("default", { month: "short" }).toUpperCase();
+  })];
+
+  return (
+    <div className="min-h-screen bg-[#f4f7f8] dark:bg-[#011627]">
+
+      {/* ── Top Module Tabs ── */}
+      <div className="flex items-center bg-white dark:bg-[#001529] border-b border-slate-200 dark:border-white/[0.06] px-4">
+        {TOP_TABS.map((t) => (
+          <Link key={t.key} href={t.href}
+            className={`px-4 py-3 text-[11px] font-bold tracking-widest transition-colors border-b-2 whitespace-nowrap ${
+              t.key === "attendance"
+                ? "border-[#008CFF] text-[#008CFF]"
+                : "border-transparent text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
+            }`}>
+            {t.label}
+          </Link>
+        ))}
+      </div>
+
+      {/* ── 3-Panel Header ── */}
+      <div className="grid grid-cols-3 bg-white dark:bg-[#001529] border-b border-slate-200 dark:border-white/[0.06]">
+
+        {/* ── Panel 1: Attendance Stats ── */}
+        <div className="p-5 border-r border-slate-200 dark:border-white/[0.06]">
+          <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-3">Attendance Stats</h3>
+
+          {/* Last Week + info icon */}
+          <div className="flex items-center justify-between mb-3">
+            <button className="flex items-center gap-1 text-[12px] font-semibold text-slate-700 dark:text-white hover:text-[#008CFF] transition-colors">
+              Last Week
+              <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            <Info size={13} strokeWidth={1.75} className="text-slate-400" />
+          </div>
+
+          {/* Column headers */}
+          <div className="grid grid-cols-[1fr_90px_90px] mb-1 px-3">
+            <span />
+            <span className="text-[9px] uppercase tracking-widest text-slate-400 font-bold text-right">AVG HRS / DAY</span>
+            <span className="text-[9px] uppercase tracking-widest text-slate-400 font-bold text-right">ON TIME ARRIVAL</span>
+          </div>
+
+          {/* Me row */}
+          <div className="grid grid-cols-[1fr_90px_90px] items-center py-3 px-3 rounded-lg bg-slate-50 dark:bg-[#002140]/60 mb-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center shrink-0">
+                <User size={14} strokeWidth={2} className="text-white" />
+              </div>
+              <span className="text-[13px] font-semibold text-slate-800 dark:text-white">Me</span>
+            </div>
+            <span className="text-[15px] font-bold text-slate-800 dark:text-white text-right">{fmtMins(avgMins)}</span>
+            <span className="text-[15px] font-bold text-slate-800 dark:text-white text-right">{onTimePct}%</span>
+          </div>
+
+          {/* My Team row */}
+          <div className="grid grid-cols-[1fr_90px_90px] items-center py-3 px-3 rounded-lg bg-slate-50 dark:bg-[#002140]/60">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-full bg-[#008CFF] flex items-center justify-center shrink-0">
+                <Users size={13} strokeWidth={2} className="text-white" />
+              </div>
+              <span className="text-[13px] font-semibold text-slate-800 dark:text-white">My Team</span>
+            </div>
+            <span className="text-[15px] font-bold text-slate-800 dark:text-white text-right">
+              {boardData?.counts ? fmtMins(boardData.counts.avgMinutes || avgMins) : fmtMins(avgMins)}
+            </span>
+            <span className="text-[15px] font-bold text-slate-800 dark:text-white text-right">{onTimePct}%</span>
+          </div>
+        </div>
+
+        {/* ── Panel 2: Timings ── */}
+        <div className="p-5 border-r border-slate-200 dark:border-white/[0.06]">
+          <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-3">Timings</h3>
+
+          {/* Week day circles */}
+          <div className="flex items-center gap-1.5 mb-4">
+            {days.map((d, i) => (
+              <div key={i} className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold transition-all ${
+                i === todayDow
+                  ? "bg-[#00BCD4] text-white shadow-sm shadow-[#00BCD4]/40"
+                  : "bg-slate-100 dark:bg-white/[0.07] text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-white/[0.06]"
+              }`}>{d}</div>
+            ))}
+          </div>
+
+          {/* Shift info */}
+          <p className="text-[12px] font-medium text-slate-600 dark:text-slate-400 mb-3">Today (9:00 AM - 6:00 PM)</p>
+
+          {/* Timeline progress bar */}
+          <div className="w-full h-3 bg-slate-100 dark:bg-white/[0.07] rounded-full overflow-hidden">
+            <div className="h-full bg-[#00BCD4] rounded-full transition-all duration-500"
+              style={{ width: `${progressPct}%` }} />
+          </div>
+
+          <div className="flex items-center justify-between mt-2">
+            <p className="text-[11px] font-medium text-slate-500 dark:text-[#00BCD4]">
+              Duration: {todayRec?.clockIn ? elapsedStr : "0h 0m"}
+            </p>
+            <div className="flex items-center gap-1 text-[11px] text-slate-500">
+              <Clock3 size={11} strokeWidth={1.75} />
+              0 min
+            </div>
+          </div>
+        </div>
+
+        {/* ── Panel 3: Actions ── */}
+        <div className="p-5">
+          <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-3">Actions</h3>
+
+          {/* 2-col layout: left = clock+date+totals, right = button+links+elapsed */}
+          <div className="flex items-start gap-3">
+
+            {/* Left column */}
+            <div className="flex flex-col gap-1 shrink-0">
+              {/* Clock box */}
+              <div className="bg-slate-50 dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg px-3 py-2 min-w-[148px]">
+                <p className="font-bold text-slate-800 dark:text-white leading-none whitespace-nowrap" suppressHydrationWarning
+                  style={{ fontSize: "1.25rem", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
+                  {clock
+                    ? clock.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: !use24 }).replace(/\s?(am|pm)/i, "")
+                    : "--:--:--"}
+                  {!use24 && clock && (
+                    <span className="text-[12px] font-bold ml-1.5">{clock.getHours() >= 12 ? "PM" : "AM"}</span>
+                  )}
+                </p>
+              </div>
+
+              {/* Date */}
+              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400" suppressHydrationWarning>
+                {clock ? clock.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "2-digit", month: "short", year: "numeric" }) : ""}
+              </p>
+
+              {/* Total hours */}
+              <div className="mt-1">
+                <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase tracking-widest font-bold mb-1">
+                  TOTAL HOURS <Info size={10} strokeWidth={2} />
+                </div>
+                <p className="text-[12px] text-slate-600 dark:text-slate-400 leading-5">
+                  Effective: <span className="font-bold text-slate-800 dark:text-white">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</span>
+                </p>
+                <p className="text-[12px] text-slate-600 dark:text-slate-400 leading-5">
+                  Gross: <span className="font-bold text-slate-800 dark:text-white">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</span>
+                </p>
+              </div>
+            </div>
+
+            {/* Right column: button → quick links → elapsed */}
+            <div className="flex flex-col gap-2">
+              {/* Button */}
+              {!todayRec?.clockIn ? (
+                <button onClick={clockIn}
+                  className="h-9 px-5 bg-[#ff4a5c] hover:bg-[#ff3045] text-white rounded-lg text-[13px] font-bold transition-colors shadow-sm whitespace-nowrap w-fit">
+                  Web Clock-In
+                </button>
+              ) : !todayRec?.clockOut ? (
+                <button onClick={clockOut}
+                  className="h-9 px-5 bg-[#ff4a5c] hover:bg-[#ff3045] text-white rounded-lg text-[13px] font-bold transition-colors shadow-sm whitespace-nowrap w-fit">
+                  Web Clock-Out
+                </button>
+              ) : (
+                <span className="h-9 px-5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 rounded-lg text-[13px] font-bold flex items-center whitespace-nowrap w-fit">
+                  ✓ Day Complete
+                </span>
+              )}
+
+              {/* Quick links */}
+              <div className="flex flex-col gap-1.5">
+                {[
+                  { label: "Work From Home",    Icon: Home,       onClick: () => setShowWFHModal(true) },
+                  { label: "On Duty",           Icon: Briefcase,  onClick: () => setShowODModal(true)  },
+                  { label: "Punch Correction",  Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
+                  { label: "Remote Clock-In",   Icon: MapPin,     onClick: () => setShowWFHModal(true) },
+                  { label: "Partial Day",       Icon: Scissors,   onClick: () => { setSubTab("requests"); setReqType("punch"); } },
+                ].map(({ label, Icon, onClick }) => (
+                  <button key={label} onClick={onClick}
+                    className="flex items-center gap-1.5 text-[12px] font-medium text-[#008CFF] hover:underline w-fit">
+                    <Icon size={12} strokeWidth={1.75} />
+                    {label}
+                  </button>
+                ))}
+            </div>
+          </div>
+        </div>
+        </div>{/* end Panel 3 */}
+      </div>{/* end 3-panel header */}
+
+      {/* ── Logs & Requests ── */}
+      <div className="px-6 pt-5 pb-8">
+
+        {/* Section header */}
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-[15px] font-semibold text-slate-800 dark:text-white">Logs & Requests</h3>
+          {/* 24-hour format toggle */}
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">24 hour format</span>
+            <div onClick={() => setUse24(v => !v)}
+              className={`w-9 h-5 rounded-full relative transition-colors duration-200 ${use24 ? "bg-[#008CFF]" : "bg-slate-200 dark:bg-white/10"}`}>
+              <div className={`w-3.5 h-3.5 bg-white rounded-full absolute top-0.5 transition-all duration-200 shadow ${use24 ? "left-[calc(100%-18px)]" : "left-0.5"}`} />
+            </div>
+          </label>
+        </div>
+
+        {/* Sub-tabs */}
+        <div className="flex gap-0 border-b border-slate-200 dark:border-white/[0.06] mb-5">
+          {([
+            ["log",      "Attendance Log"],
+            ["calendar", "Calendar"],
+            ["requests", "Attendance Requests"],
+            ["shift",    "Shift Schedule"],
+            ["overtime", "Overtime Requests"],
+            ["shiftwo",  "Shift Weekly Off"],
+          ] as const).map(([k, l]) => (
+            <button key={k} onClick={() => setSubTab(k as any)}
+              className={`px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors whitespace-nowrap ${
+                subTab === k
+                  ? "border-[#008CFF] text-[#008CFF]"
+                  : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              }`}>{l}</button>
+          ))}
+        </div>
+
+        {subTab === "log" && (
+          <>
+            {/* Period row */}
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-[14px] font-semibold text-slate-800 dark:text-white">Last 30 Days</h4>
+              <div className="flex items-center gap-1">
+                {periodBtns.map((label, i) => (
+                  <button key={label + i}
+                    className={`h-8 px-3 rounded-full text-[11px] font-semibold transition-colors ${
+                      i === 0
+                        ? "bg-[#008CFF] text-white"
+                        : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-800 dark:hover:text-white"
+                    }`}>{label}</button>
+                ))}
+                {/* List/Calendar toggle */}
+                <div className="flex ml-2 border border-slate-200 dark:border-white/[0.08] rounded-lg overflow-hidden">
+                  <button className="px-2 py-1.5 bg-[#008CFF]/10 text-[#008CFF]">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                    </svg>
+                  </button>
+                  <button className="px-2 py-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/5">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-white/[0.06]">
+                    {["DATE","ATTENDANCE VISUAL","EFFECTIVE HOURS","GROSS HOURS","LOG"].map(h => (
+                      <th key={h} className="px-5 py-3 text-left text-[10px] uppercase tracking-widest text-[#008CFF] dark:text-[#00BCD4] font-semibold">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {records.map((rec: any) => {
+                    const date      = new Date(rec.date);
+                    const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+                    const isHoliday = rec.status === "holiday";
+                    const isLeave   = rec.status === "on_leave";
+                    const hrs       = rec.totalMinutes ? fmtMins(rec.totalMinutes) : "0h 0m";
+                    const pct       = rec.totalMinutes ? Math.min((rec.totalMinutes / 540) * 100, 100) : 0;
+
+                    return (
+                      <tr key={rec.id || rec.date}
+                        className={`border-b border-slate-100 dark:border-white/[0.04] transition-colors ${
+                          isHoliday ? "bg-amber-50/60 dark:bg-yellow-900/10"
+                          : isWeekend ? "bg-slate-50/80 dark:bg-white/[0.015]"
+                          : "hover:bg-slate-50/50 dark:hover:bg-white/[0.02]"
+                        }`}>
+
+                        {/* DATE */}
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[13px] text-slate-800 dark:text-white font-medium">
+                              {date.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" })}
+                            </span>
+                            {isHoliday && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-600 dark:text-amber-400 font-bold">HLDY</span>
+                            )}
+                            {isWeekend && !isHoliday && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-white/10 text-slate-500 dark:text-slate-400 font-bold">W-OFF</span>
+                            )}
+                            {isLeave && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400 font-bold">LEAVE</span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* ATTENDANCE VISUAL */}
+                        <td className="px-5 py-3">
+                          {rec.totalMinutes > 0 ? (
+                            <div className="flex items-center gap-3">
+                              <TimelineBar clockIn={rec.clockIn} clockOut={rec.clockOut} />
+                              <svg className="w-3.5 h-3.5 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                              </svg>
+                            </div>
+                          ) : isHoliday ? (
+                            <span className="text-[12px] text-amber-500 font-medium">Holiday</span>
+                          ) : isWeekend ? (
+                            <span className="text-[12px] text-slate-400">Full day Weekly-off</span>
+                          ) : isLeave ? (
+                            <span className="text-[12px] text-violet-400">On Leave</span>
+                          ) : (
+                            <span className="text-[12px] text-slate-400">—</span>
+                          )}
+                        </td>
+
+                        {/* EFFECTIVE HOURS */}
+                        <td className="px-5 py-3">
+                          {rec.totalMinutes > 0 ? (
+                            <div className="flex items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full shrink-0 ${pct >= 90 ? "bg-emerald-400" : pct >= 50 ? "bg-[#008CFF]" : "bg-orange-400"}`} />
+                              <span className="text-[13px] text-slate-800 dark:text-white">{hrs}</span>
+                              {pct < 90 && <span className="text-[11px] text-slate-400">+</span>}
+                            </div>
+                          ) : (isHoliday || isWeekend) ? (
+                            <span className="text-slate-400 text-lg">···</span>
+                          ) : null}
+                        </td>
+
+                        {/* GROSS HOURS */}
+                        <td className="px-5 py-3 text-[13px] text-slate-700 dark:text-slate-300">
+                          {rec.totalMinutes > 0 ? hrs : (isHoliday || isWeekend) ? <span className="text-slate-400 text-lg">···</span> : ""}
+                        </td>
+
+                        {/* LOG */}
+                        <td className="px-5 py-3">
+                          {rec.totalMinutes > 0 ? (
+                            <svg className="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          ) : rec.status === "absent" ? (
+                            <svg className="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                          ) : (isHoliday || isWeekend) ? (
+                            <span className="text-slate-400 text-lg">···</span>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {records.length === 0 && (
+                <p className="text-[13px] text-slate-400 text-center py-14">No attendance records for this period</p>
+              )}
+            </div>
+          </>
+        )}
+
+        {subTab === "calendar" && (
+          <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+            <div className="flex items-center p-4 border-b border-slate-200 dark:border-white/[0.06]">
+              <input type="month" value={month} onChange={e => setMonth(e.target.value)}
+                className="h-9 px-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white focus:outline-none" />
+            </div>
+            <div className="grid grid-cols-7">
+              {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => (
+                <div key={d} className="p-3 text-center text-[11px] uppercase tracking-wider text-slate-500 font-medium border-b border-slate-100 dark:border-white/[0.04] bg-slate-50 dark:bg-white/[0.02]">{d}</div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7">
+              {(() => {
+                const [y, m] = month.split("-").map(Number);
+                const firstDay = new Date(y, m - 1, 1).getDay();
+                const daysInMonth = new Date(y, m, 0).getDate();
+                const recMap = new Map(records.map((r: any) => [new Date(r.date).getDate(), r]));
+                const cells = [];
+                for (let i = 0; i < firstDay; i++)
+                  cells.push(<div key={`e${i}`} className="border-b border-r border-slate-100 dark:border-white/[0.03] min-h-[70px]" />);
+                for (let d = 1; d <= daysInMonth; d++) {
+                  const rec = recMap.get(d) as any;
+                  const dd = new Date(y, m - 1, d);
+                  const isWeekend = dd.getDay() === 0 || dd.getDay() === 6;
+                  const isToday   = d === now.getDate() && m === now.getMonth() + 1 && y === now.getFullYear();
+                  cells.push(
+                    <div key={d} className={`border-b border-r border-slate-100 dark:border-white/[0.03] p-2 min-h-[70px] ${isToday ? "ring-1 ring-inset ring-[#008CFF]/30 bg-[#008CFF]/5" : ""} ${isWeekend ? "bg-slate-50 dark:bg-white/[0.015]" : ""}`}>
+                      <span className={`text-[12px] font-medium ${isToday ? "text-[#008CFF]" : "text-slate-500 dark:text-slate-400"}`}>{d}</span>
+                      {rec?.clockIn  && <p className="text-[10px] text-slate-400 mt-0.5">In: {new Date(rec.clockIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>}
+                      {rec?.clockOut && <p className="text-[10px] text-slate-400">Out: {new Date(rec.clockOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>}
+                      {rec?.status === "holiday" && <span className="text-[9px] px-1 rounded bg-amber-400/20 text-amber-500 mt-0.5 inline-block font-bold">HLDY</span>}
+                    </div>
+                  );
+                }
+                return cells;
+              })()}
+            </div>
+          </div>
+        )}
+
+        {subTab === "requests" && (
+          <>
+            {/* Request type + team toggle */}
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="flex border border-slate-200 dark:border-white/[0.08] rounded-lg overflow-hidden">
+                  {([["punch","Punch Corrections"],["wfh","WFH Requests"],["od","On Duty"]] as const).map(([v, l]) => (
+                    <button key={v} onClick={() => setReqType(v)}
+                      className={`px-3 py-1.5 text-[11px] font-semibold transition-colors ${reqType === v ? "bg-[#008CFF] text-white" : "text-slate-500 hover:bg-slate-50 dark:hover:bg-white/5"}`}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex border border-slate-200 dark:border-white/[0.08] rounded-lg overflow-hidden">
+                  {(["my","team"] as const).map(v => (
+                    <button key={v} onClick={() => setRegView(v)}
+                      className={`px-3 py-1.5 text-[11px] font-semibold transition-colors ${regView === v ? "bg-slate-700 text-white" : "text-slate-500 hover:bg-slate-50 dark:hover:bg-white/5"}`}>
+                      {v === "my" ? "My Requests" : "Team"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {reqType === "punch" && (
+                <button onClick={() => setShowRegModal(true)}
+                  className="h-8 px-4 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12px] font-semibold flex items-center gap-1.5">
+                  <Plus size={13} strokeWidth={2} /> New Request
+                </button>
+              )}
+              {reqType === "wfh" && (
+                <button onClick={() => setShowWFHModal(true)}
+                  className="h-8 px-4 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12px] font-semibold flex items-center gap-1.5">
+                  <Plus size={13} strokeWidth={2} /> New WFH
+                </button>
+              )}
+              {reqType === "od" && (
+                <button onClick={() => setShowODModal(true)}
+                  className="h-8 px-4 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12px] font-semibold flex items-center gap-1.5">
+                  <Plus size={13} strokeWidth={2} /> New On Duty
+                </button>
+              )}
+            </div>
+
+            {/* Punch Corrections table */}
+            {reqType === "punch" && (
+              <div className={`${C.card} overflow-hidden`}>
+                {regsData.length === 0 ? (
+                  <div className="py-14 text-center"><p className="text-[13px] text-slate-400">No punch correction requests found</p></div>
+                ) : (
+                  <table className="w-full">
+                    <thead><tr className="border-b border-slate-200 dark:border-white/[0.06]">
+                      {[...(regView === "team" ? ["EMPLOYEE"] : []), "DATE","REQ IN","REQ OUT","REASON","STATUS","ACTIONS"].map(h => (
+                        <th key={h} className="px-5 py-3 text-left text-[10px] uppercase tracking-widest text-[#008CFF] dark:text-[#00BCD4] font-semibold">{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>
+                      {regsData.map((r: any) => (
+                        <tr key={r.id} className="border-b border-slate-100 dark:border-white/[0.04] hover:bg-slate-50/50 dark:hover:bg-white/[0.015]">
+                          {regView === "team" && <td className="px-5 py-3 text-[12px] text-slate-800 dark:text-white font-medium">{r.user?.name}</td>}
+                          <td className="px-5 py-3 text-[12px] text-slate-600 dark:text-slate-300">{new Date(r.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
+                          <td className="px-5 py-3 text-[12px] text-slate-800 dark:text-white">{r.requestedIn ? new Date(r.requestedIn).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+                          <td className="px-5 py-3 text-[12px] text-slate-800 dark:text-white">{r.requestedOut ? new Date(r.requestedOut).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+                          <td className="px-5 py-3 text-[12px] text-slate-500 dark:text-slate-400 max-w-[180px] truncate">{r.reason}</td>
+                          <td className="px-5 py-3">
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${r.status === "approved" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : r.status === "rejected" ? "bg-red-500/10 text-red-500 dark:text-red-400" : "bg-amber-500/10 text-amber-600 dark:text-amber-400"}`}>
+                              {r.status.charAt(0).toUpperCase() + r.status.slice(1)}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3">
+                            {regView === "team" && r.status === "pending" && (
+                              <div className="flex items-center gap-1.5">
+                                <button onClick={async () => { await fetch("/api/hr/attendance/regularize", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, action: "approve" }) }); mutate((k: string) => typeof k === "string" && k.includes("/api/hr/attendance/regularize")); }} className="h-6 px-2.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded text-[11px] font-semibold">Approve</button>
+                                <button onClick={async () => { await fetch("/api/hr/attendance/regularize", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, action: "reject" }) }); mutate((k: string) => typeof k === "string" && k.includes("/api/hr/attendance/regularize")); }} className="h-6 px-2.5 bg-red-50 dark:bg-red-500/10 text-red-500 dark:text-red-400 rounded text-[11px] font-semibold">Reject</button>
+                              </div>
+                            )}
+                            {r.approvalNote && <p className="text-[10px] text-slate-400 mt-0.5 max-w-[140px] truncate">Note: {r.approvalNote}</p>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            {/* WFH Requests table */}
+            {reqType === "wfh" && (
+              <div className={`${C.card} overflow-hidden`}>
+                {wfhData.length === 0 ? (
+                  <div className="py-14 text-center"><p className="text-[13px] text-slate-400">No WFH requests found</p></div>
+                ) : (
+                  <table className="w-full">
+                    <thead><tr className="border-b border-slate-200 dark:border-white/[0.06]">
+                      {[...(regView === "team" ? ["EMPLOYEE"] : []), "DATE","REASON","APPLIED ON","STATUS","ACTIONS"].map(h => (
+                        <th key={h} className="px-5 py-3 text-left text-[10px] uppercase tracking-widest text-[#008CFF] dark:text-[#00BCD4] font-semibold">{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>
+                      {wfhData.map((r: any) => (
+                        <tr key={r.id} className="border-b border-slate-100 dark:border-white/[0.04] hover:bg-slate-50/50 dark:hover:bg-white/[0.015]">
+                          {regView === "team" && <td className="px-5 py-3 text-[12px] text-slate-800 dark:text-white font-medium">{r.user?.name}</td>}
+                          <td className="px-5 py-3 text-[12px] text-slate-800 dark:text-white">{new Date(r.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
+                          <td className="px-5 py-3 text-[12px] text-slate-500 dark:text-slate-400 max-w-[200px] truncate">{r.reason}</td>
+                          <td className="px-5 py-3 text-[12px] text-slate-500">{new Date(r.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
+                          <td className="px-5 py-3">
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${r.status === "approved" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : r.status === "rejected" ? "bg-red-500/10 text-red-500 dark:text-red-400" : "bg-amber-500/10 text-amber-600 dark:text-amber-400"}`}>
+                              {r.status.charAt(0).toUpperCase() + r.status.slice(1)}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3">
+                            {regView === "team" && r.status === "pending" && (
+                              <div className="flex items-center gap-1.5">
+                                <button onClick={async () => { await fetch("/api/hr/attendance/wfh", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, action: "approve" }) }); mutate((k: string) => typeof k === "string" && k.includes("/api/hr/attendance/wfh")); }} className="h-6 px-2.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded text-[11px] font-semibold">Approve</button>
+                                <button onClick={async () => { await fetch("/api/hr/attendance/wfh", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, action: "reject" }) }); mutate((k: string) => typeof k === "string" && k.includes("/api/hr/attendance/wfh")); }} className="h-6 px-2.5 bg-red-50 dark:bg-red-500/10 text-red-500 dark:text-red-400 rounded text-[11px] font-semibold">Reject</button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            {/* On Duty Requests table */}
+            {reqType === "od" && (
+              <div className={`${C.card} overflow-hidden`}>
+                {odData.length === 0 ? (
+                  <div className="py-14 text-center"><p className="text-[13px] text-slate-400">No On Duty requests found</p></div>
+                ) : (
+                  <table className="w-full">
+                    <thead><tr className="border-b border-slate-200 dark:border-white/[0.06]">
+                      {[...(regView === "team" ? ["EMPLOYEE"] : []), "DATE","FROM","TO","PURPOSE","LOCATION","STATUS","ACTIONS"].map(h => (
+                        <th key={h} className="px-5 py-3 text-left text-[10px] uppercase tracking-widest text-[#008CFF] dark:text-[#00BCD4] font-semibold">{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>
+                      {odData.map((r: any) => (
+                        <tr key={r.id} className="border-b border-slate-100 dark:border-white/[0.04] hover:bg-slate-50/50 dark:hover:bg-white/[0.015]">
+                          {regView === "team" && <td className="px-5 py-3 text-[12px] text-slate-800 dark:text-white font-medium">{r.user?.name}</td>}
+                          <td className="px-5 py-3 text-[12px] text-slate-800 dark:text-white">{new Date(r.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
+                          <td className="px-5 py-3 text-[12px] text-slate-500">{r.fromTime ? new Date(r.fromTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+                          <td className="px-5 py-3 text-[12px] text-slate-500">{r.toTime ? new Date(r.toTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+                          <td className="px-5 py-3 text-[12px] text-slate-500 dark:text-slate-400 max-w-[160px] truncate">{r.purpose}</td>
+                          <td className="px-5 py-3 text-[12px] text-slate-500">{r.location || "—"}</td>
+                          <td className="px-5 py-3">
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${r.status === "approved" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : r.status === "rejected" ? "bg-red-500/10 text-red-500 dark:text-red-400" : "bg-amber-500/10 text-amber-600 dark:text-amber-400"}`}>
+                              {r.status.charAt(0).toUpperCase() + r.status.slice(1)}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3">
+                            {regView === "team" && r.status === "pending" && (
+                              <div className="flex items-center gap-1.5">
+                                <button onClick={async () => { await fetch("/api/hr/attendance/on-duty", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, action: "approve" }) }); mutate((k: string) => typeof k === "string" && k.includes("/api/hr/attendance/on-duty")); }} className="h-6 px-2.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded text-[11px] font-semibold">Approve</button>
+                                <button onClick={async () => { await fetch("/api/hr/attendance/on-duty", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, action: "reject" }) }); mutate((k: string) => typeof k === "string" && k.includes("/api/hr/attendance/on-duty")); }} className="h-6 px-2.5 bg-red-50 dark:bg-red-500/10 text-red-500 dark:text-red-400 rounded text-[11px] font-semibold">Reject</button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {subTab === "shift" && (
+          <div className={`${C.card} p-12 flex flex-col items-center justify-center gap-3`}>
+            <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center">
+              <Clock3 size={22} className="text-slate-400" />
+            </div>
+            <p className="text-[14px] font-semibold text-slate-700 dark:text-white">Shift Schedule</p>
+            <p className="text-[12px] text-slate-400 text-center max-w-xs">Your shift schedule will appear here. Contact HR to configure your shift timings.</p>
+          </div>
+        )}
+
+        {subTab === "overtime" && (
+          <div className={`${C.card} p-12 flex flex-col items-center justify-center gap-3`}>
+            <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center">
+              <Plus size={22} className="text-slate-400" />
+            </div>
+            <p className="text-[14px] font-semibold text-slate-700 dark:text-white">Overtime Requests</p>
+            <p className="text-[12px] text-slate-400 text-center max-w-xs">Overtime request functionality coming soon. Use comp-off requests in the Leaves module for now.</p>
+          </div>
+        )}
+
+        {subTab === "shiftwo" && (
+          <div className={`${C.card} p-12 flex flex-col items-center justify-center gap-3`}>
+            <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center">
+              <ShieldCheck size={22} className="text-slate-400" />
+            </div>
+            <p className="text-[14px] font-semibold text-slate-700 dark:text-white">Shift Weekly Off Requests</p>
+            <p className="text-[12px] text-slate-400 text-center max-w-xs">Shift weekly off swap requests will appear here once your shift schedule is configured.</p>
+          </div>
+        )}
+
+      {showRegModal && <RegularizeModal onClose={() => setShowRegModal(false)} />}
+      {showWFHModal && <WFHModal onClose={() => setShowWFHModal(false)} />}
+      {showODModal  && <OnDutyModal onClose={() => setShowODModal(false)} />}
+      </div>
+    </div>
+  );
+}
