@@ -31,12 +31,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
 
     // Authenticated: show full layout
+    const isHRPage = pathname.startsWith("/dashboard/hr");
+
     return (
         <div className="flex min-h-screen">
             <Sidebar />
             <main className="flex-1 ml-64">
                 <Header />
-                <div className="p-8">
+                <div className={isHRPage ? "" : "p-8"}>
                     {children}
                 </div>
             </main>

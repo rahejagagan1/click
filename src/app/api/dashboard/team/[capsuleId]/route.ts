@@ -1,4 +1,4 @@
-import { serverError } from "@/lib/api-auth";
+import { requireAuth, serverError } from "@/lib/api-auth";
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
@@ -9,6 +9,9 @@ export async function GET(
     request: Request,
     { params }: { params: { capsuleId: string } }
 ) {
+    const { errorResponse } = await requireAuth();
+    if (errorResponse) return errorResponse;
+
     try {
         const capsuleId = parseInt(params.capsuleId);
         if (isNaN(capsuleId)) {
