@@ -1,10 +1,13 @@
-import { serverError } from "@/lib/api-auth";
+import { requireAuth, serverError } from "@/lib/api-auth";
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+    const { errorResponse } = await requireAuth();
+    if (errorResponse) return errorResponse;
+
     try {
         // Get selected list IDs from admin config
         const config = await prisma.syncConfig.findUnique({ where: { key: "selected_lists" } });

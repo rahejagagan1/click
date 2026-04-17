@@ -137,44 +137,72 @@ export const authOptions: NextAuthOptions = {
                         },
                     });
                     if (dbUser) {
+                        // Set critical fields first — before any BigInt conversion that could throw
                         (session.user as any).dbId = dbUser.id;
-                        (session.user as any).clickupUserId = dbUser.clickupUserId.toString();
                         (session.user as any).role = dbUser.role;
                         (session.user as any).orgLevel = dbUser.orgLevel;
                         (session.user as any).teamCapsule = dbUser.teamCapsule;
                         (session.user as any).dbName = dbUser.name;
+                        // BigInt conversion isolated — null clickupUserId must not wipe out dbId
+                        try {
+                            (session.user as any).clickupUserId = dbUser.clickupUserId != null
+                                ? dbUser.clickupUserId.toString()
+                                : "0";
+                        } catch {
+                            (session.user as any).clickupUserId = "0";
+                        }
                     } else if (useDevLogin && session.user.email) {
                         // Dev credentials login: ensure a DB row exists so APIs (e.g. feedback) get dbId + orgLevel
-                        const devRow = await prisma.user.upsert({
-                            where: { email: session.user.email },
-                            create: {
-                                email: session.user.email,
-                                name: session.user.name || "Dev Admin",
-                                profilePictureUrl: session.user.image ?? null,
-                                clickupUserId: devClickupUserIdFromEmail(session.user.email),
-                                role: "admin",
-                                orgLevel: "ceo",
-                            },
-                            update: {
-                                name: session.user.name || undefined,
-                                profilePictureUrl: session.user.image ?? undefined,
-                            },
-                            select: {
-                                id: true,
-                                clickupUserId: true,
-                                role: true,
-                                orgLevel: true,
-                                teamCapsule: true,
-                                name: true,
-                                profilePictureUrl: true,
-                            },
-                        });
-                        (session.user as any).dbId = devRow.id;
-                        (session.user as any).clickupUserId = devRow.clickupUserId.toString();
-                        (session.user as any).role = devRow.role;
-                        (session.user as any).orgLevel = devRow.orgLevel;
-                        (session.user as any).teamCapsule = devRow.teamCapsule;
-                        (session.user as any).dbName = devRow.name;
+                        // Upsert may fail if the generated clickupUserId hash collides with an existing user's unique ID.
+                        // In that case, fall back to a plain findUnique.
+                        const devSelect = {
+                            id: true,
+                            clickupUserId: true,
+                            role: true,
+                            orgLevel: true,
+                            teamCapsule: true,
+                            name: true,
+                            profilePictureUrl: true,
+                        } as const;
+                        let devRow: any = null;
+                        try {
+                            devRow = await prisma.user.upsert({
+                                where: { email: session.user.email },
+                                create: {
+                                    email: session.user.email,
+                                    name: session.user.name || "Dev Admin",
+                                    profilePictureUrl: session.user.image ?? null,
+                                    clickupUserId: devClickupUserIdFromEmail(session.user.email),
+                                    role: "admin",
+                                    orgLevel: "ceo",
+                                },
+                                update: {
+                                    name: session.user.name || undefined,
+                                    profilePictureUrl: session.user.image ?? undefined,
+                                },
+                                select: devSelect,
+                            });
+                        } catch {
+                            // Unique constraint collision on clickupUserId — user may already exist, look them up
+                            devRow = await prisma.user.findUnique({
+                                where: { email: session.user.email },
+                                select: devSelect,
+                            }).catch(() => null);
+                        }
+                        if (devRow) {
+                            (session.user as any).dbId = devRow.id;
+                            (session.user as any).role = devRow.role;
+                            (session.user as any).orgLevel = devRow.orgLevel;
+                            (session.user as any).teamCapsule = devRow.teamCapsule;
+                            (session.user as any).dbName = devRow.name;
+                            try {
+                                (session.user as any).clickupUserId = devRow.clickupUserId != null
+                                    ? devRow.clickupUserId.toString()
+                                    : "0";
+                            } catch {
+                                (session.user as any).clickupUserId = "0";
+                            }
+                        }
                     }
                     // Developer access from env — full access
                     if (session.user?.email && developerEmails.includes(session.user.email.toLowerCase())) {

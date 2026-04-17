@@ -93,6 +93,7 @@ export async function POST(request: NextRequest) {
                 description: templateBody.description ?? null,
                 sections:    templateBody.sections,
                 guardrails:  templateBody.guardrails ?? [],
+                roundOff:    templateBody.roundOff ?? false,
                 createdAt:   new Date(),
                 updatedAt:   new Date(),
             };

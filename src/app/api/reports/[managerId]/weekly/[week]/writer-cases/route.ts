@@ -3,7 +3,6 @@ import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { calcBusinessDaysTat, formatTatDays } from "@/lib/utils";
 import { getWeeklyReportPeriod } from "@/lib/reports/weekly-period";
-import { isWriterFirstDraftMilestone } from "@/lib/clickup/subtask-milestones";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +19,17 @@ function resolveSubtaskTat(sub: { tat?: any; startDate: Date | null; dateDone: D
         return formatTatDays(days);
     }
     return "";
+}
+
+/** Match subtask names for "Scripting – First Draft" step */
+function isFirstDraftSubtask(name: string): boolean {
+    const n = name.toLowerCase();
+    return (
+        (n.includes("script") && n.includes("first draft")) ||
+        (n.includes("scripting") && n.includes("draft")) ||
+        n === "scripting - first draft" ||
+        n === "script first draft"
+    );
 }
 
 /** Match subtask names for any Script Revision step (R1, R2 …) */
@@ -95,7 +105,7 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
 
         // Keep only cases where the First Draft OR Revision subtask was completed this week
         const filteredCases = cases.filter((c) => {
-            const firstDraftSub = c.subtasks.find(s => isWriterFirstDraftMilestone(s.name));
+            const firstDraftSub = c.subtasks.find(s => isFirstDraftSubtask(s.name));
             const revisionSub   = c.subtasks.find(s => isRevisionSubtask(s.name));
             const fdInWeek  = firstDraftSub?.dateDone != null &&
                 firstDraftSub.dateDone >= weekStart && firstDraftSub.dateDone <= weekEnd;
@@ -105,7 +115,7 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         });
 
         const writerCases = filteredCases.map((c) => {
-            const firstDraftSub = c.subtasks.find(s => isWriterFirstDraftMilestone(s.name)) ?? null;
+            const firstDraftSub = c.subtasks.find(s => isFirstDraftSubtask(s.name)) ?? null;
             const revisionSub   = c.subtasks.find(s => isRevisionSubtask(s.name))   ?? null;
 
             // Only include TAT for the subtask completed IN THIS WEEK

@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { resolveTeamCapsuleForSave } from "@/lib/capsule-matching";
-import { serverError } from "@/lib/api-auth";
+import { requireAdmin, serverError } from "@/lib/api-auth";
 
 export async function PATCH(
     request: NextRequest,
     { params }: { params: { id: string } }
 ) {
+    const { errorResponse } = await requireAdmin();
+    if (errorResponse) return errorResponse;
+
     try {
         const id = parseInt(params.id);
         if (isNaN(id)) {
