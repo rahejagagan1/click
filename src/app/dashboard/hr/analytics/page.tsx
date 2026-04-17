@@ -153,55 +153,56 @@ export default function HRHomePage() {
       <div className="flex flex-1 min-h-0 relative gap-3 px-4 py-3">
 
         {/* ══ LEFT column ══ */}
-        <div className="w-[280px] shrink-0 overflow-y-auto">
-          <div className="space-y-3">
+        <div className="w-[280px] shrink-0 overflow-y-auto rounded-lg py-3 px-3"
+             style={{ background: "#121c2e" }}>
+          <div className="space-y-2.5">
 
-            <p className="text-[14px] font-semibold text-[#1f3347] pb-0.5 pt-1 leading-none">
+            <p className="text-[11px] font-bold text-white/50 pb-0.5 pt-0.5 leading-none uppercase tracking-[0.1em]">
               Quick Access
             </p>
 
             {/* ── Clock widget ── */}
-            <div className="rounded-[2px] px-4 py-3.5 overflow-hidden relative"
+            <div className="rounded-lg px-4 py-3.5 overflow-hidden relative"
                  style={{ background: "#9182bf" }}>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[12px] leading-none font-semibold !text-white tracking-[-0.01em]" suppressHydrationWarning>
+                <span className="text-[11px] leading-none font-semibold text-white/80 tracking-[-0.01em]" suppressHydrationWarning>
                   Time Today - {dl}
                 </span>
-                <Link href="/dashboard/hr/attendance" className="text-[12px] !text-white/80 hover:!text-white transition-colors leading-none">
+                <Link href="/dashboard/hr/attendance" className="text-[11px] text-white/70 hover:text-white transition-colors leading-none">
                   View All
                 </Link>
               </div>
-              <p className="text-[9px] font-semibold uppercase tracking-[0.08em] !text-white mb-1.5">Current Time</p>
+              <p className="text-[9px] font-bold uppercase tracking-[0.1em] text-white/60 mb-1.5">Current Time</p>
               <div className="flex items-end justify-between mb-2.5">
-                <span className="font-bold tabular-nums !text-white leading-none"
-                      style={{ fontSize: 38, letterSpacing: "-0.03em" }} suppressHydrationWarning>
+                <span className="font-bold tabular-nums text-white leading-none"
+                      style={{ fontSize: 34, letterSpacing: "-0.03em" }} suppressHydrationWarning>
                   {hh}:{mm}
                 </span>
                 <div className="flex items-end gap-1 pb-1">
-                  <span className="text-[13px] font-semibold tabular-nums !text-white leading-none" suppressHydrationWarning>.{ss}</span>
-                  <span className="text-[12px] font-semibold !text-white leading-none" suppressHydrationWarning>{ap}</span>
+                  <span className="text-[13px] font-semibold tabular-nums text-white/80 leading-none" suppressHydrationWarning>.{ss}</span>
+                  <span className="text-[12px] font-semibold text-white leading-none" suppressHydrationWarning>{ap}</span>
                 </div>
               </div>
               <div className="flex items-center justify-end gap-2">
                 {!todayRec?.clockIn ? (
                   <button onClick={clockIn}
-                    className="h-8 px-4 rounded-[3px] text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
+                    className="h-7 px-4 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
                     style={{ background: "#ff6a6a" }}>
                     Clock-in
                   </button>
                 ) : !todayRec?.clockOut ? (
                   <button onClick={clockOut}
-                    className="h-8 px-4 rounded-[3px] text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
+                    className="h-7 px-4 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
                     style={{ background: "#ff6a6a" }}>
                     Clock-out
                   </button>
                 ) : (
-                  <span className="h-8 px-4 rounded-[3px] text-[12px] font-semibold flex items-center text-white/90"
+                  <span className="h-7 px-4 rounded-md text-[12px] font-semibold flex items-center text-white/90"
                         style={{ background: "rgba(255,255,255,0.18)" }}>
                     Done ✓
                   </span>
                 )}
-                <button className="h-8 px-3 rounded-[3px] text-[12px] font-medium flex items-center gap-1 text-[#2c2c2c] transition-colors"
+                <button className="h-7 px-3 rounded-md text-[11px] font-medium flex items-center gap-1 text-[#2c2c2c] transition-colors"
                         style={{ background: "#ffffff" }}>
                   Other <ChevronDown className="w-3 h-3"/>
                 </button>
@@ -209,43 +210,56 @@ export default function HRHomePage() {
             </div>
 
             {/* ── Inbox ── */}
-            <div className={`${C.card} p-3`}>
-              <p className={`text-[13px] font-semibold ${C.t1} mb-3`}>Inbox</p>
+            <div className="rounded-lg p-3" style={{ background: "#1e2d40", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <p className="text-[13px] font-semibold text-white mb-3">Inbox</p>
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                     style={{ background: "rgba(99,102,241,0.1)" }}>
-                  <Mail className="w-4.5 h-4.5" style={{ color: "#6366f1", width: 18, height: 18 }}/>
+                     style={{ background: "rgba(167,139,250,0.18)" }}>
+                  <Mail style={{ color: "#a78bfa", width: 18, height: 18 }}/>
                 </div>
                 <div>
-                  <p className={`text-[13px] font-semibold ${C.t1}`}>Good job!</p>
-                  <p className={`text-[12px] ${C.t3} mt-0.5`}>You have no pending actions</p>
+                  <p className="text-[13px] font-semibold text-white">Good job!</p>
+                  <p className="text-[12px] text-white/50 mt-0.5">You have no pending actions</p>
                 </div>
               </div>
             </div>
 
             {/* ── Holidays ── */}
             {holiday && (
-              <div className="rounded-xl p-4 relative overflow-hidden" style={{ minHeight: 108,
+              <div className="rounded-lg p-4 relative overflow-hidden" style={{ minHeight: 108,
                    background: "linear-gradient(165deg, #1a6b42 0%, #0e4528 100%)" }}>
-                {/* Hills silhouette */}
-                <svg viewBox="0 0 340 44" style={{ position: "absolute", bottom: 0, left: 0, width: "100%" }}
-                     preserveAspectRatio="none">
-                  <path d="M0,44 L0,34 Q40,18 80,28 Q110,36 140,24 Q160,16 170,10 Q180,16 190,24 Q220,36 250,28 Q290,18 340,34 L340,44 Z"
-                        fill="rgba(0,0,0,0.22)"/>
-                  <path d="M0,44 L0,38 Q50,28 100,36 Q150,44 190,38 Q230,30 280,36 Q310,40 340,38 L340,44 Z"
-                        fill="rgba(0,0,0,0.18)"/>
+                {/* Mosque silhouette */}
+                <svg viewBox="0 0 340 55" style={{ position: "absolute", bottom: 0, right: -4, width: "90%", height: 55 }}
+                     preserveAspectRatio="xMaxYMax meet">
+                  <g fill="rgba(0,0,0,0.28)">
+                    <rect x="30" y="50" width="280" height="6"/>
+                    <polygon points="52,50 52,14 55,6 58,14 58,50"/>
+                    <rect x="47" y="27" width="16" height="3" rx="1"/>
+                    <polygon points="282,50 282,14 285,6 288,14 288,50"/>
+                    <rect x="277" y="27" width="16" height="3" rx="1"/>
+                    <rect x="65" y="36" width="50" height="20"/>
+                    <path d="M65,36 A25,20 0 0 1 115,36Z"/>
+                    <rect x="115" y="40" width="110" height="16"/>
+                    <path d="M115,40 A55,36 0 0 1 225,40Z"/>
+                    <rect x="168" y="5" width="4" height="35"/>
+                    <circle cx="170" cy="5" r="3"/>
+                    <rect x="225" y="36" width="50" height="20"/>
+                    <path d="M225,36 A25,20 0 0 1 275,36Z"/>
+                  </g>
+                  <path d="M295,8 A11,11 0 1,1 309,20 A8,8 0 1,0 295,8Z" fill="rgba(255,255,255,0.40)"/>
+                  <circle cx="315" cy="10" r="1.8" fill="rgba(255,255,255,0.30)"/>
                 </svg>
                 <div className="relative z-10">
                   <div className="flex items-start justify-between mb-2">
-                    <span className="text-[9.5px] font-bold uppercase tracking-[0.14em] !text-white">Holidays</span>
-                    <Link href="/dashboard/hr/admin" className="text-[11px] !text-white hover:!text-white transition-colors">
+                    <span className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-white">Holidays</span>
+                    <Link href="/dashboard/hr/admin" className="text-[11px] text-white/80 hover:text-white transition-colors">
                       View All
                     </Link>
                   </div>
-                  <p className="text-[17px] font-bold !text-white leading-snug pr-14 mb-2">{holiday.name}</p>
+                  <p className="text-[17px] font-bold text-white leading-snug pr-14 mb-2">{holiday.name}</p>
                   <div className="flex items-end justify-between">
                     <div>
-                      <p className="text-[11px] !text-white mb-1.5">
+                      <p className="text-[11px] text-white/80 mb-1.5">
                         {new Date(holiday.date).toLocaleDateString("en-IN", { weekday:"short", day:"numeric", month:"long", year:"numeric" })}
                       </p>
                       <span className="inline-block px-2 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide text-white"
@@ -255,8 +269,8 @@ export default function HRHomePage() {
                     </div>
                     <div className="flex gap-1.5">
                       {[
-                        { fn: () => setHidx(i => Math.max(0, i - 1)),                      Icon: ChevronLeft,  dis: hidx === 0                   },
-                        { fn: () => setHidx(i => Math.min(upcoming.length - 1, i + 1)),    Icon: ChevronRight, dis: hidx >= upcoming.length - 1  },
+                        { fn: () => setHidx(i => Math.max(0, i - 1)),                      Icon: ChevronLeft,  dis: hidx === 0                  },
+                        { fn: () => setHidx(i => Math.min(upcoming.length - 1, i + 1)),    Icon: ChevronRight, dis: hidx >= upcoming.length - 1 },
                       ].map(({ fn, Icon, dis }, i) => (
                         <button key={i} onClick={fn} disabled={dis}
                           className="flex items-center justify-center text-white rounded-full transition-colors"
@@ -271,60 +285,60 @@ export default function HRHomePage() {
             )}
 
             {/* ── On Leave Today ── */}
-            <div className={`${C.card} p-3`}>
-              <p className={`text-[13px] font-semibold ${C.t1} mb-3`}>On Leave Today</p>
+            <div className="rounded-lg p-3" style={{ background: "#1e2d40", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <p className="text-[13px] font-semibold text-white mb-3">On Leave Today</p>
               {onLeave.length > 0 ? (
                 <div className="flex flex-wrap gap-3">
                   {onLeave.slice(0, 6).map((u: any) => (
                     <div key={u.id} className="flex flex-col items-center gap-1">
                       <Av name={u.name} url={u.profilePictureUrl} size={40}/>
-                      <span className={`text-[10px] ${C.t3} truncate text-center`} style={{ width: 40 }}>
+                      <span className="text-[10px] text-white/45 truncate text-center" style={{ width: 40 }}>
                         {u.name.split(" ")[0]}
                       </span>
                     </div>
                   ))}
                   {onLeave.length > 6 && (
                     <div className="flex flex-col items-center gap-1">
-                      <div className={`rounded-full flex items-center justify-center text-[10px] font-semibold ring-2 ${C.ring}`}
-                           style={{ width: 40, height: 40, background: "rgba(0,140,255,0.1)", color: "#008CFF" }}>
+                      <div className="rounded-full flex items-center justify-center text-[10px] font-semibold"
+                           style={{ width: 40, height: 40, background: "rgba(0,140,255,0.15)", color: "#008CFF" }}>
                         +{onLeave.length - 6}
                       </div>
                     </div>
                   )}
                 </div>
               ) : (
-                <p className={`text-[12px] ${C.t3}`}>No one on leave today</p>
+                <p className="text-[12px] text-white/40">No one on leave today</p>
               )}
             </div>
 
             {/* ── Working Remotely ── */}
-            <div className={`${C.card} p-3`}>
-              <p className={`text-[13px] font-semibold ${C.t1} mb-3`}>Working Remotely</p>
+            <div className="rounded-lg p-3" style={{ background: "#1e2d40", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <p className="text-[13px] font-semibold text-white mb-3">Working Remotely</p>
               {working.length > 0 ? (
                 <div className="flex flex-wrap gap-3">
                   {working.slice(0, 6).map((u: any) => (
                     <div key={u.id} className="flex flex-col items-center gap-1">
                       <div className="relative">
                         <Av name={u.name} url={u.profilePictureUrl} size={40}/>
-                        <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full ring-[1.5px] ${C.ring} flex items-center justify-center`}
-                              style={{ background: "#008CFF" }}>
+                        <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full flex items-center justify-center"
+                              style={{ background: "#008CFF", boxShadow: "0 0 0 2px #1e2d40" }}>
                           <MapPin style={{ width: 6, height: 6, color: "#fff" }}/>
                         </span>
                       </div>
-                      <span className={`text-[10px] ${C.t3} truncate text-center`} style={{ width: 40 }}>
+                      <span className="text-[10px] text-white/45 truncate text-center" style={{ width: 40 }}>
                         {u.name.split(" ")[0]}
                       </span>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className={`text-[12px] ${C.t3}`}>No one checked in yet</p>
+                <p className="text-[12px] text-white/40">No one checked in yet</p>
               )}
             </div>
 
             {/* ── Leave Balances ── */}
-            <div className={`${C.card} p-4`}>
-              <p className={`text-[24px] font-semibold ${C.t1} mb-4 leading-none`}>Leave Balances</p>
+            <div className="rounded-lg p-4" style={{ background: "#1e2d40", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <p className="text-[16px] font-semibold text-white mb-4 leading-none">Leave Balances</p>
               {balances.length > 0 ? (
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex gap-5">
@@ -333,7 +347,7 @@ export default function HRHomePage() {
                       return (
                         <div key={b.id} className="flex flex-col items-center gap-1.5">
                           <BalanceRing avail={avail} total={b.totalDays || 1} color={["#34b3d9", "#84d7ef"][i % 2]} />
-                          <p className={`text-[10px] font-medium uppercase text-center leading-tight ${C.t3}`}
+                          <p className="text-[10px] font-medium uppercase text-center leading-tight text-white/45"
                              style={{ letterSpacing: "0.05em", maxWidth: 95 }}>
                             {b.leaveType?.name}
                           </p>
@@ -341,7 +355,7 @@ export default function HRHomePage() {
                       );
                     })}
                   </div>
-                  <div className="flex flex-col gap-1.5 min-w-[130px]">
+                  <div className="flex flex-col gap-1.5 min-w-[120px]">
                     <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline leading-none">
                       Request Leave
                     </Link>
@@ -352,8 +366,8 @@ export default function HRHomePage() {
                 </div>
               ) : (
                 <div className="flex items-center justify-between gap-4">
-                  <p className={`text-[12px] ${C.t3}`}>No leave balances configured</p>
-                  <div className="flex flex-col gap-1.5 min-w-[120px]">
+                  <p className="text-[12px] text-white/40">No leave balances configured</p>
+                  <div className="flex flex-col gap-1.5 min-w-[110px]">
                     <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline">
                       Request Leave
                     </Link>
@@ -369,9 +383,9 @@ export default function HRHomePage() {
         </div>
 
         {/* ══ RIGHT column (feed) ══ */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto min-w-0">
 
-          <div className="space-y-3 pr-1">
+          <div className="ml-auto max-w-[680px] space-y-3 pr-1">
 
             {/* ── Compose card ── */}
             <div className={`${C.card} overflow-hidden`}>
