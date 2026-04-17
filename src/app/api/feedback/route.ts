@@ -1,6 +1,7 @@
 import { serverError } from "@/lib/api-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import type { Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
@@ -47,7 +48,7 @@ export async function GET() {
 }
 
 /** POST — any logged-in user can submit dashboard feedback */
-async function resolveSessionUserId(session: Awaited<ReturnType<typeof getServerSession>>): Promise<number | null> {
+async function resolveSessionUserId(session: Session | null): Promise<number | null> {
     const email = session?.user?.email;
     const raw = (session?.user as { dbId?: number | string } | undefined)?.dbId;
     const id = raw === undefined || raw === null ? NaN : Number(raw);

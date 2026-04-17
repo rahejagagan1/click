@@ -26,12 +26,10 @@ function isPrismaClientStale(client: PrismaClient | undefined): boolean {
   const c = client as unknown as {
     youtubeDashboardQuarterMetrics?: { findMany?: unknown };
     youtubeDashboardChannelQuarterAnalysis?: { findMany?: unknown };
-    youtubeDashUserQuarterChannel?: { deleteMany?: unknown };
   };
   return (
     typeof c.youtubeDashboardQuarterMetrics?.findMany !== "function" ||
-    typeof c.youtubeDashboardChannelQuarterAnalysis?.findMany !== "function" ||
-    typeof c.youtubeDashUserQuarterChannel?.deleteMany !== "function"
+    typeof c.youtubeDashboardChannelQuarterAnalysis?.findMany !== "function"
   );
 }
 
