@@ -1,6 +1,9 @@
 "use client";
 
 import useSWR from "swr";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { fetcher, swrConfig } from "@/lib/swr";
 import SummaryCards from "@/components/dashboard/summary-cards";
 import CasesTable from "@/components/dashboard/cases-table";
@@ -8,11 +11,25 @@ import RatingChart from "@/components/dashboard/rating-chart";
 import { DashboardSkeleton } from "@/components/ui/loading-spinner";
 
 export default function DashboardPage() {
-    const { data, error, isLoading } = useSWR("/api/dashboard/my", fetcher, swrConfig);
+    const { data: session, status } = useSession();
+    const router = useRouter();
+    const sessionUser = session?.user as any;
+    const isCeo = sessionUser?.orgLevel === "ceo" || sessionUser?.isDeveloper === true;
 
-    if (isLoading) {
+    useEffect(() => {
+        if (status === "loading") return;
+        if (!isCeo) {
+            router.replace("/dashboard/youtube");
+        }
+    }, [status, isCeo]);
+
+    const { data, error, isLoading } = useSWR(isCeo ? "/api/dashboard/my" : null, fetcher, swrConfig);
+
+    if (status === "loading" || isLoading) {
         return <DashboardSkeleton cards={4} />;
     }
+
+    if (!isCeo) return null;
 
     if (error) {
         return (

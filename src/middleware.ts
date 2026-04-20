@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
-import { tokenCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
 
 const PUBLIC_PATHS = ["/login", "/api/auth", "/api/health"];
 
@@ -46,12 +45,7 @@ export async function middleware(request: NextRequest) {
         }
     }
 
-    // YouTube dashboards: production team + execs + developers (read-only DB metrics)
-    if (pathname.startsWith("/dashboard/youtube")) {
-        if (!tokenCanAccessYoutubeDashboard(token as any)) {
-            return NextResponse.redirect(new URL("/dashboard", request.url));
-        }
-    }
+    // YouTube dashboard: any authenticated user (see youtube-dashboard-access)
 
     return NextResponse.next();
 }

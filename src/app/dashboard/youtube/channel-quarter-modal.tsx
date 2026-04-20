@@ -44,6 +44,11 @@ function scopeKeyFor(channelId: string, year: number, quarter: number) {
     return `${channelId}:${year}:${quarter}`;
 }
 
+export type UserQuarterContribution = {
+    videoCount: number;
+    viewsOnVideos: number;
+};
+
 export default function ChannelQuarterAnalysisSection({
     channelId,
     channelLabel,
@@ -52,6 +57,7 @@ export default function ChannelQuarterAnalysisSection({
     quarterLabel,
     onDismiss,
     embedded,
+    userContribution,
 }: {
     channelId: string;
     channelLabel: string;
@@ -62,6 +68,8 @@ export default function ChannelQuarterAnalysisSection({
     onDismiss: () => void;
     /** When true, render inside the Studio channel card (no outer frame — tab row shows selection). */
     embedded?: boolean;
+    /** Logged-in user: sum of stored views on your cases for this channel in this quarter (from quarterly payload). */
+    userContribution?: UserQuarterContribution | null;
 }) {
     const gradientId = `ytAreaFill-${useId().replace(/:/g, "")}`;
     const scopeKey = useMemo(() => scopeKeyFor(channelId, year, quarter), [channelId, year, quarter]);
@@ -106,12 +114,21 @@ export default function ChannelQuarterAnalysisSection({
         return () => ac.abort();
     }, [channelId, year, quarter]);
 
-    const chartRows =
-        data?.buckets.map((b) => ({
+    const chartRows = useMemo(() => {
+        const buckets = data?.buckets ?? [];
+        const totalBucketViews = buckets.reduce((s, b) => s + b.views, 0);
+        const contribTotal = userContribution?.viewsOnVideos ?? 0;
+
+        return buckets.map((b) => ({
             label: b.label,
             views: b.views,
             uploads: b.uploads,
-        })) ?? [];
+            contribution:
+                contribTotal > 0 && totalBucketViews > 0
+                    ? Math.round((b.views / totalBucketViews) * contribTotal)
+                    : 0,
+        }));
+    }, [data?.buckets, userContribution?.viewsOnVideos]);
 
     const contentReady = !loading && !err && data && dataScopeKey === scopeKey;
     const showSkeleton = loading && dataScopeKey !== scopeKey;
@@ -190,21 +207,31 @@ export default function ChannelQuarterAnalysisSection({
                         key={scopeKey}
                         className="space-y-6 motion-safe:animate-yt-section-reveal motion-reduce:animate-none"
                     >
-                        <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-slate-200/90 bg-slate-50/90 px-4 py-3 transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.04]">
-                            <div>
+                        <div className={`grid grid-cols-1 gap-3${userContribution != null && userContribution.viewsOnVideos > 0 ? " sm:grid-cols-2" : ""}`}>
+                            <div className="rounded-xl border border-slate-200/90 bg-slate-50/90 px-4 py-3 transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.04]">
                                 <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                                    Quarter views (YouTube Analytics)
+                                    Quarter views
                                 </p>
                                 {data.viewsGainedInQuarter != null ? (
-                                    <p className="mt-0.5 text-2xl font-bold tabular-nums tracking-tight text-slate-900 transition-opacity duration-300 dark:text-white">
+                                    <p className="mt-0.5 text-2xl font-bold tabular-nums tracking-tight text-sky-700 dark:text-sky-300">
                                         {formatViews(data.viewsGainedInQuarter)}
                                     </p>
                                 ) : (
                                     <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300">
-                                        No quarter total in the database for this channel yet.
+                                        No quarter total yet.
                                     </p>
                                 )}
                             </div>
+                            {userContribution != null && userContribution.viewsOnVideos > 0 && (
+                                <div className="rounded-xl border border-violet-200/80 bg-gradient-to-br from-violet-50/90 to-white px-4 py-3 dark:border-violet-500/20 dark:from-violet-950/30 dark:to-[#12122a]">
+                                    <p className="text-[10px] font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-300">
+                                        Your contribution
+                                    </p>
+                                    <p className="mt-0.5 text-2xl font-bold tabular-nums tracking-tight text-violet-700 dark:text-violet-300">
+                                        {formatViews(userContribution.viewsOnVideos)}
+                                    </p>
+                                </div>
+                            )}
                         </div>
 
                         <div className="rounded-2xl border border-slate-100 bg-gradient-to-b from-slate-50/80 to-white pb-2 pt-4 transition-shadow duration-300 dark:border-white/10 dark:from-white/[0.03] dark:to-[#12122a]">
@@ -214,6 +241,10 @@ export default function ChannelQuarterAnalysisSection({
                                         <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                                             <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.45} />
                                             <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.02} />
+                                        </linearGradient>
+                                        <linearGradient id={`${gradientId}-contrib`} x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.35} />
+                                            <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0.02} />
                                         </linearGradient>
                                     </defs>
                                     <CartesianGrid strokeDasharray="4 4" stroke="rgba(148,163,184,0.35)" vertical={false} />
@@ -254,6 +285,9 @@ export default function ChannelQuarterAnalysisSection({
                                                 <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow-lg dark:border-white/10 dark:bg-[#1a1a30]">
                                                     <p className="font-semibold text-slate-900 dark:text-white">{row.label}</p>
                                                     <p className="mt-1 tabular-nums text-sky-700 dark:text-sky-300">{formatViews(row.views)} views</p>
+                                                    {userContribution != null && row.contribution > 0 && (
+                                                        <p className="mt-0.5 tabular-nums text-violet-600 dark:text-violet-300">{formatViews(row.contribution)} your contribution</p>
+                                                    )}
                                                 </div>
                                             );
                                         }}
@@ -270,9 +304,24 @@ export default function ChannelQuarterAnalysisSection({
                                         animationDuration={520}
                                         animationEasing="ease-out"
                                     />
+                                    {userContribution != null && userContribution.viewsOnVideos > 0 && (
+                                        <Area
+                                            type="monotone"
+                                            dataKey="contribution"
+                                            stroke="#8b5cf6"
+                                            strokeWidth={2}
+                                            fill={`url(#${gradientId}-contrib)`}
+                                            dot={{ r: 3, fill: "#8b5cf6", strokeWidth: 0 }}
+                                            activeDot={{ r: 5 }}
+                                            isAnimationActive
+                                            animationDuration={520}
+                                            animationEasing="ease-out"
+                                        />
+                                    )}
                                 </AreaChart>
                             </ResponsiveContainer>
                         </div>
+
                     </div>
                 )}
             </div>

@@ -29,6 +29,8 @@ type ChannelRow = {
     viewsPreviousQuarter?: number | null;
     quarterOverQuarterDelta?: number | null;
     error: string | null;
+    /** Logged-in user: cases in this quarter on this channel (writer/editor) + sum of stored video views. */
+    me?: { videoCount: number; viewsOnVideos: number };
 };
 
 type QuarterlyPayload = {
@@ -65,12 +67,15 @@ function formatCompactViews(n: number | null | undefined): string {
 
 function studioComparisonLine(ch: ChannelRow): string {
     const cur = ch.viewsGainedInQuarter;
-    if (cur == null) return "No quarter data yet — wait for the next sync.";
-    if (ch.quarterOverQuarterDelta == null) return "No prior quarter stored to compare.";
+    if (cur == null) return "No quarter data yet.";
+    if (ch.quarterOverQuarterDelta == null) return "No prior quarter to compare.";
     const d = ch.quarterOverQuarterDelta;
     if (d === 0) return "Flat vs last quarter.";
-    if (d > 0) return `${formatViews(d)} more views than last quarter`;
-    return `${formatViews(-d)} fewer views than last quarter`;
+    const prev = cur - d;
+    if (prev <= 0) return d > 0 ? "New this quarter" : "Flat vs last quarter.";
+    const pct = Math.round((Math.abs(d) / prev) * 100);
+    if (d > 0) return `${pct}% more than last quarter`;
+    return `${pct}% less than last quarter`;
 }
 
 const BAR_PALETTE = ["#7c3aed", "#8b5cf6", "#a78bfa", "#c4b5fd", "#a855f7", "#9333ea", "#6d28d9"];
@@ -107,30 +112,40 @@ const STUDIO_TAB_ACCENT = "#065fd4";
 function StudioStyleChannelStrip({
     channels,
     periodLabel,
+    quarter,
     onSelectChannel,
     selectedChannelId,
     children,
+    headerRight,
 }: {
     channels: ChannelRow[];
     periodLabel: string;
+    /** 1–4, shown in the card title as Q1 … Q4 */
+    quarter: number;
     onSelectChannel?: (ch: ChannelRow) => void;
     /** Which channel tab shows white + blue top bar (Studio selection). */
     selectedChannelId?: string | null;
     /** Renders inside the same card under the tab row (e.g. quarter chart). */
     children?: ReactNode;
+    /** Extra controls rendered in the header row (e.g. year/quarter selectors). */
+    headerRight?: ReactNode;
 }) {
     const slots = Array.from({ length: 4 }, (_, i) => channels[i] ?? null);
     const extra = channels.length > 4 ? channels.length - 4 : 0;
 
     return (
         <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-100/90 dark:bg-[#0e0e1a] shadow-sm overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 bg-white dark:border-white/10 dark:bg-[#12122a] px-5 py-3">
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Current quarter views</h2>
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{periodLabel}</span>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 bg-white dark:border-white/10 dark:bg-[#12122a] px-5 py-2.5">
+                <div className="flex items-center gap-3">
+                    <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Q{quarter} views</h2>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{periodLabel}</span>
+                </div>
+                {headerRight && <div className="flex items-center gap-2">{headerRight}</div>}
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4">
                 {slots.map((ch, idx) => {
                     const selected = !!ch && !!selectedChannelId && ch.channelId === selectedChannelId;
+                    const hasContribution = ch?.me && ch.me.viewsOnVideos > 0;
                     const inner = (
                         <>
                             <p
@@ -142,6 +157,9 @@ function StudioStyleChannelStrip({
                                 )}
                             >
                                 {ch?.name ?? "—"}
+                                {hasContribution && (
+                                    <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-violet-500 align-middle" title="You contributed to this channel" />
+                                )}
                             </p>
                             <div className="flex flex-wrap items-center justify-center gap-1.5">
                                 <span
@@ -155,23 +173,13 @@ function StudioStyleChannelStrip({
                                     {ch ? formatCompactViews(ch.viewsGainedInQuarter) : "—"}
                                 </span>
                                 {ch && ch.viewsGainedInQuarter != null && ch.quarterOverQuarterDelta != null && ch.quarterOverQuarterDelta !== 0 && (
-                                    <span
-                                        className={cn(
-                                            "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full shadow-sm sm:h-7 sm:w-7",
-                                            ch.quarterOverQuarterDelta > 0
-                                                ? "bg-emerald-500 text-white"
-                                                : "bg-rose-500 text-white"
+                                    <svg className={cn("h-4 w-4 shrink-0", ch.quarterOverQuarterDelta > 0 ? "text-emerald-500" : "text-rose-500")} fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24" aria-hidden>
+                                        {ch.quarterOverQuarterDelta > 0 ? (
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                                        ) : (
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
                                         )}
-                                        title="Change vs previous calendar quarter (same DB as developer dashboard)"
-                                    >
-                                        <svg className="h-3.5 w-3.5 sm:h-4 sm:w-4" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24" aria-hidden>
-                                            {ch.quarterOverQuarterDelta > 0 ? (
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                                            ) : (
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                                            )}
-                                        </svg>
-                                    </span>
+                                    </svg>
                                 )}
                             </div>
                             <p
@@ -186,7 +194,7 @@ function StudioStyleChannelStrip({
                     );
 
                     const tabShell = cn(
-                        "relative flex min-h-[138px] w-full flex-col items-center justify-center border-slate-200/90 px-3 py-6 text-center transition-[background-color,box-shadow] duration-300 ease-out sm:min-h-[148px] sm:px-4 sm:py-7 dark:border-white/10",
+                        "relative flex min-h-[100px] w-full flex-col items-center justify-center border-slate-200/90 px-3 py-3 text-center transition-[background-color,box-shadow] duration-300 ease-out sm:min-h-[108px] sm:px-4 sm:py-4 dark:border-white/10",
                         "border-r max-lg:[&:nth-child(2n)]:border-r-0 lg:[&:nth-child(4n)]:border-r-0",
                         "max-lg:[&:nth-child(-n+2)]:border-b lg:border-b-0",
                         selected
@@ -208,7 +216,7 @@ function StudioStyleChannelStrip({
                                     type="button"
                                     onClick={() => onSelectChannel(ch)}
                                     className={cn(
-                                        "relative z-[2] flex h-full min-h-[138px] w-full flex-col items-center justify-center px-1 py-1 text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500/35 sm:min-h-[148px]",
+                                        "relative z-[2] flex h-full min-h-[100px] w-full flex-col items-center justify-center px-1 py-1 text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500/35 sm:min-h-[108px]",
                                         selected ? "" : "hover:bg-slate-200/40 dark:hover:bg-white/[0.06]"
                                     )}
                                     aria-pressed={selected}
@@ -217,7 +225,7 @@ function StudioStyleChannelStrip({
                                     {inner}
                                 </button>
                             ) : (
-                                <div className="relative z-[2] flex min-h-[138px] flex-col items-center justify-center px-1 py-1 sm:min-h-[148px]">{inner}</div>
+                                <div className="relative z-[2] flex min-h-[100px] flex-col items-center justify-center px-1 py-1 sm:min-h-[108px]">{inner}</div>
                             )}
                         </div>
                     );
@@ -255,7 +263,7 @@ export default function YoutubeDashboardPage() {
 
     const yearOptions = useMemo(() => {
         const ys: number[] = [];
-        for (let y = defaultYear + 1; y >= defaultYear - 5; y--) ys.push(y);
+        for (let y = defaultYear; y >= defaultYear - 5; y--) ys.push(y);
         return ys;
     }, [defaultYear]);
 
@@ -289,6 +297,15 @@ export default function YoutubeDashboardPage() {
     useEffect(() => {
         setAnalysisChannel(null);
     }, [year, quarter]);
+
+    // Auto-open the quarterly graph if the user contributed to exactly one channel
+    useEffect(() => {
+        if (!data?.configured || analysisChannel) return;
+        const contributed = data.channels.filter((ch) => ch.me && ch.me.viewsOnVideos > 0);
+        if (contributed.length === 1) {
+            setAnalysisChannel(contributed[0]);
+        }
+    }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const periodNote =
         data && data.configured
@@ -332,38 +349,21 @@ export default function YoutubeDashboardPage() {
 
     return (
         <div className="min-h-[calc(100vh-4rem)] w-full">
-            {/* Top band */}
-            <div className="relative overflow-hidden border-b border-slate-200/80 dark:border-white/10 bg-gradient-to-br from-slate-50 via-white to-violet-50/60 dark:from-[#0c0c18] dark:via-[#0f0f22] dark:to-violet-950/40">
-                <div
-                    className="pointer-events-none absolute inset-0 opacity-[0.35] dark:opacity-20"
-                    style={{
-                        backgroundImage: `radial-gradient(circle at 20% 20%, rgba(139,92,246,0.25), transparent 45%),
-              radial-gradient(circle at 80% 0%, rgba(236,72,153,0.12), transparent 40%)`,
-                    }}
-                />
-                <div className="relative mx-auto max-w-6xl px-4 sm:px-6 py-10 md:py-12">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-violet-600 dark:text-violet-400 mb-2">
-                        Performance
-                    </p>
-                    <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 dark:text-white">
+            <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-8 pb-8 md:pt-10 md:pb-10 space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                    <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
                         YouTube dashboard
                     </h1>
-                    <p className="mt-2 text-sm text-slate-500 dark:text-slate-400 max-w-2xl">
-                        {showDeveloperTab
-                            ? "Production view is for the team; developer analytics use the same quarter totals from the database (written by the scheduled YouTube dashboard sync)."
-                            : "Quarter view totals per channel from the dashboard database (synced from YouTube Analytics by your admin / cron)."}
-                    </p>
-
                     {showDeveloperTab && (
-                        <div className="mt-5 inline-flex rounded-xl border border-slate-200/90 dark:border-white/10 bg-white/80 dark:bg-[#12122a]/90 p-1 shadow-sm">
+                        <div className="inline-flex rounded-lg border border-slate-300 dark:border-white/10 bg-slate-200/70 dark:bg-[#12122a]/90 p-0.5">
                             <button
                                 type="button"
                                 onClick={() => setViewMode("production")}
                                 className={cn(
-                                    "rounded-lg px-4 py-2 text-xs font-semibold transition-colors",
+                                    "rounded-md px-3 py-1.5 text-xs font-semibold transition-colors",
                                     viewMode === "production"
-                                        ? "bg-slate-900 text-white dark:bg-violet-600 dark:text-white"
-                                        : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5"
+                                        ? "bg-violet-600 text-white shadow-sm"
+                                        : "text-slate-600 hover:text-slate-800 hover:bg-slate-300/60 dark:text-slate-400 dark:hover:bg-white/5"
                                 )}
                             >
                                 Production
@@ -372,66 +372,19 @@ export default function YoutubeDashboardPage() {
                                 type="button"
                                 onClick={() => setViewMode("developer")}
                                 className={cn(
-                                    "rounded-lg px-4 py-2 text-xs font-semibold transition-colors",
+                                    "rounded-md px-3 py-1.5 text-xs font-semibold transition-colors",
                                     viewMode === "developer"
-                                        ? "bg-slate-900 text-white dark:bg-violet-600 dark:text-white"
-                                        : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5"
+                                        ? "bg-violet-600 text-white shadow-sm"
+                                        : "text-slate-600 hover:text-slate-800 hover:bg-slate-300/60 dark:text-slate-400 dark:hover:bg-white/5"
                                 )}
                             >
                                 Developer analytics
                             </button>
                         </div>
                     )}
-
-                    <div className="mt-8 flex flex-wrap items-end gap-4">
-                        <div>
-                            <label htmlFor="yt-year" className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
-                                Year
-                            </label>
-                            <select
-                                id="yt-year"
-                                value={year}
-                                onChange={(e) => setYear(Number(e.target.value))}
-                                className="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#12122a] px-4 py-2.5 text-sm font-medium text-slate-900 dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 min-w-[120px]"
-                            >
-                                {yearOptions.map((y) => (
-                                    <option key={y} value={y}>
-                                        {y}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        <div>
-                            <label htmlFor="yt-q" className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
-                                Quarter
-                            </label>
-                            <select
-                                id="yt-q"
-                                value={quarter}
-                                onChange={(e) => setQuarter(Number(e.target.value))}
-                                className="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#12122a] px-4 py-2.5 text-sm font-medium text-slate-900 dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 min-w-[140px]"
-                            >
-                                <option value={1}>Q1 · Jan–Mar</option>
-                                <option value={2}>Q2 · Apr–Jun</option>
-                                <option value={3}>Q3 · Jul–Sep</option>
-                                <option value={4}>Q4 · Oct–Dec</option>
-                            </select>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => load()}
-                            disabled={loading}
-                            className="mb-0.5 rounded-xl border border-violet-500/40 bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-500 disabled:opacity-50"
-                        >
-                            {loading ? "Refreshing…" : "Refresh"}
-                        </button>
-                    </div>
-
-
                 </div>
-            </div>
 
-            <div className="mx-auto max-w-6xl px-4 sm:px-6 py-8 md:py-10 space-y-8">
+                <div className="space-y-8">
                 {fetchError && (
                     <div className="rounded-2xl border border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 px-5 py-4 text-sm text-rose-800 dark:text-rose-200">
                         {fetchError}
@@ -455,8 +408,49 @@ export default function YoutubeDashboardPage() {
                                 <StudioStyleChannelStrip
                                     channels={data.channels}
                                     periodLabel={data.label}
+                                    quarter={quarter}
                                     selectedChannelId={analysisChannel?.channelId ?? null}
                                     onSelectChannel={(ch) => setAnalysisChannel(ch)}
+                                    headerRight={
+                                        <div className="flex items-center gap-2">
+                                            <select
+                                                value={year}
+                                                onChange={(e) => {
+                                                    const y = Number(e.target.value);
+                                                    setYear(y);
+                                                    if (y === defaultYear) {
+                                                        setQuarter(defaultQuarter);
+                                                    } else {
+                                                        setQuarter(1);
+                                                    }
+                                                }}
+                                                className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1a1a30] px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                                            >
+                                                {yearOptions.map((y) => (
+                                                    <option key={y} value={y}>{y}</option>
+                                                ))}
+                                            </select>
+                                            <select
+                                                value={quarter}
+                                                onChange={(e) => setQuarter(Number(e.target.value))}
+                                                className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1a1a30] px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                                            >
+                                                {[1, 2, 3, 4]
+                                                    .filter((q) => year < defaultYear || q <= defaultQuarter)
+                                                    .map((q) => (
+                                                        <option key={q} value={q}>Q{q}</option>
+                                                    ))}
+                                            </select>
+                                            <button
+                                                type="button"
+                                                onClick={() => load()}
+                                                disabled={loading}
+                                                className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-500 disabled:opacity-50"
+                                            >
+                                                {loading ? "…" : "Refresh"}
+                                            </button>
+                                        </div>
+                                    }
                                 >
                                     {analysisChannel ? (
                                         <ChannelQuarterAnalysisSection
@@ -466,6 +460,7 @@ export default function YoutubeDashboardPage() {
                                             year={year}
                                             quarter={quarter}
                                             quarterLabel={data.label}
+                                            userContribution={analysisChannel.me ?? null}
                                             onDismiss={() => setAnalysisChannel(null)}
                                         />
                                     ) : null}
@@ -507,7 +502,7 @@ export default function YoutubeDashboardPage() {
                             </div>
                             <div className="rounded-2xl border border-emerald-200/80 dark:border-emerald-500/20 bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-500/10 dark:to-[#12122a] p-5 shadow-sm xl:col-span-2">
                                 <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
-                                    Quarter views (YouTube Analytics)
+                                    Quarter views 
                                 </p>
                                 <p className="mt-2 text-2xl font-bold tabular-nums text-emerald-900 dark:text-emerald-100">
                                     {formatViews(data.totalViewsGainedInQuarter ?? undefined)}
@@ -731,6 +726,7 @@ export default function YoutubeDashboardPage() {
                         Loading dashboard…
                     </div>
                 )}
+                </div>
             </div>
         </div>
     );
