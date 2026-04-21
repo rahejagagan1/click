@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
+import { istTodayDateOnly } from "@/lib/ist-date";
 
 export async function GET() {
   const { errorResponse } = await requireAuth();
@@ -9,13 +10,14 @@ export async function GET() {
     const now = new Date();
     const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const todayIst = istTodayDateOnly();
 
     const [totalEmployees, activeEmployees, newJoiners, exits, attendanceToday, pendingLeaves, openTickets, totalAssets, assignedAssets] = await Promise.all([
       prisma.user.count(),
       prisma.user.count({ where: { isActive: true } }),
       prisma.employeeProfile.count({ where: { joiningDate: { gte: thisMonth } } }),
       prisma.user.count({ where: { isActive: false, updatedAt: { gte: thisMonth } } }),
-      prisma.attendance.groupBy({ by: ["status"], where: { date: new Date(now.getFullYear(), now.getMonth(), now.getDate()) }, _count: true }),
+      prisma.attendance.groupBy({ by: ["status"], where: { date: todayIst }, _count: true }),
       prisma.leaveApplication.count({ where: { status: "pending" } }),
       prisma.ticket.count({ where: { status: { in: ["open", "in_progress"] } } }),
       prisma.asset.count(),

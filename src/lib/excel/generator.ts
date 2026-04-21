@@ -353,6 +353,7 @@ export async function generateCompanyExcel(): Promise<Buffer> {
     });
 
     const allRatings = await prisma.monthlyRating.findMany({
+        where: { user: { isActive: true } },
         include: { user: true },
         orderBy: [{ month: "desc" }, { overallRating: "desc" }],
     });

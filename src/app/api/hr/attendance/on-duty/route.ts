@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { notifyApprovers } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -35,8 +36,9 @@ export async function POST(req: NextRequest) {
   if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   try {
-    const { date, fromTime, toTime, purpose, location } = await req.json();
+    const { date, fromTime, toTime, purpose, location, notifyUserIds } = await req.json();
     if (!date || !purpose) return NextResponse.json({ error: "date and purpose required" }, { status: 400 });
+    const extras = Array.isArray(notifyUserIds) ? notifyUserIds.filter((x: any) => Number.isInteger(x)) : [];
 
     const rec = await prisma.onDutyRequest.create({
       data: {
@@ -47,6 +49,16 @@ export async function POST(req: NextRequest) {
         purpose,
         location,
       },
+    });
+    const requester = await prisma.user.findUnique({ where: { id: myId }, select: { name: true } });
+    await notifyApprovers({
+      actorId:  myId,
+      type:     "on_duty",
+      entityId: rec.id,
+      title:    `${requester?.name || "An employee"} requested On Duty`,
+      body:     `Date: ${new Date(date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}${location ? ` @ ${location}` : ""} — ${String(purpose).slice(0, 120)}`,
+      linkUrl:  "/dashboard/hr/attendance",
+      extraUserIds: extras,
     });
     return NextResponse.json(rec, { status: 201 });
   } catch (e) { return serverError(e, "POST /api/hr/attendance/on-duty"); }

@@ -36,9 +36,15 @@ export async function GET(request: NextRequest) {
             monthFilter.month = new Date(Date.UTC(year, mon - 1, 1));
         }
 
-        // Get all monthly ratings with user info and edit logs
+        // Get all monthly ratings with user info and edit logs.
+        // Hide ratings belonging to deactivated users (people who left the
+        // company) — their rows stop syncing so they render as "missing values"
+        // in the audit panel. Active users are unaffected.
         const ratings = await prisma.monthlyRating.findMany({
-            where: monthFilter,
+            where: {
+                ...monthFilter,
+                user: { isActive: true },
+            },
             orderBy: [{ month: "desc" }, { overallRating: "desc" }],
             include: {
                 user: {
