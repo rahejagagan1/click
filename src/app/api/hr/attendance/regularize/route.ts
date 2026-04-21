@@ -69,38 +69,51 @@ export async function PUT(req: NextRequest) {
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
   const myId = await resolveUserId(session);
+  if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
   const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
 
   try {
-    const { id, action, approvalNote } = await req.json();
+    const body = await req.json();
+    const id = Number(body.id);
+    const action = body.action;
+    const approvalNote = typeof body.approvalNote === "string" ? body.approvalNote : null;
+    if (!Number.isInteger(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+    if (action !== "approve" && action !== "reject") {
+      return NextResponse.json({ error: "action must be 'approve' or 'reject'" }, { status: 400 });
+    }
+
     const reg = await prisma.attendanceRegularization.findUnique({ where: { id } });
     if (!reg) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    if (action === "approve" || action === "reject") {
-      if (!isAdmin) {
-        const isManager = await prisma.user.findFirst({ where: { id: reg.userId, managerId: myId! } });
-        if (!isManager) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
-      const newStatus = action === "approve" ? "approved" : "rejected";
-      const updated = await prisma.attendanceRegularization.update({
-        where: { id },
-        data: { status: newStatus, approvedById: myId, approvalNote },
-      });
-
-      // Apply approved punch correction to attendance
-      if (action === "approve" && (reg.requestedIn || reg.requestedOut)) {
-        const dateOnly = new Date(reg.date);
-        const totalMin = reg.requestedIn && reg.requestedOut
-          ? Math.round((new Date(reg.requestedOut).getTime() - new Date(reg.requestedIn).getTime()) / 60000)
-          : 0;
-        await prisma.attendance.upsert({
-          where: { userId_date: { userId: reg.userId, date: dateOnly } },
-          create: { userId: reg.userId, date: dateOnly, clockIn: reg.requestedIn, clockOut: reg.requestedOut, status: "present", totalMinutes: totalMin, isRegularized: true },
-          update: { clockIn: reg.requestedIn ?? undefined, clockOut: reg.requestedOut ?? undefined, totalMinutes: totalMin, isRegularized: true, status: "present" },
-        });
-      }
-      return NextResponse.json(updated);
+    if (!isAdmin) {
+      const isManager = await prisma.user.findFirst({ where: { id: reg.userId, managerId: myId } });
+      if (!isManager) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+
+    // Race-safe status transition: only the first approver wins, duplicate
+    // clicks get 409 instead of silently re-running the attendance upsert.
+    const newStatus = action === "approve" ? "approved" : "rejected";
+    const { count } = await prisma.attendanceRegularization.updateMany({
+      where: { id, status: "pending" },
+      data:  { status: newStatus, approvedById: myId, approvalNote },
+    });
+    if (count === 0) {
+      return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
+    }
+    const updated = await prisma.attendanceRegularization.findUnique({ where: { id } });
+
+    // Apply approved punch correction to attendance (only runs for this caller).
+    if (action === "approve" && (reg.requestedIn || reg.requestedOut)) {
+      const dateOnly = new Date(reg.date);
+      const totalMin = reg.requestedIn && reg.requestedOut
+        ? Math.round((new Date(reg.requestedOut).getTime() - new Date(reg.requestedIn).getTime()) / 60000)
+        : 0;
+      await prisma.attendance.upsert({
+        where: { userId_date: { userId: reg.userId, date: dateOnly } },
+        create: { userId: reg.userId, date: dateOnly, clockIn: reg.requestedIn, clockOut: reg.requestedOut, status: "present", totalMinutes: totalMin, isRegularized: true },
+        update: { clockIn: reg.requestedIn ?? undefined, clockOut: reg.requestedOut ?? undefined, totalMinutes: totalMin, isRegularized: true, status: "present" },
+      });
+    }
+    return NextResponse.json(updated);
   } catch (e) { return serverError(e, "PUT /api/hr/attendance/regularize"); }
 }
