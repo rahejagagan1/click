@@ -40,7 +40,7 @@ enum OrgLevel {
 
 model User {
   id                Int        @id @default(autoincrement())
-  clickupUserId     BigInt     @unique
+  clickupUserId     BigInt?    @unique
   name              String
   email             String     @unique
   role              UserRole   @default(member)
