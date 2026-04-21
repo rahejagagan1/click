@@ -130,13 +130,22 @@ function applyMatrix(
     return qualityMap[String(roundedQuality)] ?? null;
 }
 
+const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+
+// Matches the custom rounding used by formula-engine.ts::customRound.
+function customRound(value: number): number {
+    if (value === 0) return 0;
+    const decimal = value - Math.floor(value);
+    return decimal > 0.5 ? Math.ceil(value) : Math.floor(value);
+}
+
 /**
  * Given a section's formula config and the new rawValue, derive the new stars.
- * Handles bracket_lookup and matrix_lookup (the two types that have a numeric input
- * the user can edit). Other types keep their existing stars.
+ * Covers every FormulaSectionType the engine uses so that editing any pillar's
+ * value in the audit panel makes the star badge follow automatically.
  *
- * Returns `undefined` when the section type isn't self-recomputable — caller
- * should leave the stars as-is in that case.
+ * Returns `undefined` only when the config is entirely missing / malformed —
+ * callers leave stars as-is in that case.
  */
 function recomputeSectionStarsFromRawValue(
     sectionConfig: any,
@@ -144,14 +153,17 @@ function recomputeSectionStarsFromRawValue(
     liveSections: any[]
 ): number | null | undefined {
     if (!sectionConfig) return undefined;
+    const type = sectionConfig.type;
 
-    if (sectionConfig.type === "bracket_lookup") {
+    // bracket_lookup — numeric variable → stars via bracket table
+    if (type === "bracket_lookup") {
         const brackets = sectionConfig.brackets;
         if (!Array.isArray(brackets)) return undefined;
         return applyBrackets(newRawValue, brackets);
     }
 
-    if (sectionConfig.type === "matrix_lookup") {
+    // matrix_lookup — (cases_count × sibling_stars) → stars via 2D matrix
+    if (type === "matrix_lookup") {
         const matrix = sectionConfig.matrix;
         const ySectionKey = sectionConfig.variable_y_section;
         if (!matrix || !ySectionKey) return undefined;
@@ -161,7 +173,28 @@ function recomputeSectionStarsFromRawValue(
         return applyMatrix(newRawValue, Number(yStars), matrix);
     }
 
-    return undefined; // leave stars untouched for other types
+    // yt_baseline_ratio — if config has brackets, apply them; otherwise rawValue is already on 0-5 scale.
+    if (type === "yt_baseline_ratio") {
+        const brackets = sectionConfig.brackets;
+        if (Array.isArray(brackets) && brackets.length > 0) return applyBrackets(newRawValue, brackets);
+        return clamp(customRound(newRawValue), 0, 5);
+    }
+
+    // passthrough — linear map via scale_min/scale_max → 1..5, else rawValue is already stars.
+    if (type === "passthrough") {
+        const min = sectionConfig.passthrough_scale_min;
+        const max = sectionConfig.passthrough_scale_max;
+        if (typeof min === "number" && typeof max === "number" && max > min) {
+            const pct = (newRawValue - min) / (max - min);
+            return clamp(customRound(pct * 4 + 1), 1, 5);
+        }
+        return clamp(customRound(newRawValue), 0, 5);
+    }
+
+    // Everything else stores rawValue directly on the 0-5 star scale:
+    //   manager_questions_avg | manager_direct_rating | team_quality_avg
+    //   combined_team_manager_rating | rm_pipeline_targets_avg
+    return clamp(customRound(newRawValue), 0, 5);
 }
 
 // Map section keys to convenience DB columns
@@ -237,8 +270,8 @@ export async function PATCH(request: NextRequest) {
             if (isStarsEdit) {
                 section.stars = numVal;
             } else {
-                // When rawValue changes, try to recompute this section's stars
-                // from the formula template so the final rating auto-adjusts.
+                // Edit score value + auto-recompute stars from the template so the
+                // rating follows the value.
                 section.rawValue = numVal;
 
                 const template = await prisma.formulaTemplate.findFirst({
@@ -247,36 +280,11 @@ export async function PATCH(request: NextRequest) {
                 });
                 const templateSections = Array.isArray(template?.sections) ? (template!.sections as any[]) : [];
                 const sectionConfig = templateSections.find((s: any) => s?.key === sectionKey);
-
                 const newStars = recomputeSectionStarsFromRawValue(sectionConfig, numVal, sections);
-                if (newStars !== undefined) {
-                    const oldStars = section.stars;
-                    section.stars = newStars;
-                    section.details =
-                        `Manual override: value=${numVal} → ${newStars ?? "null"}★ (was value=${oldVal ?? "null"}, stars=${oldStars ?? "null"})`;
-
-                    // Any matrix_lookup section that uses this one as its y-axis must
-                    // also recompute — editing a quality value should bubble into the
-                    // cases-matrix star that depends on it.
-                    for (const dep of sections) {
-                        const depConfig = templateSections.find((t: any) => t?.key === dep.key);
-                        if (depConfig?.type === "matrix_lookup" && depConfig.variable_y_section === sectionKey) {
-                            if (dep.rawValue != null) {
-                                const depNewStars = recomputeSectionStarsFromRawValue(depConfig, Number(dep.rawValue), sections);
-                                if (depNewStars !== undefined) {
-                                    dep.stars = depNewStars;
-                                    dep.details =
-                                        `Auto-recomputed from ${sectionKey} change: ${dep.rawValue} cases × ${newStars}★ → ${depNewStars ?? "null"}★`;
-                                }
-                            }
-                        }
-                    }
-                }
+                if (newStars !== undefined) section.stars = newStars;
             }
             section.isOverridden = true;
-            if (isStarsEdit) {
-                section.details = `Manual override: ${numVal}★ (was ${oldVal ?? "null"})`;
-            }
+            section.details = `Manual override: ${isStarsEdit ? `${numVal}★` : `value=${numVal}`} (was ${oldVal ?? "null"})`;
 
             // Recalculate overall rating from (possibly updated) stars
             const newOverall = recalcOverallRating(sections);
