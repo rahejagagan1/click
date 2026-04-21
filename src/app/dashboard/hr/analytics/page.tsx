@@ -4,10 +4,11 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import {
   ChevronLeft, ChevronRight, ChevronDown,
   Send, BarChart2, Award, Mail, Users, Calendar,
-  MapPin, Ticket, HardDrive, Plus
+  MapPin, HardDrive, Plus
 } from "lucide-react";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -56,21 +57,111 @@ function Av({ name, url, size = 40 }: { name: string; url?: string | null; size?
   );
 }
 
-// ── Static data ────────────────────────────────────────────────────────────────
-const HOLIDAYS = [
-  { name: "Labour Day",            date: "2026-05-01", type: "National Holiday" },
-  { name: "Bakrid / Eid ul-Adha",  date: "2026-05-26", type: "Floater Leave"    },
-  { name: "Independence Day",      date: "2026-08-15", type: "National Holiday" },
-  { name: "Gandhi Jayanti",        date: "2026-10-02", type: "National Holiday" },
-  { name: "Diwali",                date: "2026-10-19", type: "National Holiday" },
-  { name: "Christmas",             date: "2026-12-25", type: "National Holiday" },
-];
-
+// Visual hues per DB holiday `type`. The seeder / admin form writes one of these.
 const HOLIDAY_TYPE_COLOR: Record<string, string> = {
-  "National Holiday": "#008CFF",
-  "Floater Leave":    "#7c3aed",
-  "Optional Holiday": "#059669",
+  public:     "#008CFF",
+  company:    "#7c3aed",
+  optional:   "#059669",
 };
+const HOLIDAY_TYPE_LABEL: Record<string, string> = {
+  public:     "NATIONAL HOLIDAY",
+  company:    "COMPANY HOLIDAY",
+  optional:   "FLOATER HOLIDAY",
+};
+const isoDay = (d: Date) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" })
+    .formatToParts(d)
+    .reduce<Record<string, string>>((a, p) => { a[p.type] = p.value; return a; }, {} as any);
+
+// ── Events widget ─────────────────────────────────────────────────────────
+// Tabs: Birthdays · Work Anniversaries · New Joinees. Auto-derived from DB.
+function EventsWidget({
+  bTab, setBTab, C,
+}: {
+  bTab: "birthday" | "anniversary" | "joinees";
+  setBTab: (v: "birthday" | "anniversary" | "joinees") => void;
+  C: { card: string; t1: string; t2: string; t3: string; div: string; ring: string };
+}) {
+  const { data } = useSWR("/api/hr/events", fetcher, { refreshInterval: 60_000 });
+  const birthdays     = data?.birthdays     ?? { today: [], upcoming: [], count: 0 };
+  const anniversaries = data?.anniversaries ?? { thisWeek: [],             count: 0 };
+  const newJoinees    = data?.newJoinees    ?? { thisMonth: [],            count: 0 };
+
+  const tabs: { k: "birthday" | "anniversary" | "joinees"; emoji: string; count: number; label: string }[] = [
+    { k: "birthday",    emoji: "🎂", count: birthdays.count,     label: birthdays.count     === 1 ? "Birthday"         : "Birthdays"          },
+    { k: "anniversary", emoji: "✨", count: anniversaries.count, label: anniversaries.count === 1 ? "Work Anniversary" : "Work Anniversaries" },
+    { k: "joinees",     emoji: "👤", count: newJoinees.count,    label: newJoinees.count    === 1 ? "New Joinee"       : "New Joinees"        },
+  ];
+
+  const row = (p: { userId: number; name: string; profilePictureUrl: string | null; designation: string | null; dateLabel: string }, extra?: string) => (
+    <Link key={p.userId} href={`/dashboard/hr/people/${p.userId}`}
+      className="flex items-center gap-2.5 py-1.5 hover:bg-slate-50 rounded-md px-1.5 -mx-1.5 transition-colors">
+      <img
+        src={p.profilePictureUrl || ""}
+        alt={p.name}
+        className="w-8 h-8 rounded-full object-cover bg-[#e8ecf0]"
+        onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }}
+      />
+      <div className="flex-1 min-w-0">
+        <p className={`text-[12.5px] font-medium ${C.t1} truncate leading-tight`}>{p.name}</p>
+        <p className={`text-[10.5px] ${C.t3} truncate leading-tight`}>
+          {p.designation || "—"}{extra ? ` · ${extra}` : ""}
+        </p>
+      </div>
+      <span className="text-[10.5px] font-semibold text-[#008CFF] whitespace-nowrap">{p.dateLabel}</span>
+    </Link>
+  );
+
+  return (
+    <div className={`${C.card} overflow-hidden`}>
+      <div className={`flex items-center justify-between border-b ${C.div} px-1`}>
+        <div className="flex">
+          {tabs.map((t) => (
+            <button
+              key={t.k}
+              onClick={() => setBTab(t.k)}
+              className={`px-3 py-2.5 text-[12px] border-b-2 -mb-px whitespace-nowrap transition-colors ${
+                bTab === t.k
+                  ? "border-[#008CFF] text-[#008CFF] font-semibold"
+                  : `border-transparent ${C.t3} font-medium hover:${C.t1}`
+              }`}
+            >
+              {t.emoji} {t.count} {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="px-4 py-4 space-y-3">
+        {bTab === "birthday" && (
+          <>
+            <div>
+              <p className={`text-[11.5px] font-semibold ${C.t2} mb-1.5`}>Birthdays today</p>
+              {birthdays.today.length === 0
+                ? <p className={`text-[12px] ${C.t3}`}>No birthdays today</p>
+                : <div className="space-y-1">{birthdays.today.map((p: any) => row(p, "🎉 Today"))}</div>}
+            </div>
+            <div>
+              <p className={`text-[11.5px] font-semibold ${C.t2} mb-1.5`}>Upcoming birthdays</p>
+              {birthdays.upcoming.length === 0
+                ? <p className={`text-[12px] ${C.t3}`}>No upcoming birthdays in the next 14 days</p>
+                : <div className="space-y-1">{birthdays.upcoming.map((p: any) => row(p, `in ${p.daysAway} day${p.daysAway === 1 ? "" : "s"}`))}</div>}
+            </div>
+          </>
+        )}
+        {bTab === "anniversary" && (
+          anniversaries.thisWeek.length === 0
+            ? <p className={`text-[12px] ${C.t3}`}>No work anniversaries this week</p>
+            : <div className="space-y-1">{anniversaries.thisWeek.map((p: any) => row(p, `${p.years} year${p.years === 1 ? "" : "s"}`))}</div>
+        )}
+        {bTab === "joinees" && (
+          newJoinees.thisMonth.length === 0
+            ? <p className={`text-[12px] ${C.t3}`}>No new joinees this month</p>
+            : <div className="space-y-1">{newJoinees.thisMonth.map((p: any) => row(p, "Joined"))}</div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 export default function HRHomePage() {
@@ -84,6 +175,17 @@ export default function HRHomePage() {
   const { data: boardData }        = useSWR("/api/hr/attendance/board", fetcher);
   const { data: balanceData = [] } = useSWR("/api/hr/leaves/balance", fetcher);
   const { data: myData }           = useSWR(`/api/hr/attendance?month=${monthKey}`, fetcher);
+  const { data: profile }          = useSWR("/api/hr/profile", fetcher);
+  const { data: myWfh = [] }       = useSWR("/api/hr/attendance/wfh?view=my", fetcher);
+
+  // displayName/email/photo used by the merged global header (src/components/layout/header.tsx).
+
+  const workLoc  = (profile?.employeeProfile?.workLocation || "office").toLowerCase();
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const hasWfhToday = Array.isArray(myWfh) && myWfh.some((r: any) =>
+    r.status === "approved" && typeof r.date === "string" && r.date.slice(0, 10) === todayKey
+  );
+  const isRemoteMode = workLoc === "remote" || workLoc === "hybrid" || hasWfhToday;
 
   const [hh, setHh] = useState("--");
   const [mm, setMm] = useState("--");
@@ -98,62 +200,62 @@ export default function HRHomePage() {
 
   useEffect(() => {
     const tick = () => {
-      const d = new Date(), h = d.getHours(), m = d.getMinutes(), s = d.getSeconds();
-      setHh(String(h % 12 || 12).padStart(2, "0"));
-      setMm(String(m).padStart(2, "0"));
-      setSs(String(s).padStart(2, "0"));
-      setAp(h >= 12 ? "PM" : "AM");
-      setDl(d.toLocaleDateString("en-IN", { weekday:"short", day:"numeric", month:"short", year:"numeric" }));
+      const d = new Date();
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata", hour12: false,
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+      }).formatToParts(d).reduce<Record<string, string>>((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+      const h24 = parseInt(parts.hour || "0", 10);
+      setHh(String(h24 % 12 || 12).padStart(2, "0"));
+      setMm(parts.minute || "00");
+      setSs(parts.second || "00");
+      setAp(h24 >= 12 ? "PM" : "AM");
+      setDl(d.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", weekday:"short", day:"numeric", month:"short", year:"numeric" }));
     };
     tick();
     const t = setInterval(tick, 1000);
     return () => clearInterval(t);
   }, []);
 
-  const upcoming = HOLIDAYS.filter(h => new Date(h.date) >= new Date());
-  const holiday  = upcoming[hidx] ?? upcoming[0];
+  // Pull holidays from the DB (seeded Indian calendar + anything HR adds via admin).
+  const thisYear = new Date().getFullYear();
+  const { data: holidaysData = [] } = useSWR(`/api/hr/admin/holidays?year=${thisYear}`, fetcher);
+  const istTodayStr = (() => { const p = isoDay(new Date()); return `${p.year}-${p.month}-${p.day}`; })();
+  const allHolidays: { id: number; name: string; date: string; type: string }[] = Array.isArray(holidaysData)
+    ? holidaysData.map((h: any) => ({ id: h.id, name: h.name, date: String(h.date).slice(0, 10), type: h.type || "public" }))
+    : [];
+  const todaysHoliday = allHolidays.find((h) => h.date === istTodayStr) || null;
+  const upcoming      = allHolidays.filter((h) => h.date >= istTodayStr);
+  const holiday       = upcoming[hidx] ?? upcoming[0] ?? null;
   const todayRec = myData?.todayRecord;
-  const clockIn  = async () => { await fetch("/api/hr/attendance/clock-in",  { method: "POST" }); mutate(`/api/hr/attendance?month=${monthKey}`); };
+  const todayLoc = parseAttLoc(todayRec?.location);
+
+  const clockIn = async () => {
+    const geo = await captureClockInGeo();
+    await fetch("/api/hr/attendance/clock-in", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(geo),
+    });
+    mutate(`/api/hr/attendance?month=${monthKey}`);
+  };
   const clockOut = async () => { await fetch("/api/hr/attendance/clock-out", { method: "POST" }); mutate(`/api/hr/attendance?month=${monthKey}`); };
   const onLeave  = (boardData?.board || []).filter((u: any) => u.status === "on_leave");
-  const working  = (boardData?.board || []).filter((u: any) => u.status === "present" || u.status === "late");
+  // Split clocked-in employees by their actual location mode (from Attendance.location JSON).
+  const clockedIn = (boardData?.board || []).filter((u: any) => u.status === "present" || u.status === "late");
+  const remote    = clockedIn.filter((u: any) => parseAttLoc(u.location).mode === "remote");
+  const inOffice  = clockedIn.filter((u: any) => parseAttLoc(u.location).mode !== "remote");
   const balances = (balanceData as any[]).filter(b => b.leaveType).slice(0, 3);
   const ringColors = ["#008CFF", "#00bcd4", "#9c27b0"];
 
   return (
-    <div className={`min-h-screen ${C.page} flex flex-col`} style={{ fontFamily: '"Segoe UI", Tahoma, sans-serif' }}>
+    <div className={`min-h-screen ${C.page} flex flex-col`}>
 
-      {/* ── Welcome Banner ── */}
-      <div className="relative h-[64px] flex items-center px-6 shrink-0 overflow-hidden border-b border-[#dbe5ef] bg-white">
-        {/* Subtle orbs */}
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute right-0 top-0 w-[55%] h-full opacity-60">
-            <svg viewBox="0 0 600 90" preserveAspectRatio="xMaxYMid slice" className="w-full h-full">
-              <defs>
-                <radialGradient id="ob1"><stop offset="0%" stopColor="#99bce8" stopOpacity=".35"/><stop offset="100%" stopColor="#99bce8" stopOpacity="0"/></radialGradient>
-                <radialGradient id="ob2"><stop offset="0%" stopColor="#c3b2ee" stopOpacity=".3"/><stop offset="100%" stopColor="#c3b2ee" stopOpacity="0"/></radialGradient>
-                <radialGradient id="ob3"><stop offset="0%" stopColor="#9fd6cd" stopOpacity=".25"/><stop offset="100%" stopColor="#9fd6cd" stopOpacity="0"/></radialGradient>
-              </defs>
-              <ellipse cx="420" cy="45" rx="220" ry="80" fill="url(#ob1)"/>
-              <ellipse cx="530" cy="15" rx="140" ry="55" fill="url(#ob2)"/>
-              <ellipse cx="370" cy="75" rx="160" ry="45" fill="url(#ob3)"/>
-              <circle cx="290" cy="25" r="35" fill="#74c0fc" fillOpacity=".1"/>
-              <circle cx="490" cy="78" r="48" fill="#a9e34b" fillOpacity=".08"/>
-            </svg>
-          </div>
-        </div>
-        <div className="relative z-10">
-          <h2 style={{ color:"#213547", fontSize:17, fontWeight:600, margin:0, letterSpacing:"-0.01em" }}>
-            Welcome {user?.name || "there"}!
-          </h2>
-        </div>
-      </div>
-
-      {/* ── Body ── */}
-      <div className="flex flex-1 min-h-0 relative gap-3 px-4 py-3">
+      {/* ── Body ── (the welcome banner is now merged into the global Header) */}
+      <div className="flex flex-1 min-h-0 relative gap-2 pl-2 pr-3 py-2.5">
 
         {/* ══ LEFT column ══ */}
-        <div className="w-[280px] shrink-0 overflow-y-auto">
+        <div className="w-[272px] shrink-0 overflow-y-auto">
           <div className="space-y-2.5">
 
             <p className={`text-[13px] font-semibold ${C.t1} pb-0.5 pt-1 leading-none`}>
@@ -171,7 +273,20 @@ export default function HRHomePage() {
                   View All
                 </Link>
               </div>
-              <p className="text-[9px] font-bold uppercase tracking-[0.1em] text-white/60 mb-2">Current Time</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[9px] font-bold uppercase tracking-[0.1em] text-white/60">Current Time</p>
+                {(() => {
+                  const activeRemote = todayLoc.mode
+                    ? todayLoc.mode === "remote"
+                    : isRemoteMode;
+                  return (
+                    <span className="text-[9px] font-bold uppercase tracking-[0.1em] px-1.5 py-0.5 rounded"
+                          style={{ background: activeRemote ? "rgba(0,140,255,0.35)" : "rgba(255,255,255,0.18)", color: "#fff" }}>
+                      {activeRemote ? "Remote" : "Office"}
+                    </span>
+                  );
+                })()}
+              </div>
 
               {/* ── Digital clock display ── */}
               <div className="rounded-md px-3 py-2 mb-2.5 flex items-start gap-0.5"
@@ -199,14 +314,14 @@ export default function HRHomePage() {
                 {!todayRec?.clockIn ? (
                   <button onClick={clockIn}
                     className="h-7 px-4 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
-                    style={{ background: "#ff6a6a" }}>
-                    Clock-in
+                    style={{ background: isRemoteMode ? "#008CFF" : "#ff6a6a" }}>
+                    {isRemoteMode ? "Remote Clock-in" : "Clock-in"}
                   </button>
                 ) : !todayRec?.clockOut ? (
                   <button onClick={clockOut}
                     className="h-7 px-4 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
-                    style={{ background: "#ff6a6a" }}>
-                    Clock-out
+                    style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a6a" }}>
+                    {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
                   </button>
                 ) : (
                   <span className="h-7 px-4 rounded-md text-[12px] font-semibold flex items-center text-white/90"
@@ -236,8 +351,28 @@ export default function HRHomePage() {
               </div>
             </div>
 
-            {/* ── Holidays ── */}
-            {holiday && (
+            {/* ── Holidays ── today-only widget. If nothing today, show empty state
+                 regardless of whether upcoming holidays exist. */}
+            {!todaysHoliday && (
+              <div className="rounded-lg p-4 relative overflow-hidden border border-[#dbe5ef]" style={{ minHeight: 108, background: "#f8fafc" }}>
+                <div className="flex items-start justify-between mb-2">
+                  <span className={`text-[9.5px] font-bold uppercase tracking-[0.14em] ${C.t3}`}>Holidays</span>
+                  <Link
+                    href={isAdmin ? "/dashboard/hr/admin/holidays" : "/dashboard/hr/leaves"}
+                    className="text-[11px] text-[#008CFF] hover:underline"
+                  >
+                    {isAdmin ? "Manage" : "View All"}
+                  </Link>
+                </div>
+                <p className={`text-[14px] font-semibold ${C.t1} mb-1`}>No event today</p>
+                <p className={`text-[11.5px] ${C.t3}`}>
+                  {upcoming.length > 0
+                    ? `Next: ${upcoming[0].name} · ${new Date(upcoming[0].date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
+                    : "No upcoming holidays on file."}
+                </p>
+              </div>
+            )}
+            {todaysHoliday && (
               <div className="rounded-lg p-4 relative overflow-hidden" style={{ minHeight: 108,
                    background: "linear-gradient(165deg, #1a6b42 0%, #0e4528 100%)" }}>
                 {/* Mosque silhouette */}
@@ -263,34 +398,27 @@ export default function HRHomePage() {
                 </svg>
                 <div className="relative z-10">
                   <div className="flex items-start justify-between mb-2">
-                    <span className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-white">Holidays</span>
-                    <Link href="/dashboard/hr/admin" className="text-[11px] text-white/80 hover:text-white transition-colors">
-                      View All
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-white">Holidays</span>
+                      {todaysHoliday && (
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-white text-[#0e4528]">
+                          Today
+                        </span>
+                      )}
+                    </div>
+                    <Link href={isAdmin ? "/dashboard/hr/admin/holidays" : "/dashboard/hr/leaves"} className="text-[11px] text-white/80 hover:text-white transition-colors">
+                      {isAdmin ? "Manage" : "View All"}
                     </Link>
                   </div>
-                  <p className="text-[17px] font-bold text-white leading-snug pr-14 mb-2">{holiday.name}</p>
-                  <div className="flex items-end justify-between">
-                    <div>
-                      <p className="text-[11px] text-white/80 mb-1.5">
-                        {new Date(holiday.date).toLocaleDateString("en-IN", { weekday:"short", day:"numeric", month:"long", year:"numeric" })}
-                      </p>
-                      <span className="inline-block px-2 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide text-white"
-                            style={{ background: HOLIDAY_TYPE_COLOR[holiday.type] ?? "#008CFF" }}>
-                        {holiday.type}
-                      </span>
-                    </div>
-                    <div className="flex gap-1.5">
-                      {[
-                        { fn: () => setHidx(i => Math.max(0, i - 1)),                      Icon: ChevronLeft,  dis: hidx === 0                  },
-                        { fn: () => setHidx(i => Math.min(upcoming.length - 1, i + 1)),    Icon: ChevronRight, dis: hidx >= upcoming.length - 1 },
-                      ].map(({ fn, Icon, dis }, i) => (
-                        <button key={i} onClick={fn} disabled={dis}
-                          className="flex items-center justify-center text-white rounded-full transition-colors"
-                          style={{ width: 24, height: 24, background: "rgba(255,255,255,0.15)", opacity: dis ? 0.3 : 1 }}>
-                          <Icon className="w-3 h-3"/>
-                        </button>
-                      ))}
-                    </div>
+                  <p className="text-[17px] font-bold text-white leading-snug pr-14 mb-2">{todaysHoliday.name}</p>
+                  <div>
+                    <p className="text-[11px] text-white/80 mb-1.5">
+                      {new Date(todaysHoliday.date).toLocaleDateString("en-IN", { weekday:"short", day:"numeric", month:"long", year:"numeric" })}
+                    </p>
+                    <span className="inline-block px-2 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide text-white"
+                          style={{ background: HOLIDAY_TYPE_COLOR[todaysHoliday.type] ?? "#008CFF" }}>
+                      {HOLIDAY_TYPE_LABEL[todaysHoliday.type] ?? "PUBLIC HOLIDAY"}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -323,20 +451,14 @@ export default function HRHomePage() {
               )}
             </div>
 
-            {/* ── Working Remotely ── */}
+            {/* ── In Office ── */}
             <div className={`${C.card} p-3`}>
-              <p className={`text-[13px] font-semibold ${C.t1} mb-3`}>Working Remotely</p>
-              {working.length > 0 ? (
+              <p className={`text-[13px] font-semibold ${C.t1} mb-3`}>In Office</p>
+              {inOffice.length > 0 ? (
                 <div className="flex flex-wrap gap-3">
-                  {working.slice(0, 6).map((u: any) => (
+                  {inOffice.slice(0, 6).map((u: any) => (
                     <div key={u.id} className="flex flex-col items-center gap-1">
-                      <div className="relative">
-                        <Av name={u.name} url={u.profilePictureUrl} size={40}/>
-                        <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full ring-[1.5px] ${C.ring} flex items-center justify-center`}
-                              style={{ background: "#008CFF" }}>
-                          <MapPin style={{ width: 6, height: 6, color: "#fff" }}/>
-                        </span>
-                      </div>
+                      <Av name={u.name} url={u.profilePictureUrl} size={40}/>
                       <span className={`text-[10px] ${C.t3} truncate text-center`} style={{ width: 40 }}>
                         {u.name.split(" ")[0]}
                       </span>
@@ -344,7 +466,26 @@ export default function HRHomePage() {
                   ))}
                 </div>
               ) : (
-                <p className={`text-[12px] ${C.t3}`}>No one checked in yet</p>
+                <p className={`text-[12px] ${C.t3}`}>No one in office yet</p>
+              )}
+            </div>
+
+            {/* ── Working Remotely ── */}
+            <div className={`${C.card} p-3`}>
+              <p className={`text-[13px] font-semibold ${C.t1} mb-3`}>Working Remotely</p>
+              {remote.length > 0 ? (
+                <div className="flex flex-wrap gap-3">
+                  {remote.slice(0, 6).map((u: any) => (
+                    <div key={u.id} className="flex flex-col items-center gap-1">
+                      <Av name={u.name} url={u.profilePictureUrl} size={40}/>
+                      <span className={`text-[10px] ${C.t3} truncate text-center`} style={{ width: 40 }}>
+                        {u.name.split(" ")[0]}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className={`text-[12px] ${C.t3}`}>No one working remotely</p>
               )}
             </div>
 
@@ -458,55 +599,16 @@ export default function HRHomePage() {
               </div>
             )}
 
-            {/* ── Birthdays / Anniversaries / New Joinees ── */}
-            <div className={`${C.card} overflow-hidden`}>
-              <div className={`flex items-center justify-between border-b ${C.div} px-1`}>
-                <div className="flex">
-                  {[
-                    { k: "birthday",    lb: "🎂 1 Birthday"           },
-                    { k: "anniversary", lb: "✨ 0 Work Anniversaries" },
-                    { k: "joinees",     lb: "👤 0 New Joinees"        },
-                  ].map(t => (
-                    <button key={t.k} onClick={() => setBTab(t.k as any)}
-                      className={`px-3 py-2.5 text-[12px] border-b-2 -mb-px whitespace-nowrap transition-colors ${
-                        bTab === t.k
-                          ? "border-[#008CFF] text-[#008CFF] font-semibold"
-                          : `border-transparent ${C.t3} font-medium hover:${C.t1}`
-                      }`}>
-                      {t.lb}
-                    </button>
-                  ))}
-                </div>
-                <button className={`mr-2 ${C.t3}`}>
-                  <ChevronLeft className="w-4 h-4 rotate-90"/>
-                </button>
-              </div>
-              <div className="px-4 py-4 space-y-3">
-                {bTab === "birthday" && (
-                  <>
-                    <div>
-                      <p className={`text-[11.5px] font-semibold ${C.t2} mb-1.5`}>Birthdays today</p>
-                      <p className={`text-[12px] ${C.t3}`}>No birthdays today</p>
-                    </div>
-                    <div>
-                      <p className={`text-[11.5px] font-semibold ${C.t2} mb-1.5`}>Upcoming Birthdays</p>
-                      <p className={`text-[12px] ${C.t3}`}>No upcoming birthdays</p>
-                    </div>
-                  </>
-                )}
-                {bTab === "anniversary" && <p className={`text-[12px] ${C.t3}`}>No work anniversaries this week</p>}
-                {bTab === "joinees"     && <p className={`text-[12px] ${C.t3}`}>No new joinees this month</p>}
-              </div>
-            </div>
+            {/* ── Birthdays / Anniversaries / New Joinees ── (auto-derived from EmployeeProfile) */}
+            <EventsWidget bTab={bTab} setBTab={setBTab} C={C} />
 
             {/* ── HR Summary stats (admin) ── */}
             {isAdmin && analyticsData && (
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 {[
                   { lb: "Total Employees", val: analyticsData.workforce?.totalEmployees, color: "#008CFF",  Icon: Users,    href: "/dashboard/hr/people"    },
                   { lb: "Present Today",   val: analyticsData.attendance?.present,       color: "#10b981",  Icon: Calendar, href: "/dashboard/hr/attendance" },
                   { lb: "On Leave",        val: analyticsData.attendance?.onLeave,       color: "#8b5cf6",  Icon: MapPin,   href: "/dashboard/hr/leaves"     },
-                  { lb: "Open Tickets",    val: analyticsData.tickets?.open,             color: "#f59e0b",  Icon: Ticket,   href: "/dashboard/hr/tickets"    },
                 ].map(m => (
                   <Link key={m.lb} href={m.href}
                     className={`${C.card} p-4 flex flex-col items-center justify-center gap-1 hover:border-[#008CFF]/25 transition-all cursor-pointer`}>

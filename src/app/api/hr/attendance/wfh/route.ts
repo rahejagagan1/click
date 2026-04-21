@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { notifyApprovers } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -35,11 +36,22 @@ export async function POST(req: NextRequest) {
   if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   try {
-    const { date, reason } = await req.json();
+    const { date, reason, notifyUserIds } = await req.json();
     if (!date || !reason) return NextResponse.json({ error: "date and reason required" }, { status: 400 });
+    const extras = Array.isArray(notifyUserIds) ? notifyUserIds.filter((x: any) => Number.isInteger(x)) : [];
 
     const req2 = await prisma.wFHRequest.create({
       data: { userId: myId, date: new Date(date), reason },
+    });
+    const requester = await prisma.user.findUnique({ where: { id: myId }, select: { name: true } });
+    await notifyApprovers({
+      actorId:  myId,
+      type:     "wfh",
+      entityId: req2.id,
+      title:    `${requester?.name || "An employee"} requested Work From Home`,
+      body:     `Date: ${new Date(date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} — ${String(reason).slice(0, 120)}`,
+      linkUrl:  "/dashboard/hr/attendance",
+      extraUserIds: extras,
     });
     return NextResponse.json(req2, { status: 201 });
   } catch (e) { return serverError(e, "POST /api/hr/attendance/wfh"); }
