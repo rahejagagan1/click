@@ -79,6 +79,7 @@ model User {
   teamRatingsGiven       TeamManagerRating[] @relation("TeamMemberRater")
   teamRatingsReceived    TeamManagerRating[] @relation("ManagerRated")
   dashboardFeedbacks     UserFeedback[]
+  youtubeDashUserQuarterChannels YoutubeDashUserQuarterChannel[]
 
   // ── HR Module Relations ──
   employeeProfile        EmployeeProfile?
@@ -443,6 +444,24 @@ model YoutubeDashboardChannelQuarterAnalysis {
 
   @@unique([channelId, year, quarter])
   @@index([year, quarter])
+}
+
+/// YouTube dashboard: cached per-user contribution per channel for a calendar quarter (see quarter-user-contribution).
+model YoutubeDashUserQuarterChannel {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  channelId  String
+  year       Int
+  quarter    Int
+  videoCount Int      @default(0)
+  viewsSum   BigInt   @default(0)
+  computedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channelId, year, quarter])
+  @@index([userId, year, quarter])
+  @@index([channelId, year, quarter])
 }
 
 model ScorecardConfig {

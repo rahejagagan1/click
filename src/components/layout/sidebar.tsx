@@ -25,13 +25,13 @@ interface Manager {
 }
 
 const NAV_ITEMS = [
-    { label: "Dashboard", href: "/dashboard",         icon: icon(LayoutDashboard)                     },
-    { label: "Cases",     href: "/cases",              icon: icon(FileText),       adminOnly: true     },
-    { label: "Company",   href: "/dashboard/company",  icon: icon(Building2),      adminOnly: true     },
-    { label: "Scores",    href: "/dashboard/scores",   icon: icon(Star)                                 },
-    { label: "YouTube",   href: "/dashboard/youtube",  icon: icon(PlayCircle), youtubeDashboardAccess: true },
-    { label: "Feedback",  href: "/dashboard/feedback", icon: icon(MessageCircle)                       },
-    { label: "Admin",     href: "/admin",              icon: icon(Settings),       adminOnly: true     },
+    { label: "Dashboard", href: "/dashboard",         icon: icon(LayoutDashboard),                             ceoOnly: true                },
+    { label: "Cases",     href: "/cases",              icon: icon(FileText),       adminOnly: true                                           },
+    { label: "Company",   href: "/dashboard/company",  icon: icon(Building2),      adminOnly: true                                           },
+    { label: "Scores",    href: "/dashboard/scores",   icon: icon(Star),                                        managersOnly: true           },
+    { label: "YouTube",   href: "/dashboard/youtube",  icon: icon(PlayCircle),     youtubeDashboardAccess: true                              },
+    { label: "Feedback",  href: "/dashboard/feedback", icon: icon(MessageCircle)                                                             },
+    { label: "Admin",     href: "/admin",              icon: icon(Settings),       adminOnly: true                                           },
 ];
 
 export default function Sidebar() {
@@ -41,10 +41,14 @@ export default function Sidebar() {
 
     const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper;
     const isHRAdmin = isAdmin || user?.orgLevel === "hr_manager";
+    const isCeo = user?.orgLevel === "ceo" || user?.isDeveloper === true;
+    const canSeeReports = isAdmin || user?.orgLevel === "manager" || user?.orgLevel === "hod";
     const canSeeViolationLog = isAdmin || user?.orgLevel === "special_access" || user?.role === "hr_manager";
     const showFeedbackSubmenu = canViewFeedbackInbox(user);
 
     const visibleItems = NAV_ITEMS.filter((item) => {
+        if ((item as any).ceoOnly && !isCeo) return false;
+        if ((item as any).managersOnly && !canSeeReports) return false;
         if ((item as any).adminOnly && !isAdmin) return false;
         if ((item as any).developerOnly && user?.isDeveloper !== true) return false;
         if ((item as any).youtubeDashboardAccess && !userCanAccessYoutubeDashboard(user)) return false;
@@ -317,8 +321,8 @@ export default function Sidebar() {
                     );
                 })}
 
-                {/* Report — direct link for non-admins, hover submenu for admins */}
-                {!isAdmin ? (
+                {/* Report — visible to CEO, developers, managers, HODs only */}
+                {canSeeReports && (!isAdmin ? (
                     <Link
                         href={`/dashboard/reports/${user?.dbId}`}
                         className={cn(
@@ -413,7 +417,7 @@ export default function Sidebar() {
                             document.body
                         )}
                     </div>
-                )}
+                ))}
 
                 {/* Dept. — visible to admins, hover submenu with department names */}
                 {isAdmin && (() => {
@@ -750,8 +754,3 @@ export default function Sidebar() {
         </>
     );
 }
-
-
-
-
-
