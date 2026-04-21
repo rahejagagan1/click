@@ -819,6 +819,18 @@ export default function AttendancePage() {
                 </span>
               )}
 
+              {/* Elapsed since clock-in — lives right under the button, Keka-style */}
+              {todayRec?.clockIn && (
+                <div className="w-fit">
+                  <p className="text-[14px] font-bold text-[#008CFF] leading-none tabular-nums">
+                    {elapsedStr.replace(" ", ":")}
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Since {todayRec.clockOut ? "Last Clock-in" : "Last Login"}
+                  </p>
+                </div>
+              )}
+
               {/* Quick links */}
               <div className="flex flex-col gap-1.5">
                 {[
