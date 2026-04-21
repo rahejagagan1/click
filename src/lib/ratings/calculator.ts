@@ -273,9 +273,10 @@ export async function calculateMonthlyRatings(
         count++;
     }
 
-    // Calculate ranks within each role
+    // Calculate ranks within each role — active users only so ranks read
+    // 1..N without gaps from people who left the company.
     const allRatings = await prisma.monthlyRating.findMany({
-        where: { month: monthStart },
+        where: { month: monthStart, user: { isActive: true } },
         orderBy: { overallRating: "desc" },
     });
 

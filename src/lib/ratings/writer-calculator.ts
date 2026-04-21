@@ -586,9 +586,10 @@ export async function calculateAllWriterRatings(
         }
     }
 
-    // Rank update in single transaction
+    // Rank update in single transaction — only rank active users so the
+    // leaderboard reads 1..N without gaps from people who left the company.
     const writerRatings = await prisma.monthlyRating.findMany({
-        where: { month: monthStart, roleType: "writer" },
+        where: { month: monthStart, roleType: "writer", user: { isActive: true } },
         select: { id: true, overallRating: true },
         orderBy: { overallRating: "desc" },
     });

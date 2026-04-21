@@ -36,9 +36,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return (
         <div className="flex min-h-screen">
             <Sidebar />
-            <main className="flex-1 ml-64">
+            <main className="flex-1 ml-20 min-w-0 bg-[#eef2f6]">
                 <Header />
-                <div className={isHRPage ? "" : "p-8"}>
+                <div className={isHRPage ? "" : "p-6"}>
                     {children}
                 </div>
             </main>
