@@ -69,21 +69,37 @@ export async function PUT(req: NextRequest) {
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
   const myId = await resolveUserId(session);
+  if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
   const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
 
   try {
-    const { id, action, approvalNote } = await req.json();
+    const body = await req.json();
+    const id = Number(body.id);
+    const action = body.action;
+    const approvalNote = typeof body.approvalNote === "string" ? body.approvalNote : null;
+    if (!Number.isInteger(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+    if (action !== "approve" && action !== "reject") {
+      return NextResponse.json({ error: "action must be 'approve' or 'reject'" }, { status: 400 });
+    }
+
     const record = await prisma.onDutyRequest.findUnique({ where: { id } });
     if (!record) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     if (!isAdmin) {
-      const isMgr = await prisma.user.findFirst({ where: { id: record.userId, managerId: myId! } });
+      const isMgr = await prisma.user.findFirst({ where: { id: record.userId, managerId: myId } });
       if (!isMgr) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const updated = await prisma.onDutyRequest.update({
-      where: { id },
-      data: { status: action === "approve" ? "approved" : "rejected", approvedById: myId, approvalNote },
+
+    // Race-safe status transition: only write if the request is still pending.
+    const newStatus = action === "approve" ? "approved" : "rejected";
+    const { count } = await prisma.onDutyRequest.updateMany({
+      where: { id, status: "pending" },
+      data:  { status: newStatus, approvedById: myId, approvalNote },
     });
+    if (count === 0) {
+      return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
+    }
+    const updated = await prisma.onDutyRequest.findUnique({ where: { id } });
     return NextResponse.json(updated);
   } catch (e) { return serverError(e, "PUT /api/hr/attendance/on-duty"); }
 }

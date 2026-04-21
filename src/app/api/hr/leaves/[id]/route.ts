@@ -14,8 +14,14 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const self = session!.user as any;
     const myId = await resolveUserId(session);
     if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
-    const appId = parseInt(params.id);
-    const { action, approvalNote } = await req.json();
+
+    const appId = Number(params.id);
+    if (!Number.isInteger(appId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+    const body = await req.json().catch(() => ({}));
+    const action = body?.action;
+    const approvalNote = typeof body?.approvalNote === "string" ? body.approvalNote : null;
+
     const application = await prisma.leaveApplication.findUnique({
       where: { id: appId },
       include: { leaveType: true, user: { select: { id: true, name: true, managerId: true } } },
@@ -33,20 +39,30 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const rangeLabel = fmtRange(new Date(application.fromDate), new Date(application.toDate), totalDays);
 
     // ── CANCEL ─────────────────────────────────────────────────────────────
+    // Race-safe: only one cancel wins. The status filter inside updateMany is
+    // the guard — if another request already cancelled/approved, count === 0.
     if (action === "cancel") {
       if (application.userId !== myId && !isFinalApprover) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      if (!["pending", "partially_approved", "approved"].includes(application.status)) {
+      const cancellableStatuses = ["pending", "partially_approved", "approved"];
+      if (!cancellableStatuses.includes(application.status)) {
         return NextResponse.json({ error: "Cannot cancel" }, { status: 400 });
       }
-      await prisma.$transaction([
-        prisma.leaveApplication.update({ where: { id: appId }, data: { status: "cancelled" } }),
-        prisma.leaveBalance.updateMany({
+      const originalStatus = application.status;
+      const result = await prisma.$transaction(async (tx) => {
+        const { count } = await tx.leaveApplication.updateMany({
+          where: { id: appId, status: { in: cancellableStatuses } },
+          data:  { status: "cancelled" },
+        });
+        if (count === 0) return { raced: true as const };
+        await tx.leaveBalance.updateMany({
           where: { userId: application.userId, leaveTypeId: application.leaveTypeId, year },
-          data: application.status === "approved"
+          data: originalStatus === "approved"
             ? { usedDays: { decrement: totalDays } }
             : { pendingDays: { decrement: totalDays } },
-        }),
-      ]);
+        });
+        return { raced: false as const };
+      });
+      if (result.raced) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
       return NextResponse.json({ success: true });
     }
 
@@ -54,15 +70,16 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       return NextResponse.json({ error: "Invalid action" }, { status: 400 });
     }
 
-    // ── REJECT — any stage, either the manager or a final approver can reject ─
+    // ── REJECT ─────────────────────────────────────────────────────────────
+    // Either the direct manager or a final approver can reject. Race-safe.
     if (action === "reject") {
       if (!isFinalApprover && !isDirectManager) return NextResponse.json({ error: "Not authorised" }, { status: 403 });
       if (!["pending", "partially_approved"].includes(application.status)) {
         return NextResponse.json({ error: "Only pending leaves can be rejected" }, { status: 400 });
       }
-      await prisma.$transaction([
-        prisma.leaveApplication.update({
-          where: { id: appId },
+      const result = await prisma.$transaction(async (tx) => {
+        const { count } = await tx.leaveApplication.updateMany({
+          where: { id: appId, status: { in: ["pending", "partially_approved"] } },
           data: {
             status: "rejected",
             approvedById: application.approvedById ?? myId,
@@ -71,13 +88,16 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
             finalApprovedAt:   isFinalApprover ? new Date() : application.finalApprovedAt,
             finalApprovalNote: isFinalApprover ? approvalNote : application.finalApprovalNote,
           },
-        }),
-        prisma.leaveBalance.updateMany({
+        });
+        if (count === 0) return { raced: true as const };
+        await tx.leaveBalance.updateMany({
           where: { userId: application.userId, leaveTypeId: application.leaveTypeId, year },
           data: { pendingDays: { decrement: totalDays } },
-        }),
-      ]);
-      // Notify the applicant.
+        });
+        return { raced: false as const };
+      });
+      if (result.raced) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
+
       await notifyUsers({
         actorId:  myId,
         userIds:  [application.userId],
@@ -90,22 +110,22 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       return NextResponse.json({ success: true });
     }
 
-    // ── APPROVE ────────────────────────────────────────────────────────────
-    // Stage 1: manager approves a pending request → partially_approved, notify CEO/HR.
+    // ── APPROVE — stage 1: manager → partially_approved ───────────────────
     if (application.status === "pending") {
       if (!isDirectManager && !isFinalApprover) return NextResponse.json({ error: "Not authorised" }, { status: 403 });
 
-      await prisma.leaveApplication.update({
-        where: { id: appId },
-        data: {
+      // Race-safe: only one stage-1 approval wins. Notifications only fire for the winner.
+      const { count } = await prisma.leaveApplication.updateMany({
+        where: { id: appId, status: "pending" },
+        data:  {
           status:       "partially_approved",
           approvedById: myId,
           approvedAt:   new Date(),
           approvalNote,
         },
       });
+      if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
 
-      // Queue stage-2 approvers: every active CEO / HR manager (minus the actor).
       const finalApprovers = await prisma.user.findMany({
         where: { isActive: true, orgLevel: { in: ["ceo", "hr_manager"] } },
         select: { id: true },
@@ -120,7 +140,6 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
         body:     `${rangeLabel} — manager approved, awaiting CEO / HR.`,
         linkUrl:  "/dashboard/hr/approvals",
       });
-      // Let the applicant know stage 1 is done.
       await notifyUsers({
         actorId:  myId,
         userIds:  [application.userId],
@@ -133,27 +152,36 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       return NextResponse.json({ success: true });
     }
 
-    // Stage 2: CEO / HR finalises a partially_approved request → approved, deduct balance.
+    // ── APPROVE — stage 2: CEO/HR finalises → balance debit + attendance marks ─
+    // This is the most dangerous race: double-debit of leave balance. Guard
+    // the status transition, then do the balance + attendance work only for
+    // the winner inside the same transaction.
     if (application.status === "partially_approved") {
       if (!isFinalApprover) return NextResponse.json({ error: "Only CEO / HR can finalise" }, { status: 403 });
 
-      await prisma.$transaction([
-        prisma.leaveApplication.update({
-          where: { id: appId },
+      const result = await prisma.$transaction(async (tx) => {
+        const { count } = await tx.leaveApplication.updateMany({
+          where: { id: appId, status: "partially_approved" },
           data: {
             status:            "approved",
             finalApprovedById: myId,
             finalApprovedAt:   new Date(),
             finalApprovalNote: approvalNote,
           },
-        }),
-        prisma.leaveBalance.updateMany({
+        });
+        if (count === 0) return { raced: true as const };
+        await tx.leaveBalance.updateMany({
           where: { userId: application.userId, leaveTypeId: application.leaveTypeId, year },
           data: { pendingDays: { decrement: totalDays }, usedDays: { increment: totalDays } },
-        }),
-      ]);
+        });
+        return { raced: false as const };
+      });
+      if (result.raced) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
 
       // Mark attendance as on_leave for each working day in the range.
+      // Attendance.upsert is idempotent on the unique key, so even if two
+      // callers reached this far (they can't, but belt-and-braces), the
+      // second just re-writes status=on_leave to the same value.
       const from = new Date(application.fromDate), to = new Date(application.toDate);
       const cur = new Date(from);
       while (cur <= to) {
@@ -168,7 +196,6 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
         cur.setDate(cur.getDate() + 1);
       }
 
-      // Notify applicant + the extras they tagged + the stage-1 approver.
       const extras = application.notifyUserIds ?? [];
       await notifyUsers({
         actorId:  myId,
