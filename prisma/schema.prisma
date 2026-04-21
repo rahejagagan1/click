@@ -88,6 +88,7 @@ model User {
   leaveBalances          LeaveBalance[]
   leaveApplications      LeaveApplication[]   @relation("LeaveApplicant")
   leaveApprovals         LeaveApplication[]   @relation("LeaveApprover")
+  leaveFinalApprovals    LeaveApplication[]   @relation("LeaveFinalApprover")
   heldAssets             AssetAssignment[]
   ownedDocuments         EmployeeDocument[]   @relation("DocOwner")
   uploadedDocuments      EmployeeDocument[]   @relation("DocUploader")
@@ -115,6 +116,8 @@ model User {
   engagePraises          EngagePost[]     @relation("EngagePraiseTo")
   engageReactions        EngageReaction[]
   engageComments         EngageComment[]  @relation("EngageCommentAuthor")
+  notifications          Notification[]   @relation("NotificationRecipient")
+  notificationsTriggered Notification[]   @relation("NotificationActor")
 
   @@index([managerId])
 }
@@ -904,22 +907,32 @@ model LeaveBalance {
 }
 
 model LeaveApplication {
-  id              Int       @id @default(autoincrement())
-  userId          Int
-  leaveTypeId     Int
-  fromDate        DateTime  @db.Date
-  toDate          DateTime  @db.Date
-  totalDays       Decimal   @db.Decimal(5, 1)
-  reason          String    @db.Text
-  status          String    @default("pending")  // pending | approved | rejected | cancelled
-  approvedById    Int?
-  approvalNote    String?
-  appliedAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                Int       @id @default(autoincrement())
+  userId            Int
+  leaveTypeId       Int
+  fromDate          DateTime  @db.Date
+  toDate            DateTime  @db.Date
+  totalDays         Decimal   @db.Decimal(5, 1)
+  reason            String    @db.Text
+  // pending -> partially_approved (after stage-1 mgr) -> approved (after stage-2 CEO/HR) | rejected | cancelled
+  status            String    @default("pending")
+  // Stage 1 — manager approval
+  approvedById      Int?
+  approvedAt        DateTime?
+  approvalNote      String?
+  // Stage 2 — CEO / HR manager final approval
+  finalApprovedById Int?
+  finalApprovedAt   DateTime?
+  finalApprovalNote String?
+  // Optional list of users the applicant asked to notify (Notify picker on form)
+  notifyUserIds     Int[]     @default([])
+  appliedAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  user            User      @relation("LeaveApplicant", fields: [userId], references: [id], onDelete: Cascade)
-  leaveType       LeaveType @relation(fields: [leaveTypeId], references: [id])
-  approver        User?     @relation("LeaveApprover", fields: [approvedById], references: [id])
+  user              User      @relation("LeaveApplicant",      fields: [userId],            references: [id], onDelete: Cascade)
+  leaveType         LeaveType @relation(fields: [leaveTypeId], references: [id])
+  approver          User?     @relation("LeaveApprover",       fields: [approvedById],      references: [id])
+  finalApprover     User?     @relation("LeaveFinalApprover",  fields: [finalApprovedById], references: [id])
 
   @@index([userId])
   @@index([status])
@@ -1374,4 +1387,31 @@ model EngageComment {
   author    User       @relation("EngageCommentAuthor", fields: [authorId], references: [id])
 
   @@index([postId])
+}
+
+// ═══════════════════════════════════════════════════════
+// HR MODULE — Notifications (approval fan-out for HR requests)
+// ═══════════════════════════════════════════════════════
+//
+// `type` is one of: regularization | wfh | on_duty | leave | comp_off | travel | expense
+// `entityId` is the id of the originating request (e.g. AttendanceRegularization.id)
+// `actorId` is the requester (who triggered the notification)
+model Notification {
+  id         Int       @id @default(autoincrement())
+  userId     Int       // recipient
+  actorId    Int?      // requester / trigger
+  type       String
+  entityId   Int?
+  title      String
+  body       String?   @db.Text
+  linkUrl    String?
+  isRead     Boolean   @default(false)
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  user       User      @relation("NotificationRecipient", fields: [userId],  references: [id], onDelete: Cascade)
+  actor      User?     @relation("NotificationActor",     fields: [actorId], references: [id])
+
+  @@index([userId, isRead])
+  @@index([createdAt])
 }
