@@ -8,7 +8,7 @@ import { useSession } from "next-auth/react";
 import useSWR from "swr";
 import type { ManagerReportFormat } from "@/lib/reports/manager-report-format";
 import dynamic from "next/dynamic";
-import "react-quill/dist/quill.snow.css";
+import "react-quill-new/dist/quill.snow.css";
 
 const FONT_WHITELIST = [
     "inter",
@@ -26,7 +26,7 @@ const FONT_WHITELIST = [
 ];
 
 const ReactQuill = dynamic(async () => {
-    const reactQuillModule = await import("react-quill");
+    const reactQuillModule = await import("react-quill-new");
     const RQ = reactQuillModule.default;
 
     // Safely extract Quill from the module or window
