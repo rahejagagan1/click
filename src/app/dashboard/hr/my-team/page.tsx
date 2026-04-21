@@ -4,6 +4,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { Clock, TreePine, Target, CheckCircle2, AlertCircle, AlertTriangle } from "lucide-react";
+import { getUserRoleLabel } from "@/lib/user-role-options";
 
 const C = {
   card:    "bg-white dark:bg-[#101c2e] border border-[#e2e8f0] dark:border-[rgba(255,255,255,0.06)] shadow-[0_1px_3px_rgba(0,0,0,0.07)] dark:shadow-none rounded-2xl",
@@ -104,7 +105,7 @@ export default function MyTeamPage() {
                         <div>
                           <p className={`text-[14px] font-semibold ${C.t1}`}>{m.name}</p>
                           <p className={`text-[12px] ${C.t3} mt-0.5`}>
-                            {m.employeeProfile?.designation || "—"}
+                            {m.employeeProfile?.designation || getUserRoleLabel(m.role) || "—"}
                             {m.employeeProfile?.department ? ` · ${m.employeeProfile.department}` : ""}
                           </p>
                         </div>

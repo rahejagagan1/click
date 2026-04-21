@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
+import { istTodayDateOnly } from "@/lib/ist-date";
 
 export async function POST(_req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
@@ -15,7 +16,7 @@ export async function POST(_req: NextRequest) {
     }
     if (!userId) return NextResponse.json({ error: "User not found" }, { status: 404 });
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const today = istTodayDateOnly();
 
     const existing = await prisma.attendance.findUnique({
       where: { userId_date: { userId, date: today } },

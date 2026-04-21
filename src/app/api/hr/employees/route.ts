@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
+import { serializeBigInt } from "@/lib/utils";
 
 // GET /api/hr/employees — list all employees with profiles
 export async function GET(req: NextRequest) {
@@ -35,7 +36,7 @@ export async function GET(req: NextRequest) {
       orderBy: { name: "asc" },
     });
 
-    return NextResponse.json(users);
+    return NextResponse.json(serializeBigInt(users));
   } catch (e) {
     return serverError(e, "GET /api/hr/employees");
   }
