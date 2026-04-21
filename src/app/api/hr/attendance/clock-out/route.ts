@@ -18,21 +18,37 @@ export async function POST(_req: NextRequest) {
     const now = new Date();
     const today = istTodayDateOnly();
 
+    // Read once to compute duration + status; we still race-guard at write time.
     const existing = await prisma.attendance.findUnique({
       where: { userId_date: { userId, date: today } },
     });
-    if (!existing?.clockIn) return NextResponse.json({ error: "You haven't clocked in today" }, { status: 400 });
-    if (existing.clockOut) return NextResponse.json({ error: "Already clocked out today" }, { status: 400 });
+    if (!existing?.clockIn) {
+      return NextResponse.json({ error: "You haven't clocked in today" }, { status: 400 });
+    }
+    if (existing.clockOut) {
+      return NextResponse.json({ error: "Already clocked out today" }, { status: 409 });
+    }
 
-    const totalMinutes = Math.floor((now.getTime() - existing.clockIn!.getTime()) / 60000);
+    const totalMinutes = Math.floor((now.getTime() - existing.clockIn.getTime()) / 60000);
     let status = existing.status;
     if (totalMinutes >= 480) status = existing.status === "late" ? "late" : "present";
     else if (totalMinutes >= 240) status = "half_day";
     const overtimeMinutes = Math.max(0, totalMinutes - 540);
 
-    const record = await prisma.attendance.update({
-      where: { userId_date: { userId, date: today } },
+    // ── Race-safe clock-out ─────────────────────────────────────────────
+    // Atomic conditional update: only write clockOut if it's STILL null.
+    // If two requests arrive together, only the first one's updateMany
+    // matches (count === 1); the second sees count === 0 and returns 409.
+    const updated = await prisma.attendance.updateMany({
+      where: { userId, date: today, clockOut: null },
       data: { clockOut: now, totalMinutes, status, overtimeMinutes },
+    });
+    if (updated.count === 0) {
+      return NextResponse.json({ error: "Already clocked out today" }, { status: 409 });
+    }
+
+    const record = await prisma.attendance.findUnique({
+      where: { userId_date: { userId, date: today } },
     });
     return NextResponse.json(record);
   } catch (e) {
