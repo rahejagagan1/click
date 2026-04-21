@@ -1,9 +1,22 @@
 "use client";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import OrgTreeView from "@/components/hr/OrgTreeView";
+import FilterDropdown from "@/components/hr/FilterDropdown";
+import {
+  deriveEntity,
+  deriveDepartment,
+  deriveLocation,
+  deriveRole,
+  entityOptions,
+  departmentOptions,
+  locationOptions,
+  roleOptions,
+} from "@/lib/hr-taxonomy";
+import { getUserRoleLabel } from "@/lib/user-role-options";
 
 const ORG_TABS = [
   { key: "employees", label: "EMPLOYEES" },
@@ -17,21 +30,58 @@ export default function PeoplePage() {
   const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper;
   const [subTab, setSubTab] = useState<"directory" | "tree">("directory");
   const [search, setSearch] = useState("");
-  const [deptFilter, setDeptFilter] = useState("");
-  const [locationFilter, setLocationFilter] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+
+  const [fBizUnit,  setFBizUnit]  = useState<Set<string>>(new Set());
+  const [fDept,     setFDept]     = useState<Set<string>>(new Set());
+  const [fLocation, setFLocation] = useState<Set<string>>(new Set());
+  const [fCost,     setFCost]     = useState<Set<string>>(new Set());
+  const [fLegal,    setFLegal]    = useState<Set<string>>(new Set());
+  const [fRole,     setFRole]     = useState<Set<string>>(new Set());
 
   const { data: employees = [] } = useSWR("/api/hr/employees", fetcher);
 
-  const filtered = employees.filter((e: any) => {
-    if (search && !e.name?.toLowerCase().includes(search.toLowerCase())) return false;
-    if (deptFilter && e.profile?.department !== deptFilter) return false;
-    if (locationFilter && e.profile?.workLocation !== locationFilter) return false;
-    return true;
-  });
+  const { bizUnitOpts, deptOpts, locOpts, costOpts, legalOpts, rolesOpts } = useMemo(() => {
+    const ents = entityOptions(employees);
+    return {
+      bizUnitOpts: ents,
+      legalOpts:   ents,
+      costOpts:    ents,
+      deptOpts:    departmentOptions(employees),
+      locOpts:     locationOptions(employees),
+      rolesOpts:   roleOptions(employees),
+    };
+  }, [employees]);
 
-  const departments = [...new Set(employees.map((e: any) => e.profile?.department).filter(Boolean))];
-  const locations = [...new Set(employees.map((e: any) => e.profile?.workLocation).filter(Boolean))];
+  const filtered = useMemo(() => {
+    // When a filter has any selection, only users whose derived value is in
+    // the set pass. Users with empty values are excluded (no more UNASSIGNED
+    // pseudo-match since the option itself was removed).
+    const matches = (selected: Set<string>, derived: string) => {
+      if (selected.size === 0) return true;
+      return !!derived && selected.has(derived);
+    };
+    return employees.filter((e: any) => {
+      const en = deriveEntity(e);
+      const dp = deriveDepartment(e);
+      const lc = deriveLocation(e);
+      const rl = deriveRole(e);
+      if (!matches(fBizUnit,  en)) return false;
+      if (!matches(fLegal,    en)) return false;
+      if (!matches(fCost,     en)) return false;
+      if (!matches(fDept,     dp)) return false;
+      if (!matches(fLocation, lc)) return false;
+      if (!matches(fRole,     rl)) return false;
+      if (search && !(
+        e.name?.toLowerCase().includes(search.toLowerCase()) ||
+        (e.email || "").toLowerCase().includes(search.toLowerCase())
+      )) return false;
+      return true;
+    });
+  }, [employees, fBizUnit, fDept, fLocation, fCost, fLegal, fRole, search]);
+
+  const anyFilter = fBizUnit.size || fDept.size || fLocation.size || fCost.size || fLegal.size || fRole.size;
+  const clearFilters = () => { setFBizUnit(new Set()); setFDept(new Set()); setFLocation(new Set()); setFCost(new Set()); setFLegal(new Set()); setFRole(new Set()); };
 
   return (
     <div className="space-y-0">
@@ -72,31 +122,27 @@ export default function PeoplePage() {
             {/* Section Title */}
             <h2 className="text-[17px] font-semibold text-slate-800 dark:text-white mb-4">Employee Directory</h2>
 
-            {/* Keka-style Filter Bar */}
-            <div className="flex items-center gap-3 mb-5">
-              <select className="h-9 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-500 dark:text-slate-400 focus:outline-none focus:border-[#008CFF]/40 min-w-[130px]">
-                <option>Business Unit</option>
-              </select>
-              <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}
-                className="h-9 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-500 dark:text-slate-400 focus:outline-none focus:border-[#008CFF]/40 min-w-[160px]">
-                <option value="">Department</option>
-                {departments.map((d: any) => <option key={d} value={d}>{d}</option>)}
-              </select>
-              <select value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)}
-                className="h-9 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-500 dark:text-slate-400 focus:outline-none focus:border-[#008CFF]/40 min-w-[120px]">
-                <option value="">Location</option>
-                {locations.map((l: any) => <option key={l} value={l}>{l}</option>)}
-              </select>
-              <select className="h-9 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-500 dark:text-slate-400 focus:outline-none focus:border-[#008CFF]/40 min-w-[120px]">
-                <option>Cost Center</option>
-              </select>
-              <select className="h-9 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-500 dark:text-slate-400 focus:outline-none focus:border-[#008CFF]/40 min-w-[120px]">
-                <option>Legal Entity</option>
-              </select>
-              <div className="relative flex-1">
+            {/* Filter bar (themed multi-select dropdowns) */}
+            <div className="flex items-center gap-2 mb-5 flex-wrap">
+              <FilterDropdown label="Business Unit" options={bizUnitOpts} selected={fBizUnit}  onChange={setFBizUnit}  />
+              <FilterDropdown label="Department"    options={deptOpts}    selected={fDept}     onChange={setFDept}     width={280} />
+              <FilterDropdown label="Location"      options={locOpts}     selected={fLocation} onChange={setFLocation} />
+              <FilterDropdown label="Cost Center"   options={costOpts}    selected={fCost}     onChange={setFCost}     />
+              <FilterDropdown label="Legal Entity"  options={legalOpts}   selected={fLegal}    onChange={setFLegal}    />
+              <FilterDropdown label="Role"          options={rolesOpts}   selected={fRole}     onChange={setFRole}     width={220} />
+              {anyFilter ? (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="h-9 px-3 text-[12px] font-medium text-slate-500 dark:text-slate-400 hover:text-[#008CFF] dark:hover:text-[#4a9cff] transition-colors"
+                >
+                  Clear filters
+                </button>
+              ) : null}
+              <div className="relative flex-1 min-w-[200px]">
                 <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                 <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search"
-                  className="w-full h-9 pl-9 pr-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-800 dark:text-white placeholder-slate-600 focus:outline-none focus:border-[#008CFF]/40" />
+                  className="w-full h-9 pl-9 pr-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-800 dark:text-white placeholder-slate-500 focus:outline-none focus:border-[#008CFF]/40" />
               </div>
             </div>
 
@@ -120,32 +166,32 @@ export default function PeoplePage() {
                         <h3 className="text-[14px] font-semibold text-slate-800 dark:text-white truncate group-hover:text-[#008CFF] transition-colors">{emp.name}</h3>
                         <span className="text-slate-600 text-sm cursor-pointer">⋯</span>
                       </div>
-                      <p className="text-[12px] text-slate-500 dark:text-slate-400 truncate">{emp.profile?.designation || "Team Member"}</p>
+                      <p className="text-[12px] text-slate-500 dark:text-slate-400 truncate">{emp.employeeProfile?.designation || getUserRoleLabel(emp.role)}</p>
                     </div>
                   </div>
 
                   {/* Info Rows */}
                   <div className="space-y-1.5">
-                    {emp.profile?.department && (
+                    {emp.employeeProfile?.department && (
                       <div className="flex items-start gap-2">
                         <span className="text-[11px] text-slate-600 min-w-[80px]">Department :</span>
-                        <span className="text-[11px] text-[#008CFF] font-medium">{emp.profile.department}</span>
+                        <span className="text-[11px] text-[#008CFF] font-medium">{emp.employeeProfile.department}</span>
                       </div>
                     )}
-                    {(emp.profile?.workLocation) && (
+                    {(emp.employeeProfile?.workLocation) && (
                       <div className="flex items-start gap-2">
                         <span className="text-[11px] text-slate-600 min-w-[80px]">Location :</span>
-                        <span className="text-[11px] text-slate-800 dark:text-white">{emp.profile.workLocation}</span>
+                        <span className="text-[11px] text-slate-800 dark:text-white">{emp.employeeProfile.workLocation}</span>
                       </div>
                     )}
                     <div className="flex items-start gap-2">
                       <span className="text-[11px] text-slate-600 min-w-[80px]">Email :</span>
                       <span className="text-[11px] text-slate-800 dark:text-white truncate">{emp.email}</span>
                     </div>
-                    {emp.profile?.phone && (
+                    {emp.employeeProfile?.phone && (
                       <div className="flex items-start gap-2">
                         <span className="text-[11px] text-slate-600 min-w-[80px]">Mobile :</span>
-                        <span className="text-[11px] text-slate-800 dark:text-white">{emp.profile.phone}</span>
+                        <span className="text-[11px] text-slate-800 dark:text-white">{emp.employeeProfile.phone}</span>
                       </div>
                     )}
                   </div>
@@ -161,12 +207,7 @@ export default function PeoplePage() {
           </>
         )}
 
-        {subTab === "tree" && (
-          <div className="text-center py-16">
-            <p className="text-[14px] text-slate-500 dark:text-slate-400 mb-2">Organization Tree</p>
-            <p className="text-[12px] text-slate-600">Hierarchical org chart view coming soon</p>
-          </div>
-        )}
+        {subTab === "tree" && <OrgTreeView />}
       </div>
 
       {/* Add Employee Slide Panel */}

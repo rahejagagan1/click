@@ -1,15 +1,27 @@
 "use client";
 import { useState } from "react";
 import useSWR, { mutate } from "swr";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight, Palmtree, Trash2 } from "lucide-react";
+import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package } from "lucide-react";
+import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
+import AssetsPanel from "@/components/hr/AssetsPanel";
 
-const ADMIN_TABS = [
-  { key: "leave-types", label: "Leave Types",      icon: Calendar  },
-  { key: "shifts",      label: "Shift Templates",  icon: Clock     },
-  { key: "departments", label: "Departments",      icon: Users     },
-  { key: "holidays",    label: "Holidays",         icon: Palmtree  },
+// Every HR-admin section is an inline state tab — no sub-routes.
+type AdminTabDef = {
+  key: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string; size?: number; strokeWidth?: number }>;
+};
+const ADMIN_TABS: AdminTabDef[] = [
+  { key: "attendance-dashboard", label: "Attendance Dashboard", icon: LayoutDashboard },
+  { key: "holidays",             label: "Holidays & Calendar",  icon: CalendarDays    },
+  { key: "assets",               label: "Assets",               icon: Package         },
+  { key: "leave-types",          label: "Leave Types",          icon: Calendar        },
+  { key: "shifts",               label: "Shift Templates",      icon: Clock           },
+  { key: "departments",          label: "Departments",          icon: Users           },
 ];
 
 const DAYS_LABEL = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -19,7 +31,7 @@ export default function HRAdminPage() {
   const user = session?.user as any;
   const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper || user?.orgLevel === "hr_manager";
 
-  const [tab, setTab] = useState("leave-types");
+  const [tab, setTab] = useState("attendance-dashboard");
 
   const { data: leaveTypes = [] } = useSWR("/api/hr/admin/leave-types", fetcher);
   const { data: shifts = [] }     = useSWR("/api/hr/admin/shifts", fetcher);
@@ -116,30 +128,39 @@ export default function HRAdminPage() {
         <div className="flex items-center gap-3">
           <Settings className="w-5 h-5 text-[#008CFF]" />
           <div>
-            <h1 className="text-[15px] font-bold text-slate-800 dark:text-white">HR Admin Settings</h1>
-            <p className="text-[12px] text-slate-500 dark:text-slate-400">Configure leave types, shifts, and org structure</p>
+            <h1 className="text-[15px] font-bold text-slate-800 dark:text-white">HR Dashboard</h1>
+            <p className="text-[12px] text-slate-500 dark:text-slate-400">Attendance, holidays, assets, leave types, shifts & org structure</p>
           </div>
         </div>
       </div>
 
       <div className="flex gap-0 h-full">
 
-        {/* Sidebar tabs */}
-        <div className="w-[220px] shrink-0 p-4 space-y-1 border-r border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/40">
-          {ADMIN_TABS.map(({ key, label, icon: Icon }) => (
-            <button key={key} onClick={() => setTab(key)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left ${
-                tab === key
-                  ? "bg-[#008CFF]/10 text-[#008CFF]"
-                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
-              }`}>
-              <Icon className="w-4 h-4" />{label}
-            </button>
-          ))}
+        {/* Sidebar tabs — every section is an in-page state tab. */}
+        <div className="w-[240px] shrink-0 p-4 space-y-1 border-r border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/40">
+          {ADMIN_TABS.map((t) => {
+            const active = tab === t.key;
+            const base = `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left ${
+              active
+                ? "bg-[#008CFF]/10 text-[#008CFF]"
+                : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
+            }`;
+            return (
+              <button key={t.key} onClick={() => setTab(t.key)} className={base}>
+                <t.icon className="w-4 h-4" />{t.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Content */}
         <div className="flex-1 p-6 space-y-4">
+
+          {/* ── Attendance Dashboard ── */}
+          {tab === "attendance-dashboard" && <AttendanceDashboardPanel />}
+
+          {/* ── Assets ── */}
+          {tab === "assets" && <AssetsPanel />}
 
           {/* ── Leave Types ── */}
           {tab === "leave-types" && (

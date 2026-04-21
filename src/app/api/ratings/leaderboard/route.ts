@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
         const limit = parseInt(searchParams.get("limit") || "10");
         const month = searchParams.get("month");
 
-        const where: any = { roleType };
+        const where: any = { roleType, user: { isActive: true } };
         if (month) {
             const d = new Date(month);
             where.month = new Date(d.getFullYear(), d.getMonth(), 1);

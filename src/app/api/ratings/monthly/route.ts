@@ -13,7 +13,13 @@ export async function GET(request: NextRequest) {
         const roleType = searchParams.get("roleType");
 
         const where: any = {};
-        if (userId) where.userId = parseInt(userId);
+        if (userId) {
+            where.userId = parseInt(userId);
+        } else {
+            // List views hide rows for users who have left the company.
+            // A direct lookup by userId still returns their historic data.
+            where.user = { isActive: true };
+        }
         if (roleType) where.roleType = roleType;
         if (month) {
             const d = new Date(month);

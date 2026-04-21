@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, requireHRAdmin, resolveUserId, serverError } from "@/lib/api-auth";
+import { notifyApprovers } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -36,8 +37,9 @@ export async function POST(req: NextRequest) {
   if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   try {
-    const { date, requestedIn, requestedOut, reason } = await req.json();
+    const { date, requestedIn, requestedOut, reason, notifyUserIds } = await req.json();
     if (!date || !reason) return NextResponse.json({ error: "date and reason required" }, { status: 400 });
+    const extras = Array.isArray(notifyUserIds) ? notifyUserIds.filter((x: any) => Number.isInteger(x)) : [];
 
     const reg = await prisma.attendanceRegularization.create({
       data: {
@@ -47,6 +49,16 @@ export async function POST(req: NextRequest) {
         requestedOut: requestedOut ? new Date(requestedOut) : null,
         reason,
       },
+    });
+    const requester = await prisma.user.findUnique({ where: { id: myId }, select: { name: true } });
+    await notifyApprovers({
+      actorId:  myId,
+      type:     "regularization",
+      entityId: reg.id,
+      title:    `${requester?.name || "An employee"} requested regularization`,
+      body:     `Date: ${new Date(date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} — ${String(reason).slice(0, 120)}`,
+      linkUrl:  "/dashboard/hr/attendance",
+      extraUserIds: extras,
     });
     return NextResponse.json(reg, { status: 201 });
   } catch (e) { return serverError(e, "POST /api/hr/attendance/regularize"); }
