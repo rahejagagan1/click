@@ -101,6 +101,69 @@ function recalcOverallRating(sections: any[]): number | null {
     return Math.round(raw * 100) / 100;
 }
 
+// Bracket lookup — mirrors formula-engine.ts::applyBrackets
+function applyBrackets(value: number, brackets: Array<{ min: number; max: number; stars: number }>): number {
+    for (const b of brackets) if (value >= b.min && value <= b.max) return b.stars;
+    if (brackets.length === 0) return 1;
+    const sorted = [...brackets].sort((a, b) => a.min - b.min);
+    if (value < sorted[0].min) return sorted[0].stars;
+    let best = sorted[0];
+    for (const b of sorted) if (b.min <= value) best = b;
+    return best.stars;
+}
+
+// Matrix lookup — mirrors formula-engine.ts::applyMatrix
+function applyMatrix(
+    casesCompleted: number,
+    qualityStars: number,
+    matrix: Record<string, Record<string, number>>
+): number | null {
+    if (casesCompleted <= 1) return 0;
+    const roundedQuality = Math.min(5, Math.max(1, Math.round(qualityStars)));
+    const caseKeys = Object.keys(matrix).map(Number).sort((a, b) => a - b);
+    let matchKey: string | null = null;
+    for (const ck of caseKeys) if (casesCompleted >= ck) matchKey = String(ck);
+    if (!matchKey && caseKeys.length > 0) matchKey = String(caseKeys[caseKeys.length - 1]);
+    if (!matchKey) return null;
+    const qualityMap = matrix[matchKey];
+    if (!qualityMap) return null;
+    return qualityMap[String(roundedQuality)] ?? null;
+}
+
+/**
+ * Given a section's formula config and the new rawValue, derive the new stars.
+ * Handles bracket_lookup and matrix_lookup (the two types that have a numeric input
+ * the user can edit). Other types keep their existing stars.
+ *
+ * Returns `undefined` when the section type isn't self-recomputable — caller
+ * should leave the stars as-is in that case.
+ */
+function recomputeSectionStarsFromRawValue(
+    sectionConfig: any,
+    newRawValue: number,
+    liveSections: any[]
+): number | null | undefined {
+    if (!sectionConfig) return undefined;
+
+    if (sectionConfig.type === "bracket_lookup") {
+        const brackets = sectionConfig.brackets;
+        if (!Array.isArray(brackets)) return undefined;
+        return applyBrackets(newRawValue, brackets);
+    }
+
+    if (sectionConfig.type === "matrix_lookup") {
+        const matrix = sectionConfig.matrix;
+        const ySectionKey = sectionConfig.variable_y_section;
+        if (!matrix || !ySectionKey) return undefined;
+        const sibling = liveSections.find((s: any) => s.key === ySectionKey);
+        const yStars = sibling?.stars;
+        if (yStars == null) return null;
+        return applyMatrix(newRawValue, Number(yStars), matrix);
+    }
+
+    return undefined; // leave stars untouched for other types
+}
+
 // Map section keys to convenience DB columns
 const SECTION_TO_COLUMN: Record<string, string> = {
     writerQuality: "writerQualityStars",
@@ -174,12 +237,48 @@ export async function PATCH(request: NextRequest) {
             if (isStarsEdit) {
                 section.stars = numVal;
             } else {
+                // When rawValue changes, try to recompute this section's stars
+                // from the formula template so the final rating auto-adjusts.
                 section.rawValue = numVal;
+
+                const template = await prisma.formulaTemplate.findFirst({
+                    where: { roleType: current.roleType, isActive: true },
+                    orderBy: { version: "desc" },
+                });
+                const templateSections = Array.isArray(template?.sections) ? (template!.sections as any[]) : [];
+                const sectionConfig = templateSections.find((s: any) => s?.key === sectionKey);
+
+                const newStars = recomputeSectionStarsFromRawValue(sectionConfig, numVal, sections);
+                if (newStars !== undefined) {
+                    const oldStars = section.stars;
+                    section.stars = newStars;
+                    section.details =
+                        `Manual override: value=${numVal} → ${newStars ?? "null"}★ (was value=${oldVal ?? "null"}, stars=${oldStars ?? "null"})`;
+
+                    // Any matrix_lookup section that uses this one as its y-axis must
+                    // also recompute — editing a quality value should bubble into the
+                    // cases-matrix star that depends on it.
+                    for (const dep of sections) {
+                        const depConfig = templateSections.find((t: any) => t?.key === dep.key);
+                        if (depConfig?.type === "matrix_lookup" && depConfig.variable_y_section === sectionKey) {
+                            if (dep.rawValue != null) {
+                                const depNewStars = recomputeSectionStarsFromRawValue(depConfig, Number(dep.rawValue), sections);
+                                if (depNewStars !== undefined) {
+                                    dep.stars = depNewStars;
+                                    dep.details =
+                                        `Auto-recomputed from ${sectionKey} change: ${dep.rawValue} cases × ${newStars}★ → ${depNewStars ?? "null"}★`;
+                                }
+                            }
+                        }
+                    }
+                }
             }
             section.isOverridden = true;
-            section.details = `Manual override: ${isStarsEdit ? `${numVal}★` : `value=${numVal}`} (was ${oldVal ?? "null"})`;
+            if (isStarsEdit) {
+                section.details = `Manual override: ${numVal}★ (was ${oldVal ?? "null"})`;
+            }
 
-            // Recalculate overall rating from stars
+            // Recalculate overall rating from (possibly updated) stars
             const newOverall = recalcOverallRating(sections);
 
             updateData.parametersJson = sections;
