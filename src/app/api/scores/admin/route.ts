@@ -101,6 +101,102 @@ function recalcOverallRating(sections: any[]): number | null {
     return Math.round(raw * 100) / 100;
 }
 
+// Bracket lookup — mirrors formula-engine.ts::applyBrackets
+function applyBrackets(value: number, brackets: Array<{ min: number; max: number; stars: number }>): number {
+    for (const b of brackets) if (value >= b.min && value <= b.max) return b.stars;
+    if (brackets.length === 0) return 1;
+    const sorted = [...brackets].sort((a, b) => a.min - b.min);
+    if (value < sorted[0].min) return sorted[0].stars;
+    let best = sorted[0];
+    for (const b of sorted) if (b.min <= value) best = b;
+    return best.stars;
+}
+
+// Matrix lookup — mirrors formula-engine.ts::applyMatrix
+function applyMatrix(
+    casesCompleted: number,
+    qualityStars: number,
+    matrix: Record<string, Record<string, number>>
+): number | null {
+    if (casesCompleted <= 1) return 0;
+    const roundedQuality = Math.min(5, Math.max(1, Math.round(qualityStars)));
+    const caseKeys = Object.keys(matrix).map(Number).sort((a, b) => a - b);
+    let matchKey: string | null = null;
+    for (const ck of caseKeys) if (casesCompleted >= ck) matchKey = String(ck);
+    if (!matchKey && caseKeys.length > 0) matchKey = String(caseKeys[caseKeys.length - 1]);
+    if (!matchKey) return null;
+    const qualityMap = matrix[matchKey];
+    if (!qualityMap) return null;
+    return qualityMap[String(roundedQuality)] ?? null;
+}
+
+const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+
+// Matches the custom rounding used by formula-engine.ts::customRound.
+function customRound(value: number): number {
+    if (value === 0) return 0;
+    const decimal = value - Math.floor(value);
+    return decimal > 0.5 ? Math.ceil(value) : Math.floor(value);
+}
+
+/**
+ * Given a section's formula config and the new rawValue, derive the new stars.
+ * Covers every FormulaSectionType the engine uses so that editing any pillar's
+ * value in the audit panel makes the star badge follow automatically.
+ *
+ * Returns `undefined` only when the config is entirely missing / malformed —
+ * callers leave stars as-is in that case.
+ */
+function recomputeSectionStarsFromRawValue(
+    sectionConfig: any,
+    newRawValue: number,
+    liveSections: any[]
+): number | null | undefined {
+    if (!sectionConfig) return undefined;
+    const type = sectionConfig.type;
+
+    // bracket_lookup — numeric variable → stars via bracket table
+    if (type === "bracket_lookup") {
+        const brackets = sectionConfig.brackets;
+        if (!Array.isArray(brackets)) return undefined;
+        return applyBrackets(newRawValue, brackets);
+    }
+
+    // matrix_lookup — (cases_count × sibling_stars) → stars via 2D matrix
+    if (type === "matrix_lookup") {
+        const matrix = sectionConfig.matrix;
+        const ySectionKey = sectionConfig.variable_y_section;
+        if (!matrix || !ySectionKey) return undefined;
+        const sibling = liveSections.find((s: any) => s.key === ySectionKey);
+        const yStars = sibling?.stars;
+        if (yStars == null) return null;
+        return applyMatrix(newRawValue, Number(yStars), matrix);
+    }
+
+    // yt_baseline_ratio — if config has brackets, apply them; otherwise rawValue is already on 0-5 scale.
+    if (type === "yt_baseline_ratio") {
+        const brackets = sectionConfig.brackets;
+        if (Array.isArray(brackets) && brackets.length > 0) return applyBrackets(newRawValue, brackets);
+        return clamp(customRound(newRawValue), 0, 5);
+    }
+
+    // passthrough — linear map via scale_min/scale_max → 1..5, else rawValue is already stars.
+    if (type === "passthrough") {
+        const min = sectionConfig.passthrough_scale_min;
+        const max = sectionConfig.passthrough_scale_max;
+        if (typeof min === "number" && typeof max === "number" && max > min) {
+            const pct = (newRawValue - min) / (max - min);
+            return clamp(customRound(pct * 4 + 1), 1, 5);
+        }
+        return clamp(customRound(newRawValue), 0, 5);
+    }
+
+    // Everything else stores rawValue directly on the 0-5 star scale:
+    //   manager_questions_avg | manager_direct_rating | team_quality_avg
+    //   combined_team_manager_rating | rm_pipeline_targets_avg
+    return clamp(customRound(newRawValue), 0, 5);
+}
+
 // Map section keys to convenience DB columns
 const SECTION_TO_COLUMN: Record<string, string> = {
     writerQuality: "writerQualityStars",
@@ -174,12 +270,23 @@ export async function PATCH(request: NextRequest) {
             if (isStarsEdit) {
                 section.stars = numVal;
             } else {
+                // Edit score value + auto-recompute stars from the template so the
+                // rating follows the value.
                 section.rawValue = numVal;
+
+                const template = await prisma.formulaTemplate.findFirst({
+                    where: { roleType: current.roleType, isActive: true },
+                    orderBy: { version: "desc" },
+                });
+                const templateSections = Array.isArray(template?.sections) ? (template!.sections as any[]) : [];
+                const sectionConfig = templateSections.find((s: any) => s?.key === sectionKey);
+                const newStars = recomputeSectionStarsFromRawValue(sectionConfig, numVal, sections);
+                if (newStars !== undefined) section.stars = newStars;
             }
             section.isOverridden = true;
             section.details = `Manual override: ${isStarsEdit ? `${numVal}★` : `value=${numVal}`} (was ${oldVal ?? "null"})`;
 
-            // Recalculate overall rating from stars
+            // Recalculate overall rating from (possibly updated) stars
             const newOverall = recalcOverallRating(sections);
 
             updateData.parametersJson = sections;
