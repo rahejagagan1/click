@@ -227,19 +227,19 @@ function LocationPin({ raw }: { raw?: string | null }) {
 }
 
 // ── Timeline bar (same proportional grid as Keka) ────────────────────────────
-function TimelineBar({ clockIn, clockOut }: { clockIn?: string; clockOut?: string }) {
-  const START_H = 7, SPAN = 15; // 07:00 → 22:00
-  if (!clockIn) return <span className="text-[11px] text-slate-400">—</span>;
-  const toFrac = (iso: string) => {
-    const d = new Date(iso);
-    return Math.max(0, Math.min(1, ((d.getHours() + d.getMinutes() / 60) - START_H) / SPAN));
-  };
-  const left = toFrac(clockIn);
-  const right = clockOut ? toFrac(clockOut) : left + 0.02;
+// Shift-progress bar: fills from 0 → 100% of a 9h shift based on elapsed minutes.
+// Orange < 50% · blue < 100% · green once the full 9h is met.
+function TimelineBar({ liveMins }: { liveMins: number }) {
+  if (!liveMins || liveMins <= 0) return <span className="text-[11px] text-slate-400">—</span>;
+  const SHIFT_LEN = 540; // 9h in minutes
+  const pct = Math.min((liveMins / SHIFT_LEN) * 100, 100);
+  const color = pct >= 100 ? "bg-emerald-400" : pct >= 50 ? "bg-[#008CFF]" : "bg-orange-400";
   return (
     <div className="relative w-full max-w-[280px] h-2 bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
-      <div className="absolute h-full bg-[#00BCD4] rounded-full"
-        style={{ left: `${left * 100}%`, width: `${Math.max((right - left) * 100, 1)}%` }} />
+      <div
+        className={`h-full ${color} rounded-full transition-[width] duration-500`}
+        style={{ width: `${pct}%` }}
+      />
     </div>
   );
 }
@@ -975,7 +975,7 @@ export default function AttendancePage() {
                         <td className="px-5 py-3">
                           {hasClock ? (
                             <div className="flex items-center gap-3">
-                              <TimelineBar clockIn={rec.clockIn} clockOut={rec.clockOut} />
+                              <TimelineBar liveMins={liveMins} />
                               <LocationPin raw={rec.location} />
                             </div>
                           ) : isHoliday ? (
