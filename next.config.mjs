@@ -3,7 +3,6 @@ const nextConfig = {
     // Optimize large library imports for smaller bundles
     experimental: {
         optimizePackageImports: ["recharts", "lru-cache"],
-        instrumentationHook: true,
     },
     // Reduce powered-by header for security
     poweredByHeader: false,
