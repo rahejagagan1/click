@@ -98,7 +98,7 @@ export default function Sidebar() {
     const { data: session } = useSession();
     const user = session?.user as any;
 
-    const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper;
+    const isAdmin = user?.orgLevel === "ceo" || user?.orgLevel === "special_access" || user?.isDeveloper;
     const isHRAdmin = isAdmin || user?.orgLevel === "hr_manager";
     const isCeo = user?.orgLevel === "ceo" || user?.isDeveloper === true;
     const canSeeReports = isAdmin || user?.orgLevel === "manager" || user?.orgLevel === "hod";
@@ -116,6 +116,8 @@ export default function Sidebar() {
 
     // Report submenu state
     const [reportHovered, setReportHovered] = useState(false);
+    const [reportY, setReportY] = useState(0);
+    const reportTrigger = useRef<HTMLDivElement>(null);
     const [managers, setManagers] = useState<Manager[]>([]);
     const [managersLoaded, setManagersLoaded] = useState(false);
     const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -154,10 +156,14 @@ export default function Sidebar() {
 
     // Dept submenu state
     const [deptHovered, setDeptHovered] = useState(false);
+    const [deptY, setDeptY] = useState(0);
+    const deptTrigger = useRef<HTMLDivElement>(null);
     const deptHoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     // Feedback submenu (CEO / Developer / HR)
     const [feedbackHovered, setFeedbackHovered] = useState(false);
+    const [feedbackY, setFeedbackY] = useState(0);
+    const feedbackTrigger = useRef<HTMLDivElement>(null);
     const feedbackHoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const DEPARTMENTS = [
@@ -172,6 +178,7 @@ export default function Sidebar() {
 
     const handleDeptMouseEnter = () => {
         if (deptHoverTimeoutRef.current) clearTimeout(deptHoverTimeoutRef.current);
+        if (deptTrigger.current) setDeptY(deptTrigger.current.getBoundingClientRect().top);
         setDeptHovered(true);
     };
 
@@ -202,6 +209,7 @@ export default function Sidebar() {
 
     const handleReportMouseEnter = () => {
         if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+        if (reportTrigger.current) setReportY(reportTrigger.current.getBoundingClientRect().top);
         setReportHovered(true);
     };
 
@@ -213,6 +221,7 @@ export default function Sidebar() {
 
     const handleFeedbackMouseEnter = () => {
         if (feedbackHoverTimeoutRef.current) clearTimeout(feedbackHoverTimeoutRef.current);
+        if (feedbackTrigger.current) setFeedbackY(feedbackTrigger.current.getBoundingClientRect().top);
         setFeedbackHovered(true);
     };
 
@@ -269,7 +278,7 @@ export default function Sidebar() {
                         return (
                             <div
                                 key={item.href}
-                                className="relative"
+                                ref={feedbackTrigger}
                                 onMouseEnter={handleFeedbackMouseEnter}
                                 onMouseLeave={handleFeedbackMouseLeave}
                             >
@@ -300,9 +309,10 @@ export default function Sidebar() {
                                     </svg>
                                 </div>
 
-                                {feedbackHovered && (
+                                {feedbackHovered && typeof document !== "undefined" && createPortal(
                                     <div
-                                        className="absolute left-full top-0 ml-1 w-56 bg-[#12122a] border border-white/10 rounded-xl shadow-2xl shadow-black/50 py-2 z-50 animate-in fade-in slide-in-from-left-2 duration-200"
+                                        style={{ position: "fixed", left: 264, top: feedbackY, zIndex: 9999 }}
+                                        className="w-56 bg-[#12122a] border border-white/10 rounded-xl shadow-2xl shadow-black/50 py-2 animate-in fade-in slide-in-from-left-2 duration-200"
                                         onMouseEnter={handleFeedbackMouseEnter}
                                         onMouseLeave={handleFeedbackMouseLeave}
                                     >
@@ -315,7 +325,7 @@ export default function Sidebar() {
                                                     : "text-slate-700 dark:text-white hover:text-violet-700 dark:hover:text-white hover:bg-violet-50 dark:hover:bg-white/5"
                                             )}
                                         >
-                                            <span className="truncate">Anonymous feedback</span>
+                                            <span className="truncate">NB Unplugged</span>
                                             <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                             </svg>
@@ -329,12 +339,13 @@ export default function Sidebar() {
                                                     : "text-slate-700 dark:text-white hover:text-violet-700 dark:hover:text-white hover:bg-violet-50 dark:hover:bg-white/5"
                                             )}
                                         >
-                                            <span className="truncate">Feedback inbox</span>
+                                            <span className="truncate">NB Unplugged inbox</span>
                                             <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                             </svg>
                                         </Link>
-                                    </div>
+                                    </div>,
+                                    document.body
                                 )}
                             </div>
                         );
@@ -381,7 +392,7 @@ export default function Sidebar() {
                     </Link>
                 ) : (
                     <div
-                        className="relative"
+                        ref={reportTrigger}
                         onMouseEnter={handleReportMouseEnter}
                         onMouseLeave={handleReportMouseLeave}
                     >
@@ -415,9 +426,10 @@ export default function Sidebar() {
                         </div>
 
                         {/* Flyout submenu — admins only */}
-                        {reportHovered && (
+                        {reportHovered && typeof document !== "undefined" && createPortal(
                             <div
-                                className="absolute left-full top-0 ml-1 w-52 bg-[#12122a] border border-white/10 rounded-xl shadow-2xl shadow-black/50 py-2 z-50 animate-in fade-in slide-in-from-left-2 duration-200"
+                                style={{ position: "fixed", left: 264, top: reportY, zIndex: 9999 }}
+                                className="w-52 bg-[#12122a] border border-white/10 rounded-xl shadow-2xl shadow-black/50 py-2 animate-in fade-in slide-in-from-left-2 duration-200"
                                 onMouseEnter={handleReportMouseEnter}
                                 onMouseLeave={handleReportMouseLeave}
                             >
@@ -455,7 +467,8 @@ export default function Sidebar() {
                                         </Link>
                                     ))
                                 )}
-                            </div>
+                            </div>,
+                            document.body
                         )}
                     </div>
                 ))}
@@ -465,7 +478,7 @@ export default function Sidebar() {
                     const isDeptActive = pathname.startsWith("/dashboard/departments");
                     return (
                         <div
-                            className="relative"
+                            ref={deptTrigger}
                             onMouseEnter={handleDeptMouseEnter}
                             onMouseLeave={handleDeptMouseLeave}
                         >
@@ -499,9 +512,10 @@ export default function Sidebar() {
                             </div>
 
                             {/* Flyout submenu */}
-                            {deptHovered && (
+                            {deptHovered && typeof document !== "undefined" && createPortal(
                                 <div
-                                    className="absolute left-full top-0 ml-1 w-52 bg-[#12122a] border border-white/10 rounded-xl shadow-2xl shadow-black/50 py-2 z-50 animate-in fade-in slide-in-from-left-2 duration-200"
+                                    style={{ position: "fixed", left: 264, top: deptY, zIndex: 9999 }}
+                                    className="w-52 bg-[#12122a] border border-white/10 rounded-xl shadow-2xl shadow-black/50 py-2 animate-in fade-in slide-in-from-left-2 duration-200"
                                     onMouseEnter={handleDeptMouseEnter}
                                     onMouseLeave={handleDeptMouseLeave}
                                 >
@@ -525,7 +539,8 @@ export default function Sidebar() {
                                             </svg>
                                         </Link>
                                     ))}
-                                </div>
+                                </div>,
+                                document.body
                             )}
                         </div>
                     );
@@ -554,8 +569,8 @@ export default function Sidebar() {
                     );
                 })()}
 
-                {/* ── HR & People Section ── */}
-                {(() => {
+                {/* ── HR & People Section ── developers only while under rollout */}
+                {user?.isDeveloper === true && (() => {
                     const inboxCount = (inboxData?.total || 0) as number;
                     const E = "text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5";
                     const A = "bg-emerald-500/15 text-emerald-700 dark:text-white border border-emerald-500/20 dark:bg-gradient-to-r dark:from-emerald-500/20 dark:to-teal-500/10";

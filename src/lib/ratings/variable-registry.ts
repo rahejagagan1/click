@@ -136,10 +136,10 @@ export const VARIABLE_REGISTRY: Record<string, VariableDefinition> = {
 
     cm_cases_completed: {
         key: "cm_cases_completed",
-        label: "CM Cases Completed (CM Check 4 / CM Check4)",
+        label: "CM Cases Completed (Video QA1)",
         source: "derived",
         description:
-            "Count of cases where the CM subtask (name contains 'CM Check 4' or 'CM Check4') is done within the month. The subtask's dateDone determines the month.",
+            "Count of cases where the QA subtask (name contains 'Video QA1' or 'Video QA 1') is done within the month. The subtask's dateDone determines the month.",
         dataType: "integer",
         nullable: false,
         example: "8",

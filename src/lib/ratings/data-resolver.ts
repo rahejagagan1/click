@@ -20,8 +20,9 @@ import {
 } from "@/lib/capsule-matching";
 import type { FormulaSection, ResolvedDataContext } from "./types";
 import { getResearcherPipelineCounts } from "@/lib/clickup/researcher-pipeline";
+import { getMonthlyReportWindow } from "@/lib/reports/monthly-window";
 
-/** Same ClickUp case pipeline as CM/PM (CM Check 4 + team capsule + delivery %). */
+/** Same ClickUp case pipeline as CM/PM (Video QA1 + team capsule + delivery %). */
 function isCmLikeRole(roleType: string): boolean {
     return roleType === "production_manager" || roleType === "researcher_manager";
 }
@@ -123,39 +124,16 @@ export interface QualifiedCase {
 }
 
 // ═══════════════════════════════════════════════════════
-// Date helpers
-// ═══════════════════════════════════════════════════════
-
-/**
- * Returns end-of-day (23:59:59 UTC) of the Nth working day in a month.
- * Working days = Mon–Fri only.
- */
-function getNthWorkingDayEnd(year: number, month: number, n: number): Date {
-    let count = 0;
-    let day = 1;
-    while (count < n) {
-        const d = new Date(Date.UTC(year, month, day));
-        const dow = d.getUTCDay(); // 0=Sun, 6=Sat
-        if (dow !== 0 && dow !== 6) {
-            count++;
-            if (count === n) return new Date(Date.UTC(year, month, day, 23, 59, 59));
-        }
-        day++;
-    }
-    return new Date(Date.UTC(year, month, day - 1, 23, 59, 59));
-}
-
-// ═══════════════════════════════════════════════════════
 // Case qualification
 // ═══════════════════════════════════════════════════════
 
 /**
  * Fetch all qualified cases for a role/month combination.
  * A case qualifies when its role-specific subtask ("Scripting" or "Editing")
- * is marked done within the month + 3-working-day grace period.
+ * is marked done within the month + grace period (up to end of the 3rd day of the next month).
  *
- * For production_manager: cases qualify when a CM subtask is done — we match names
- * containing "CM Check 4" or "CM Check4" (ClickUp naming varies).
+ * For production_manager: cases qualify when the QA subtask is done — we match names
+ * containing "Video QA1" or "Video QA 1" (ClickUp naming varies).
  * The subtask's dateDone determines which month the case belongs to.
  *
  * Pass userId to filter to one user, or omit for full batch.
@@ -167,12 +145,11 @@ export async function getQualifiedCasesForRole(
     userId?: number
 ): Promise<QualifiedCase[]> {
     if (!["writer", "editor", "production_manager", "researcher_manager"].includes(roleType)) return [];
-    const nextYear =
-        monthEnd.getUTCMonth() === 11
-            ? monthEnd.getUTCFullYear() + 1
-            : monthEnd.getUTCFullYear();
-    const nextMonth = (monthEnd.getUTCMonth() + 1) % 12;
-    const graceEnd = getNthWorkingDayEnd(nextYear, nextMonth, 3);
+    // Reporting window: day 4 of month M → end of day 3 of month M+1.
+    const { windowStart, windowEnd } = getMonthlyReportWindow(
+        monthStart.getUTCFullYear(),
+        monthStart.getUTCMonth()
+    );
 
     const subtaskName =
         roleType === "writer" ? "Scripting" : roleType === "editor" ? "Editing" : null;
@@ -184,16 +161,16 @@ export async function getQualifiedCasesForRole(
                 roleType === "production_manager" || roleType === "researcher_manager"
                     ? {
                           OR: [
-                              { name: { contains: "CM Check 4", mode: "insensitive" } },
-                              { name: { contains: "CM Check4", mode: "insensitive" } },
+                              { name: { contains: "Video QA1", mode: "insensitive" } },
+                              { name: { contains: "Video QA 1", mode: "insensitive" } },
                           ],
                           status: { in: ["done", "complete", "closed"] },
-                          dateDone: { gte: monthStart, lte: graceEnd },
+                          dateDone: { gte: windowStart, lte: windowEnd },
                       }
                     : {
                           name: { contains: subtaskName!, mode: "insensitive" },
                           status: { in: ["done", "complete", "closed"] },
-                          dateDone: { gte: monthStart, lte: graceEnd },
+                          dateDone: { gte: windowStart, lte: windowEnd },
                       },
             select: { caseId: true },
         });
@@ -211,7 +188,7 @@ export async function getQualifiedCasesForRole(
         // name (case-insensitive), only those lists are used. Otherwise it matches Capsule
         // folder(s) and all lists under those folders are included.
         // Non-empty with no list or capsule match → 0 cases.
-        // Empty teamCapsule: legacy — no list filter (all CM Check 4 / CM Check4 cases in month).
+        // Empty teamCapsule: legacy — no list filter (all Video QA1 / Video QA 1 cases in month).
         if (userId) {
             const cmUser = await prisma.user.findUnique({
                 where: { id: userId },
@@ -712,7 +689,7 @@ export async function resolveDataContext(
 
     /**
      * Pillar 1 (Views / yt_baseline_ratio) — case source differs by role:
-     * - production_manager (CM/PM): same as always — `cases` = CM Check 4–qualified tasks in that manager’s capsule; 30-day-since-publish rule applies below.
+     * - production_manager (CM/PM): same as always — `cases` = Video QA1–qualified tasks in that manager’s capsule; 30-day-since-publish rule applies below.
      * - researcher_manager: `fetchResearcherManagerViewsPillarCases` — all capsule-backed lists, YT published in rating month; no 30-day gate.
      */
     let ytCasesForRatios: QualifiedCase[] = cases;

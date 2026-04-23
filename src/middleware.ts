@@ -38,9 +38,20 @@ export async function middleware(request: NextRequest) {
     if (ADMIN_PATHS.some((p) => pathname.startsWith(p))) {
         const orgLevel = (token as any).orgLevel;
         const isDeveloper = (token as any).isDeveloper;
-        const isAdmin = orgLevel === "ceo" || isDeveloper === true;
+        const isAdmin = orgLevel === "ceo" || orgLevel === "special_access" || isDeveloper === true;
 
         if (!isAdmin) {
+            return NextResponse.redirect(new URL("/dashboard", request.url));
+        }
+    }
+
+    // HR pages + HR APIs are developer-only while the module is under rollout
+    if (pathname.startsWith("/dashboard/hr") || pathname.startsWith("/api/hr")) {
+        const isDeveloper = (token as any).isDeveloper;
+        if (isDeveloper !== true) {
+            if (pathname.startsWith("/api/hr")) {
+                return NextResponse.json({ error: "Not available" }, { status: 403 });
+            }
             return NextResponse.redirect(new URL("/dashboard", request.url));
         }
     }
