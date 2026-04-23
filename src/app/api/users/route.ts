@@ -77,10 +77,10 @@ export async function POST(request: NextRequest) {
         const user = await prisma.user.create({
             data: {
                 name,
-                email,
+                email: String(email).trim().toLowerCase(),
                 role: role || "member",
                 orgLevel: orgLevel || "member",
-                clickupUserId: clickupUserId ? BigInt(clickupUserId) : BigInt(Date.now()),
+                clickupUserId: clickupUserId ? BigInt(clickupUserId) : null,
                 teamCapsule: resolvedCapsule,
                 managerId: managerId || null,
             },

@@ -365,7 +365,7 @@ export const DEFAULT_PRODUCTION_MANAGER_TEMPLATE: DefaultTemplate = {
         "CM/PM rating: Views 15% · Production Quality 15% · Monthly Targets 15% · Leadership 15% · Team Feedback 15% · Strategic Thinking 10% · Communication 15%",
     sections: [
         // ── Pillar 1: Views (15%) ──
-        // Same logic as editor but cases are qualified by "CM Check 4" subtask completion
+        // Same logic as editor but cases are qualified by "Video QA1" subtask completion
         {
             key: "youtubeViews",
             label: "Views Performance",
@@ -376,7 +376,7 @@ export const DEFAULT_PRODUCTION_MANAGER_TEMPLATE: DefaultTemplate = {
             blocks_final_score: false,
             brackets: YT_BRACKETS,
             yt_manager_adjustment_key: "cm_yt_adjustment",
-            description: "YouTube views performance of cases completed by your capsule (CM Check 4 done). Same logic as editor views scoring.",
+            description: "YouTube views performance of cases completed by your capsule (Video QA1 done). Same logic as editor views scoring.",
         },
 
         // ── Pillar 2: Production Quality (15%) ──
