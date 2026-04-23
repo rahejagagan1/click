@@ -7,7 +7,7 @@ function fmtRange(from: Date, to: Date, days: number) {
   return `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} (${days} day${days === 1 ? "" : "s"})`;
 }
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   try {
@@ -15,7 +15,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const myId = await resolveUserId(session);
     if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-    const appId = Number(params.id);
+    const { id: idParam } = await params;
+    const appId = Number(idParam);
     if (!Number.isInteger(appId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
     const body = await req.json().catch(() => ({}));
