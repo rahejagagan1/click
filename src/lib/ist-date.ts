@@ -28,3 +28,32 @@ export function istHour(instant: Date): number {
   }).format(instant);
   return parseInt(h, 10);
 }
+
+/**
+ * First and last UTC-midnight dates (inclusive) of the IST calendar month
+ * containing `dateOnly` — suitable for a Prisma `gte / lte` range on a
+ * `@db.Date` column. Keys like `date` in `AttendanceRegularization` are
+ * already stored as UTC-midnight of the IST day, so no timezone math is
+ * needed beyond reading the UTC year/month off the given date.
+ */
+export function istMonthRange(dateOnly: Date): { start: Date; end: Date } {
+  const y = dateOnly.getUTCFullYear();
+  const m = dateOnly.getUTCMonth();
+  const start = new Date(Date.UTC(y, m, 1));
+  const end   = new Date(Date.UTC(y, m + 1, 0)); // last day of month
+  return { start, end };
+}
+
+/**
+ * Build a precise UTC `Date` for a given HH:MM on the IST calendar day that
+ * `dateOnly` represents (which is stored as UTC-midnight of that IST day).
+ *
+ * Example: `istTimeOnDate(reg.date, 10, 0)` → 10:00 AM IST on that date.
+ * IST is UTC+5:30, so we subtract 330 minutes to land on the matching UTC instant.
+ */
+export function istTimeOnDate(dateOnly: Date, hourIst: number, minuteIst: number): Date {
+  const IST_OFFSET_MIN = 330; // +5:30
+  const base = new Date(dateOnly).setUTCHours(0, 0, 0, 0);
+  const offsetMs = (hourIst * 60 + minuteIst - IST_OFFSET_MIN) * 60 * 1000;
+  return new Date(base + offsetMs);
+}
