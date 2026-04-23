@@ -13,7 +13,7 @@ export async function GET() {
       where: { isActive: true },
       select: {
         id: true, name: true, email: true, role: true, orgLevel: true,
-        managerId: true, profilePictureUrl: true,
+        managerId: true, profilePictureUrl: true, teamCapsule: true,
         employeeProfile: {
           select: { department: true, designation: true, employmentType: true, joiningDate: true },
         },

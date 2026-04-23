@@ -1,10 +1,29 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, Scissors } from "lucide-react";
+import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, MoreVertical, CheckCircle2, XCircle, Coffee, PieChart } from "lucide-react";
+import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
+import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
+
+// ── Form copy per kind ───────────────────────────────────────────────────────
+const FORM_TITLE: Record<LeaveRequestKind, string> = {
+  wfh:        "Request Work From Home",
+  on_duty:    "Apply for On Duty",
+  half_day:   "Apply for Half Day",
+  leave:      "Request Leave",
+  regularize: "Request Regularization",
+};
+const FORM_POLICY: Record<LeaveRequestKind, string | undefined> = {
+  wfh:        "As per the policy assigned only Monday, Tuesday, Wednesday, Thursday, Friday, Saturday will be considered for WFH. Clock in is necessary on WFH days to avoid being marked absent.",
+  on_duty:    "On-duty time counts as working hours. Log the purpose clearly — your manager will review before approval.",
+  half_day:   "Half day leave covers either the first (9:00 AM – 2:00 PM) or second half (2:00 PM – 6:00 PM) of the day.",
+  leave:      "Leave is deducted from your balance once approved. Check your remaining balance before applying.",
+  regularize: "Use this to fix missed punches or incorrect clock-in/out. Attach a clear reason so approval is quick.",
+};
 
 // ── Tab config ────────────────────────────────────────────────────────────────
 const TOP_TABS = [
@@ -12,28 +31,222 @@ const TOP_TABS = [
   { key: "attendance",       label: "ATTENDANCE",         href: "/dashboard/hr/attendance" },
   { key: "leave",            label: "LEAVE",              href: "/dashboard/hr/leaves"     },
   { key: "performance",      label: "PERFORMANCE",        href: "/dashboard/hr/goals"      },
-  { key: "expenses",         label: "EXPENSES & TRAVEL",  href: "/dashboard/hr/expenses"   },
-  { key: "helpdesk",         label: "HELPDESK",           href: "/dashboard/hr/tickets"    },
   { key: "apps",             label: "APPS",               href: "/dashboard/hr/apps"       },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtMins(m: number) { return `${Math.floor(m / 60)}h ${m % 60}m`; }
 
-// ── Timeline bar (same proportional grid as Keka) ────────────────────────────
-function TimelineBar({ clockIn, clockOut }: { clockIn?: string; clockOut?: string }) {
-  const START_H = 7, SPAN = 15; // 07:00 → 22:00
-  if (!clockIn) return <span className="text-[11px] text-slate-400">—</span>;
-  const toFrac = (iso: string) => {
-    const d = new Date(iso);
-    return Math.max(0, Math.min(1, ((d.getHours() + d.getMinutes() / 60) - START_H) / SPAN));
+// ── Kebab row menu with Regularize / WFH / On Duty / Leave actions ──────────
+type RowMenuProps = {
+  onRegularize: () => void;
+  onWFH:        () => void;
+  onOnDuty:     () => void;
+  onLeave:      () => void;
+  disableRegularize?: boolean;
+  disableRegularizeReason?: string;
+};
+function RowMenu({ onRegularize, onWFH, onOnDuty, onLeave, disableRegularize, disableRegularizeReason }: RowMenuProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  const items: { label: string; Icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>; onSelect: () => void; disabled?: boolean; title?: string }[] = [
+    { label: "Regularize",        Icon: ShieldCheck, onSelect: onRegularize,
+      disabled: !!disableRegularize, title: disableRegularizeReason },
+    { label: "Apply WFH Request", Icon: Home,        onSelect: onWFH        },
+    { label: "Apply On Duty",     Icon: Briefcase,   onSelect: onOnDuty     },
+    { label: "Request Leave",     Icon: Coffee,      onSelect: onLeave      },
+  ];
+
+  return (
+    <div ref={ref} className="relative inline-flex">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        className="w-7 h-7 rounded hover:bg-slate-100 dark:hover:bg-white/[0.06] flex items-center justify-center text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-white"
+        aria-label="Row actions"
+        aria-expanded={open}
+      >
+        <MoreVertical size={16} strokeWidth={2.25} />
+      </button>
+      {open && (
+        <div className="absolute z-40 right-0 top-8 w-[210px] bg-white dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg shadow-2xl py-1">
+          {items.map(({ label, Icon, onSelect, disabled, title }, i) => (
+            <button
+              key={label}
+              type="button"
+              disabled={disabled}
+              title={disabled ? title : undefined}
+              onClick={() => { if (disabled) return; setOpen(false); onSelect(); }}
+              className={`w-full text-left px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 transition-colors flex items-center gap-2.5 ${
+                i === 0 ? "border-b border-slate-200 dark:border-white/[0.06]" : ""
+              } ${
+                disabled
+                  ? "opacity-40 cursor-not-allowed"
+                  : "hover:bg-[#008CFF]/[0.06] dark:hover:bg-[#008CFF]/[0.1] hover:text-[#008CFF] dark:hover:text-[#4a9cff]"
+              }`}
+            >
+              <Icon size={14} strokeWidth={2} className="text-[#008CFF] dark:text-[#4a9cff] shrink-0" />
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Location pin with click-to-view popover (Keka-style) ─────────────────────
+function LocationPin({ raw }: { raw?: string | null }) {
+  const [open, setOpen] = useState(false);
+  const [liveGeo, setLiveGeo] = useState<{ lat?: number; lng?: number; address?: string } | null>(null);
+  const [locating, setLocating] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const info = parseAttLoc(raw);
+  const hasAddress = !!info.address;
+  const hasCoords  = typeof info.lat === "number" && typeof info.lng === "number";
+  const has        = hasAddress || hasCoords;
+  const tint = has
+    ? (info.mode === "remote" ? "#008CFF" : "#10b981")
+    : "#94a3b8";
+
+  // Close on outside-click / Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t))   return;
+      if (panelRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  const locateNow = async () => {
+    setLocating(true);
+    const geo = await captureClockInGeo();
+    setLiveGeo(geo);
+    setLocating(false);
   };
-  const left = toFrac(clockIn);
-  const right = clockOut ? toFrac(clockOut) : left + 0.02;
+
+  const shownLat  = info.lat  ?? liveGeo?.lat;
+  const shownLng  = info.lng  ?? liveGeo?.lng;
+  const shownAddr = info.address ?? liveGeo?.address;
+  const shownCoords = typeof shownLat === "number" && typeof shownLng === "number";
+
+  const rect = btnRef.current?.getBoundingClientRect() ?? null;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={has ? (info.address || `${info.lat!.toFixed(4)}, ${info.lng!.toFixed(4)}`) : "Location not captured — click to view"}
+        className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full border border-[#008CFF]/20 bg-[#008CFF]/5 text-[#008CFF] cursor-pointer transition-all hover:bg-[#008CFF]/15 hover:border-[#008CFF]/40 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30"
+        style={has ? { color: tint, borderColor: `${tint}33`, background: `${tint}14` } : undefined}
+        aria-label="Clock-in location"
+      >
+        <MapPin size={14} strokeWidth={2} />
+      </button>
+      {open && typeof document !== "undefined" && createPortal(
+        <div
+          ref={panelRef}
+          style={{
+            position: "fixed",
+            top:   (rect?.bottom ?? 0) + 6,
+            left:  Math.min((rect?.left ?? 0), (typeof window !== "undefined" ? window.innerWidth - 260 : 0)),
+            zIndex: 10000,
+          }}
+          className="w-[260px] bg-white dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg shadow-2xl p-3"
+        >
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: tint }} />
+            <span className="text-[10px] uppercase tracking-widest font-bold" style={{ color: tint }}>
+              {info.mode === "remote" ? "Remote Clock-in" : info.mode === "office" ? "Office Clock-in" : "Clock-in"}
+            </span>
+          </div>
+
+          {shownAddr && (
+            <p className="text-[12px] text-slate-700 dark:text-slate-200 leading-snug mb-1">{shownAddr}</p>
+          )}
+          {shownCoords && (
+            <>
+              <p className="text-[11px] text-slate-400 font-mono">{shownLat!.toFixed(5)}, {shownLng!.toFixed(5)}</p>
+              <a
+                href={`https://www.google.com/maps?q=${shownLat},${shownLng}`}
+                target="_blank" rel="noopener noreferrer"
+                className="text-[11px] text-[#008CFF] hover:underline mt-1.5 inline-block"
+              >Open in Maps ↗</a>
+            </>
+          )}
+
+          {!has && !liveGeo && (
+            <>
+              <p className="text-[11.5px] text-slate-500 leading-snug mb-2">
+                No location was captured at clock-in. You probably denied the browser's geolocation prompt.
+              </p>
+              <button
+                type="button"
+                onClick={locateNow}
+                disabled={locating}
+                className="w-full h-8 rounded-md bg-[#008CFF] text-white text-[11.5px] font-semibold hover:bg-[#0070cc] disabled:opacity-60"
+              >
+                {locating ? "Locating…" : "Locate me now"}
+              </button>
+              <p className="text-[10px] text-slate-400 mt-1.5 leading-tight">
+                Only shows your current position — doesn't overwrite the DB record.
+              </p>
+            </>
+          )}
+
+          {!has && liveGeo && !shownCoords && (
+            <p className="text-[11.5px] text-amber-600 leading-snug">
+              Couldn't get your current location. Check browser permissions.
+            </p>
+          )}
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
+// ── Timeline bar (same proportional grid as Keka) ────────────────────────────
+// Shift-progress bar: fills from 0 → 100% of a 9h shift based on elapsed minutes.
+// Orange < 50% · blue < 100% · green once the full 9h is met.
+function TimelineBar({ liveMins }: { liveMins: number }) {
+  if (!liveMins || liveMins <= 0) return <span className="text-[11px] text-slate-400">—</span>;
+  const SHIFT_LEN = 540; // 9h in minutes
+  const pct = Math.min((liveMins / SHIFT_LEN) * 100, 100);
+  const color = pct >= 100 ? "bg-emerald-400" : pct >= 50 ? "bg-[#008CFF]" : "bg-orange-400";
   return (
     <div className="relative w-full max-w-[280px] h-2 bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
-      <div className="absolute h-full bg-[#00BCD4] rounded-full"
-        style={{ left: `${left * 100}%`, width: `${Math.max((right - left) * 100, 1)}%` }} />
+      <div
+        className={`h-full ${color} rounded-full transition-[width] duration-500`}
+        style={{ width: `${pct}%` }}
+      />
     </div>
   );
 }
@@ -46,11 +259,63 @@ const C = {
   t3:      "text-slate-400 dark:text-slate-500",
 };
 
-function RegularizeModal({ onClose }: { onClose: () => void }) {
-  const [form, setForm] = useState({ date: "", requestedIn: "", requestedOut: "", reason: "" });
+function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefillDate?: string }) {
+  const [form, setForm] = useState({ date: prefillDate || "", requestedIn: "", requestedOut: "", reason: "" });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const [loadingDay, setLoadingDay] = useState(false);
+  const [balance, setBalance] = useState<{ used: number; limit: number; remaining: number; month: string } | null>(null);
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  // Fetch the caller's monthly regularization quota for whichever month the
+  // selected date falls into. Refreshes whenever the date changes so users see
+  // accurate "X of 2 used for Month YYYY" when toggling between months.
+  useEffect(() => {
+    let cancelled = false;
+    const url = form.date
+      ? `/api/hr/attendance/regularize/balance?date=${form.date}`
+      : `/api/hr/attendance/regularize/balance`;
+    fetch(url)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (!cancelled && data) setBalance(data); })
+      .catch(() => { /* silent — the POST will still enforce */ });
+    return () => { cancelled = true; };
+  }, [form.date]);
+
+  // Auto-fill Clock In / Clock Out from the existing attendance row for the
+  // selected date. If a field already has a value on the server, we show it
+  // so the user only needs to correct what's actually missing; empty fields
+  // remain empty for manual entry. Re-runs whenever the date changes.
+  useEffect(() => {
+    if (!form.date) return;
+    let cancelled = false;
+    setLoadingDay(true);
+    const fmtTime = (iso?: string | null) => {
+      if (!iso) return "";
+      try {
+        // IST wall-clock HH:MM — matches what <input type="time"> expects.
+        return new Date(iso).toLocaleTimeString("en-IN", {
+          timeZone: "Asia/Kolkata", hour12: false, hour: "2-digit", minute: "2-digit",
+        });
+      } catch { return ""; }
+    };
+    fetch(`/api/hr/attendance?from=${form.date}&to=${form.date}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (cancelled || !data) return;
+        const rec = Array.isArray(data?.records)
+          ? data.records.find((r: any) => String(r.date).slice(0, 10) === form.date)
+          : null;
+        setForm((f) => ({
+          ...f,
+          requestedIn:  rec?.clockIn  ? fmtTime(rec.clockIn)  : f.requestedIn,
+          requestedOut: rec?.clockOut ? fmtTime(rec.clockOut) : f.requestedOut,
+        }));
+      })
+      .catch(() => { /* silent — user can still fill manually */ })
+      .finally(() => { if (!cancelled) setLoadingDay(false); });
+    return () => { cancelled = true; };
+  }, [form.date]);
 
   const submit = async () => {
     setErr("");
@@ -70,11 +335,23 @@ function RegularizeModal({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.08] rounded-2xl w-full max-w-md shadow-2xl">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06]">
-          <h3 className="text-[14px] font-bold text-slate-800 dark:text-white">Request Punch Correction</h3>
+          <h3 className="text-[14px] font-bold text-slate-800 dark:text-white">Request Regularization</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-white"><X size={18} /></button>
         </div>
         <div className="px-6 py-5 space-y-4">
           {err && <p className="text-[12px] text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
+          {balance && (
+            <div className={`flex items-center justify-between px-3 py-2 rounded-lg text-[12px] ${
+              balance.remaining === 0
+                ? "bg-red-500/10 text-red-500"
+                : balance.remaining === 1
+                ? "bg-amber-500/10 text-amber-600"
+                : "bg-[#008CFF]/10 text-[#008CFF]"
+            }`}>
+              <span className="font-semibold">{balance.used} of {balance.limit} used · {balance.month}</span>
+              <span>{balance.remaining} left</span>
+            </div>
+          )}
           <div>
             <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>
             <input type="date" value={form.date} onChange={e => set("date", e.target.value)}
@@ -84,26 +361,29 @@ function RegularizeModal({ onClose }: { onClose: () => void }) {
             <div>
               <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Clock In</label>
               <input type="time" value={form.requestedIn} onChange={e => set("requestedIn", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none" />
+                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]" />
             </div>
             <div>
               <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Clock Out</label>
               <input type="time" value={form.requestedOut} onChange={e => set("requestedOut", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none" />
+                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]" />
             </div>
           </div>
+          {loadingDay && (
+            <p className="text-[11px] text-slate-400">Pulling attendance for {form.date}…</p>
+          )}
           <div>
             <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Reason *</label>
             <textarea value={form.reason} onChange={e => set("reason", e.target.value)} rows={3}
-              placeholder="Explain why you need a punch correction..."
+              placeholder="Explain why you need regularization..."
               className="mt-1 w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none resize-none" />
           </div>
         </div>
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-white/[0.06]">
           <button onClick={onClose} className="h-8 px-4 text-[13px] font-medium text-slate-500">Cancel</button>
-          <button onClick={submit} disabled={saving}
-            className="h-8 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50">
-            {saving ? "Submitting..." : "Submit Request"}
+          <button onClick={submit} disabled={saving || balance?.remaining === 0}
+            className="h-8 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+            {saving ? "Submitting..." : balance?.remaining === 0 ? "Quota exhausted" : "Submit Request"}
           </button>
         </div>
       </div>
@@ -233,17 +513,22 @@ export default function AttendancePage() {
   const user = session?.user as any;
   const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper || user?.orgLevel === "hr_manager";
 
-  const now = new Date();
+  // `now` ticks with the clock so week-day highlight, calendar "today", and
+  // month default all track the actual wall-clock time rather than mount time.
+  const [clock, setClock] = useState<Date | null>(null);
+  const now = clock ?? new Date();
   const [month, setMonth] = useState(
     `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
   );
-  const [subTab, setSubTab] = useState<"log" | "calendar" | "requests" | "shift" | "overtime" | "shiftwo">("log");
+  const [subTab, setSubTab] = useState<"log" | "calendar" | "requests">("log");
   const [reqType, setReqType] = useState<"punch" | "wfh" | "od">("punch");
-  const [clock, setClock] = useState<Date | null>(null);
   const [use24, setUse24] = useState(false);
+  const [period, setPeriod] = useState<"30d" | "month">("30d");
   const [showRegModal, setShowRegModal] = useState(false);
-  const [showWFHModal, setShowWFHModal] = useState(false);
-  const [showODModal,  setShowODModal]  = useState(false);
+  const [regPrefillDate, setRegPrefillDate] = useState<string | undefined>(undefined);
+  // New unified form (WFH / On-Duty / Half Day / Leave / Regularize-via-form).
+  const [formState, setFormState] = useState<{ kind: LeaveRequestKind; prefillDate?: string } | null>(null);
+  const openForm = (kind: LeaveRequestKind, prefillDate?: string) => setFormState({ kind, prefillDate });
   const [regView, setRegView] = useState<"my" | "team">("my");
 
   useEffect(() => {
@@ -252,14 +537,44 @@ export default function AttendancePage() {
     return () => clearInterval(t);
   }, []);
 
-  const { data: myData }    = useSWR(`/api/hr/attendance?month=${month}`, fetcher);
+  // Build the attendance query: rolling 30-day window when period="30d",
+  // otherwise the currently-selected month.
+  const attendanceQs = (() => {
+    if (period === "30d") {
+      const end = clock ?? new Date();
+      const start = new Date(end); start.setDate(start.getDate() - 29);
+      const iso = (d: Date) => d.toISOString().slice(0, 10);
+      return `from=${iso(start)}&to=${iso(end)}`;
+    }
+    return `month=${month}`;
+  })();
+  const { data: myData }    = useSWR(`/api/hr/attendance?${attendanceQs}`, fetcher);
   const { data: boardData } = useSWR(`/api/hr/attendance/board`, fetcher);
   const { data: regsData = [] } = useSWR(`/api/hr/attendance/regularize?view=${regView}`, fetcher);
   const { data: wfhData  = [] } = useSWR(`/api/hr/attendance/wfh?view=${regView}`, fetcher);
   const { data: odData   = [] } = useSWR(`/api/hr/attendance/on-duty?view=${regView}`, fetcher);
+  // My pending leave applications — used to show "Pending leave" on affected days.
+  const { data: leavesData } = useSWR(`/api/hr/leaves?view=my`, fetcher);
+  const myLeaves: any[] = Array.isArray(leavesData) ? leavesData : (leavesData?.applications ?? leavesData?.items ?? []);
+  const { data: leaveTypesData = [] } = useSWR(`/api/hr/admin/leave-types`, fetcher);
+  // Rolling team-stats comparison: me vs everyone sharing my `teamCapsule`.
+  const { data: teamStats } = useSWR(`/api/hr/attendance/team-stats?period=week`, fetcher);
+  const leaveTypes: { id: number; name: string }[] = Array.isArray(leaveTypesData)
+    ? leaveTypesData.map((t: any) => ({ id: t.id, name: t.name }))
+    : [];
 
-  const clockIn  = async () => { const res = await fetch("/api/hr/attendance/clock-in",  { method: "POST" }); const d = await res.json(); if (!res.ok) return alert(d.error); mutate(`/api/hr/attendance?month=${month}`); };
-  const clockOut = async () => { const res = await fetch("/api/hr/attendance/clock-out", { method: "POST" }); const d = await res.json(); if (!res.ok) return alert(d.error); mutate(`/api/hr/attendance?month=${month}`); };
+  const clockIn  = async () => {
+    const geo = await captureClockInGeo();
+    const res = await fetch("/api/hr/attendance/clock-in", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(geo),
+    });
+    const d = await res.json();
+    if (!res.ok) return alert(d.error);
+    mutate(`/api/hr/attendance?${attendanceQs}`);
+  };
+  const clockOut = async () => { const res = await fetch("/api/hr/attendance/clock-out", { method: "POST" }); const d = await res.json(); if (!res.ok) return alert(d.error); mutate(`/api/hr/attendance?${attendanceQs}`); };
 
   const todayRec  = myData?.todayRecord;
   const summary   = myData?.summary || {};
@@ -273,17 +588,115 @@ export default function AttendancePage() {
   const onTimePct   = summary.present > 0
     ? Math.round(((summary.present - (summary.late || 0)) / summary.present) * 100) : 0;
 
+  // Elapsed since clock-in (live while open; snapshot after clock-out).
   const elapsedMins = todayRec?.clockIn && !todayRec?.clockOut && clock
     ? Math.floor((clock.getTime() - new Date(todayRec.clockIn).getTime()) / 60000)
     : todayRec?.totalMinutes || 0;
   const elapsedStr  = fmtMins(elapsedMins);
-  const progressPct = Math.min((elapsedMins / 540) * 100, 100);
 
-  // Month period buttons (30 DAYS + last 6 months)
-  const periodBtns = ["30 DAYS", ...Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(); d.setMonth(d.getMonth() - i);
-    return d.toLocaleString("default", { month: "short" }).toUpperCase();
-  })];
+  // IST minutes-since-midnight for an arbitrary instant (live clock tick).
+  const toIstMinutes = (d: Date) => {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Kolkata", hour12: false, hour: "2-digit", minute: "2-digit",
+    }).formatToParts(d).reduce<Record<string, string>>((a, p) => { a[p.type] = p.value; return a; }, {});
+    return parseInt(parts.hour || "0", 10) * 60 + parseInt(parts.minute || "0", 10);
+  };
+  const istMinsSinceMidnight = clock ? toIstMinutes(clock) : 0;
+
+  const SHIFT_START = 9  * 60;  // 9:00 AM IST
+  const SHIFT_END   = 18 * 60;  // 6:00 PM IST
+  const SHIFT_MID   = 14 * 60;  // 2:00 PM IST \u2014 first/second half boundary
+  const SHIFT_LEN   = SHIFT_END - SHIFT_START;        // 540
+  const MID_POS     = SHIFT_MID - SHIFT_START;        // 300 (bar position of 2 PM)
+  const MID_PCT     = (MID_POS / SHIFT_LEN) * 100;    // ~55.56% of the bar
+
+  // Map an IST minutes value to a 0..540 position within the shift window.
+  const toShiftPos = (m: number) => Math.max(0, Math.min(SHIFT_LEN, m - SHIFT_START));
+
+  // Worked span inside the shift window. Null when not clocked in \u2014 bar stays empty.
+  let workedStartPos: number | null = null;
+  let workedEndPos:   number | null = null;
+  if (todayRec?.clockIn) {
+    workedStartPos = toShiftPos(toIstMinutes(new Date(todayRec.clockIn)));
+    const endIst = todayRec.clockOut
+      ? toIstMinutes(new Date(todayRec.clockOut))
+      : istMinsSinceMidnight;
+    workedEndPos = toShiftPos(endIst);
+    if (workedEndPos < workedStartPos) workedEndPos = workedStartPos;
+  }
+
+  // Half-day yellow bands (boundary = 2:00 PM IST):
+  //  \u2022 first half  (9:00\u20132:00)  yellow when user clocked in on/after 14:00 IST.
+  //  \u2022 second half (2:00\u20136:00)  yellow when clock-out landed on/before 14:00 IST.
+  const missedFirstHalf  = workedStartPos !== null && workedStartPos >= MID_POS;
+  const missedSecondHalf = !!todayRec?.clockOut && workedEndPos !== null && workedEndPos <= MID_POS;
+
+  const progressMins = todayRec?.clockIn ? elapsedMins : 0;
+
+  // "Time left" is relative to a full 9-hour (SHIFT_LEN) shift counted from the
+  // employee's actual clock-in, not a wall-clock countdown to 6 PM. If they
+  // clock in late, they still owe 9 hours.
+  const remainingLabel = !todayRec?.clockIn
+    ? "not clocked in"
+    : todayRec.clockOut
+      ? "\u2713 done"
+      : elapsedMins >= SHIFT_LEN
+        ? `+${fmtMins(elapsedMins - SHIFT_LEN)} OT`
+        : `${fmtMins(SHIFT_LEN - elapsedMins)} left`;
+
+  // Synthesize a "today" row at the top of the log if the server returned none
+  // (user hasn't clocked in yet today). Keeps the current day always visible.
+  const istTodayIso = (() => {
+    const d = clock ?? new Date();
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
+    }).formatToParts(d);
+    const y = parts.find(p => p.type === "year")!.value;
+    const m = parts.find(p => p.type === "month")!.value;
+    const dd = parts.find(p => p.type === "day")!.value;
+    return `${y}-${m}-${dd}`;
+  })();
+  const recsWithToday = (() => {
+    // Only show the placeholder when the current view actually includes today:
+    // always in 30-day mode, or in month mode when viewing the current IST month.
+    const viewingIncludesToday = period === "30d" || month === istTodayIso.slice(0, 7);
+    if (!viewingIncludesToday) return records;
+    const hasToday = records.some((r: any) => String(r.date).slice(0, 10) === istTodayIso);
+    if (hasToday) return records;
+    const placeholder = {
+      id: `placeholder-${istTodayIso}`,
+      date: `${istTodayIso}T00:00:00.000Z`,
+      clockIn: null,
+      clockOut: null,
+      totalMinutes: 0,
+      status: "pending",
+      location: null,
+    };
+    return [placeholder, ...records];
+  })();
+
+  // Month period buttons (30 DAYS + last 6 months). Each month carries its
+  // YYYY-MM key so December/November correctly fall into the previous year
+  // when we're early in the current year.
+  type PeriodBtn = { kind: "30d" } | { kind: "month"; label: string; key: string };
+  const periodBtns: PeriodBtn[] = [
+    { kind: "30d" },
+    ...Array.from({ length: 6 }, (_, i): PeriodBtn => {
+      const anchor = clock ?? new Date();
+      const d = new Date(anchor.getFullYear(), anchor.getMonth() - i, 1);
+      return {
+        kind: "month",
+        label: d.toLocaleString("default", { month: "short" }).toUpperCase(),
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+      };
+    }),
+  ];
+
+  const periodLabel = (() => {
+    if (period === "30d") return "Last 30 Days";
+    const [y, m] = month.split("-").map(Number);
+    return new Date(y, m - 1, 1).toLocaleString("default", { month: "long", year: "numeric" });
+  })();
 
   return (
     <div className="min-h-screen bg-[#f4f7f8] dark:bg-[#011627]">
@@ -309,15 +722,14 @@ export default function AttendancePage() {
         <div className="p-5 border-r border-slate-200 dark:border-white/[0.06]">
           <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-3">Attendance Stats</h3>
 
-          {/* Last Week + info icon */}
+          {/* Period label (matches the API window) + info icon */}
           <div className="flex items-center justify-between mb-3">
-            <button className="flex items-center gap-1 text-[12px] font-semibold text-slate-700 dark:text-white hover:text-[#008CFF] transition-colors">
-              Last Week
-              <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            <Info size={13} strokeWidth={1.75} className="text-slate-400" />
+            <span className="flex items-center gap-1.5 text-[12px] font-semibold text-slate-700 dark:text-white">
+              {teamStats?.period?.label || "Last 7 Days"}
+            </span>
+            <span title="Average effective hours and on-time arrival across the window.">
+              <Info size={13} strokeWidth={1.75} className="text-slate-400" />
+            </span>
           </div>
 
           {/* Column headers */}
@@ -327,7 +739,7 @@ export default function AttendancePage() {
             <span className="text-[9px] uppercase tracking-widest text-slate-400 font-bold text-right">ON TIME ARRIVAL</span>
           </div>
 
-          {/* Me row */}
+          {/* Me row — falls back to local calc if the team-stats request is still loading. */}
           <div className="grid grid-cols-[1fr_90px_90px] items-center py-3 px-3 rounded-lg bg-slate-50 dark:bg-[#002140]/60 mb-2">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center shrink-0">
@@ -335,22 +747,38 @@ export default function AttendancePage() {
               </div>
               <span className="text-[13px] font-semibold text-slate-800 dark:text-white">Me</span>
             </div>
-            <span className="text-[15px] font-bold text-slate-800 dark:text-white text-right">{fmtMins(avgMins)}</span>
-            <span className="text-[15px] font-bold text-slate-800 dark:text-white text-right">{onTimePct}%</span>
+            <span className="text-[15px] font-bold text-slate-800 dark:text-white text-right">
+              {fmtMins(teamStats?.me?.avgMinutes ?? avgMins)}
+            </span>
+            <span className="text-[15px] font-bold text-slate-800 dark:text-white text-right">
+              {(teamStats?.me?.onTimePct ?? onTimePct)}%
+            </span>
           </div>
 
-          {/* My Team row */}
+          {/* My Team row — resolves peers by matching teamCapsule. */}
           <div className="grid grid-cols-[1fr_90px_90px] items-center py-3 px-3 rounded-lg bg-slate-50 dark:bg-[#002140]/60">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-full bg-[#008CFF] flex items-center justify-center shrink-0">
                 <Users size={13} strokeWidth={2} className="text-white" />
               </div>
-              <span className="text-[13px] font-semibold text-slate-800 dark:text-white">My Team</span>
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold text-slate-800 dark:text-white leading-tight">My Team</p>
+                {teamStats?.team?.teamCapsule && (
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight truncate">
+                    {teamStats.team.teamCapsule} · {teamStats.team.memberCount} {teamStats.team.memberCount === 1 ? "member" : "members"}
+                  </p>
+                )}
+                {!teamStats?.team?.teamCapsule && teamStats && (
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">No team assigned</p>
+                )}
+              </div>
             </div>
             <span className="text-[15px] font-bold text-slate-800 dark:text-white text-right">
-              {boardData?.counts ? fmtMins(boardData.counts.avgMinutes || avgMins) : fmtMins(avgMins)}
+              {teamStats?.team?.memberCount ? fmtMins(teamStats.team.avgMinutes) : "—"}
             </span>
-            <span className="text-[15px] font-bold text-slate-800 dark:text-white text-right">{onTimePct}%</span>
+            <span className="text-[15px] font-bold text-slate-800 dark:text-white text-right">
+              {teamStats?.team?.memberCount ? `${teamStats.team.onTimePct}%` : "—"}
+            </span>
           </div>
         </div>
 
@@ -372,19 +800,38 @@ export default function AttendancePage() {
           {/* Shift info */}
           <p className="text-[12px] font-medium text-slate-600 dark:text-slate-400 mb-3">Today (9:00 AM - 6:00 PM)</p>
 
-          {/* Timeline progress bar */}
-          <div className="w-full h-3 bg-slate-100 dark:bg-white/[0.07] rounded-full overflow-hidden">
-            <div className="h-full bg-[#00BCD4] rounded-full transition-all duration-500"
-              style={{ width: `${progressPct}%` }} />
-          </div>
+          {/* Timeline progress bar: grey track, yellow half-day bands where the
+              user missed a half, cyan fill = elapsed / 9 h. Progress starts at 0
+              and grows in real time from clock-in, independent of whether the
+              session falls inside or outside the 9:00–18:00 window. */}
+          {(() => {
+            const elapsedPct = todayRec?.clockIn
+              ? Math.min(100, (elapsedMins / SHIFT_LEN) * 100)
+              : 0;
+            return (
+              <div className="relative w-full h-3 bg-slate-100 dark:bg-white/[0.07] rounded-full overflow-hidden">
+                {missedFirstHalf && (
+                  <div className="absolute inset-y-0 bg-amber-400/80" style={{ left: "0%", width: `${MID_PCT}%` }} />
+                )}
+                {missedSecondHalf && (
+                  <div className="absolute inset-y-0 bg-amber-400/80" style={{ left: `${MID_PCT}%`, width: `${100 - MID_PCT}%` }} />
+                )}
+                {elapsedPct > 0 && (
+                  <div className="absolute inset-y-0 left-0 bg-[#00BCD4] transition-all duration-500" style={{ width: `${elapsedPct}%` }} />
+                )}
+                {/* Subtle 2 PM marker so the half-day boundary is readable. */}
+                <div className="absolute inset-y-0 w-px bg-slate-300/70 dark:bg-white/10" style={{ left: `${MID_PCT}%` }} />
+              </div>
+            );
+          })()}
 
           <div className="flex items-center justify-between mt-2">
-            <p className="text-[11px] font-medium text-slate-500 dark:text-[#00BCD4]">
+            <p className="text-[11px] font-medium text-slate-500 dark:text-[#00BCD4]" suppressHydrationWarning>
               Duration: {todayRec?.clockIn ? elapsedStr : "0h 0m"}
             </p>
-            <div className="flex items-center gap-1 text-[11px] text-slate-500">
+            <div className="flex items-center gap-1 text-[11px] text-slate-500" suppressHydrationWarning>
               <Clock3 size={11} strokeWidth={1.75} />
-              0 min
+              {remainingLabel}
             </div>
           </div>
         </div>
@@ -449,14 +896,25 @@ export default function AttendancePage() {
                 </span>
               )}
 
+              {/* Elapsed since clock-in — lives right under the button, Keka-style */}
+              {todayRec?.clockIn && (
+                <div className="w-fit">
+                  <p className="text-[14px] font-bold text-[#008CFF] leading-none tabular-nums">
+                    {elapsedStr.replace(" ", ":")}
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Since {todayRec.clockOut ? "Last Clock-in" : "Last Login"}
+                  </p>
+                </div>
+              )}
+
               {/* Quick links */}
               <div className="flex flex-col gap-1.5">
                 {[
-                  { label: "Work From Home",    Icon: Home,       onClick: () => setShowWFHModal(true) },
-                  { label: "On Duty",           Icon: Briefcase,  onClick: () => setShowODModal(true)  },
-                  { label: "Punch Correction",  Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
-                  { label: "Remote Clock-In",   Icon: MapPin,     onClick: () => setShowWFHModal(true) },
-                  { label: "Partial Day",       Icon: Scissors,   onClick: () => { setSubTab("requests"); setReqType("punch"); } },
+                  { label: "Work From Home",    Icon: Home,       onClick: () => openForm("wfh")       },
+                  { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
+                  { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
+                  { label: "Half Day",          Icon: PieChart,   onClick: () => openForm("half_day")  },
                 ].map(({ label, Icon, onClick }) => (
                   <button key={label} onClick={onClick}
                     className="flex items-center gap-1.5 text-[12px] font-medium text-[#008CFF] hover:underline w-fit">
@@ -492,9 +950,6 @@ export default function AttendancePage() {
             ["log",      "Attendance Log"],
             ["calendar", "Calendar"],
             ["requests", "Attendance Requests"],
-            ["shift",    "Shift Schedule"],
-            ["overtime", "Overtime Requests"],
-            ["shiftwo",  "Shift Weekly Off"],
           ] as const).map(([k, l]) => (
             <button key={k} onClick={() => setSubTab(k as any)}
               className={`px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors whitespace-nowrap ${
@@ -509,16 +964,27 @@ export default function AttendancePage() {
           <>
             {/* Period row */}
             <div className="flex items-center justify-between mb-4">
-              <h4 className="text-[14px] font-semibold text-slate-800 dark:text-white">Last 30 Days</h4>
+              <h4 className="text-[14px] font-semibold text-slate-800 dark:text-white">{periodLabel}</h4>
               <div className="flex items-center gap-1">
-                {periodBtns.map((label, i) => (
-                  <button key={label + i}
-                    className={`h-8 px-3 rounded-full text-[11px] font-semibold transition-colors ${
-                      i === 0
-                        ? "bg-[#008CFF] text-white"
-                        : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-800 dark:hover:text-white"
-                    }`}>{label}</button>
-                ))}
+                {periodBtns.map((btn, i) => {
+                  const isActive = btn.kind === "30d" ? period === "30d" : (period === "month" && month === btn.key);
+                  const label    = btn.kind === "30d" ? "30 DAYS" : btn.label;
+                  return (
+                    <button
+                      key={btn.kind === "30d" ? "30d" : btn.key}
+                      type="button"
+                      onClick={() => {
+                        if (btn.kind === "30d") setPeriod("30d");
+                        else { setPeriod("month"); setMonth(btn.key); }
+                      }}
+                      className={`h-8 px-3 rounded-full text-[11px] font-semibold transition-colors ${
+                        isActive
+                          ? "bg-[#008CFF] text-white"
+                          : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-800 dark:hover:text-white"
+                      }`}
+                    >{label}</button>
+                  );
+                })}
                 {/* List/Calendar toggle */}
                 <div className="flex ml-2 border border-slate-200 dark:border-white/[0.08] rounded-lg overflow-hidden">
                   <button className="px-2 py-1.5 bg-[#008CFF]/10 text-[#008CFF]">
@@ -535,29 +1001,99 @@ export default function AttendancePage() {
               </div>
             </div>
 
-            {/* Table */}
-            <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+            {/* Table — overflow-visible so row kebab dropdowns aren't clipped. */}
+            <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-visible">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/[0.06]">
-                    {["DATE","ATTENDANCE VISUAL","EFFECTIVE HOURS","GROSS HOURS","LOG"].map(h => (
+                    {["DATE","ATTENDANCE VISUAL","EFFECTIVE HOURS","GROSS HOURS","LOG","ACTIONS"].map(h => (
                       <th key={h} className="px-5 py-3 text-left text-[10px] uppercase tracking-widest text-[#008CFF] dark:text-[#00BCD4] font-semibold">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {records.map((rec: any) => {
+                  {recsWithToday.map((rec: any) => {
                     const date      = new Date(rec.date);
+                    const dateIso   = String(rec.date).slice(0, 10);
+                    const isTodayRow = dateIso === istTodayIso;
                     const isWeekend = date.getDay() === 0 || date.getDay() === 6;
                     const isHoliday = rec.status === "holiday";
                     const isLeave   = rec.status === "on_leave";
-                    const hrs       = rec.totalMinutes ? fmtMins(rec.totalMinutes) : "0h 0m";
-                    const pct       = rec.totalMinutes ? Math.min((rec.totalMinutes / 540) * 100, 100) : 0;
+                    const isPending = rec.status === "pending" && !rec.clockIn;
+                    // Has a pending request for this date? Any type (regularize, WFH,
+                    // On-Duty, or Leave that covers this date) flips the row to
+                    // "Pending approval" and disables re-submission of the same kind.
+                    const hasPendingReg = Array.isArray(regsData) && regsData.some(
+                      (r: any) => r.status === "pending" && String(r.date).slice(0, 10) === dateIso
+                    );
+                    const hasPendingWfh = Array.isArray(wfhData) && wfhData.some(
+                      (r: any) => r.status === "pending" && String(r.date).slice(0, 10) === dateIso
+                    );
+                    const hasPendingOd  = Array.isArray(odData) && odData.some(
+                      (r: any) => r.status === "pending" && String(r.date).slice(0, 10) === dateIso
+                    );
+                    const hasPendingLeave = myLeaves.some((l: any) => {
+                      if (l.status !== "pending" && l.status !== "partially_approved") return false;
+                      const from = String(l.fromDate).slice(0, 10);
+                      const to   = String(l.toDate).slice(0, 10);
+                      return dateIso >= from && dateIso <= to;
+                    });
+                    const pendingKind =
+                      hasPendingReg   ? "regularization" :
+                      hasPendingLeave ? "leave" :
+                      hasPendingWfh   ? "WFH" :
+                      hasPendingOd    ? "On-Duty" :
+                      null;
+                    const hasPendingAny = pendingKind !== null;
+                    // Approved WFH for this date — drives the "WFH" / "Half Day WFH" attendance label.
+                    const approvedWfh = Array.isArray(wfhData) && wfhData.find(
+                      (r: any) => r.status === "approved" && String(r.date).slice(0, 10) === dateIso
+                    );
+                    const approvedWfhKind = approvedWfh
+                      ? (String(approvedWfh.reason ?? "").startsWith("[Half Day]") ? "Half Day WFH" : "WFH")
+                      : null;
+                    // Approved leave that covers this date — shows "On Leave" plus the type name.
+                    const approvedLeave = myLeaves.find((l: any) => {
+                      if (l.status !== "approved") return false;
+                      const from = String(l.fromDate).slice(0, 10);
+                      const to   = String(l.toDate).slice(0, 10);
+                      return dateIso >= from && dateIso <= to;
+                    });
+                    const onLeave = !!approvedLeave || rec.status === "on_leave";
+                    const leaveLabel = approvedLeave?.leaveType?.name
+                      ? `On Leave · ${approvedLeave.leaveType.name}`
+                      : "On Leave";
+                    // Missed clock-out: clocked in on a past day but never clocked out.
+                    // Either the server has already flagged it (status === "missed_clock_out")
+                    // or the sweeper hasn't run yet but the row is stale. Either way, we must
+                    // NOT tick the timer — otherwise the display drifts to 24h+ forever.
+                    // Once a regularization is approved (isRegularized = true), the row is
+                    // considered settled regardless of whether clockOut got a value, so the
+                    // missed-clockout banner clears. Same for on-leave days.
+                    // NOTE: `onLeave` is computed a few lines down but declared via `var`-like
+                    // hoisting via `const` isn't possible; we inline the same check here.
+                    const _onLeaveQuickCheck = rec.status === "on_leave" || myLeaves.some((l: any) => {
+                      if (l.status !== "approved") return false;
+                      const from = String(l.fromDate).slice(0, 10);
+                      const to   = String(l.toDate).slice(0, 10);
+                      return dateIso >= from && dateIso <= to;
+                    });
+                    const missedClockOut = rec.clockIn && !rec.clockOut && !isTodayRow && !rec.isRegularized && !_onLeaveQuickCheck;
+                    // Live elapsed: only for today's open session. Past days freeze at the
+                    // recorded totalMinutes (which is 0 until a regularization lands).
+                    const liveMins  = isTodayRow && rec.clockIn && !rec.clockOut && clock
+                      ? Math.floor((clock.getTime() - new Date(rec.clockIn).getTime()) / 60000)
+                      : (rec.totalMinutes || 0);
+                    const hrs       = liveMins ? fmtMins(liveMins) : "0h 0m";
+                    const pct       = liveMins ? Math.min((liveMins / 540) * 100, 100) : 0;
+                    const met9h     = liveMins >= 540;
+                    const hasClock  = !!rec.clockIn;
 
                     return (
                       <tr key={rec.id || rec.date}
                         className={`border-b border-slate-100 dark:border-white/[0.04] transition-colors ${
-                          isHoliday ? "bg-amber-50/60 dark:bg-yellow-900/10"
+                          isTodayRow ? "bg-[#008CFF]/5 dark:bg-[#008CFF]/5"
+                          : isHoliday ? "bg-amber-50/60 dark:bg-yellow-900/10"
                           : isWeekend ? "bg-slate-50/80 dark:bg-white/[0.015]"
                           : "hover:bg-slate-50/50 dark:hover:bg-white/[0.02]"
                         }`}>
@@ -566,36 +1102,59 @@ export default function AttendancePage() {
                         <td className="px-5 py-3">
                           <div className="flex items-center gap-2">
                             <span className="text-[13px] text-slate-800 dark:text-white font-medium">
-                              {date.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" })}
+                              {date.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "2-digit", month: "short" })}
                             </span>
+                            {isTodayRow && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#008CFF]/15 text-[#008CFF] font-bold uppercase tracking-wider">Today</span>
+                            )}
                             {isHoliday && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-600 dark:text-amber-400 font-bold">HLDY</span>
                             )}
                             {isWeekend && !isHoliday && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-white/10 text-slate-500 dark:text-slate-400 font-bold">W-OFF</span>
                             )}
-                            {isLeave && (
+                            {onLeave && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400 font-bold">LEAVE</span>
+                            )}
+                            {missedClockOut && !hasPendingAny && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold uppercase tracking-wider">Missed</span>
+                            )}
+                            {hasPendingAny && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#008CFF]/15 text-[#008CFF] font-bold uppercase tracking-wider">Pending</span>
+                            )}
+                            {!hasPendingAny && approvedWfhKind && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold uppercase tracking-wider">
+                                {approvedWfhKind}
+                              </span>
                             )}
                           </div>
                         </td>
 
                         {/* ATTENDANCE VISUAL */}
                         <td className="px-5 py-3">
-                          {rec.totalMinutes > 0 ? (
+                          {hasPendingAny ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[12px] text-[#008CFF] font-semibold">Pending {pendingKind}</span>
+                              <span className="text-[11px] text-slate-500">— awaiting approval</span>
+                            </div>
+                          ) : missedClockOut ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[12px] text-amber-600 font-semibold">Missed clock-out</span>
+                              <span className="text-[11px] text-slate-500">— regularize to log hours</span>
+                            </div>
+                          ) : hasClock ? (
                             <div className="flex items-center gap-3">
-                              <TimelineBar clockIn={rec.clockIn} clockOut={rec.clockOut} />
-                              <svg className="w-3.5 h-3.5 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                              </svg>
+                              <TimelineBar liveMins={liveMins} />
+                              <LocationPin raw={rec.location} />
                             </div>
                           ) : isHoliday ? (
                             <span className="text-[12px] text-amber-500 font-medium">Holiday</span>
                           ) : isWeekend ? (
                             <span className="text-[12px] text-slate-400">Full day Weekly-off</span>
-                          ) : isLeave ? (
-                            <span className="text-[12px] text-violet-400">On Leave</span>
+                          ) : onLeave ? (
+                            <span className="text-[12px] text-violet-500 dark:text-violet-400 font-medium">{leaveLabel}</span>
+                          ) : isTodayRow ? (
+                            <span className="text-[12px] text-[#008CFF] font-medium">Not clocked in yet</span>
                           ) : (
                             <span className="text-[12px] text-slate-400">—</span>
                           )}
@@ -603,7 +1162,9 @@ export default function AttendancePage() {
 
                         {/* EFFECTIVE HOURS */}
                         <td className="px-5 py-3">
-                          {rec.totalMinutes > 0 ? (
+                          {missedClockOut ? (
+                            <span className="text-[12px] text-slate-400">—</span>
+                          ) : liveMins > 0 ? (
                             <div className="flex items-center gap-2">
                               <span className={`w-2 h-2 rounded-full shrink-0 ${pct >= 90 ? "bg-emerald-400" : pct >= 50 ? "bg-[#008CFF]" : "bg-orange-400"}`} />
                               <span className="text-[13px] text-slate-800 dark:text-white">{hrs}</span>
@@ -616,22 +1177,48 @@ export default function AttendancePage() {
 
                         {/* GROSS HOURS */}
                         <td className="px-5 py-3 text-[13px] text-slate-700 dark:text-slate-300">
-                          {rec.totalMinutes > 0 ? hrs : (isHoliday || isWeekend) ? <span className="text-slate-400 text-lg">···</span> : ""}
+                          {missedClockOut
+                            ? <span className="text-slate-400">—</span>
+                            : liveMins > 0
+                              ? hrs
+                              : (isHoliday || isWeekend)
+                                ? <span className="text-slate-400 text-lg">···</span>
+                                : ""}
                         </td>
 
-                        {/* LOG */}
+                        {/* LOG: 9h threshold \u2192 green tick when met, red cross otherwise (once clocked in). */}
                         <td className="px-5 py-3">
-                          {rec.totalMinutes > 0 ? (
-                            <svg className="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
+                          {missedClockOut ? (
+                            <XCircle size={20} strokeWidth={2} className="text-amber-500" aria-label="Missed clock-out" />
+                          ) : hasClock ? (
+                            met9h ? (
+                              <CheckCircle2 size={20} strokeWidth={2} className="text-emerald-500" aria-label="9h shift completed" />
+                            ) : (
+                              <XCircle size={20} strokeWidth={2} className="text-red-500" aria-label="Less than 9h" />
+                            )
                           ) : rec.status === "absent" ? (
-                            <svg className="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
+                            <XCircle size={20} strokeWidth={2} className="text-orange-400" aria-label="Absent" />
+                          ) : isTodayRow ? (
+                            <Clock3 size={18} strokeWidth={2} className="text-[#008CFF]" aria-label="Today pending" />
                           ) : (isHoliday || isWeekend) ? (
                             <span className="text-slate-400 text-lg">···</span>
                           ) : null}
+                        </td>
+
+                        {/* ACTIONS: kebab menu \u2192 Regularize */}
+                        <td className="px-5 py-3">
+                          {(isHoliday || isWeekend) ? (
+                            <span className="text-slate-300 text-lg">···</span>
+                          ) : (
+                            <RowMenu
+                              onRegularize={() => { setRegPrefillDate(dateIso); setShowRegModal(true); }}
+                              onWFH={() => openForm("wfh", dateIso)}
+                              onOnDuty={() => openForm("on_duty", dateIso)}
+                              onLeave={() => openForm("leave", dateIso)}
+                              disableRegularize={hasPendingReg}
+                              disableRegularizeReason="You already have a pending regularization for this date"
+                            />
+                          )}
                         </td>
                       </tr>
                     );
@@ -691,18 +1278,10 @@ export default function AttendancePage() {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="flex border border-slate-200 dark:border-white/[0.08] rounded-lg overflow-hidden">
-                  {([["punch","Punch Corrections"],["wfh","WFH Requests"],["od","On Duty"]] as const).map(([v, l]) => (
+                  {([["punch","Regularizations"],["wfh","WFH Requests"],["od","On Duty"]] as const).map(([v, l]) => (
                     <button key={v} onClick={() => setReqType(v)}
                       className={`px-3 py-1.5 text-[11px] font-semibold transition-colors ${reqType === v ? "bg-[#008CFF] text-white" : "text-slate-500 hover:bg-slate-50 dark:hover:bg-white/5"}`}>
                       {l}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex border border-slate-200 dark:border-white/[0.08] rounded-lg overflow-hidden">
-                  {(["my","team"] as const).map(v => (
-                    <button key={v} onClick={() => setRegView(v)}
-                      className={`px-3 py-1.5 text-[11px] font-semibold transition-colors ${regView === v ? "bg-slate-700 text-white" : "text-slate-500 hover:bg-slate-50 dark:hover:bg-white/5"}`}>
-                      {v === "my" ? "My Requests" : "Team"}
                     </button>
                   ))}
                 </div>
@@ -714,24 +1293,24 @@ export default function AttendancePage() {
                 </button>
               )}
               {reqType === "wfh" && (
-                <button onClick={() => setShowWFHModal(true)}
+                <button onClick={() => openForm("wfh")}
                   className="h-8 px-4 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12px] font-semibold flex items-center gap-1.5">
                   <Plus size={13} strokeWidth={2} /> New WFH
                 </button>
               )}
               {reqType === "od" && (
-                <button onClick={() => setShowODModal(true)}
+                <button onClick={() => openForm("on_duty")}
                   className="h-8 px-4 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12px] font-semibold flex items-center gap-1.5">
                   <Plus size={13} strokeWidth={2} /> New On Duty
                 </button>
               )}
             </div>
 
-            {/* Punch Corrections table */}
+            {/* Regularizations table */}
             {reqType === "punch" && (
               <div className={`${C.card} overflow-hidden`}>
                 {regsData.length === 0 ? (
-                  <div className="py-14 text-center"><p className="text-[13px] text-slate-400">No punch correction requests found</p></div>
+                  <div className="py-14 text-center"><p className="text-[13px] text-slate-400">No regularization requests found</p></div>
                 ) : (
                   <table className="w-full">
                     <thead><tr className="border-b border-slate-200 dark:border-white/[0.06]">
@@ -853,39 +1432,22 @@ export default function AttendancePage() {
           </>
         )}
 
-        {subTab === "shift" && (
-          <div className={`${C.card} p-12 flex flex-col items-center justify-center gap-3`}>
-            <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center">
-              <Clock3 size={22} className="text-slate-400" />
-            </div>
-            <p className="text-[14px] font-semibold text-slate-700 dark:text-white">Shift Schedule</p>
-            <p className="text-[12px] text-slate-400 text-center max-w-xs">Your shift schedule will appear here. Contact HR to configure your shift timings.</p>
-          </div>
-        )}
-
-        {subTab === "overtime" && (
-          <div className={`${C.card} p-12 flex flex-col items-center justify-center gap-3`}>
-            <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center">
-              <Plus size={22} className="text-slate-400" />
-            </div>
-            <p className="text-[14px] font-semibold text-slate-700 dark:text-white">Overtime Requests</p>
-            <p className="text-[12px] text-slate-400 text-center max-w-xs">Overtime request functionality coming soon. Use comp-off requests in the Leaves module for now.</p>
-          </div>
-        )}
-
-        {subTab === "shiftwo" && (
-          <div className={`${C.card} p-12 flex flex-col items-center justify-center gap-3`}>
-            <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center">
-              <ShieldCheck size={22} className="text-slate-400" />
-            </div>
-            <p className="text-[14px] font-semibold text-slate-700 dark:text-white">Shift Weekly Off Requests</p>
-            <p className="text-[12px] text-slate-400 text-center max-w-xs">Shift weekly off swap requests will appear here once your shift schedule is configured.</p>
-          </div>
-        )}
-
-      {showRegModal && <RegularizeModal onClose={() => setShowRegModal(false)} />}
-      {showWFHModal && <WFHModal onClose={() => setShowWFHModal(false)} />}
-      {showODModal  && <OnDutyModal onClose={() => setShowODModal(false)} />}
+      {showRegModal && (
+        <RegularizeModal
+          prefillDate={regPrefillDate}
+          onClose={() => { setShowRegModal(false); setRegPrefillDate(undefined); }}
+        />
+      )}
+      {formState && (
+        <LeaveRequestForm
+          kind={formState.kind}
+          title={FORM_TITLE[formState.kind]}
+          policyText={FORM_POLICY[formState.kind]}
+          leaveTypes={leaveTypes}
+          prefillDate={formState.prefillDate}
+          onClose={() => setFormState(null)}
+        />
+      )}
       </div>
     </div>
   );

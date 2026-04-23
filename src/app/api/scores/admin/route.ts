@@ -38,9 +38,15 @@ export async function GET(request: NextRequest) {
             monthFilter.month = new Date(Date.UTC(year, mon - 1, 1));
         }
 
-        // Get all monthly ratings with user info and edit logs
+        // Get all monthly ratings with user info and edit logs.
+        // Hide ratings belonging to deactivated users (people who left the
+        // company) — their rows stop syncing so they render as "missing values"
+        // in the audit panel. Active users are unaffected.
         const ratings = await prisma.monthlyRating.findMany({
-            where: monthFilter,
+            where: {
+                ...monthFilter,
+                user: { isActive: true },
+            },
             orderBy: [{ month: "desc" }, { overallRating: "desc" }],
             include: {
                 user: {
@@ -224,6 +230,8 @@ export async function PATCH(request: NextRequest) {
                 section.isOverridden = true;
                 section.details = `Manual override: ${numVal}★ (was ${oldVal ?? "null"})`;
             } else {
+                // Edit score value + auto-recompute stars from the template so the
+                // rating follows the value.
                 section.rawValue = numVal;
 
                 // Auto-derive stars from the new value via the section's formula.
