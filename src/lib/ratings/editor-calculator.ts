@@ -22,6 +22,7 @@ import {
     scoreToFinalStars,
     type MonthlyTargetsMatrix,
 } from "./writer-calculator";
+import { getMonthlyReportWindow } from "@/lib/reports/monthly-window";
 
 // ═══════════════════════════════════════════════════════
 // Types
@@ -159,35 +160,22 @@ interface QualifiedEditorCase {
     } | null;
 }
 
-function getNthWorkingDayEnd(year: number, month: number, n: number): Date {
-    let count = 0;
-    let day = 1;
-    while (count < n) {
-        const d = new Date(Date.UTC(year, month, day));
-        const dow = d.getUTCDay();
-        if (dow !== 0 && dow !== 6) {
-            count++;
-            if (count === n) return new Date(Date.UTC(year, month, day, 23, 59, 59));
-        }
-        day++;
-    }
-    return new Date(Date.UTC(year, month, day - 1, 23, 59, 59));
-}
-
 export async function getQualifiedEditorCases(
     monthStart: Date,
     monthEnd: Date,
     editorId?: number
 ): Promise<QualifiedEditorCase[]> {
-    const nextYear  = monthEnd.getUTCMonth() === 11 ? monthEnd.getUTCFullYear() + 1 : monthEnd.getUTCFullYear();
-    const nextMonth = (monthEnd.getUTCMonth() + 1) % 12;
-    const graceEnd  = getNthWorkingDayEnd(nextYear, nextMonth, 3);
+    // Reporting window: day 4 of month M → end of day 3 of month M+1.
+    const { windowStart, windowEnd } = getMonthlyReportWindow(
+        monthStart.getUTCFullYear(),
+        monthStart.getUTCMonth()
+    );
 
     const subtasks = await prisma.subtask.findMany({
         where: {
             name: { contains: "Editing", mode: "insensitive" },
             status: { in: ["done", "complete", "closed"] },
-            dateDone: { gte: monthStart, lte: graceEnd },
+            dateDone: { gte: windowStart, lte: windowEnd },
         },
         select: { caseId: true },
     });

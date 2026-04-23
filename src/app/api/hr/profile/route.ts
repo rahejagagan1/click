@@ -36,22 +36,25 @@ export async function PUT(req: NextRequest) {
       address, city, state, profilePictureUrl,
     } = body;
 
-    const [user] = await prisma.$transaction([
+    // Self-edit updates the profile in place. We don't auto-create here: creation
+    // belongs to the HR Add Employee wizard so firstName/lastName/employeeId/series
+    // get populated correctly. Users without a profile must be onboarded by HR.
+    const existing = await prisma.employeeProfile.findUnique({ where: { userId: myId } });
+    if (!existing) {
+      return NextResponse.json(
+        { error: "No employee profile found — please ask HR to onboard you first." },
+        { status: 400 },
+      );
+    }
+
+    await prisma.$transaction([
       prisma.user.update({
         where: { id: myId },
         data: { profilePictureUrl: profilePictureUrl || undefined },
-        select: { id: true, name: true, email: true, profilePictureUrl: true },
       }),
-      prisma.employeeProfile.upsert({
+      prisma.employeeProfile.update({
         where: { userId: myId },
-        create: {
-          userId: myId,
-          employeeId: `NB-${new Date().getFullYear()}-${String(myId).padStart(3, "0")}`,
-          phone, gender, bloodGroup,
-          dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
-          emergencyContact, emergencyPhone, address, city, state,
-        },
-        update: {
+        data: {
           phone, gender, bloodGroup,
           dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
           emergencyContact, emergencyPhone, address, city, state,
