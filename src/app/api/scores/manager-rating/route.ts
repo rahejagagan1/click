@@ -60,7 +60,13 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        if (userId) where.userId = parseInt(userId);
+        if (userId) {
+            where.userId = parseInt(userId);
+        } else {
+            // List views hide rows for users who have left the company.
+            // Direct lookup by userId still returns their historic ratings.
+            where.user = { isActive: true };
+        }
         if (period) where.period = period;
 
         const ratings = await prisma.managerRating.findMany({

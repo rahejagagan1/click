@@ -4,6 +4,7 @@ import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import Link from "next/link";
 import { Users, ChevronDown, ChevronRight, Search } from "lucide-react";
+import { getUserRoleLabel } from "@/lib/user-role-options";
 
 function Avatar({ name, url, size = 40 }: { name: string; url?: string | null; size?: number }) {
   const initials = name.split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase();
@@ -24,7 +25,7 @@ function OrgCard({ node, depth = 0 }: { node: any; depth?: number }) {
   const [expanded, setExpanded] = useState(depth < 2);
   const hasChildren = node.children?.length > 0;
   const dept = node.employeeProfile?.department || node.role || "";
-  const desig = node.employeeProfile?.designation || node.orgLevel?.replace(/_/g, " ") || "";
+  const desig = node.employeeProfile?.designation || getUserRoleLabel(node.role) || node.orgLevel?.replace(/_/g, " ") || "";
 
   return (
     <div className="flex flex-col items-center">
@@ -172,7 +173,7 @@ export default function OrgChartPage() {
                         </Link>
                       </td>
                       <td className="px-5 py-3 text-[13px] text-slate-600 dark:text-slate-300">{u.employeeProfile?.department || "—"}</td>
-                      <td className="px-5 py-3 text-[13px] text-slate-600 dark:text-slate-300 capitalize">{u.employeeProfile?.designation || u.orgLevel?.replace(/_/g," ") || "—"}</td>
+                      <td className="px-5 py-3 text-[13px] text-slate-600 dark:text-slate-300 capitalize">{u.employeeProfile?.designation || getUserRoleLabel(u.role) || u.orgLevel?.replace(/_/g," ") || "—"}</td>
                       <td className="px-5 py-3 text-[13px] text-slate-600 dark:text-slate-300 capitalize">{u.employeeProfile?.employmentType || "—"}</td>
                       <td className="px-5 py-3 text-[13px] text-slate-600 dark:text-slate-300">{mgr?.name || "—"}</td>
                     </tr>

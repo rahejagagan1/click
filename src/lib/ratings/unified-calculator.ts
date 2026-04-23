@@ -469,7 +469,8 @@ function buildMonthlyRatingData(
 
 async function updateRanksInRole(monthStart: Date, roleType: string): Promise<void> {
     const ratings = await prisma.monthlyRating.findMany({
-        where: { month: monthStart, roleType },
+        // Only rank active users so ranks read 1..N without gaps from people who left.
+        where: { month: monthStart, roleType, user: { isActive: true } },
         select: { id: true, overallRating: true },
         orderBy: { overallRating: "desc" },
     });
