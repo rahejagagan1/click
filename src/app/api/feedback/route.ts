@@ -10,15 +10,15 @@ import { serializeBigInt } from "@/lib/utils";
 export const dynamic = "force-dynamic";
 
 const ALLOWED = new Set([
-    "attendance_issue",
-    "policy_issue",
-    "finance_issue",
-    "salary_issue",
-    "others",
-    "feature_requested",
-    "general_issue",
+    "people_team_dynamics",
+    "work_culture_environment",
+    "ideas_improvements",
+    "processes_policies",
+    "compensation_support",
+    "unfiltered_unsaid",
+    "anything_else",
 ]);
-const DEFAULT_CATEGORY = "general_issue";
+const DEFAULT_CATEGORY = "anything_else";
 const MAX_LEN = 8000;
 
 /** GET — CEO, Developer, HR: list feedback (no submitter PII — anonymous inbox) */

@@ -83,11 +83,11 @@ export async function POST(request: NextRequest) {
 
         // ── ClickUp invite (best-effort) ─────────────────────────────────
         // If requested, invite the user to the ClickUp workspace by email
-        // and use the real id they hand back. If the caller also supplied
-        // an explicit clickupUserId, we prefer ClickUp's response since it's
-        // authoritative. Failures here abort the whole create — otherwise
-        // we'd leave a local row with no ClickUp backing.
-        let resolvedClickupId: bigint;
+        // and use the real id they hand back. Otherwise we leave
+        // clickupUserId NULL — the schema now allows null since the
+        // hr_first_clickup_optional migration, so we no longer need to
+        // generate a fake timestamp id.
+        let resolvedClickupId: bigint | null;
         let clickupInviteNote: string | undefined;
         if (inviteToClickup) {
             try {
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
                 );
             }
         } else {
-            resolvedClickupId = clickupUserId ? BigInt(clickupUserId) : BigInt(Date.now());
+            resolvedClickupId = clickupUserId ? BigInt(clickupUserId) : null;
         }
 
         // ── Local create, wrapped so profile + shift + balances ride along ─
@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
             const created = await tx.user.create({
                 data: {
                     name,
-                    email,
+                    email: String(email).trim().toLowerCase(),
                     role: role || "member",
                     orgLevel: orgLevel || "member",
                     clickupUserId: resolvedClickupId,

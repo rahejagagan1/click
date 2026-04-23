@@ -1439,7 +1439,7 @@ function SectionEditor({
                     {(section.type === "bracket_lookup") && section.variable === "cm_delivery_pct" && (
                         <div className="space-y-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
                             <p className="text-xs font-medium text-amber-800 dark:text-amber-200/90">
-                                CM Monthly Delivery % — uses ClickUp <code className="text-amber-700 dark:text-amber-300">Case.caseType</code> on the main task; CM Check 4 subtask still gates which cases qualify.
+                                CM Monthly Delivery % — uses ClickUp <code className="text-amber-700 dark:text-amber-300">Case.caseType</code> on the main task; Video QA1 subtask still gates which cases qualify.
                             </p>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                 <div className="space-y-1">

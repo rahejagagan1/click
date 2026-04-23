@@ -84,6 +84,9 @@ export default function AdminPage() {
     const [refreshedReportId, setRefreshedReportId] = useState<number | null>(null);
     const [users, setUsers] = useState<any[]>([]);
     const [usersLoading, setUsersLoading] = useState(false);
+    const [unmatchedClickup, setUnmatchedClickup] = useState<any[]>([]);
+    const [unmatchedLoading, setUnmatchedLoading] = useState(false);
+    const [unmatchedBusyId, setUnmatchedBusyId] = useState<number | null>(null);
     const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(new Set());
     const [lastSyncs, setLastSyncs] = useState<Record<string, string | null>>({});
     const [ytUrl, setYtUrl] = useState("");
@@ -229,6 +232,53 @@ export default function AdminPage() {
                 .catch(() => setUsersLoading(false));
         }
     }, [activeTab, users.length]);
+
+    // Load ClickUp users that didn't match any HR user at last sync
+    useEffect(() => {
+        if (activeTab !== "users" || !canManageUsers) return;
+        setUnmatchedLoading(true);
+        fetch("/api/admin/clickup-unmatched")
+            .then(r => r.ok ? r.json() : [])
+            .then(data => { setUnmatchedClickup(Array.isArray(data) ? data : []); })
+            .catch(() => { })
+            .finally(() => setUnmatchedLoading(false));
+    }, [activeTab, canManageUsers]);
+
+    const handleOnboardUnmatched = async (id: number) => {
+        setUnmatchedBusyId(id);
+        try {
+            const res = await fetch("/api/admin/clickup-unmatched", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                alert(err.error || `Onboard failed (${res.status})`);
+                return;
+            }
+            setUnmatchedClickup(prev => prev.filter(u => u.id !== id));
+            const freshRes = await fetch("/api/users?all=true");
+            const fresh = await freshRes.json();
+            if (Array.isArray(fresh)) setUsers(fresh);
+        } finally {
+            setUnmatchedBusyId(null);
+        }
+    };
+
+    const handleDismissUnmatched = async (id: number) => {
+        setUnmatchedBusyId(id);
+        try {
+            const res = await fetch("/api/admin/clickup-unmatched", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id }),
+            });
+            if (res.ok) setUnmatchedClickup(prev => prev.filter(u => u.id !== id));
+        } finally {
+            setUnmatchedBusyId(null);
+        }
+    };
 
     // Load reports when tab is active
     useEffect(() => {
@@ -818,6 +868,61 @@ export default function AdminPage() {
                             </table>
                         </div>
                     )}
+                    {canManageUsers && (
+                        <div className="border-t border-white/5">
+                            <div className="px-5 py-4 flex items-center justify-between">
+                                <div>
+                                    <h3 className="text-sm font-semibold text-white">ClickUp users not in HR ({unmatchedClickup.length})</h3>
+                                    <p className="text-xs text-slate-500 mt-0.5">Seen in ClickUp sync but no matching HR user by email. Onboard creates an HR record and links the ClickUp ID.</p>
+                                </div>
+                            </div>
+                            {unmatchedLoading ? (
+                                <div className="px-5 py-6 text-center text-slate-500 text-sm animate-pulse">Loading…</div>
+                            ) : unmatchedClickup.length === 0 ? (
+                                <div className="px-5 py-6 text-center text-slate-500 text-sm">All ClickUp users are matched to HR.</div>
+                            ) : (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                        <thead>
+                                            <tr className="border-y border-white/5">
+                                                <th className="text-left px-5 py-2 text-[11px] uppercase tracking-wider text-slate-500">Name</th>
+                                                <th className="text-left px-3 py-2 text-[11px] uppercase tracking-wider text-slate-500">Email</th>
+                                                <th className="text-left px-3 py-2 text-[11px] uppercase tracking-wider text-slate-500">ClickUp ID</th>
+                                                <th className="text-left px-3 py-2 text-[11px] uppercase tracking-wider text-slate-500">Last seen</th>
+                                                <th className="text-right px-5 py-2 text-[11px] uppercase tracking-wider text-slate-500">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {unmatchedClickup.map((u: any) => (
+                                                <tr key={u.id} className="border-b border-white/5 hover:bg-white/5">
+                                                    <td className="px-5 py-2 text-slate-200">{u.name || "—"}</td>
+                                                    <td className="px-3 py-2 text-slate-400">{u.email}</td>
+                                                    <td className="px-3 py-2 text-slate-500 font-mono text-[11px]">{u.clickupUserId}</td>
+                                                    <td className="px-3 py-2 text-slate-500 text-[11px]">{u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleString() : "—"}</td>
+                                                    <td className="px-5 py-2">
+                                                        <div className="flex items-center justify-end gap-2">
+                                                            <button
+                                                                onClick={() => handleOnboardUnmatched(u.id)}
+                                                                disabled={unmatchedBusyId === u.id}
+                                                                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-medium rounded-lg transition-all disabled:opacity-50">
+                                                                {unmatchedBusyId === u.id ? "…" : "Onboard to HR"}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleDismissUnmatched(u.id)}
+                                                                disabled={unmatchedBusyId === u.id}
+                                                                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-slate-300 text-[11px] font-medium rounded-lg transition-all disabled:opacity-50">
+                                                                Dismiss
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -909,7 +1014,7 @@ export default function AdminPage() {
                                 <label className="text-[11px] text-slate-400 mb-1 block">ClickUp User ID (optional)</label>
                                 <input type="text" value={newUser.clickupUserId} onChange={e => setNewUser(p => ({ ...p, clickupUserId: e.target.value }))}
                                     className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
-                                    placeholder="Leave empty to auto-generate" />
+                                    placeholder="Leave empty — auto-linked when user appears in ClickUp sync" />
                             </div>
                         </div>
                         <div className="flex justify-end gap-3 pt-2">
