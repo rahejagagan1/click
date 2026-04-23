@@ -4,8 +4,86 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { useState, useEffect, useRef, useCallback, type MutableRefObject, type ReactNode } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+
+const FLYOUT_LEFT = 88;
+const FLYOUT_MARGIN = 8;
+
+function FlyoutPanel({
+    open,
+    triggerTop,
+    className,
+    onMouseEnter,
+    onMouseLeave,
+    children,
+}: {
+    open: boolean;
+    triggerTop: number;
+    className?: string;
+    onMouseEnter?: () => void;
+    onMouseLeave?: () => void;
+    children: ReactNode;
+}) {
+    const panelRef = useRef<HTMLDivElement | null>(null);
+    const [style, setStyle] = useState<{ top: number; maxHeight?: number }>({ top: triggerTop });
+
+    useLayoutEffect(() => {
+        if (!open) return;
+        const el = panelRef.current;
+        if (!el) return;
+
+        const adjust = () => {
+            const node = panelRef.current;
+            if (!node) return;
+            const vh = window.innerHeight;
+            const maxAvail = vh - 2 * FLYOUT_MARGIN;
+            const h = node.getBoundingClientRect().height;
+
+            let top = triggerTop;
+            let maxHeight: number | undefined;
+
+            if (h > maxAvail) {
+                top = FLYOUT_MARGIN;
+                maxHeight = maxAvail;
+            } else if (triggerTop + h + FLYOUT_MARGIN > vh) {
+                top = Math.max(FLYOUT_MARGIN, vh - h - FLYOUT_MARGIN);
+            }
+            setStyle({ top, maxHeight });
+        };
+
+        adjust();
+        const ro = new ResizeObserver(adjust);
+        ro.observe(el);
+        window.addEventListener("resize", adjust);
+        return () => {
+            ro.disconnect();
+            window.removeEventListener("resize", adjust);
+        };
+    }, [open, triggerTop]);
+
+    if (!open || typeof document === "undefined") return null;
+
+    return createPortal(
+        <div
+            ref={panelRef}
+            style={{
+                position: "fixed",
+                left: FLYOUT_LEFT,
+                top: style.top,
+                zIndex: 9999,
+                maxHeight: style.maxHeight,
+                overflowY: style.maxHeight ? "auto" : undefined,
+            }}
+            className={className}
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+        >
+            {children}
+        </div>,
+        document.body,
+    );
+}
 import { cn } from "@/lib/utils";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
@@ -295,44 +373,42 @@ export default function Sidebar() {
                                     </svg>
                                 </div>
 
-                                {feedbackHovered && typeof document !== "undefined" && createPortal(
-                                    <div
-                                        style={{ position: "fixed", left: 88, top: feedbackY, zIndex: 9999 }}
-                                        className="w-56 bg-[#eef2f6] border border-[#cfd8e3] rounded-xl shadow-xl shadow-slate-300/30 py-2 animate-in fade-in slide-in-from-left-2 duration-200"
-                                        onMouseEnter={handleFeedbackMouseEnter}
-                                        onMouseLeave={handleFeedbackMouseLeave}
+                                <FlyoutPanel
+                                    open={feedbackHovered}
+                                    triggerTop={feedbackY}
+                                    className="w-56 bg-[#eef2f6] border border-[#cfd8e3] rounded-xl shadow-xl shadow-slate-300/30 py-2 animate-in fade-in slide-in-from-left-2 duration-200"
+                                    onMouseEnter={handleFeedbackMouseEnter}
+                                    onMouseLeave={handleFeedbackMouseLeave}
+                                >
+                                    <Link
+                                        href="/dashboard/feedback"
+                                        className={cn(
+                                            "flex items-center justify-between px-4 py-2 text-sm transition-all duration-150",
+                                            isFeedbackFormActive
+                                                ? "text-[#1f3b57] bg-[#dfe7f1] font-medium"
+                                                : "text-[#34495e] hover:text-[#1f3b57] hover:bg-[#dde4ec]"
+                                        )}
                                     >
-                                        <Link
-                                            href="/dashboard/feedback"
-                                            className={cn(
-                                                "flex items-center justify-between px-4 py-2 text-sm transition-all duration-150",
-                                                isFeedbackFormActive
-                                                    ? "text-[#1f3b57] bg-[#dfe7f1] font-medium"
-                                                    : "text-[#34495e] hover:text-[#1f3b57] hover:bg-[#dde4ec]"
-                                            )}
-                                        >
-                                            <span className="truncate">Anonymous feedback</span>
-                                            <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                            </svg>
-                                        </Link>
-                                        <Link
-                                            href="/dashboard/feedback_inbox"
-                                            className={cn(
-                                                "flex items-center justify-between px-4 py-2 text-sm transition-all duration-150",
-                                                isFeedbackInboxActive
-                                                    ? "text-[#1f3b57] bg-[#dfe7f1] font-medium"
-                                                    : "text-[#34495e] hover:text-[#1f3b57] hover:bg-[#dde4ec]"
-                                            )}
-                                        >
-                                            <span className="truncate">Feedback inbox</span>
-                                            <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                            </svg>
-                                        </Link>
-                                    </div>,
-                                    document.body
-                                )}
+                                        <span className="truncate">NB Unplugged</span>
+                                        <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                        </svg>
+                                    </Link>
+                                    <Link
+                                        href="/dashboard/feedback_inbox"
+                                        className={cn(
+                                            "flex items-center justify-between px-4 py-2 text-sm transition-all duration-150",
+                                            isFeedbackInboxActive
+                                                ? "text-[#1f3b57] bg-[#dfe7f1] font-medium"
+                                                : "text-[#34495e] hover:text-[#1f3b57] hover:bg-[#dde4ec]"
+                                        )}
+                                    >
+                                        <span className="truncate">NB Unplugged inbox</span>
+                                        <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                        </svg>
+                                    </Link>
+                                </FlyoutPanel>
                             </div>
                         );
                     }
@@ -409,50 +485,48 @@ export default function Sidebar() {
                         </div>
 
                         {/* Flyout submenu — admins only, portalled to escape overflow clip */}
-                        {reportHovered && typeof document !== "undefined" && createPortal(
-                            <div
-                                style={{ position: "fixed", left: 88, top: reportY, zIndex: 9999 }}
-                                className="w-52 bg-[#eef2f6] border border-[#cfd8e3] rounded-xl shadow-xl shadow-slate-300/30 py-2 animate-in fade-in slide-in-from-left-2 duration-200"
-                                onMouseEnter={handleReportMouseEnter}
-                                onMouseLeave={handleReportMouseLeave}
-                            >
-                                <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-medium mb-1 px-4 py-1">
-                                    Manager Reports
-                                </p>
-                                {!managersLoaded ? (
-                                    <div className="px-4 py-3">
-                                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                                            <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                                            </svg>
-                                            Loading...
-                                        </div>
+                        <FlyoutPanel
+                            open={reportHovered}
+                            triggerTop={reportY}
+                            className="w-52 bg-[#eef2f6] border border-[#cfd8e3] rounded-xl shadow-xl shadow-slate-300/30 py-2 animate-in fade-in slide-in-from-left-2 duration-200"
+                            onMouseEnter={handleReportMouseEnter}
+                            onMouseLeave={handleReportMouseLeave}
+                        >
+                            <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-medium mb-1 px-4 py-1">
+                                Manager Reports
+                            </p>
+                            {!managersLoaded ? (
+                                <div className="px-4 py-3">
+                                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                        </svg>
+                                        Loading...
                                     </div>
-                                ) : managers.length === 0 ? (
-                                    <p className="text-xs text-slate-500 px-4 py-2">No managers found</p>
-                                ) : (
-                                    managers.map((manager) => (
-                                        <Link
-                                            key={manager.id}
-                                            href={`/dashboard/reports/${manager.id}`}
-                                            className={cn(
-                                                "flex items-center justify-between px-4 py-2 text-sm transition-all duration-150",
-                                                pathname === `/dashboard/reports/${manager.id}`
-                                                    ? "text-[#1f3b57] bg-[#dfe7f1] font-medium"
-                                                    : "text-[#34495e] hover:text-[#1f3b57] hover:bg-[#dde4ec]"
-                                            )}
-                                        >
-                                            <span className="truncate">{manager.name}</span>
-                                            <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                            </svg>
-                                        </Link>
-                                    ))
-                                )}
-                            </div>,
-                            document.body
-                        )}
+                                </div>
+                            ) : managers.length === 0 ? (
+                                <p className="text-xs text-slate-500 px-4 py-2">No managers found</p>
+                            ) : (
+                                managers.map((manager) => (
+                                    <Link
+                                        key={manager.id}
+                                        href={`/dashboard/reports/${manager.id}`}
+                                        className={cn(
+                                            "flex items-center justify-between px-4 py-2 text-sm transition-all duration-150",
+                                            pathname === `/dashboard/reports/${manager.id}`
+                                                ? "text-[#1f3b57] bg-[#dfe7f1] font-medium"
+                                                : "text-[#34495e] hover:text-[#1f3b57] hover:bg-[#dde4ec]"
+                                        )}
+                                    >
+                                        <span className="truncate">{manager.name}</span>
+                                        <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                        </svg>
+                                    </Link>
+                                ))
+                            )}
+                        </FlyoutPanel>
                     </div>
                 ))}
 
@@ -494,36 +568,34 @@ export default function Sidebar() {
                             </div>
 
                             {/* Flyout submenu */}
-                            {deptHovered && typeof document !== "undefined" && createPortal(
-                                <div
-                                    style={{ position: "fixed", left: 88, top: deptY, zIndex: 9999 }}
-                                    className="w-52 bg-[#eef2f6] border border-[#cfd8e3] rounded-xl shadow-xl shadow-slate-300/30 py-2 animate-in fade-in slide-in-from-left-2 duration-200"
-                                    onMouseEnter={handleDeptMouseEnter}
-                                    onMouseLeave={handleDeptMouseLeave}
-                                >
-                                    <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-medium mb-1 px-4 py-1">
-                                        Departments
-                                    </p>
-                                    {DEPARTMENTS.map((dept) => (
-                                        <Link
-                                            key={dept.slug}
-                                            href={`/dashboard/departments/${dept.slug}`}
-                                            className={cn(
-                                                "flex items-center justify-between px-4 py-2 text-sm transition-all duration-150",
-                                                pathname === `/dashboard/departments/${dept.slug}`
-                                                    ? "text-[#1f3b57] bg-[#dfe7f1] font-medium"
-                                                    : "text-[#34495e] hover:text-[#1f3b57] hover:bg-[#dde4ec]"
-                                            )}
-                                        >
-                                            <span className="truncate">{dept.label}</span>
-                                            <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                            </svg>
-                                        </Link>
-                                    ))}
-                                </div>,
-                                document.body
-                            )}
+                            <FlyoutPanel
+                                open={deptHovered}
+                                triggerTop={deptY}
+                                className="w-52 bg-[#eef2f6] border border-[#cfd8e3] rounded-xl shadow-xl shadow-slate-300/30 py-2 animate-in fade-in slide-in-from-left-2 duration-200"
+                                onMouseEnter={handleDeptMouseEnter}
+                                onMouseLeave={handleDeptMouseLeave}
+                            >
+                                <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-medium mb-1 px-4 py-1">
+                                    Departments
+                                </p>
+                                {DEPARTMENTS.map((dept) => (
+                                    <Link
+                                        key={dept.slug}
+                                        href={`/dashboard/departments/${dept.slug}`}
+                                        className={cn(
+                                            "flex items-center justify-between px-4 py-2 text-sm transition-all duration-150",
+                                            pathname === `/dashboard/departments/${dept.slug}`
+                                                ? "text-[#1f3b57] bg-[#dfe7f1] font-medium"
+                                                : "text-[#34495e] hover:text-[#1f3b57] hover:bg-[#dde4ec]"
+                                        )}
+                                    >
+                                        <span className="truncate">{dept.label}</span>
+                                        <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                        </svg>
+                                    </Link>
+                                ))}
+                            </FlyoutPanel>
                         </div>
                     );
                 })()}
@@ -642,37 +714,29 @@ export default function Sidebar() {
                             )}
 
                             {/* ── Portal flyouts — escape overflow-y:auto, open sideways ── */}
-                            {hrMeOpen && typeof document !== "undefined" && createPortal(
-                                <div style={{ position: "fixed", left: 88, top: hrMeY, zIndex: 9999 }}
-                                    className={panelCls} {...meHandlers}>
-                                    <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">My Space</p>
-                                    {fl("/dashboard/hr/attendance", "Attendance"       )}
-                                    {fl("/dashboard/hr/leaves",     "Leave"            )}
-                                    <div className="my-1 mx-3 border-t border-[#d1dae5]" />
-                                    {fl("/dashboard/hr/payroll",    "My Finances"      )}
-                                    <div className="my-1 mx-3 border-t border-[#d1dae5]" />
-                                    {fl("/dashboard/hr/goals",      "Goals"            )}
-                                    {fl("/dashboard/hr/documents",  "Documents"        )}
-                                    {fl("/dashboard/hr/tickets",    "Helpdesk"         )}
-                                </div>,
-                                document.body
-                            )}
+                            <FlyoutPanel open={hrMeOpen} triggerTop={hrMeY} className={panelCls} {...meHandlers}>
+                                <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">My Space</p>
+                                {fl("/dashboard/hr/attendance", "Attendance"       )}
+                                {fl("/dashboard/hr/leaves",     "Leave"            )}
+                                <div className="my-1 mx-3 border-t border-[#d1dae5]" />
+                                {fl("/dashboard/hr/payroll",    "My Finances"      )}
+                                <div className="my-1 mx-3 border-t border-[#d1dae5]" />
+                                {fl("/dashboard/hr/goals",      "Goals"            )}
+                                {fl("/dashboard/hr/documents",  "Documents"        )}
+                                {fl("/dashboard/hr/tickets",    "Helpdesk"         )}
+                            </FlyoutPanel>
 
-                            {hrTeamOpen && typeof document !== "undefined" && createPortal(
-                                <div style={{ position: "fixed", left: 88, top: hrTeamY, zIndex: 9999 }}
-                                    className={panelCls} {...teamHandlers}>
-                                    <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">My Team</p>
-                                    {fl("/dashboard/hr/my-team", "Team Overview")}
-                                    {fl("/dashboard/hr/inbox",   "Inbox",
-                                        inboxCount > 0 ? (
-                                            <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[#008CFF] text-white text-[10px] font-bold flex items-center justify-center leading-none tabular-nums">
-                                                {inboxCount > 99 ? "99+" : inboxCount}
-                                            </span>
-                                        ) : undefined
-                                    )}
-                                </div>,
-                                document.body
-                            )}
+                            <FlyoutPanel open={hrTeamOpen} triggerTop={hrTeamY} className={panelCls} {...teamHandlers}>
+                                <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">My Team</p>
+                                {fl("/dashboard/hr/my-team", "Team Overview")}
+                                {fl("/dashboard/hr/inbox",   "Inbox",
+                                    inboxCount > 0 ? (
+                                        <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[#008CFF] text-white text-[10px] font-bold flex items-center justify-center leading-none tabular-nums">
+                                            {inboxCount > 99 ? "99+" : inboxCount}
+                                        </span>
+                                    ) : undefined
+                                )}
+                            </FlyoutPanel>
 
                         </>
                     );
