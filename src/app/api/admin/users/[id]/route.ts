@@ -5,13 +5,15 @@ import { requireAdmin, serverError } from "@/lib/api-auth";
 
 export async function PATCH(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     const { errorResponse } = await requireAdmin();
     if (errorResponse) return errorResponse;
 
+
+        const { id: idRaw } = await params;
     try {
-        const id = parseInt(params.id);
+        const id = parseInt(idRaw);
         if (isNaN(id)) {
             return NextResponse.json({ error: "Invalid user ID" }, { status: 400 });
         }

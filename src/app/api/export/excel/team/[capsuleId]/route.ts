@@ -4,10 +4,11 @@ import { generateTeamExcel } from "@/lib/excel/generator";
 
 export async function GET(
     request: Request,
-    { params }: { params: { capsuleId: string } }
+    { params }: { params: Promise<{ capsuleId: string }> }
 ) {
     try {
-        const capsuleId = parseInt(params.capsuleId);
+        const { capsuleId: capsuleIdRaw } = await params;
+        const capsuleId = parseInt(capsuleIdRaw);
         if (isNaN(capsuleId)) {
             return NextResponse.json({ error: "Invalid capsule ID" }, { status: 400 });
         }

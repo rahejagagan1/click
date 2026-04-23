@@ -4,16 +4,17 @@ import { requireAuth , serverError } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
-type Params = { managerId: string; week: string };
-
+type Params = Promise<{ managerId: string; week: string }>;
 /* ── GET — load weekly report ── */
 export async function GET(req: NextRequest, { params }: { params: Params }) {
     try {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const managerId = parseInt(params.managerId);
-        const week      = parseInt(params.week);
+
+        const { managerId: managerIdRaw, week: weekRaw } = await params;
+        const managerId = parseInt(managerIdRaw);
+        const week      = parseInt(weekRaw);
         const month     = parseInt(req.nextUrl.searchParams.get("month") ?? "");
         const year      = parseInt(req.nextUrl.searchParams.get("year")  ?? "");
 
@@ -55,8 +56,10 @@ export async function DELETE(req: NextRequest, { params }: { params: Params }) {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const managerId = parseInt(params.managerId);
-        const week      = parseInt(params.week);
+
+        const { managerId: managerIdRaw, week: weekRaw } = await params;
+        const managerId = parseInt(managerIdRaw);
+        const week      = parseInt(weekRaw);
         const month     = parseInt(req.nextUrl.searchParams.get("month") ?? "");
         const year      = parseInt(req.nextUrl.searchParams.get("year")  ?? "");
 
@@ -91,8 +94,10 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const managerId = parseInt(params.managerId);
-        const week      = parseInt(params.week);
+
+        const { managerId: managerIdRaw, week: weekRaw } = await params;
+        const managerId = parseInt(managerIdRaw);
+        const week      = parseInt(weekRaw);
         const body      = await req.json();
         const { month, year, isDraft, writerRows, editorRows, researcherRows, overviewRows, viewsRows } = body;
 

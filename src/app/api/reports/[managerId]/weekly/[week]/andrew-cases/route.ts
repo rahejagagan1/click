@@ -5,15 +5,16 @@ import { getWeeklyReportPeriod } from "@/lib/reports/weekly-period";
 
 export const dynamic = "force-dynamic";
 
-type Params = { managerId: string; week: string };
-
+type Params = Promise<{ managerId: string; week: string }>;
 export async function GET(req: NextRequest, { params }: { params: Params }) {
     try {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const managerId = parseInt(params.managerId);
-        const week      = parseInt(params.week);
+
+        const { managerId: managerIdRaw, week: weekRaw } = await params;
+        const managerId = parseInt(managerIdRaw);
+        const week      = parseInt(weekRaw);
         const month     = parseInt(req.nextUrl.searchParams.get("month") ?? "");
         const year      = parseInt(req.nextUrl.searchParams.get("year")  ?? "");
 

@@ -147,6 +147,11 @@ export default function ScoreHubPage() {
     // Collect team members for manager rating form (exclude self)
     const allUsers = (Object.values(roleGroups).flat() as any[]).filter((u: any) => u.id !== currentUser.dbId);
 
+    // Safety net — dedupe the month list on the client so a legacy API
+    // response that still has duplicates never crashes the <select>. The API
+    // already dedupes, but belt-and-suspenders is cheap here.
+    const uniqueMonths = Array.from(new Set(availableMonths));
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -165,7 +170,7 @@ export default function ScoreHubPage() {
                             onChange={(e) => setSelectedMonth(e.target.value)}
                             className="appearance-none pl-9 pr-8 py-2.5 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500/50"
                         >
-                            {(availableMonths.length > 0 ? availableMonths : [selectedMonth]).map((m) => (
+                            {(uniqueMonths.length > 0 ? uniqueMonths : [selectedMonth]).map((m) => (
                                 <option key={m} value={m} className="bg-white dark:bg-[#1a1a2e] dark:text-slate-200">
                                     {formatMonthLabel(m)}
                                 </option>

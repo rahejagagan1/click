@@ -7,10 +7,11 @@ export const dynamic = 'force-dynamic';
 
 export async function PUT(
     request: Request,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const id = parseInt(params.id);
+        const { id: idRaw } = await params;
+        const id = parseInt(idRaw);
         if (isNaN(id)) {
             return NextResponse.json({ error: "Invalid user ID" }, { status: 400 });
         }

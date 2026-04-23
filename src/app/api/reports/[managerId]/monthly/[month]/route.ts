@@ -11,8 +11,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-type Params = { managerId: string; month: string };
-
+type Params = Promise<{ managerId: string; month: string }>;
 // Production Volume auto-fill: for production managers, Total Video Completed is
 // the count of cases with a Video QA1 subtask done in the reporting window
 // (day 4 of month M → end of day 3 of month M+1; see monthly-window.ts), and
@@ -76,8 +75,10 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const managerId = parseInt(params.managerId);
-        const month     = parseInt(params.month);
+
+        const { managerId: managerIdRaw, month: monthRaw } = await params;
+        const managerId = parseInt(managerIdRaw);
+        const month     = parseInt(monthRaw);
         const year      = parseInt(req.nextUrl.searchParams.get("year") ?? "");
 
         if (isNaN(managerId) || isNaN(month) || isNaN(year)) {
@@ -189,8 +190,10 @@ export async function DELETE(req: NextRequest, { params }: { params: Params }) {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const managerId = parseInt(params.managerId);
-        const month     = parseInt(params.month);
+
+        const { managerId: managerIdRaw, month: monthRaw } = await params;
+        const managerId = parseInt(managerIdRaw);
+        const month     = parseInt(monthRaw);
         const year      = parseInt(req.nextUrl.searchParams.get("year") ?? "");
 
         if (isNaN(managerId) || isNaN(month) || isNaN(year)) {
@@ -224,8 +227,10 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
         const { session, errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const managerId = parseInt(params.managerId);
-        const month     = parseInt(params.month);
+
+        const { managerId: managerIdRaw, month: monthRaw } = await params;
+        const managerId = parseInt(managerIdRaw);
+        const month     = parseInt(monthRaw);
         const body      = await req.json();
         const { year, isDraft, ...fields } = body;
 

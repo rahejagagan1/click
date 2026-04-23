@@ -4,8 +4,7 @@ import { requireAuth , serverError } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
-type Params = { managerId: string; month: string };
-
+type Params = Promise<{ managerId: string; month: string }>;
 /**
  * GET /api/reports/[managerId]/monthly/[month]/researcher-stats?year=2026
  *
@@ -17,8 +16,10 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const managerId = parseInt(params.managerId);
-        const month     = parseInt(params.month);          // 0-indexed (Jan=0)
+
+        const { managerId: managerIdRaw, month: monthRaw } = await params;
+        const managerId = parseInt(managerIdRaw);
+        const month     = parseInt(monthRaw);          // 0-indexed (Jan=0)
         const year      = parseInt(req.nextUrl.searchParams.get("year") ?? "");
 
         if (isNaN(managerId) || isNaN(month) || isNaN(year)) {
