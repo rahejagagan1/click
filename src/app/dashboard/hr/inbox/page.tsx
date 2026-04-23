@@ -1,22 +1,49 @@
 "use client";
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { TreePine, IndianRupee, Clock, CheckCircle2, Home, Briefcase, Gift, Plane } from "lucide-react";
+import {
+  TreePine, IndianRupee, Clock, CheckCircle2, Home, Briefcase, Gift,
+  Search, Bell, Archive as ArchiveIcon, Inbox as InboxIcon, XCircle,
+} from "lucide-react";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Theme tokens — matches the rest of the HR module.
+// ─────────────────────────────────────────────────────────────────────────────
 const C = {
-  card:    "bg-white dark:bg-[#101c2e] border border-[#e2e8f0] dark:border-[rgba(255,255,255,0.06)] shadow-[0_1px_3px_rgba(0,0,0,0.07)] dark:shadow-none rounded-2xl",
+  shell:   "bg-[#f1f5f9] dark:bg-[#0b1220]",
+  header:  "bg-white dark:bg-[#0d1b2e] border-[#e2e8f0] dark:border-[rgba(255,255,255,0.06)]",
+  card:    "bg-white dark:bg-[#001529] border border-[#e2e8f0] dark:border-[rgba(255,255,255,0.06)]",
   t1:      "text-[#1e293b] dark:text-[#e2e8f0]",
   t2:      "text-[#475569] dark:text-[#8892a4]",
   t3:      "text-[#94a3b8] dark:text-[#64748b]",
   divider: "border-[#e2e8f0] dark:border-[rgba(255,255,255,0.06)]",
+  accent:  "#008CFF",
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+const fmtDate = (s: string) =>
+  new Date(s).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+const fmtRel  = (s: string) => {
+  const diff = Date.now() - new Date(s).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1)   return "just now";
+  if (m < 60)  return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24)  return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30)  return `${d}d ago`;
+  const mo = Math.floor(d / 30);
+  return `${mo}mo ago`;
 };
 
 function Av({ name, url, size = 36 }: { name: string; url?: string; size?: number }) {
-  const initials = name.split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase();
+  const initials = (name || "?").split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase();
   const colors = ["#4f46e5","#0891b2","#059669","#d97706","#dc2626","#7c3aed"];
-  const bg = colors[name.charCodeAt(0) % colors.length];
-  if (url) return <img src={url} alt={name} className="rounded-full object-cover" style={{ width: size, height: size, flexShrink: 0 }} />;
+  const bg = colors[(name || "?").charCodeAt(0) % colors.length];
+  if (url) return <img src={url} alt={name} className="rounded-full object-cover shrink-0" style={{ width: size, height: size }} />;
   return (
     <div className="rounded-full flex items-center justify-center font-bold text-white shrink-0"
       style={{ width: size, height: size, background: bg, fontSize: size * 0.33 }}>
@@ -25,264 +52,488 @@ function Av({ name, url, size = 36 }: { name: string; url?: string; size?: numbe
   );
 }
 
-function ActionRow({ item, prefix, onApprove, onReject, approving, children }: any) {
-  const key = `${prefix}${item.id}`;
-  return (
-    <div className={`flex items-center gap-4 px-5 py-4 border-b last:border-0 ${C.divider}`}>
-      <Av name={item.user?.name || "?"} url={item.user?.profilePictureUrl} />
-      <div className="flex-1 min-w-0">{children}</div>
-      <div className="flex items-center gap-2 shrink-0">
-        <button onClick={() => onApprove(item.id)} disabled={approving[key]}
-          className="h-7 px-3 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg text-[11px] font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-500/20 disabled:opacity-40">
-          Approve
-        </button>
-        <button onClick={() => onReject(item.id)} disabled={approving[key]}
-          className="h-7 px-3 bg-red-50 dark:bg-red-500/10 text-red-500 dark:text-red-400 rounded-lg text-[11px] font-semibold hover:bg-red-100 dark:hover:bg-red-500/20 disabled:opacity-40">
-          Reject
-        </button>
-      </div>
-    </div>
-  );
+// ─────────────────────────────────────────────────────────────────────────────
+// Category taxonomy — drives the left sidebar.
+// ─────────────────────────────────────────────────────────────────────────────
+type CatKey = "leaves" | "expenses" | "regularizations" | "wfh" | "onDuty" | "compOff";
+
+type Cat = {
+  key: CatKey;
+  label: string;
+  Icon: any;
+  color: string;          // icon colour
+  bucket: CatKey;         // matches the key on /api/hr/inbox response
+  prefix: string;         // unique prefix for per-item request keys
+};
+
+const CATEGORIES: Cat[] = [
+  { key: "leaves",          label: "Leave Requests",            Icon: TreePine,     color: "text-violet-500", bucket: "leaves",          prefix: "l"  },
+  { key: "expenses",        label: "Expense Claims",            Icon: IndianRupee,  color: "text-emerald-500",bucket: "expenses",        prefix: "e"  },
+  { key: "regularizations", label: "Attendance Regularization", Icon: Clock,        color: "text-amber-500",  bucket: "regularizations", prefix: "r"  },
+  { key: "wfh",             label: "Work From Home",            Icon: Home,         color: "text-cyan-500",   bucket: "wfh",             prefix: "w"  },
+  { key: "onDuty",          label: "On Duty",                   Icon: Briefcase,    color: "text-indigo-500", bucket: "onDuty",          prefix: "od" },
+  { key: "compOff",         label: "Comp-Off",                  Icon: Gift,         color: "text-pink-500",   bucket: "compOff",         prefix: "co" },
+];
+
+// Build the right-panel detail rows for each category.
+function detailFor(cat: Cat, item: any) {
+  switch (cat.key) {
+    case "leaves":
+      return [
+        ["Leave Type", item.leaveType?.name],
+        ["From",       fmtDate(item.fromDate)],
+        ["To",         fmtDate(item.toDate)],
+        ["Total Days", `${parseFloat(item.totalDays).toFixed(1)} day${parseFloat(item.totalDays) !== 1 ? "s" : ""}`],
+        ["Applied On", fmtDate(item.appliedAt)],
+      ];
+    case "expenses":
+      return [
+        ["Title",    item.title],
+        ["Category", item.category],
+        ["Amount",   `₹${Number(item.amount).toLocaleString("en-IN")}`],
+        ["Created",  fmtDate(item.createdAt)],
+      ];
+    case "regularizations":
+      return [
+        ["Date",      fmtDate(item.date)],
+        ...(item.requestedIn  ? [["Requested In",  new Date(item.requestedIn).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})] as [string, string] ] : []),
+        ...(item.requestedOut ? [["Requested Out", new Date(item.requestedOut).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})] as [string, string] ] : []),
+        ["Submitted", fmtDate(item.createdAt)],
+      ];
+    case "wfh":
+      return [
+        ["Date",      fmtDate(item.date)],
+        ["Submitted", fmtDate(item.createdAt)],
+      ];
+    case "onDuty":
+      return [
+        ["Date",       fmtDate(item.date)],
+        ...(item.fromTime ? [["From Time", item.fromTime] as [string, string]] : []),
+        ...(item.toTime   ? [["To Time",   item.toTime]   as [string, string]] : []),
+        ...(item.location ? [["Location",  item.location] as [string, string]] : []),
+      ];
+    case "compOff":
+      return [
+        ["Worked Date", fmtDate(item.workedDate)],
+        ["Credit",      `${parseFloat(item.creditDays).toFixed(1)} day`],
+        ["Submitted",   fmtDate(item.createdAt)],
+      ];
+  }
 }
 
-function SectionBlock({ icon: Icon, label, count, color, bgColor, items, prefix, onApprove, onReject, approving, children }: any) {
-  if (!items?.length) return null;
-  return (
-    <section>
-      <div className="flex items-center gap-2 mb-3">
-        <Icon className={`w-4 h-4 ${color}`} />
-        <h2 className={`text-[13px] font-semibold ${C.t1}`}>{label}</h2>
-        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${bgColor}`}>{count}</span>
-      </div>
-      <div className={`${C.card} overflow-hidden`}>
-        {items.map((item: any) => (
-          <ActionRow key={item.id} item={item} prefix={prefix} onApprove={onApprove} onReject={onReject} approving={approving}>
-            {children(item)}
-          </ActionRow>
-        ))}
-      </div>
-    </section>
-  );
+// Route each approval action to the right endpoint.
+function approvalUrlFor(cat: Cat, item: any, action: "approve" | "reject") {
+  switch (cat.key) {
+    case "leaves":          return { url: `/api/hr/leaves/${item.id}`,           body: { action } };
+    case "expenses":        return { url: `/api/hr/expenses/${item.id}`,         body: { action } };
+    case "regularizations": return { url: `/api/hr/attendance/regularize`,       body: { id: item.id, action } };
+    case "wfh":             return { url: `/api/hr/attendance/wfh`,              body: { id: item.id, action } };
+    case "onDuty":          return { url: `/api/hr/attendance/on-duty`,          body: { id: item.id, action } };
+    case "compOff":         return { url: `/api/hr/leaves/comp-off`,             body: { id: item.id, action } };
+  }
 }
 
-type Tab = "all" | "leaves" | "expenses" | "attendance" | "travel";
+// ─────────────────────────────────────────────────────────────────────────────
+// Page
+// ─────────────────────────────────────────────────────────────────────────────
+type TopTab = "take_action" | "notifications" | "archive";
 
 export default function InboxPage() {
-  const [tab, setTab] = useState<Tab>("all");
+  const [topTab, setTopTab]       = useState<TopTab>("take_action");
+  const [catKey, setCatKey]       = useState<CatKey>("leaves");
+  const [selectedId, setSelected] = useState<number | null>(null);
+  const [search, setSearch]       = useState("");
+  const [sort, setSort]           = useState<"newest" | "oldest">("newest");
   const [approving, setApproving] = useState<Record<string, boolean>>({});
 
-  const { data, isLoading, mutate: revalidate } = useSWR("/api/hr/inbox", fetcher);
+  const endpoint =
+    topTab === "archive"
+      ? "/api/hr/inbox?view=archive"
+      : topTab === "notifications"
+      ? "/api/hr/notifications"
+      : "/api/hr/inbox";
 
-  const leaves         = data?.leaves          ?? [];
-  const expenses       = data?.expenses        ?? [];
-  const regs           = data?.regularizations ?? [];
-  const wfh            = data?.wfh             ?? [];
-  const onDuty         = data?.onDuty          ?? [];
-  const compOff        = data?.compOff         ?? [];
-  const travel         = data?.travel          ?? [];
-  const total          = data?.total ?? 0;
+  const { data, isLoading } = useSWR(endpoint, fetcher);
 
-  const attendanceTotal = regs.length + wfh.length + onDuty.length + compOff.length;
+  // Counts for sidebar badges — only meaningful for take_action + archive.
+  const counts = useMemo(() => {
+    if (!data || topTab === "notifications") return {} as Record<CatKey, number>;
+    return Object.fromEntries(
+      CATEGORIES.map(c => [c.key, (data[c.bucket] ?? []).length])
+    ) as Record<CatKey, number>;
+  }, [data, topTab]);
 
-  const act = async (url: string, body: object, key: string) => {
+  const total = useMemo(() => {
+    if (topTab === "notifications") return data?.unreadCount ?? 0;
+    return data?.total ?? 0;
+  }, [data, topTab]);
+
+  // Items visible in the middle column for the current category.
+  const items: any[] = useMemo(() => {
+    if (!data || topTab === "notifications") return [];
+    const cat = CATEGORIES.find(c => c.key === catKey);
+    if (!cat) return [];
+    let list: any[] = data[cat.bucket] ?? [];
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter((it: any) =>
+        (it.user?.name || "").toLowerCase().includes(q) ||
+        (it.reason    || "").toLowerCase().includes(q) ||
+        (it.title     || "").toLowerCase().includes(q)
+      );
+    }
+    list = [...list].sort((a, b) => {
+      const ta = new Date(a.createdAt ?? a.appliedAt ?? a.updatedAt).getTime();
+      const tb = new Date(b.createdAt ?? b.appliedAt ?? b.updatedAt).getTime();
+      return sort === "newest" ? tb - ta : ta - tb;
+    });
+    return list;
+  }, [data, catKey, topTab, search, sort]);
+
+  // Default selection: first item whenever the category or dataset changes.
+  useEffect(() => {
+    if (items.length === 0) { setSelected(null); return; }
+    if (!items.find(it => it.id === selectedId)) setSelected(items[0].id);
+  }, [items, selectedId]);
+
+  const selected = useMemo(() => items.find(it => it.id === selectedId), [items, selectedId]);
+  const activeCat = CATEGORIES.find(c => c.key === catKey)!;
+
+  // ── Approve / Reject ──────────────────────────────────────────────────
+  const act = async (action: "approve" | "reject") => {
+    if (!selected) return;
+    const { url, body } = approvalUrlFor(activeCat, selected, action);
+    const key = `${activeCat.prefix}${selected.id}`;
     setApproving(p => ({ ...p, [key]: true }));
-    await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    setApproving(p => ({ ...p, [key]: false }));
-    revalidate();
-    mutate((k: string) => typeof k === "string" && (
-      k.includes("/api/hr/leaves") || k.includes("/api/hr/expenses") ||
-      k.includes("/api/hr/attendance") || k.includes("/api/hr/travel") || k.includes("/api/hr/inbox")
-    ));
+    try {
+      await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      // Bust every related cache so the user sees the change everywhere.
+      mutate((k: string) => typeof k === "string" && (
+        k.includes("/api/hr/leaves") || k.includes("/api/hr/expenses") ||
+        k.includes("/api/hr/attendance") || k.includes("/api/hr/inbox") ||
+        k.includes("/api/hr/notifications")
+      ));
+    } finally {
+      setApproving(p => ({ ...p, [key]: false }));
+    }
   };
 
-  const fmtDate = (s: string) => new Date(s).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-
-  const tabs: { key: Tab; label: string; count: number; icon: any; color: string; bg: string }[] = [
-    { key: "all",        label: "All",        count: total,          icon: null,        color: "text-[#008CFF]",    bg: "bg-[#008CFF]/10 text-[#008CFF]"       },
-    { key: "leaves",     label: "Leaves",     count: leaves.length,  icon: TreePine,    color: "text-violet-500",   bg: "bg-violet-100 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400" },
-    { key: "expenses",   label: "Expenses",   count: expenses.length + travel.length, icon: IndianRupee, color: "text-emerald-500", bg: "bg-emerald-100 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
-    { key: "attendance", label: "Attendance", count: attendanceTotal, icon: Clock,       color: "text-amber-500",    bg: "bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400"   },
-    { key: "travel",     label: "Travel",     count: travel.length,  icon: Plane,       color: "text-sky-500",      bg: "bg-sky-100 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400"           },
-  ];
-
+  // ─────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[#f1f5f9] dark:bg-[#0b1220]">
-      <div className="bg-white dark:bg-[#0d1b2e] border-b border-[#e2e8f0] dark:border-[rgba(255,255,255,0.06)] px-6 py-4">
+    <div className={`min-h-screen ${C.shell}`}>
+      {/* ── Header ── */}
+      <div className={`${C.header} border-b px-6 py-4`}>
         <h1 className={`text-[17px] font-semibold ${C.t1}`}>Inbox</h1>
-        <p className={`text-[12px] ${C.t3} mt-0.5`}>{total} pending action{total !== 1 ? "s" : ""} require your attention</p>
+        <p className={`text-[12px] ${C.t3} mt-0.5`}>
+          {topTab === "notifications"
+            ? `${total} unread notification${total !== 1 ? "s" : ""}`
+            : topTab === "archive"
+            ? `${total} recently resolved`
+            : `${total} pending action${total !== 1 ? "s" : ""} require your attention`}
+        </p>
       </div>
 
-      <div className="flex gap-0 bg-white dark:bg-[#0d1b2e] border-b border-[#e2e8f0] dark:border-[rgba(255,255,255,0.06)] px-6">
-        {tabs.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className={`flex items-center gap-1.5 px-4 py-3 text-[11px] font-bold tracking-wider border-b-2 transition-colors ${
-              tab === t.key ? "border-[#008CFF] text-[#008CFF]" : `border-transparent ${C.t2}`
-            }`}>
-            {t.icon && <t.icon className={`w-3.5 h-3.5 ${tab === t.key ? "text-[#008CFF]" : t.color}`} />}
-            {t.label}
-            {t.count > 0 && (
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tab === t.key ? "bg-[#008CFF] text-white" : "bg-slate-100 dark:bg-white/10 " + C.t3}`}>
-                {t.count}
-              </span>
-            )}
+      {/* ── Top tabs ── */}
+      <div className={`${C.header} border-b flex items-center gap-0 px-6`}>
+        {([
+          { key: "take_action",   label: "TAKE ACTION",   Icon: InboxIcon },
+          { key: "notifications", label: "NOTIFICATIONS", Icon: Bell      },
+          { key: "archive",       label: "ARCHIVE",       Icon: ArchiveIcon },
+        ] as const).map(({ key, label, Icon }) => (
+          <button
+            key={key}
+            onClick={() => setTopTab(key)}
+            className={`flex items-center gap-2 px-4 py-3 text-[11px] font-bold tracking-widest border-b-2 transition-colors ${
+              topTab === key
+                ? "border-[#008CFF] text-[#008CFF]"
+                : `border-transparent ${C.t2} hover:text-[#008CFF]`
+            }`}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            {label}
           </button>
         ))}
       </div>
 
-      <div className="px-6 py-5 space-y-6">
-        {isLoading ? (
-          <div className="flex items-center justify-center h-40">
-            <div className="w-8 h-8 border-2 border-[#008CFF] border-t-transparent rounded-full animate-spin" />
+      {/* ── Body ── */}
+      {topTab === "notifications" ? (
+        <NotificationsPane data={data} isLoading={isLoading} />
+      ) : (
+        <div className="flex min-h-[calc(100vh-170px)]">
+          {/* Left — categories */}
+          <aside className={`w-[240px] shrink-0 ${C.header} border-r`}>
+            <div className="px-4 py-3">
+              <p className={`text-[10px] font-bold tracking-widest ${C.t3} uppercase`}>
+                {topTab === "archive" ? "Archive · last 3 months" : "Pending tasks"}
+              </p>
+            </div>
+            <nav className="flex flex-col gap-0.5 px-2">
+              {CATEGORIES.map(cat => {
+                const n = counts[cat.key] ?? 0;
+                const active = catKey === cat.key;
+                return (
+                  <button
+                    key={cat.key}
+                    onClick={() => { setCatKey(cat.key); setSelected(null); }}
+                    className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12.5px] transition-colors text-left ${
+                      active
+                        ? "bg-[#008CFF]/10 text-[#008CFF]"
+                        : `${C.t2} hover:bg-slate-100 dark:hover:bg-white/[0.04]`
+                    }`}
+                  >
+                    <cat.Icon className={`w-4 h-4 ${active ? "text-[#008CFF]" : cat.color}`} />
+                    <span className="flex-1 truncate font-medium">{cat.label}</span>
+                    {n > 0 && (
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                        active ? "bg-[#008CFF] text-white" : "bg-slate-100 dark:bg-white/10 " + C.t3
+                      }`}>{n}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+          </aside>
+
+          {/* Middle — list */}
+          <div className={`w-[380px] shrink-0 border-r ${C.divider} bg-white dark:bg-[#0a1526]`}>
+            <div className={`flex items-center gap-2 px-4 py-3 border-b ${C.divider}`}>
+              <p className={`text-[10px] font-bold tracking-widest ${C.t2} uppercase flex-1 truncate`}>
+                {activeCat.label}
+              </p>
+              <select
+                value={sort}
+                onChange={e => setSort(e.target.value as any)}
+                className={`text-[10px] font-semibold tracking-wider uppercase bg-transparent ${C.t2} border-0 focus:outline-none cursor-pointer`}
+              >
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+              </select>
+            </div>
+            <div className={`px-4 py-2.5 border-b ${C.divider}`}>
+              <div className="flex items-center gap-2 bg-slate-50 dark:bg-white/[0.03] px-3 h-8 rounded-lg">
+                <Search className={`w-3.5 h-3.5 ${C.t3}`} />
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search"
+                  className={`flex-1 bg-transparent text-[12px] ${C.t1} placeholder-slate-400 focus:outline-none`}
+                />
+              </div>
+            </div>
+            <div className="overflow-y-auto max-h-[calc(100vh-260px)]">
+              {isLoading ? (
+                <div className="flex items-center justify-center h-40">
+                  <div className="w-6 h-6 border-2 border-[#008CFF] border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : items.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-40 text-center px-4">
+                  <CheckCircle2 className="w-7 h-7 text-emerald-400 mb-2" />
+                  <p className={`text-[12px] font-medium ${C.t1}`}>All caught up</p>
+                  <p className={`text-[11px] ${C.t3} mt-1`}>
+                    {topTab === "archive" ? "No resolved items here." : "Nothing pending in this category."}
+                  </p>
+                </div>
+              ) : (
+                items.map((item: any) => {
+                  const active = item.id === selectedId;
+                  const when   = item.createdAt ?? item.appliedAt ?? item.updatedAt;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setSelected(item.id)}
+                      className={`w-full text-left flex items-start gap-3 px-4 py-3 border-b ${C.divider} transition-colors ${
+                        active ? "bg-[#008CFF]/5 border-l-2 border-l-[#008CFF]" : "hover:bg-slate-50 dark:hover:bg-white/[0.025]"
+                      }`}
+                    >
+                      <Av name={item.user?.name || "?"} url={item.user?.profilePictureUrl} size={32} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className={`text-[12.5px] font-semibold ${C.t1} truncate`}>{item.user?.name || "Employee"}</p>
+                          {when && <span className={`text-[10px] ${C.t3} shrink-0`}>{fmtRel(when)}</span>}
+                        </div>
+                        <p className={`text-[11px] ${C.t2} truncate mt-0.5`}>
+                          {previewFor(activeCat, item)}
+                        </p>
+                        {topTab === "archive" && (
+                          <StatusPill status={item.status} />
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
-        ) : total === 0 ? (
-          <div className={`${C.card} p-12 text-center`}>
-            <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
-            <p className={`text-[14px] font-medium ${C.t1}`}>All caught up!</p>
-            <p className={`text-[12px] ${C.t3} mt-1`}>No pending actions in your inbox.</p>
-          </div>
-        ) : (
-          <>
-            {/* Leaves */}
-            {(tab === "all" || tab === "leaves") && (
-              <SectionBlock icon={TreePine} label="Leave Requests" count={leaves.length}
-                color="text-violet-500" bgColor="bg-violet-100 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400"
-                items={leaves} prefix="l"
-                onApprove={(id: number) => act(`/api/hr/leaves/${id}`, { action: "approve" }, `l${id}`)}
-                onReject={(id: number)  => act(`/api/hr/leaves/${id}`, { action: "reject"  }, `l${id}`)}
-                approving={approving}>
-                {(l: any) => (
-                  <>
-                    <p className={`text-[13px] font-semibold ${C.t1}`}>{l.user?.name}</p>
-                    <p className={`text-[11px] ${C.t3} mt-0.5`}>
-                      {l.leaveType?.name} · {fmtDate(l.fromDate)}{l.fromDate !== l.toDate && ` → ${fmtDate(l.toDate)}`} · {parseFloat(l.totalDays).toFixed(1)} day{parseFloat(l.totalDays) !== 1 ? "s" : ""}
+
+          {/* Right — detail */}
+          <section className="flex-1 overflow-y-auto">
+            {!selected ? (
+              <div className="flex flex-col items-center justify-center h-full text-center px-6">
+                <CheckCircle2 className="w-10 h-10 text-emerald-400 mb-3" />
+                <p className={`text-[14px] font-medium ${C.t1}`}>
+                  {topTab === "archive" ? "No resolved items" : "All caught up!"}
+                </p>
+                <p className={`text-[12px] ${C.t3} mt-1`}>
+                  {topTab === "archive" ? "Select an item to view details." : "No pending actions in your inbox."}
+                </p>
+              </div>
+            ) : (
+              <div className="p-8 max-w-3xl">
+                <div className="flex items-center gap-3">
+                  <Av name={selected.user?.name || "?"} url={selected.user?.profilePictureUrl} size={44} />
+                  <div>
+                    <p className={`text-[15px] font-semibold ${C.t1}`}>{selected.user?.name}</p>
+                    <p className={`text-[11px] ${C.t3}`}>
+                      {activeCat.label}
+                      {selected.createdAt && ` · ${fmtRel(selected.createdAt)}`}
                     </p>
-                    {l.reason && <p className={`text-[11px] ${C.t2} mt-0.5 truncate max-w-sm`}>"{l.reason}"</p>}
-                  </>
-                )}
-              </SectionBlock>
-            )}
+                  </div>
+                  {topTab === "archive" && (
+                    <div className="ml-auto"><StatusPill status={selected.status} size="lg" /></div>
+                  )}
+                </div>
 
-            {/* Expenses */}
-            {(tab === "all" || tab === "expenses") && (
-              <SectionBlock icon={IndianRupee} label="Expense Claims" count={expenses.length}
-                color="text-emerald-500" bgColor="bg-emerald-100 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                items={expenses} prefix="e"
-                onApprove={(id: number) => act(`/api/hr/expenses/${id}`, { action: "approve" }, `e${id}`)}
-                onReject={(id: number)  => act(`/api/hr/expenses/${id}`, { action: "reject"  }, `e${id}`)}
-                approving={approving}>
-                {(e: any) => (
-                  <>
-                    <p className={`text-[13px] font-semibold ${C.t1}`}>{e.user?.name}</p>
-                    <p className={`text-[11px] ${C.t3} mt-0.5`}>{e.title} · {e.category} · <span className="text-emerald-500 font-bold">₹{Number(e.amount).toLocaleString("en-IN")}</span></p>
-                    {e.description && <p className={`text-[11px] ${C.t2} mt-0.5 truncate max-w-sm`}>"{e.description}"</p>}
-                  </>
-                )}
-              </SectionBlock>
-            )}
+                <div className="mt-6 grid grid-cols-2 gap-x-8 gap-y-4">
+                  {detailFor(activeCat, selected)?.map(([k, v]) => (
+                    <div key={k}>
+                      <p className={`text-[10px] font-bold tracking-widest ${C.t3} uppercase`}>{k}</p>
+                      <p className={`text-[13px] ${C.t1} mt-1`}>{v}</p>
+                    </div>
+                  ))}
+                </div>
 
-            {/* Regularizations */}
-            {(tab === "all" || tab === "attendance") && (
-              <SectionBlock icon={Clock} label="Attendance Regularizations" count={regs.length}
-                color="text-amber-500" bgColor="bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                items={regs} prefix="r"
-                onApprove={(id: number) => act(`/api/hr/attendance/regularize`, { id, action: "approve" }, `r${id}`)}
-                onReject={(id: number)  => act(`/api/hr/attendance/regularize`, { id, action: "reject"  }, `r${id}`)}
-                approving={approving}>
-                {(r: any) => (
-                  <>
-                    <p className={`text-[13px] font-semibold ${C.t1}`}>{r.user?.name}</p>
-                    <p className={`text-[11px] ${C.t3} mt-0.5`}>
-                      {fmtDate(r.date)}
-                      {r.requestedIn && ` · In: ${new Date(r.requestedIn).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}`}
-                      {r.requestedOut && ` · Out: ${new Date(r.requestedOut).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}`}
+                {(selected.reason || selected.description || selected.purpose) && (
+                  <div className="mt-6">
+                    <p className={`text-[10px] font-bold tracking-widest ${C.t3} uppercase`}>Reason</p>
+                    <p className={`text-[13px] ${C.t1} mt-1 whitespace-pre-wrap`}>
+                      {selected.reason || selected.description || selected.purpose}
                     </p>
-                    {r.reason && <p className={`text-[11px] ${C.t2} mt-0.5 truncate max-w-sm`}>"{r.reason}"</p>}
-                  </>
+                  </div>
                 )}
-              </SectionBlock>
-            )}
 
-            {/* WFH */}
-            {(tab === "all" || tab === "attendance") && (
-              <SectionBlock icon={Home} label="Work From Home Requests" count={wfh.length}
-                color="text-cyan-500" bgColor="bg-cyan-100 dark:bg-cyan-500/10 text-cyan-600 dark:text-cyan-400"
-                items={wfh} prefix="w"
-                onApprove={(id: number) => act(`/api/hr/attendance/wfh`, { id, action: "approve" }, `w${id}`)}
-                onReject={(id: number)  => act(`/api/hr/attendance/wfh`, { id, action: "reject"  }, `w${id}`)}
-                approving={approving}>
-                {(w: any) => (
-                  <>
-                    <p className={`text-[13px] font-semibold ${C.t1}`}>{w.user?.name}</p>
-                    <p className={`text-[11px] ${C.t3} mt-0.5`}>{fmtDate(w.date)}</p>
-                    {w.reason && <p className={`text-[11px] ${C.t2} mt-0.5 truncate max-w-sm`}>"{w.reason}"</p>}
-                  </>
+                {topTab === "take_action" && (
+                  <div className="mt-8 flex items-center gap-3">
+                    <button
+                      onClick={() => act("approve")}
+                      disabled={approving[`${activeCat.prefix}${selected.id}`]}
+                      className="h-9 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white rounded-lg text-[12.5px] font-semibold"
+                    >Approve</button>
+                    <button
+                      onClick={() => act("reject")}
+                      disabled={approving[`${activeCat.prefix}${selected.id}`]}
+                      className="h-9 px-5 bg-white dark:bg-white/5 hover:bg-red-50 dark:hover:bg-red-500/10 border border-red-300 dark:border-red-500/30 text-red-600 dark:text-red-400 disabled:opacity-40 rounded-lg text-[12.5px] font-semibold"
+                    >Reject</button>
+                  </div>
                 )}
-              </SectionBlock>
+              </div>
             )}
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
 
-            {/* On Duty */}
-            {(tab === "all" || tab === "attendance") && (
-              <SectionBlock icon={Briefcase} label="On-Duty Requests" count={onDuty.length}
-                color="text-indigo-500" bgColor="bg-indigo-100 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
-                items={onDuty} prefix="od"
-                onApprove={(id: number) => act(`/api/hr/attendance/on-duty`, { id, action: "approve" }, `od${id}`)}
-                onReject={(id: number)  => act(`/api/hr/attendance/on-duty`, { id, action: "reject"  }, `od${id}`)}
-                approving={approving}>
-                {(od: any) => (
-                  <>
-                    <p className={`text-[13px] font-semibold ${C.t1}`}>{od.user?.name}</p>
-                    <p className={`text-[11px] ${C.t3} mt-0.5`}>
-                      {fmtDate(od.date)}
-                      {od.fromTime && ` · ${od.fromTime}`}{od.toTime && ` → ${od.toTime}`}
-                      {od.location && ` · ${od.location}`}
-                    </p>
-                    {od.purpose && <p className={`text-[11px] ${C.t2} mt-0.5 truncate max-w-sm`}>"{od.purpose}"</p>}
-                  </>
-                )}
-              </SectionBlock>
-            )}
+// ─────────────────────────────────────────────────────────────────────────────
+// List preview text — one-liner under the employee name in the middle column.
+// ─────────────────────────────────────────────────────────────────────────────
+function previewFor(cat: Cat, it: any): string {
+  switch (cat.key) {
+    case "leaves":          return `${it.leaveType?.name || "Leave"} · ${fmtDate(it.fromDate)}${it.fromDate !== it.toDate ? ` → ${fmtDate(it.toDate)}` : ""}`;
+    case "expenses":        return `${it.title || "Expense"} · ₹${Number(it.amount || 0).toLocaleString("en-IN")}`;
+    case "regularizations": return `${fmtDate(it.date)}${it.reason ? ` · ${it.reason}` : ""}`;
+    case "wfh":             return `${fmtDate(it.date)}${it.reason ? ` · ${it.reason}` : ""}`;
+    case "onDuty":          return `${fmtDate(it.date)}${it.location ? ` · ${it.location}` : ""}`;
+    case "compOff":         return `Worked ${fmtDate(it.workedDate)} · ${parseFloat(it.creditDays).toFixed(1)} day`;
+  }
+}
 
-            {/* Comp-Off */}
-            {(tab === "all" || tab === "attendance") && (
-              <SectionBlock icon={Gift} label="Comp-Off Requests" count={compOff.length}
-                color="text-pink-500" bgColor="bg-pink-100 dark:bg-pink-500/10 text-pink-600 dark:text-pink-400"
-                items={compOff} prefix="co"
-                onApprove={(id: number) => act(`/api/hr/leaves/comp-off`, { id, action: "approve" }, `co${id}`)}
-                onReject={(id: number)  => act(`/api/hr/leaves/comp-off`, { id, action: "reject"  }, `co${id}`)}
-                approving={approving}>
-                {(co: any) => (
-                  <>
-                    <p className={`text-[13px] font-semibold ${C.t1}`}>{co.user?.name}</p>
-                    <p className={`text-[11px] ${C.t3} mt-0.5`}>Worked: {fmtDate(co.workedDate)} · Credit: {parseFloat(co.creditDays).toFixed(1)} day</p>
-                    {co.reason && <p className={`text-[11px] ${C.t2} mt-0.5 truncate max-w-sm`}>"{co.reason}"</p>}
-                  </>
-                )}
-              </SectionBlock>
-            )}
+// ─────────────────────────────────────────────────────────────────────────────
+// Status pill for archive view.
+// ─────────────────────────────────────────────────────────────────────────────
+function StatusPill({ status, size = "sm" }: { status: string; size?: "sm" | "lg" }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    approved:            { label: "Approved",  cls: "bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" },
+    partially_approved:  { label: "Mgr Approved", cls: "bg-blue-100 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400" },
+    rejected:            { label: "Rejected",  cls: "bg-red-100 dark:bg-red-500/15 text-red-600 dark:text-red-400" },
+    pending:             { label: "Pending",   cls: "bg-amber-100 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400" },
+  };
+  const info = map[status] ?? { label: status, cls: "bg-slate-100 dark:bg-white/10 text-slate-500" };
+  return (
+    <span className={`inline-block font-semibold rounded-full ${
+      size === "lg" ? "text-[11px] px-3 py-1" : "text-[9.5px] px-2 py-0.5 mt-1"
+    } ${info.cls}`}>{info.label}</span>
+  );
+}
 
-            {/* Travel */}
-            {(tab === "all" || tab === "travel") && (
-              <SectionBlock icon={Plane} label="Travel Requests" count={travel.length}
-                color="text-sky-500" bgColor="bg-sky-100 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400"
-                items={travel} prefix="tr"
-                onApprove={(id: number) => act(`/api/hr/travel/${id}`, { action: "approve" }, `tr${id}`)}
-                onReject={(id: number)  => act(`/api/hr/travel/${id}`, { action: "reject"  }, `tr${id}`)}
-                approving={approving}>
-                {(tr: any) => (
-                  <>
-                    <p className={`text-[13px] font-semibold ${C.t1}`}>{tr.user?.name}</p>
-                    <p className={`text-[11px] ${C.t3} mt-0.5`}>
-                      {fmtDate(tr.travelDate)} · {tr.fromLocation} → {tr.toLocation}
-                      {tr.estimatedCost && ` · ₹${Number(tr.estimatedCost).toLocaleString("en-IN")}`}
-                    </p>
-                    {tr.purpose && <p className={`text-[11px] ${C.t2} mt-0.5 truncate max-w-sm`}>"{tr.purpose}"</p>}
-                  </>
-                )}
-              </SectionBlock>
-            )}
-          </>
-        )}
+// ─────────────────────────────────────────────────────────────────────────────
+// Notifications pane — simple vertical list.
+// ─────────────────────────────────────────────────────────────────────────────
+function NotificationsPane({ data, isLoading }: { data: any; isLoading: boolean }) {
+  const items: any[] = data?.items ?? [];
+
+  const markRead = async (id: number) => {
+    await fetch("/api/hr/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, action: "read" }),
+    });
+    mutate("/api/hr/notifications");
+  };
+  const markAllRead = async () => {
+    await fetch("/api/hr/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "read_all" }),
+    });
+    mutate("/api/hr/notifications");
+  };
+
+  return (
+    <div className="px-6 py-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className={`text-[13px] font-semibold ${C.t1}`}>Notifications</h2>
+        <button onClick={markAllRead} className="text-[11px] font-semibold text-[#008CFF] hover:underline">
+          Mark all as read
+        </button>
       </div>
+      {isLoading ? (
+        <div className="flex items-center justify-center h-40">
+          <div className="w-6 h-6 border-2 border-[#008CFF] border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : items.length === 0 ? (
+        <div className={`${C.card} rounded-2xl p-12 text-center`}>
+          <Bell className={`w-9 h-9 ${C.t3} mx-auto mb-3`} />
+          <p className={`text-[14px] font-medium ${C.t1}`}>You're all caught up</p>
+          <p className={`text-[12px] ${C.t3} mt-1`}>No new notifications.</p>
+        </div>
+      ) : (
+        <div className={`${C.card} rounded-2xl overflow-hidden`}>
+          {items.map((n: any, i: number) => (
+            <div
+              key={n.id}
+              className={`flex items-start gap-3 px-5 py-4 ${i !== items.length - 1 ? `border-b ${C.divider}` : ""} ${
+                n.isRead ? "" : "bg-[#008CFF]/[0.04]"
+              }`}
+            >
+              <Av name={n.actor?.name || "System"} url={n.actor?.profilePictureUrl} size={36} />
+              <div className="flex-1 min-w-0">
+                <p className={`text-[13px] ${C.t1} font-medium`}>{n.title}</p>
+                {n.body && <p className={`text-[12px] ${C.t2} mt-0.5`}>{n.body}</p>}
+                <p className={`text-[10px] ${C.t3} mt-1`}>{fmtRel(n.createdAt)}</p>
+              </div>
+              {!n.isRead && (
+                <button onClick={() => markRead(n.id)}
+                  className="text-[11px] text-[#008CFF] font-semibold hover:underline shrink-0">
+                  Mark read
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
