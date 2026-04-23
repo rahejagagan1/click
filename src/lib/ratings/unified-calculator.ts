@@ -125,7 +125,7 @@ export async function ensureDefaultTemplate(roleType: string): Promise<FormulaTe
 // Roles that are purely manager-rated (no ClickUp cases, no YouTube)
 const MANAGER_ONLY_ROLES = ["hr_manager", "researcher_foia", "researcher_rtc", "researcher_foia_pitching"];
 
-// Roles that have cases but qualified differently than writer/editor (CM Check 4 + capsule filter, same pipeline)
+// Roles that have cases but qualified differently than writer/editor (Video QA1 + capsule filter, same pipeline)
 const CM_ROLES = ["production_manager", "researcher_manager"];
 
 export async function calculateUserRating(
@@ -312,7 +312,8 @@ export async function calculateAllRatings(
             userCasesMap.set(u.id, cases);
         }
     } else {
-        // Case-based roles (writer/editor): fetch qualified cases and group by user
+        // Case-based roles (writer/editor): only include users who actually have
+        // qualified cases this month. Zero-case users are hidden from the audit panel.
         const allCases = await getQualifiedCasesForRole(monthStart, monthEnd, roleType);
         const userIdField = roleType === "writer" ? "writerUserId" : "editorUserId";
 
@@ -326,11 +327,18 @@ export async function calculateAllRatings(
         }
 
         const userIds = [...userCasesMap.keys()];
-        const users = await prisma.user.findMany({
-            where: { id: { in: userIds } },
-            select: { id: true, name: true },
-        });
-        userNameMap = new Map(users.map((u) => [u.id, u.name]));
+        const roleUsers = userIds.length > 0
+            ? await prisma.user.findMany({
+                where: { id: { in: userIds }, role: roleType as any, isActive: true },
+                select: { id: true, name: true },
+            })
+            : [];
+        userNameMap = new Map(roleUsers.map((u) => [u.id, u.name]));
+
+        // Drop any cases whose user is inactive or role-changed (keeps the roster clean).
+        for (const uid of [...userCasesMap.keys()]) {
+            if (!userNameMap.has(uid)) userCasesMap.delete(uid);
+        }
     }
 
     // Rows created or edited via Audit Panel / admin API keep `isManualOverride: true` — never overwrite on batch calculate.

@@ -8,6 +8,7 @@ interface CaseRow {
     name: string;
     status: string;
     channel: string | null;
+    hasDeepSubtasks?: boolean;
     writer?: { name: string } | null;
     editor?: { name: string } | null;
     youtubeStats?: { viewCount: string | number | null } | null;
@@ -34,13 +35,27 @@ export default function CasesTable({ cases }: { cases: CaseRow[] }) {
                         {cases.map((c) => (
                             <tr
                                 key={c.id}
-                                className="border-b border-white/[0.03] hover:bg-white/[0.03] transition-colors group"
+                                className={
+                                    c.hasDeepSubtasks
+                                        ? "border-b border-amber-500/30 bg-amber-500/[0.08] hover:bg-amber-500/[0.14] transition-colors group"
+                                        : "border-b border-white/[0.03] hover:bg-white/[0.03] transition-colors group"
+                                }
                             >
                                 <td className="pl-6 pr-4 py-4">
                                     <Link
                                         href={`/cases/${c.id}`}
-                                        className="text-white text-[13px] font-medium hover:text-violet-400 transition-colors line-clamp-1 block"
+                                        className={
+                                            c.hasDeepSubtasks
+                                                ? "text-amber-200 text-[13px] font-medium hover:text-amber-100 transition-colors line-clamp-1 block"
+                                                : "text-white text-[13px] font-medium hover:text-violet-400 transition-colors line-clamp-1 block"
+                                        }
+                                        title={c.hasDeepSubtasks ? "This case has a sub-subtask in ClickUp (level 3+). Schema stores only 2 levels — clean up in ClickUp to remove the flag." : undefined}
                                     >
+                                        {c.hasDeepSubtasks && (
+                                            <span className="inline-flex items-center mr-2 px-1.5 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-200 text-[10px] font-semibold uppercase tracking-wider">
+                                                Deep
+                                            </span>
+                                        )}
                                         {c.name}
                                     </Link>
                                 </td>

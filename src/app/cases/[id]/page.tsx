@@ -231,7 +231,6 @@ export default function CaseDetailPage() {
                                 likeCount={data.youtubeStats.likeCount}
                                 commentCount={data.youtubeStats.commentCount}
                                 last30DaysViews={data.youtubeStats.last30DaysViews}
-                                ctr={data.youtubeStats.ctr}
                                 publishedAt={data.youtubeStats.publishedAt}
                                 history={data.youtubeStats.history || []}
                             />

@@ -228,7 +228,7 @@ export default function ScoreAdminPage() {
 
     const { data: session } = useSession();
     const sessionUser = session?.user as any;
-    const canEdit = sessionUser?.orgLevel === "ceo" || sessionUser?.isDeveloper === true;
+    const canEdit = sessionUser?.orgLevel === "ceo" || sessionUser?.orgLevel === "special_access" || sessionUser?.isDeveloper === true;
 
     const handleAddEntry = async () => {
         if (!addUserId || !filterMonth) return;
@@ -326,7 +326,16 @@ export default function ScoreAdminPage() {
 
     useEffect(() => { fetchData(); }, [filterMonth]);
 
-    const filteredRatings = filterRole ? ratings.filter((r) => r.roleType === filterRole) : ratings;
+    const roleFiltered = filterRole ? ratings.filter((r) => r.roleType === filterRole) : ratings;
+    // Hide zero-case writer/editor rows unless an admin manually overrode them.
+    // Managers (CM/PM/HR/Researcher) are always shown — they can legitimately have 0 cases.
+    const filteredRatings = roleFiltered.filter((r) => {
+        const isCaseBased = r.roleType === "writer" || r.roleType === "editor";
+        if (!isCaseBased) return true;
+        const cases = (r as any).casesCompleted ?? 0;
+        if (cases > 0) return true;
+        return (r as any).isManualOverride === true;
+    });
     const uniqueRoles = [...new Set(ratings.map((r) => r.roleType))];
     const columns = deriveColumns(filteredRatings);
 
@@ -649,11 +658,11 @@ export default function ScoreAdminPage() {
                                                     if (col.source === "formula" && sec.details) {
                                                         // Legacy calculators store caseCount directly
                                                         if ((sec as any).caseCount != null) {
-                                                            return `${(sec as any).caseCount} cases`;
+                                                            return `${(sec as any).caseCount}`;
                                                         }
                                                         // Unified calculator: parse from details like "3 cases × 5★ quality → 5★ (matrix)"
                                                         const match = sec.details.match(/^(\d+)\s*cases/);
-                                                        if (match) return `${match[1]} cases`;
+                                                        if (match) return match[1];
                                                     }
                                                     return Number(sec.rawValue).toFixed(1);
                                                 };

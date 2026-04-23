@@ -4,6 +4,8 @@ import prisma from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { serializeBigInt } from "@/lib/utils";
+import { applyBrackets, applyMatrix, customRound } from "@/lib/ratings/formula-engine";
+import type { FormulaSection } from "@/lib/ratings/types";
 
 export const dynamic = "force-dynamic";
 
@@ -95,6 +97,58 @@ function recalcOverallRating(sections: any[]): number | null {
     return Math.round(raw * 100) / 100;
 }
 
+// Derive new stars from an edited rawValue by re-applying the section's
+// type-specific formula. Returns null if this section type doesn't have a
+// deterministic value→stars mapping (caller should keep existing stars).
+function recalcStarsFromRawValue(
+    tplSection: FormulaSection | undefined,
+    newRawValue: number,
+    sections: any[]
+): number | null {
+    if (!tplSection) return null;
+    const clamp01to5 = (v: number) => Math.max(0, Math.min(5, v));
+
+    switch (tplSection.type) {
+        case "bracket_lookup": {
+            if (!tplSection.brackets?.length) return null;
+            return clamp01to5(applyBrackets(newRawValue, tplSection.brackets));
+        }
+        case "matrix_lookup": {
+            if (!tplSection.matrix || !tplSection.variable_y_section) return null;
+            const ySection = sections.find((s: any) => s.key === tplSection.variable_y_section);
+            if (!ySection || ySection.stars == null) return null;
+            const score = applyMatrix(newRawValue, Number(ySection.stars), tplSection.matrix);
+            return score == null ? null : clamp01to5(score);
+        }
+        case "manager_direct_rating": {
+            return Math.min(5, Math.max(1, Math.round(newRawValue)));
+        }
+        case "manager_questions_avg":
+        case "team_quality_avg": {
+            if (tplSection.brackets?.length) {
+                return clamp01to5(applyBrackets(newRawValue, tplSection.brackets));
+            }
+            return clamp01to5(customRound(newRawValue));
+        }
+        case "passthrough": {
+            const mn = tplSection.passthrough_scale_min;
+            const mx = tplSection.passthrough_scale_max;
+            const base =
+                mn !== undefined && mx !== undefined && mx > mn
+                    ? 1 + ((newRawValue - mn) / (mx - mn)) * 4
+                    : newRawValue;
+            return clamp01to5(customRound(base));
+        }
+        case "combined_team_manager_rating":
+        case "rm_pipeline_targets_avg":
+        case "yt_baseline_ratio":
+            // Treat rawValue as the pre-rounding star average.
+            return clamp01to5(customRound(newRawValue));
+        default:
+            return null;
+    }
+}
+
 // Map section keys to convenience DB columns
 const SECTION_TO_COLUMN: Record<string, string> = {
     writerQuality: "writerQualityStars",
@@ -167,19 +221,74 @@ export async function PATCH(request: NextRequest) {
 
             if (isStarsEdit) {
                 section.stars = numVal;
+                section.isOverridden = true;
+                section.details = `Manual override: ${numVal}★ (was ${oldVal ?? "null"})`;
             } else {
                 section.rawValue = numVal;
-            }
-            section.isOverridden = true;
-            section.details = `Manual override: ${isStarsEdit ? `${numVal}★` : `value=${numVal}`} (was ${oldVal ?? "null"})`;
 
-            // Recalculate overall rating from stars
+                // Auto-derive stars from the new value via the section's formula.
+                // Load the template that produced this rating so we can re-apply
+                // bracket/matrix/etc. logic. Cascade to dependent matrix sections.
+                let derivedNote = "";
+                let recalcedStars = false;
+                try {
+                    const tplId = current.formulaTemplateId ?? null;
+                    if (tplId != null) {
+                        const tpl = await prisma.formulaTemplate.findUnique({
+                            where: { id: tplId },
+                        });
+                        const tplSections = (tpl?.sections as unknown as FormulaSection[]) ?? [];
+                        const tplSection = tplSections.find((s) => s.key === sectionKey);
+                        const newStars = recalcStarsFromRawValue(tplSection, numVal, sections);
+                        if (newStars != null) {
+                            section.stars = newStars;
+                            recalcedStars = true;
+                            derivedNote = ` → ${newStars}★`;
+
+                            // Cascade: matrix_lookup sections that depend on this
+                            // section's stars (y-axis) must also be recomputed.
+                            for (const depTpl of tplSections) {
+                                if (
+                                    depTpl.type === "matrix_lookup" &&
+                                    depTpl.variable_y_section === sectionKey &&
+                                    depTpl.matrix
+                                ) {
+                                    const depSec = sections.find((s: any) => s.key === depTpl.key);
+                                    if (depSec && depSec.rawValue != null) {
+                                        const cascaded = applyMatrix(
+                                            Number(depSec.rawValue),
+                                            newStars,
+                                            depTpl.matrix
+                                        );
+                                        if (cascaded != null) {
+                                            depSec.stars = Math.max(0, Math.min(5, cascaded));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.warn("[scores/admin PATCH] stars auto-recalc failed:", err);
+                }
+
+                section.isOverridden = true;
+                section.details = `Manual override: value=${numVal} (was ${oldVal ?? "null"})${derivedNote}`;
+
+                // Keep convenience star columns in sync when we recomputed stars.
+                if (recalcedStars) {
+                    const convCol = SECTION_TO_COLUMN[sectionKey];
+                    if (convCol) updateData[convCol] = section.stars;
+                }
+            }
+
+            // Recalculate overall rating from stars (any cascaded stars already applied)
             const newOverall = recalcOverallRating(sections);
 
             updateData.parametersJson = sections;
             updateData.overallRating = newOverall;
 
-            // Update convenience column if mapped (only for stars edits)
+            // Update convenience column for direct stars edits
             if (isStarsEdit) {
                 const convCol = SECTION_TO_COLUMN[sectionKey];
                 if (convCol) updateData[convCol] = numVal;

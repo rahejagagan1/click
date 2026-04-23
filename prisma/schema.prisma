@@ -40,7 +40,8 @@ enum OrgLevel {
 
 model User {
   id                Int        @id @default(autoincrement())
-  clickupUserId     BigInt     @unique
+  /// Nullable: HR-registered users may not exist in ClickUp yet. Backfilled by sync when a ClickUp user with matching email is found.
+  clickupUserId     BigInt?    @unique
   name              String
   email             String     @unique
   role              UserRole   @default(member)
@@ -233,6 +234,10 @@ model Case {
   dateDone                DateTime?
   lastSyncedAt            DateTime  @default(now())
   isArchived              Boolean   @default(false)
+  /// Set by the sync when a level-3+ subtask (sub-subtask) is detected anywhere
+  /// under this case. Our schema only models Case → Subtask; anything deeper
+  /// can't be stored, so we surface the case for manual cleanup in ClickUp.
+  hasDeepSubtasks         Boolean   @default(false)
 
   productionList          ProductionList @relation(fields: [productionListId], references: [id])
   assignee                User?     @relation("CaseAssignee", fields: [assigneeUserId], references: [id])
@@ -302,7 +307,6 @@ model YoutubeStats {
   likeCount       BigInt?
   commentCount    BigInt?
   last30DaysViews BigInt?
-  ctr             Decimal?  @db.Decimal(5, 2)
   publishedAt     DateTime?
   lastFetchedAt   DateTime  @default(now())
 
@@ -441,6 +445,20 @@ model YoutubeDashboardChannelQuarterAnalysis {
 
   @@unique([channelId, year, quarter])
   @@index([year, quarter])
+}
+
+/// ClickUp users whose email does not match any HR User. Populated by the sync job.
+/// Admin UI lists these so HR can decide whether to onboard them into the HR/attendance system.
+model ClickupUnmatchedUser {
+  id                Int      @id @default(autoincrement())
+  clickupUserId     BigInt   @unique
+  email             String
+  name              String?
+  profilePictureUrl String?
+  firstSeenAt       DateTime @default(now())
+  lastSeenAt        DateTime @updatedAt
+
+  @@index([email])
 }
 
 /// YouTube dashboard: cached per-user contribution per channel for a calendar quarter (see quarter-user-contribution).
@@ -593,6 +611,17 @@ model MonthlyReport {
   heroContentTarget   String?
   heroContentActual   String?
   heroContentVariance String?
+  // Override flags: when true, the actual was manually entered by a CEO/developer and
+  // must not be clobbered by auto-recompute. When false, actuals are recomputed from
+  // qualified CM Check 4 cases on every GET and persisted on every save.
+  totalVideoActualOverridden  Boolean @default(false)
+  heroContentActualOverridden Boolean @default(false)
+  // Videos Published: count of cases in the manager's production lists with an
+  // uploadDate in the reporting window (day 4 → day 3 next month).
+  videosPublishedTarget       String?
+  videosPublishedActual       String?
+  videosPublishedVariance     String?
+  videosPublishedActualOverridden Boolean @default(false)
   editorNotes         Json?   @db.JsonB  // { [editorId]: "note text" }
   writerNotes         Json?   @db.JsonB  // { [writerId]: "note text" }
 
@@ -777,7 +806,16 @@ model Violation {
 model EmployeeProfile {
   id                Int       @id @default(autoincrement())
   userId            Int       @unique
-  employeeId        String    @unique          // e.g. "NB-2026-001"
+  employeeId        String    @unique          // Auto-allocated from numberSeries, e.g. "HRM1"
+  // ── Wizard Page 1: Basic Details ──
+  firstName         String
+  middleName        String?
+  lastName          String
+  workCountry       String    @default("India")
+  nationality       String
+  numberSeriesId    Int
+  numberSeries      EmployeeNumberSeries @relation(fields: [numberSeriesId], references: [id], onDelete: Restrict)
+  // ── Existing fields ──
   designation       String?
   department        String?
   employmentType    String    @default("fulltime")  // fulltime | parttime | contract | intern
@@ -800,6 +838,21 @@ model EmployeeProfile {
 
   @@index([department])
   @@index([employmentType])
+  @@index([numberSeriesId])
+}
+
+// Named employee-ID sequences. Admins can add series; each has a prefix and an
+// auto-incrementing counter. Employee IDs are allocated as `{prefix}{nextNumber}`
+// inside a single UPDATE … RETURNING, so concurrent creates can't collide.
+model EmployeeNumberSeries {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  prefix     String
+  nextNumber Int      @default(1)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  profiles   EmployeeProfile[]
 }
 
 // ═══════════════════════════════════════════════════════
