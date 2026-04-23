@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+
+        const { id: idRaw } = await params;
   const user = session!.user as any;
 
   try {
-    const id = parseInt(params.id);
+    const id = parseInt(idRaw);
     const body = await request.json();
     const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
 
@@ -56,13 +58,15 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+
+        const { id: idRaw } = await params;
   const user = session!.user as any;
 
   try {
-    const id = parseInt(params.id);
+    const id = parseInt(idRaw);
     const expense = await prisma.expense.findUnique({ where: { id } });
     if (!expense) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (expense.userId !== user.dbId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });

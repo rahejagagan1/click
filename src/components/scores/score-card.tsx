@@ -310,7 +310,7 @@ export default function ScoreCard({ user, monthlyRatings, managerRatings, select
                         <div className="relative">
                             <select value={selectedMonth} onChange={(e) => onMonthChange(e.target.value)}
                                 className="appearance-none pl-3 pr-7 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 cursor-pointer focus:outline-none focus:ring-2 focus:ring-violet-500/30">
-                                {availableMonths.map(m => (
+                                {Array.from(new Set(availableMonths)).map(m => (
                                     <option key={m} value={m} className="bg-white dark:bg-[#1a1a2e]">{formatMonthLabel(m)}</option>
                                 ))}
                             </select>
