@@ -1,5 +1,5 @@
 import prisma from "@/lib/prisma";
-import { detectVideoChannel, batchGetFirst30DaysViews, batchGetLifetimeCTR, getChannelConfigs } from "./youtube-analytics";
+import { detectVideoChannel, batchGetFirst30DaysViews, getChannelConfigs } from "./youtube-analytics";
 
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
@@ -60,9 +60,8 @@ export async function syncYoutubeStats(): Promise<number> {
 
     if (caseVideoMap.length === 0) return 0;
 
-    // Detect channels for analytics features (CTR, first-30-day views)
+    // Detect channels for analytics features (first-30-day views)
     let first30Map = new Map<string, number>();
-    let ctrMap = new Map<string, number>();
     const channelDetectionMap = new Map<string, string>();
     const publishDates = new Map<string, Date | null>();
     const hasChannelConfigs = getChannelConfigs().length > 0;
@@ -91,11 +90,6 @@ export async function syncYoutubeStats(): Promise<number> {
         }
 
         console.log(`[YouTube Sync] Detected channels for ${channelDetectionMap.size} videos`);
-
-        // Always fetch lifetime CTR regardless of API mode
-        const allVideoIds = caseVideoMap.map(c => c.videoId);
-        ctrMap = await batchGetLifetimeCTR(allVideoIds, channelDetectionMap, publishDates);
-        console.log(`[YouTube Sync] Got CTR for ${ctrMap.size} videos`);
 
         // First-30-day views only in analytics_api mode
         if (mode === "analytics_api") {
@@ -156,7 +150,6 @@ export async function syncYoutubeStats(): Promise<number> {
 
                 try {
                     const first30Days = first30Map.get(item.id);
-                    const videoCtr = ctrMap.get(item.id);
 
                     const viewCountBig = BigInt(item.statistics?.viewCount || 0);
                     const likeCountBig = BigInt(item.statistics?.likeCount || 0);
@@ -172,7 +165,6 @@ export async function syncYoutubeStats(): Promise<number> {
                             likeCount: likeCountBig,
                             commentCount: BigInt(item.statistics?.commentCount || 0),
                             last30DaysViews: first30Days !== undefined ? BigInt(first30Days) : null,
-                            ctr: videoCtr !== undefined ? videoCtr : null,
                             publishedAt: item.snippet?.publishedAt
                                 ? new Date(item.snippet.publishedAt)
                                 : null,
@@ -185,7 +177,6 @@ export async function syncYoutubeStats(): Promise<number> {
                             likeCount: likeCountBig,
                             commentCount: BigInt(item.statistics?.commentCount || 0),
                             ...(first30Days !== undefined ? { last30DaysViews: BigInt(first30Days) } : {}),
-                            ...(videoCtr !== undefined ? { ctr: videoCtr } : {}),
                             lastFetchedAt: new Date(),
                         },
                     });

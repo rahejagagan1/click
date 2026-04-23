@@ -39,7 +39,7 @@ export async function GET(
                 youtubeStats: {
                     select: {
                         viewCount: true, likeCount: true, commentCount: true, last30DaysViews: true,
-                        ctr: true, youtubeVideoId: true, videoUrl: true, videoTitle: true, publishedAt: true,
+                        youtubeVideoId: true, videoUrl: true, videoTitle: true, publishedAt: true,
                     },
                 },
                 productionList: {
