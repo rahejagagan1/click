@@ -45,7 +45,9 @@ export async function GET(request: NextRequest) {
                 where,
                 skip: (page - 1) * limit,
                 take: limit,
-                orderBy: { dateCreated: "desc" },
+                // Flagged cases (level-3 subtasks in ClickUp) float to the top so
+                // they're easy to spot and clean up; everything else by recency.
+                orderBy: [{ hasDeepSubtasks: "desc" }, { dateCreated: "desc" }],
                 include: {
                     writer: { select: { id: true, name: true } },
                     editor: { select: { id: true, name: true } },

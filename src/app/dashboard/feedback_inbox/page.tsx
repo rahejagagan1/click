@@ -6,13 +6,22 @@ import { useSession } from "next-auth/react";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
 
 const CATEGORY_LABELS: Record<string, string> = {
-    general_issue: "General issue",
-    attendance_issue: "Attendance issue",
-    policy_issue: "Policy issue",
-    finance_issue: "Finance issue",
-    salary_issue: "Salary issue",
+    // Current categories
+    people_team_dynamics:     "People & Team Dynamics",
+    work_culture_environment: "Work Culture & Environment",
+    ideas_improvements:       "Ideas & Improvements",
+    processes_policies:       "Processes & Policies",
+    compensation_support:     "Compensation & Support",
+    unfiltered_unsaid:        "Unfiltered / Something Unsaid",
+    anything_else:            "Anything Else",
+    // Legacy categories — kept so historical entries still render a friendly label
+    general_issue:     "General issue",
+    attendance_issue:  "Attendance issue",
+    policy_issue:      "Policy issue",
+    finance_issue:     "Finance issue",
+    salary_issue:      "Salary issue",
     feature_requested: "Feature requested",
-    others: "Others",
+    others:            "Others",
 };
 
 type Row = {
@@ -82,7 +91,7 @@ export default function FeedbackInboxPage() {
                     <Link href="/dashboard/feedback" className="text-xs text-violet-600 dark:text-violet-400 hover:underline mb-2 inline-block">
                         ← Feedback
                     </Link>
-                    <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">Anonymous feedback inbox</h1>
+                    <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">NB Unplugged inbox</h1>
                     <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
                         Submissions from the Feedback page. Entries are anonymous in this view.
                     </p>

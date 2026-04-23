@@ -4,6 +4,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import AddEmployeeWizard from "@/components/hr/add-employee-wizard";
 import OrgTreeView from "@/components/hr/OrgTreeView";
 import FilterDropdown from "@/components/hr/FilterDropdown";
 import {
@@ -210,71 +211,13 @@ export default function PeoplePage() {
         {subTab === "tree" && <OrgTreeView />}
       </div>
 
-      {/* Add Employee Slide Panel */}
+      {/* Add Employee Wizard — 4-step Keka-style flow (Page 1 wired) */}
       {showAdd && (
-        <>
-          <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowAdd(false)} />
-          <AddEmployeePanel onClose={() => setShowAdd(false)} />
-        </>
+        <AddEmployeeWizard
+          onClose={() => setShowAdd(false)}
+          onCreated={() => mutate("/api/hr/employees")}
+        />
       )}
-    </div>
-  );
-}
-
-function AddEmployeePanel({ onClose }: { onClose: () => void }) {
-  const [form, setForm] = useState({ name: "", email: "", department: "", designation: "", phone: "", workLocation: "", employmentType: "full_time" });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const submit = async () => {
-    setError("");
-    if (!form.name || !form.email) return setError("Name and email are required");
-    setSaving(true);
-    const res = await fetch("/api/hr/employees", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-    const data = await res.json();
-    if (!res.ok) { setError(data.error); setSaving(false); return; }
-    mutate("/api/hr/employees");
-    onClose();
-  };
-
-  return (
-    <div className="fixed top-0 right-0 bottom-0 w-[420px] bg-[#f4f7f8] dark:bg-[#001529] border-l border-slate-200 dark:border-white/[0.08] shadow-2xl z-50 flex flex-col animate-slide-in">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06]">
-        <h2 className="text-[16px] font-semibold text-slate-800 dark:text-white">Add Employee</h2>
-        <button onClick={onClose} className="text-slate-500 hover:text-slate-800 dark:text-white text-xl">✕</button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-        {error && <p className="text-[12px] text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">{error}</p>}
-        {[
-          { key: "name", label: "Full Name", placeholder: "Enter full name" },
-          { key: "email", label: "Email", placeholder: "name@company.com" },
-          { key: "department", label: "Department", placeholder: "e.g. Engineering" },
-          { key: "designation", label: "Designation", placeholder: "e.g. Software Engineer" },
-          { key: "phone", label: "Mobile", placeholder: "Phone number" },
-          { key: "workLocation", label: "Location", placeholder: "e.g. Mohali" },
-        ].map((f) => (
-          <div key={f.key}>
-            <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">{f.label}</label>
-            <input value={(form as any)[f.key]} onChange={(e) => setForm((p) => ({ ...p, [f.key]: e.target.value }))} placeholder={f.placeholder}
-              className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white placeholder-slate-600 focus:outline-none focus:border-[#008CFF]/40" />
-          </div>
-        ))}
-        <div>
-          <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Employment Type</label>
-          <select value={form.employmentType} onChange={(e) => setForm((p) => ({ ...p, employmentType: e.target.value }))}
-            className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]/40">
-            {["full_time", "part_time", "contract", "intern"].map((t) => <option key={t} value={t}>{t.replace("_", " ")}</option>)}
-          </select>
-        </div>
-      </div>
-
-      <div className="px-6 py-4 border-t border-slate-200 dark:border-white/[0.06] flex justify-end gap-3">
-        <button onClick={onClose} className="h-9 px-5 text-[13px] text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:text-white rounded-lg hover:bg-slate-100 dark:bg-white/5">Cancel</button>
-        <button onClick={submit} disabled={saving} className="h-9 px-5 bg-[#008CFF] hover:bg-[#0077dd] disabled:opacity-40 text-slate-800 dark:text-white rounded-lg text-[13px] font-semibold">
-          {saving ? "Adding..." : "Add Employee"}
-        </button>
-      </div>
     </div>
   );
 }
