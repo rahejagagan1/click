@@ -786,15 +786,25 @@ export default function AttendancePage() {
         <div className="p-5 border-r border-slate-200 dark:border-white/[0.06]">
           <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-3">Timings</h3>
 
-          {/* Week day circles */}
+          {/* Week day circles — past days render darker + slightly blurred
+              so "done" days visually recede and the eye lands on today. */}
           <div className="flex items-center gap-1.5 mb-4">
-            {days.map((d, i) => (
-              <div key={i} className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold transition-all ${
-                i === todayDow
-                  ? "bg-[#00BCD4] text-white shadow-sm shadow-[#00BCD4]/40"
-                  : "bg-slate-100 dark:bg-white/[0.07] text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-white/[0.06]"
-              }`}>{d}</div>
-            ))}
+            {days.map((d, i) => {
+              const isToday = i === todayDow;
+              const isPast  = i < todayDow;
+              return (
+                <div
+                  key={i}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold transition-all ${
+                    isToday
+                      ? "bg-[#00BCD4] text-white shadow-sm shadow-[#00BCD4]/40"
+                      : isPast
+                      ? "bg-slate-300 dark:bg-[#05101c] text-slate-500 dark:text-slate-600 border border-slate-300 dark:border-white/[0.03] opacity-60 blur-[0.4px]"
+                      : "bg-slate-100 dark:bg-white/[0.07] text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-white/[0.06]"
+                  }`}
+                >{d}</div>
+              );
+            })}
           </div>
 
           {/* Shift info */}
@@ -985,14 +995,31 @@ export default function AttendancePage() {
                     >{label}</button>
                   );
                 })}
-                {/* List/Calendar toggle */}
+                {/* List/Calendar toggle — mirrors the sub-tab switcher above
+                    so users can flip between log and calendar views from the
+                    period row as well. */}
                 <div className="flex ml-2 border border-slate-200 dark:border-white/[0.08] rounded-lg overflow-hidden">
-                  <button className="px-2 py-1.5 bg-[#008CFF]/10 text-[#008CFF]">
+                  {/* Rendered inside `subTab === "log"`; TS narrows subTab
+                      here, so the List toggle is always pressed and the
+                      Calendar toggle is always unpressed. */}
+                  <button
+                    type="button"
+                    aria-label="List view"
+                    aria-pressed={true}
+                    onClick={() => setSubTab("log")}
+                    className="px-2 py-1.5 bg-[#008CFF]/10 text-[#008CFF]"
+                  >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
                     </svg>
                   </button>
-                  <button className="px-2 py-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/5">
+                  <button
+                    type="button"
+                    aria-label="Calendar view"
+                    aria-pressed={false}
+                    onClick={() => setSubTab("calendar")}
+                    className="px-2 py-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                  >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
@@ -1234,9 +1261,33 @@ export default function AttendancePage() {
 
         {subTab === "calendar" && (
           <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
-            <div className="flex items-center p-4 border-b border-slate-200 dark:border-white/[0.06]">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-white/[0.06]">
               <input type="month" value={month} onChange={e => setMonth(e.target.value)}
                 className="h-9 px-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white focus:outline-none" />
+              {/* Same List/Calendar toggle — mirrors the one in the log view. */}
+              <div className="flex border border-slate-200 dark:border-white/[0.08] rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  aria-label="List view"
+                  aria-pressed={false}
+                  onClick={() => setSubTab("log")}
+                  className="px-2 py-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Calendar view"
+                  aria-pressed={true}
+                  className="px-2 py-1.5 bg-[#008CFF]/10 text-[#008CFF]"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </button>
+              </div>
             </div>
             <div className="grid grid-cols-7">
               {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => (

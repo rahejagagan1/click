@@ -100,7 +100,9 @@ export const authOptions: NextAuthOptions = {
                     }
                     if (developerEmails.includes(token.email.toLowerCase())) {
                         token.isDeveloper = true;
-                        token.orgLevel = "ceo";
+                        // Full visibility but NOT CEO — CEO is a named title
+                        // reserved for the actual CEO account in the DB.
+                        token.orgLevel = "special_access";
                     }
                 } catch {}
             }
@@ -173,10 +175,11 @@ export const authOptions: NextAuthOptions = {
                                 : null;
                         }
                     }
-                    // Developer access from env — full access
+                    // Developer access from env — full visibility via
+                    // special_access, NOT CEO (CEO title stays with the real CEO).
                     if (session.user?.email && developerEmails.includes(session.user.email.toLowerCase())) {
                         (session.user as any).isDeveloper = true;
-                        (session.user as any).orgLevel = "ceo"; // Full visibility
+                        (session.user as any).orgLevel = "special_access";
                     }
                     // Dev credentials login: same developer-only UI as production DEVELOPER_EMAILS (YouTube dashboard, etc.)
                     if (useDevLogin && session.user?.email) {
