@@ -610,7 +610,7 @@ export default function Sidebar() {
                             <div className="mx-3 mt-4 mb-1.5 border-t border-[#d1dae5]" />
                             <p className="hidden text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1.5 px-1 text-center">Organisation</p>
                             {[
-                                { href: "/dashboard/hr/people", label: "People",    Icon: Users     },
+                                { href: "/dashboard/hr/people", label: "People", Icon: Users },
                             ].map(({ href, label, Icon }) => {
                                 const active = pathname === href || pathname.startsWith(href + "/");
                                 return (
