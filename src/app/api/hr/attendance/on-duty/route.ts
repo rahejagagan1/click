@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
-import { notifyApprovers } from "@/lib/notifications";
+import { notifyApprovers, notifyUsers } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +15,9 @@ export async function GET(req: NextRequest) {
   const view = searchParams.get("view") || "my";
 
   try {
+    if (!myId && view !== "all") return NextResponse.json([]);
+    if (!myId && view === "all" && !isAdmin) return NextResponse.json([]);
+
     const where =
       view === "team" && !isAdmin ? { user: { managerId: myId! } } :
       view === "all"  && isAdmin  ? {} :
@@ -51,15 +54,27 @@ export async function POST(req: NextRequest) {
       },
     });
     const requester = await prisma.user.findUnique({ where: { id: myId }, select: { name: true } });
-    await notifyApprovers({
-      actorId:  myId,
-      type:     "on_duty",
-      entityId: rec.id,
-      title:    `${requester?.name || "An employee"} requested On Duty`,
-      body:     `Date: ${new Date(date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}${location ? ` @ ${location}` : ""} — ${String(purpose).slice(0, 120)}`,
-      linkUrl:  "/dashboard/hr/attendance",
-      extraUserIds: extras,
-    });
+    const dateLabel = new Date(date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    await Promise.all([
+      notifyApprovers({
+        actorId:  myId,
+        type:     "on_duty",
+        entityId: rec.id,
+        title:    `${requester?.name || "An employee"} requested On Duty`,
+        body:     `Date: ${dateLabel}${location ? ` @ ${location}` : ""} — ${String(purpose).slice(0, 120)}`,
+        linkUrl:  "/dashboard/hr/approvals?tab=wfh",
+        extraUserIds: extras,
+      }),
+      notifyUsers({
+        actorId:  null,
+        userIds:  [myId],
+        type:     "on_duty",
+        entityId: rec.id,
+        title:    `On Duty request submitted`,
+        body:     `Your request for ${dateLabel}${location ? ` @ ${location}` : ""} is awaiting approval.`,
+        linkUrl:  "/dashboard/hr/attendance",
+      }),
+    ]);
     return NextResponse.json(rec, { status: 201 });
   } catch (e) { return serverError(e, "POST /api/hr/attendance/on-duty"); }
 }
@@ -100,6 +115,22 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
     }
     const updated = await prisma.onDutyRequest.findUnique({ where: { id } });
+
+    // Notify the submitter of the outcome.
+    if (updated) {
+      const dateLabel = new Date(record.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+      await notifyUsers({
+        actorId:  myId,
+        userIds:  [record.userId],
+        type:     "on_duty",
+        entityId: record.id,
+        title:    action === "approve"
+          ? `Your On Duty request for ${dateLabel} was approved`
+          : `Your On Duty request for ${dateLabel} was rejected`,
+        body:     approvalNote ? String(approvalNote).slice(0, 160) : undefined,
+        linkUrl:  "/dashboard/hr/attendance",
+      });
+    }
     return NextResponse.json(updated);
   } catch (e) { return serverError(e, "PUT /api/hr/attendance/on-duty"); }
 }

@@ -11,8 +11,6 @@ const TOP_TABS = [
   { key: "attendance",   label: "ATTENDANCE",        href: "/dashboard/hr/attendance" },
   { key: "leave",        label: "LEAVE",             href: "/dashboard/hr/leaves"     },
   { key: "performance",  label: "PERFORMANCE",       href: "/dashboard/hr/goals"      },
-  { key: "expenses",     label: "EXPENSES & TRAVEL", href: "/dashboard/hr/expenses"   },
-  { key: "helpdesk",     label: "HELPDESK",          href: "/dashboard/hr/tickets"    },
   { key: "payroll",      label: "MY FINANCES",       href: "/dashboard/hr/payroll"    },
 ];
 
