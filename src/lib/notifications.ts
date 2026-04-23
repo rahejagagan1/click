@@ -10,14 +10,29 @@ export type NotificationType =
 /**
  * Resolve the set of users who should be notified when `actorId` submits a
  * request that needs approval: their direct manager + every active CEO / HR
- * manager. The actor themselves is excluded, so self-approvers don't ping
- * their own inbox.
+ * manager / developer / admin. The actor themselves is excluded so
+ * self-approvers don't ping their own inbox.
  */
 export async function approverIdsForUser(actorId: number): Promise<number[]> {
+  // Developers aren't a DB flag — they're resolved at session time from the
+  // DEVELOPER_EMAILS env var. Match those emails here so devs get the same
+  // approver notifications as CEOs / HR managers.
+  const devEmails = (process.env.DEVELOPER_EMAILS || "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+
   const [actor, admins] = await Promise.all([
     prisma.user.findUnique({ where: { id: actorId }, select: { managerId: true } }),
     prisma.user.findMany({
-      where: { isActive: true, orgLevel: { in: ["ceo", "hr_manager"] } },
+      where: {
+        isActive: true,
+        OR: [
+          { orgLevel: { in: ["ceo", "hr_manager"] } },
+          { role: "admin" },
+          ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+        ],
+      },
       select: { id: true },
     }),
   ]);
@@ -29,10 +44,12 @@ export async function approverIdsForUser(actorId: number): Promise<number[]> {
 
 /**
  * Low-level: write notifications for an explicit set of recipient ids. Dedupes
- * and excludes the actor themselves. Swallows failures.
+ * and excludes the actor themselves. Pass `actorId: null` (or omit it) to
+ * create a system / self-confirmation notification that isn't filtered out of
+ * its own recipient list. Swallows failures.
  */
 export async function notifyUsers(params: {
-  actorId:  number;
+  actorId?: number | null;
   userIds:  number[];
   type:     NotificationType;
   title:    string;
@@ -41,7 +58,9 @@ export async function notifyUsers(params: {
   linkUrl?:  string;
 }): Promise<void> {
   try {
-    const ids = Array.from(new Set(params.userIds)).filter((id) => id !== params.actorId);
+    const actor = params.actorId ?? null;
+    const ids = Array.from(new Set(params.userIds))
+      .filter((id) => actor == null || id !== actor);
     if (ids.length === 0) return;
     await prisma.notification.createMany({
       data: ids.map((userId) => ({
