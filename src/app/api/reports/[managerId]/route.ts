@@ -7,13 +7,15 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(
     request: NextRequest,
-    { params }: { params: { managerId: string } }
+    { params }: { params: Promise<{ managerId: string }> }
 ) {
     try {
         const { session, errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const managerId = parseInt(params.managerId);
+
+        const { managerId: managerIdRaw } = await params;
+        const managerId = parseInt(managerIdRaw);
         if (isNaN(managerId)) {
             return NextResponse.json({ error: "Invalid manager ID" }, { status: 400 });
         }

@@ -7,13 +7,15 @@ import { serializeBigInt } from "@/lib/utils";
 
 export async function GET(
     request: Request,
-    { params }: { params: { capsuleId: string } }
+    { params }: { params: Promise<{ capsuleId: string }> }
 ) {
     const { errorResponse } = await requireAuth();
     if (errorResponse) return errorResponse;
 
+
+        const { capsuleId: capsuleIdRaw } = await params;
     try {
-        const capsuleId = parseInt(params.capsuleId);
+        const capsuleId = parseInt(capsuleIdRaw);
         if (isNaN(capsuleId)) {
             return NextResponse.json({ error: "Invalid capsule ID" }, { status: 400 });
         }
