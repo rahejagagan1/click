@@ -658,7 +658,7 @@ export default function ScoreAdminPage() {
                                                     if (col.source === "formula" && sec.details) {
                                                         // Legacy calculators store caseCount directly
                                                         if ((sec as any).caseCount != null) {
-                                                            return `${(sec as any).caseCount}`;
+                                                            return String((sec as any).caseCount);
                                                         }
                                                         // Unified calculator: parse from details like "3 cases × 5★ quality → 5★ (matrix)"
                                                         const match = sec.details.match(/^(\d+)\s*cases/);

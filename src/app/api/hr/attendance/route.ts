@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
+import { istTodayDateOnly } from "@/lib/ist-date";
 
 // GET /api/hr/attendance?userId=X&month=2026-04
 export async function GET(req: NextRequest) {
@@ -25,15 +26,21 @@ export async function GET(req: NextRequest) {
       : myDbId;
 
     const month = searchParams.get("month");
+    const fromStr = searchParams.get("from");  // YYYY-MM-DD (inclusive)
+    const toStr   = searchParams.get("to");    // YYYY-MM-DD (inclusive)
     let fromDate: Date, toDate: Date;
-    if (month) {
+    if (fromStr && toStr) {
+      fromDate = new Date(`${fromStr}T00:00:00.000Z`);
+      toDate   = new Date(`${toStr}T00:00:00.000Z`);
+    } else if (month) {
       const [y, m] = month.split("-").map(Number);
-      fromDate = new Date(y, m - 1, 1);
-      toDate = new Date(y, m, 0);
+      fromDate = new Date(Date.UTC(y, m - 1, 1));
+      toDate   = new Date(Date.UTC(y, m, 0));
     } else {
-      const now = new Date();
-      fromDate = new Date(now.getFullYear(), now.getMonth(), 1);
-      toDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      const today = istTodayDateOnly();
+      const [y, m] = [today.getUTCFullYear(), today.getUTCMonth()];
+      fromDate = new Date(Date.UTC(y, m, 1));
+      toDate   = new Date(Date.UTC(y, m + 1, 0));
     }
 
     const records = await prisma.attendance.findMany({
@@ -51,7 +58,7 @@ export async function GET(req: NextRequest) {
       summary.totalOvertimeMinutes += r.overtimeMinutes;
     }
 
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const today = istTodayDateOnly();
     const todayRecord = await prisma.attendance.findUnique({
       where: { userId_date: { userId: targetUserId, date: today } },
     });

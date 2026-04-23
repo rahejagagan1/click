@@ -8,7 +8,7 @@ export async function GET() {
   const { errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   try {
-    const types = await prisma.leaveType.findMany({ orderBy: { name: "asc" } });
+    const types = await prisma.leaveType.findMany({ where: { isActive: true }, orderBy: { name: "asc" } });
     return NextResponse.json(types);
   } catch (e) { return serverError(e, "GET /api/hr/admin/leave-types"); }
 }

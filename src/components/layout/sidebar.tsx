@@ -114,7 +114,6 @@ export default function Sidebar() {
         return true;
     });
 
-    // Report submenu state
     const [reportHovered, setReportHovered] = useState(false);
     const [reportY, setReportY] = useState(0);
     const reportTrigger = useRef<HTMLDivElement>(null);
@@ -122,7 +121,6 @@ export default function Sidebar() {
     const [managersLoaded, setManagersLoaded] = useState(false);
     const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    // HR sideways flyout state — portalled to body so overflow-y:auto can't clip them
     const isHRPath = pathname.startsWith("/dashboard/hr");
     const [hrMeOpen,    setHrMeOpen]    = useState(false);
     const [hrTeamOpen,  setHrTeamOpen]  = useState(false);
@@ -151,16 +149,13 @@ export default function Sidebar() {
         onMouseLeave: () => { timerRef.current = setTimeout(() => setOpen(false), 200); },
     });
 
-    // Inbox badge count
     const { data: inboxData } = useSWR("/api/hr/inbox", fetcher, { refreshInterval: 30000 });
 
-    // Dept submenu state
     const [deptHovered, setDeptHovered] = useState(false);
     const [deptY, setDeptY] = useState(0);
     const deptTrigger = useRef<HTMLDivElement>(null);
     const deptHoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Feedback submenu (CEO / Developer / HR)
     const [feedbackHovered, setFeedbackHovered] = useState(false);
     const [feedbackY, setFeedbackY] = useState(0);
     const feedbackTrigger = useRef<HTMLDivElement>(null);
@@ -194,7 +189,6 @@ export default function Sidebar() {
                 .then((res) => res.json())
                 .then((data) => {
                     if (Array.isArray(data)) {
-                        // Non-admin users only see their own report link
                         if (!isAdmin) {
                             setManagers(data.filter((m: Manager) => String(m.id) === String(user?.dbId)));
                         } else {
@@ -237,7 +231,6 @@ export default function Sidebar() {
         pathname === "/dashboard/feedback_inbox" || pathname.startsWith("/dashboard/feedback_inbox/");
     const isFeedbackNavActive = isFeedbackFormActive || isFeedbackInboxActive;
 
-    // Find the index where Report should be inserted (before Admin)
     const adminIndex = visibleItems.findIndex((item) => item.label === "Admin");
     const beforeAdmin = adminIndex >= 0 ? visibleItems.slice(0, adminIndex) : visibleItems;
     const afterAdmin = adminIndex >= 0 ? visibleItems.slice(adminIndex) : [];
@@ -245,7 +238,6 @@ export default function Sidebar() {
     return (
         <>
         <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-[#0a0a1a] border-r border-white/5 flex flex-col" style={{ background: 'var(--sidebar-bg)' }}>
-            {/* Logo */}
             <div className="p-6 border-b border-white/5">
                 <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-lg overflow-hidden shrink-0">
@@ -266,13 +258,11 @@ export default function Sidebar() {
                 </div>
             </div>
 
-            {/* Navigation */}
             <nav className="flex-1 p-4 space-y-1 overflow-y-auto scrollbar-thin">
                 <p className="text-[10px] uppercase tracking-widest text-slate-600 font-medium mb-3 px-3">
                     Main Menu
                 </p>
 
-                {/* Items before Admin */}
                 {beforeAdmin.map((item) => {
                     if (item.label === "Feedback" && showFeedbackSubmenu) {
                         return (
@@ -372,7 +362,6 @@ export default function Sidebar() {
                     );
                 })}
 
-                {/* Report — visible to CEO, developers, managers only */}
                 {canSeeReports && (!isAdmin ? (
                     <Link
                         href={`/dashboard/reports/${user?.dbId}`}
@@ -425,7 +414,6 @@ export default function Sidebar() {
                             </svg>
                         </div>
 
-                        {/* Flyout submenu — admins only */}
                         {reportHovered && typeof document !== "undefined" && createPortal(
                             <div
                                 style={{ position: "fixed", left: 264, top: reportY, zIndex: 9999 }}
@@ -473,7 +461,6 @@ export default function Sidebar() {
                     </div>
                 ))}
 
-                {/* Dept. — visible to admins, hover submenu with department names */}
                 {isAdmin && (() => {
                     const isDeptActive = pathname.startsWith("/dashboard/departments");
                     return (
@@ -511,7 +498,6 @@ export default function Sidebar() {
                                 </svg>
                             </div>
 
-                            {/* Flyout submenu */}
                             {deptHovered && typeof document !== "undefined" && createPortal(
                                 <div
                                     style={{ position: "fixed", left: 264, top: deptY, zIndex: 9999 }}
@@ -546,7 +532,6 @@ export default function Sidebar() {
                     );
                 })()}
 
-                {/* System Violation Log — HR, Special Access, CEO, Developer only */}
                 {canSeeViolationLog && (() => {
                     const isActive = pathname.startsWith("/dashboard/violations");
                     return (
@@ -569,7 +554,6 @@ export default function Sidebar() {
                     );
                 })()}
 
-                {/* ── HR & People Section ── developers only while under rollout */}
                 {user?.isDeveloper === true && (() => {
                     const inboxCount = (inboxData?.total || 0) as number;
                     const E = "text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5";
@@ -583,7 +567,6 @@ export default function Sidebar() {
                     const isTeamActive  = pathname.startsWith("/dashboard/hr/my-team") || pathname.startsWith("/dashboard/hr/inbox");
                     const isAdminActive = pathname.startsWith("/dashboard/hr/admin") || pathname.startsWith("/dashboard/hr/assets");
 
-                    // Flyout link
                     const fl = (href: string, label: string, badge?: ReactNode) => {
                         const active = pathname === href || pathname.startsWith(href + "/");
                         return (
@@ -604,14 +587,12 @@ export default function Sidebar() {
                         );
                     };
 
-                    // Shared flyout panel class
                     const panelCls = "w-56 bg-[#12122a] border border-white/10 rounded-xl shadow-2xl shadow-black/40 py-2 animate-in fade-in slide-in-from-left-2 duration-150";
 
                     return (
                         <>
                             <p className="text-[10px] uppercase tracking-widest text-slate-600 font-medium mt-6 mb-2 px-3">HR & People</p>
 
-                            {/* HR Home — direct link */}
                             {(() => {
                                 const active = pathname === "/dashboard/hr/analytics" || pathname.startsWith("/dashboard/hr/analytics/");
                                 return (
@@ -623,14 +604,12 @@ export default function Sidebar() {
                                 );
                             })()}
 
-                            {/* ME trigger */}
                             <div ref={hrMeTrigger} {...meHandlers}
                                 className={cn("flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer", isMeActive || hrMeOpen ? A : E)}>
                                 <User size={15} strokeWidth={1.75} className={isMeActive || hrMeOpen ? "text-emerald-400" : ""} />
                                 Me
                             </div>
 
-                            {/* MY TEAM trigger */}
                             <div ref={hrTeamTrigger} {...teamHandlers}
                                 className={cn("flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer", isTeamActive || hrTeamOpen ? A : E)}>
                                 <span className="flex items-center gap-3">
@@ -644,7 +623,6 @@ export default function Sidebar() {
                                 )}
                             </div>
 
-                            {/* ORGANISATION */}
                             <div className="mx-3 mt-4 mb-1.5 border-t border-white/5" />
                             <p className="text-[10px] uppercase tracking-widest text-slate-600 font-medium mb-1.5 px-3">Organisation</p>
                             {[
@@ -661,7 +639,6 @@ export default function Sidebar() {
                                 );
                             })}
 
-                            {/* HR ADMIN trigger */}
                             {isHRAdmin && (
                                 <>
                                     <div className="mx-3 mt-4 mb-1.5 border-t border-white/5" />
@@ -673,7 +650,6 @@ export default function Sidebar() {
                                 </>
                             )}
 
-                            {/* ── Portal flyouts — escape overflow-y:auto, open sideways ── */}
                             {hrMeOpen && typeof document !== "undefined" && createPortal(
                                 <div style={{ position: "fixed", left: 264, top: hrMeY, zIndex: 9999 }}
                                     className={panelCls} {...meHandlers}>
@@ -722,7 +698,6 @@ export default function Sidebar() {
                     );
                 })()}
 
-                {/* Items from Admin onward */}
                 {afterAdmin.map((item) => {
                     const isActive =
                         pathname === item.href ||
@@ -746,7 +721,6 @@ export default function Sidebar() {
                 })}
             </nav>
 
-            {/* Footer */}
             <div className="p-4 border-t border-white/5">
                 <div className="px-3 py-2 rounded-xl bg-gradient-to-r from-violet-500/10 to-transparent">
                     <p className="text-[10px] text-slate-500 uppercase tracking-wider">Workspace</p>

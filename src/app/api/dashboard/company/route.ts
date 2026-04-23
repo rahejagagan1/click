@@ -46,7 +46,7 @@ export async function GET() {
                     },
                 }),
                 prisma.monthlyRating.findMany({
-                    where: { roleType: "writer" },
+                    where: { roleType: "writer", user: { isActive: true } },
                     orderBy: { overallRating: "desc" },
                     take: 10,
                     include: {
@@ -54,7 +54,7 @@ export async function GET() {
                     },
                 }),
                 prisma.monthlyRating.findMany({
-                    where: { roleType: "editor" },
+                    where: { roleType: "editor", user: { isActive: true } },
                     orderBy: { overallRating: "desc" },
                     take: 10,
                     include: {
