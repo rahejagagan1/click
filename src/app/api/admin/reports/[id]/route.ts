@@ -5,12 +5,14 @@ import { requireAuth, serverError } from "@/lib/api-auth";
 export const dynamic = "force-dynamic";
 
 /* PATCH — toggle lock/unlock */
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     try {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const id = parseInt(params.id);
+
+        const { id: idRaw } = await params;
+        const id = parseInt(idRaw);
         if (isNaN(id)) return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 
         const { isLocked, isMonthly } = await req.json();
