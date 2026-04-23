@@ -1,15 +1,29 @@
 "use client";
 import { useState } from "react";
 import useSWR, { mutate } from "swr";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight, Palmtree, Trash2 } from "lucide-react";
+import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare } from "lucide-react";
+import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
+import AssetsPanel from "@/components/hr/AssetsPanel";
+import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
 
-const ADMIN_TABS = [
-  { key: "leave-types", label: "Leave Types",      icon: Calendar  },
-  { key: "shifts",      label: "Shift Templates",  icon: Clock     },
-  { key: "departments", label: "Departments",      icon: Users     },
-  { key: "holidays",    label: "Holidays",         icon: Palmtree  },
+// Every HR-admin section is an inline state tab — no sub-routes.
+type AdminTabDef = {
+  key: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string; size?: number; strokeWidth?: number }>;
+};
+const ADMIN_TABS: AdminTabDef[] = [
+  { key: "attendance-dashboard", label: "Attendance Dashboard", icon: LayoutDashboard },
+  { key: "approvals",            label: "Approvals",            icon: CheckSquare     },
+  { key: "holidays",             label: "Holidays & Calendar",  icon: CalendarDays    },
+  { key: "assets",               label: "Assets",               icon: Package         },
+  { key: "leave-types",          label: "Leave Types",          icon: Calendar        },
+  { key: "shifts",               label: "Shift Templates",      icon: Clock           },
+  { key: "departments",          label: "Departments",          icon: Users           },
 ];
 
 const DAYS_LABEL = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -19,12 +33,19 @@ export default function HRAdminPage() {
   const user = session?.user as any;
   const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper || user?.orgLevel === "hr_manager";
 
-  const [tab, setTab] = useState("leave-types");
+  const [tab, setTab] = useState("attendance-dashboard");
 
   const { data: leaveTypes = [] } = useSWR("/api/hr/admin/leave-types", fetcher);
   const { data: shifts = [] }     = useSWR("/api/hr/admin/shifts", fetcher);
   const { data: employees = [] }  = useSWR("/api/hr/employees", fetcher);
   const { data: holidays = [] }   = useSWR("/api/hr/admin/holidays", fetcher);
+  // Pending approvals count — feeds the badge on the "Approvals" rail item.
+  const { data: approvalsSummary } = useSWR<{ byTab: Record<string, number>; total: number }>(
+    "/api/hr/approvals/summary",
+    fetcher,
+    { refreshInterval: 60_000 }
+  );
+  const approvalsTotal = approvalsSummary?.total ?? 0;
 
   const [showHolidayForm, setShowHolidayForm] = useState(false);
   const [holidayForm, setHolidayForm] = useState({ name: "", date: "", isOptional: false });
@@ -116,30 +137,52 @@ export default function HRAdminPage() {
         <div className="flex items-center gap-3">
           <Settings className="w-5 h-5 text-[#008CFF]" />
           <div>
-            <h1 className="text-[15px] font-bold text-slate-800 dark:text-white">HR Admin Settings</h1>
-            <p className="text-[12px] text-slate-500 dark:text-slate-400">Configure leave types, shifts, and org structure</p>
+            <h1 className="text-[15px] font-bold text-slate-800 dark:text-white">HR Dashboard</h1>
+            <p className="text-[12px] text-slate-500 dark:text-slate-400">Attendance, holidays, assets, leave types, shifts & org structure</p>
           </div>
         </div>
       </div>
 
       <div className="flex gap-0 h-full">
 
-        {/* Sidebar tabs */}
-        <div className="w-[220px] shrink-0 p-4 space-y-1 border-r border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/40">
-          {ADMIN_TABS.map(({ key, label, icon: Icon }) => (
-            <button key={key} onClick={() => setTab(key)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left ${
-                tab === key
-                  ? "bg-[#008CFF]/10 text-[#008CFF]"
-                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
-              }`}>
-              <Icon className="w-4 h-4" />{label}
-            </button>
-          ))}
+        {/* Sidebar tabs — every section is an in-page state tab. */}
+        <div className="w-[240px] shrink-0 p-4 space-y-1 border-r border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/40">
+          {ADMIN_TABS.map((t) => {
+            const active = tab === t.key;
+            const base = `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left ${
+              active
+                ? "bg-[#008CFF]/10 text-[#008CFF]"
+                : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
+            }`;
+            // Only the Approvals item carries a count badge (for now).
+            const badge = t.key === "approvals" && approvalsTotal > 0 ? approvalsTotal : null;
+            return (
+              <button key={t.key} onClick={() => setTab(t.key)} className={base}>
+                <t.icon className="w-4 h-4" />
+                <span className="flex-1">{t.label}</span>
+                {badge !== null && (
+                  <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-bold tabular-nums leading-none ${
+                    active ? "bg-[#008CFF] text-white" : "bg-[#008CFF]/15 text-[#008CFF]"
+                  }`}>
+                    {badge > 99 ? "99+" : badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {/* Content */}
         <div className="flex-1 p-6 space-y-4">
+
+          {/* ── Attendance Dashboard ── */}
+          {tab === "attendance-dashboard" && <AttendanceDashboardPanel />}
+
+          {/* ── Approvals — full multi-tab panel (Leave / Comp Offs / WFH / …) ── */}
+          {tab === "approvals" && <ApprovalsPanel embedded />}
+
+          {/* ── Assets ── */}
+          {tab === "assets" && <AssetsPanel />}
 
           {/* ── Leave Types ── */}
           {tab === "leave-types" && (
