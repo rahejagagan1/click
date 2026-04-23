@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { notifyUsers } from "@/lib/notifications";
 
 async function countWorkingDays(from: Date, to: Date): Promise<number> {
   const holidays = await prisma.holidayCalendar.findMany({
@@ -62,9 +63,10 @@ export async function POST(req: NextRequest) {
   try {
     const myId = await resolveUserId(session);
     if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
-    const { leaveTypeId, fromDate, toDate, reason } = await req.json();
+    const { leaveTypeId, fromDate, toDate, reason, notifyUserIds } = await req.json();
     if (!leaveTypeId || !fromDate || !toDate || !reason)
       return NextResponse.json({ error: "All fields are required" }, { status: 400 });
+    const extras = Array.isArray(notifyUserIds) ? notifyUserIds.filter((x: any) => Number.isInteger(x)) : [];
 
     const from = new Date(fromDate), to = new Date(toDate);
     if (from > to) return NextResponse.json({ error: "Invalid date range" }, { status: 400 });
@@ -88,14 +90,36 @@ export async function POST(req: NextRequest) {
 
     const [application] = await prisma.$transaction([
       prisma.leaveApplication.create({
-        data: { userId: myId, leaveTypeId, fromDate: from, toDate: to, totalDays, reason, status: "pending" },
-        include: { leaveType: true },
+        data: {
+          userId: myId, leaveTypeId, fromDate: from, toDate: to, totalDays, reason,
+          status: "pending", notifyUserIds: extras,
+        },
+        include: { leaveType: true, user: { select: { managerId: true, name: true } } },
       }),
       prisma.leaveBalance.update({
         where: { userId_leaveTypeId_year: { userId: myId, leaveTypeId, year } },
         data: { pendingDays: { increment: totalDays } },
       }),
     ]);
+
+    // Stage-1 notification: direct manager + whoever the applicant tagged in the
+    // "Notify" picker. CEO / HR get notified only after stage 1 (manager approves).
+    const requesterName = application.user?.name || "An employee";
+    const managerId = application.user?.managerId ?? null;
+    const stage1Recipients = [
+      ...(managerId ? [managerId] : []),
+      ...extras,
+    ];
+    await notifyUsers({
+      actorId:  myId,
+      userIds:  stage1Recipients,
+      type:     "leave",
+      entityId: application.id,
+      title:    `${requesterName} requested ${application.leaveType?.name || "leave"}`,
+      body:     `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} (${totalDays} day${totalDays === 1 ? "" : "s"}) — awaiting manager approval.`,
+      linkUrl:  "/dashboard/hr/approvals",
+    });
+
     return NextResponse.json(application);
   } catch (e) { return serverError(e, "POST /api/hr/leaves"); }
 }
