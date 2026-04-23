@@ -511,9 +511,10 @@ export async function calculateAllEditorRatings(
         }
     }
 
-    // Rank update in single transaction
+    // Rank update in single transaction — only rank active users so the
+    // leaderboard reads 1..N without gaps from people who left the company.
     const editorRatings = await prisma.monthlyRating.findMany({
-        where: { month: monthStart, roleType: "editor" },
+        where: { month: monthStart, roleType: "editor", user: { isActive: true } },
         select: { id: true, overallRating: true },
         orderBy: { overallRating: "desc" },
     });

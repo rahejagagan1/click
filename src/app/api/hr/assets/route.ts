@@ -27,7 +27,26 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     if (body.purchaseDate) body.purchaseDate = new Date(body.purchaseDate);
-    const asset = await prisma.asset.create({ data: body });
+
+    const { assignedToUserId, ...assetData } = body;
+    if (assignedToUserId) assetData.status = "assigned";
+
+    const asset = await prisma.asset.create({
+      data: {
+        ...assetData,
+        ...(assignedToUserId
+          ? {
+              assignments: {
+                create: {
+                  userId: Number(assignedToUserId),
+                  conditionOnAssign: assetData.condition ?? null,
+                },
+              },
+            }
+          : {}),
+      },
+      include: { assignments: { include: { user: { select: { id: true, name: true } } } } },
+    });
     return NextResponse.json(asset);
   } catch (e) { return serverError(e, "POST /api/hr/assets"); }
 }
