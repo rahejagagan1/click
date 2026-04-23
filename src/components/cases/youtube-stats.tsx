@@ -17,12 +17,11 @@ interface YoutubeStatsProps {
     likeCount: string | number | null;
     commentCount: string | number | null;
     last30DaysViews: string | number | null;
-    ctr: string | number | null;
     publishedAt: string | null;
     history: Array<{ snapshotDate: string; viewCount: string | number }>;
 }
 
-export default function YoutubeStats({ videoId, viewCount, likeCount, commentCount, last30DaysViews: dbLast30, ctr, publishedAt, history }: YoutubeStatsProps) {
+export default function YoutubeStats({ videoId, viewCount, likeCount, commentCount, last30DaysViews: dbLast30, publishedAt, history }: YoutubeStatsProps) {
     const totalViews = Number(viewCount || 0);
 
     // Check if the video is still within the first 30 days since publish
@@ -57,7 +56,7 @@ export default function YoutubeStats({ videoId, viewCount, likeCount, commentCou
     return (
         <div className="space-y-4">
             {/* Stats Grid */}
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-3 gap-3">
                 <div className="rounded-xl bg-slate-100 dark:bg-[#1a1a2e] border border-slate-200 dark:border-white/5 p-4 text-center">
                     <p className="text-lg font-bold text-slate-800 dark:text-white">{publishDate || "—"}</p>
                     <p className="text-[11px] text-slate-500 mt-1">Published</p>
@@ -73,12 +72,6 @@ export default function YoutubeStats({ videoId, viewCount, likeCount, commentCou
                 <div className="rounded-xl bg-slate-100 dark:bg-[#1a1a2e] border border-slate-200 dark:border-white/5 p-4 text-center">
                     <p className="text-2xl font-bold text-slate-800 dark:text-white">{formatNumber(totalViews)}</p>
                     <p className="text-[11px] text-slate-500 mt-1">Total Views</p>
-                </div>
-                <div className="rounded-xl bg-slate-100 dark:bg-[#1a1a2e] border border-slate-200 dark:border-white/5 p-4 text-center">
-                    <p className="text-2xl font-bold text-slate-800 dark:text-white">
-                        {ctr !== null && ctr !== undefined ? `${Number(ctr).toFixed(1)}%` : "—"}
-                    </p>
-                    <p className="text-[11px] text-slate-500 mt-1">CTR</p>
                 </div>
             </div>
 

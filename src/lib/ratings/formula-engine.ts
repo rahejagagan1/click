@@ -43,7 +43,7 @@ function variableAsNullableNumber(v: number | null | undefined): number | null {
  * Custom rounding: exactly 0.5 rounds DOWN, anything above rounds UP.
  * Matches existing business rule used throughout the system.
  */
-function customRound(value: number): number {
+export function customRound(value: number): number {
     if (value === 0) return 0;
     const decimal = value - Math.floor(value);
     return decimal > 0.5 ? Math.ceil(value) : Math.floor(value);
@@ -60,7 +60,7 @@ function formatCmDeliveryUnitsLabel(context: ResolvedDataContext): string {
     return Math.abs(n - Math.round(n)) < 1e-6 ? String(Math.round(n)) : n.toFixed(2);
 }
 
-function applyBrackets(value: number, brackets: Bracket[]): number {
+export function applyBrackets(value: number, brackets: Bracket[]): number {
     for (const b of brackets) {
         if (value >= b.min && value <= b.max) return b.stars;
     }
@@ -82,7 +82,7 @@ function applyBrackets(value: number, brackets: Bracket[]): number {
  * Finds the best row key where casesCompleted >= key (highest match).
  * Returns 0 if casesCompleted <= 1 (minimum threshold).
  */
-function applyMatrix(
+export function applyMatrix(
     casesCompleted: number,
     qualityStars: number,
     matrix: MatrixTable
