@@ -5,54 +5,105 @@ import { USER_FIELDS } from "./field-mapping";
 import { delay, deriveShortName, calcBusinessDaysTat } from "@/lib/utils";
 
 // ═══ STEP 1: Sync Workspace Members ═══
+// HR is the identity source. This sync:
+//   1. For each ClickUp workspace member, finds the HR User by email (case-insensitive).
+//      If found, backfills clickupUserId (if null) and refreshes name/picture. Does NOT create new Users.
+//   2. Records ClickUp users without a matching HR User in ClickupUnmatchedUser so HR admins can review.
+//   3. Clears clickupUserId on HR users who are no longer in ClickUp (keeps the User for history).
 export async function syncUsers(): Promise<number> {
     const response = await clickupApi<any>(`/team/${WORKSPACE_ID}`);
     const members = response.team?.members || [];
-    let count = 0;
+    let matched = 0;
+    let unmatched = 0;
 
-    // Collect all active ClickUp user IDs
-    const activeClickupIds: bigint[] = [];
+    const seenClickupIds: bigint[] = [];
+    const seenUnmatchedClickupIds: bigint[] = [];
 
     for (const member of members) {
         const user = member.user;
         if (!user?.id || !user?.email) continue;
 
         const clickupId = BigInt(user.id);
-        activeClickupIds.push(clickupId);
+        const email = String(user.email).trim().toLowerCase();
+        const name = user.username || email.split("@")[0];
+        const picture = user.profilePicture || null;
 
-        await prisma.user.upsert({
-            where: { clickupUserId: clickupId },
-            create: {
-                clickupUserId: clickupId,
-                name: user.username || user.email.split("@")[0],
-                email: user.email,
-                profilePictureUrl: user.profilePicture || null,
-                isActive: true,
-            },
-            update: {
-                name: user.username || user.email.split("@")[0],
-                profilePictureUrl: user.profilePicture || null,
-                isActive: true,
-            },
-        });
-        count++;
-    }
+        seenClickupIds.push(clickupId);
 
-    // Deactivate users no longer in ClickUp (skip Google-only users with clickupUserId=0)
-    if (activeClickupIds.length > 0) {
-        const deactivated = await prisma.user.updateMany({
-            where: {
-                clickupUserId: { notIn: activeClickupIds, not: BigInt(0) },
-                isActive: true,
-            },
-            data: { isActive: false },
+        // Match by email (case-insensitive). Prisma's String @unique is case-sensitive,
+        // so we query with lowercase — HR registration should also lowercase-normalize.
+        const hrUser = await prisma.user.findUnique({
+            where: { email },
+            select: { id: true, clickupUserId: true },
         });
-        if (deactivated.count > 0) {
-            console.log(`[Sync] Deactivated ${deactivated.count} users no longer in ClickUp`);
+
+        if (hrUser) {
+            // Matched: backfill clickupUserId if missing or different, refresh display fields.
+            // Guard against collisions: another HR user may already own this clickupUserId.
+            if (hrUser.clickupUserId == null || hrUser.clickupUserId !== clickupId) {
+                const collision = await prisma.user.findUnique({
+                    where: { clickupUserId: clickupId },
+                    select: { id: true, email: true },
+                });
+                if (collision && collision.id !== hrUser.id) {
+                    console.warn(
+                        `[Sync] clickupUserId ${clickupId} already linked to HR user "${collision.email}" — not re-linking to "${email}"`
+                    );
+                    continue;
+                }
+            }
+
+            await prisma.user.update({
+                where: { id: hrUser.id },
+                data: {
+                    clickupUserId: clickupId,
+                    name,
+                    profilePictureUrl: picture,
+                },
+            });
+            matched++;
+        } else {
+            // Not in HR. Record so admins can onboard them.
+            seenUnmatchedClickupIds.push(clickupId);
+            await prisma.clickupUnmatchedUser.upsert({
+                where: { clickupUserId: clickupId },
+                create: {
+                    clickupUserId: clickupId,
+                    email,
+                    name,
+                    profilePictureUrl: picture,
+                },
+                update: {
+                    email,
+                    name,
+                    profilePictureUrl: picture,
+                },
+            });
+            unmatched++;
         }
     }
 
-    return count;
+    // Users previously linked to ClickUp but no longer present → clear clickupUserId.
+    // Keep the HR User row and historical records intact.
+    if (seenClickupIds.length > 0) {
+        const cleared = await prisma.user.updateMany({
+            where: {
+                clickupUserId: { notIn: seenClickupIds, not: null },
+            },
+            data: { clickupUserId: null },
+        });
+        if (cleared.count > 0) {
+            console.log(`[Sync] Cleared clickupUserId on ${cleared.count} HR users no longer in ClickUp`);
+        }
+    }
+
+    // Drop stale unmatched entries — they either got onboarded or were removed from ClickUp.
+    await prisma.clickupUnmatchedUser.deleteMany({
+        where: { clickupUserId: { notIn: seenUnmatchedClickupIds } },
+    });
+
+    console.log(`[Sync] Users: ${matched} matched/backfilled, ${unmatched} unmatched (awaiting HR onboarding)`);
+    return matched;
 }
 
 // ═══ STEP 2: Sync Spaces ═══
@@ -202,6 +253,87 @@ async function resolveUserId(
     }
 }
 
+// Upsert a single ClickUp subtask into our DB. Shared between the list-flat
+// pass and the per-task include_subtasks pass.
+//
+// Correctness rule: we NEVER fabricate a dateDone. ClickUp's parent-task
+// payload frequently omits `date_done` from embedded subtask summaries, and the
+// old code fell back to `date_updated` — which is the "last touched" timestamp
+// and is completely wrong (e.g. bumps every time anyone adds a comment). So:
+//   1. If the provided subtask already has a real `date_done`, use it.
+//   2. Else if the subtask is closed but `date_done` is missing, refetch the
+//      full subtask via GET /task/{id}. That call returns the authoritative
+//      `date_done`.
+//   3. If even the standalone fetch has no `date_done`, we store null — we
+//      would rather have a missing date than a wrong one.
+async function upsertSubtaskFromClickup(subtask: any, caseId: number): Promise<void> {
+    // Decide whether the payload's dateDone is trustworthy, or whether we must
+    // refetch the subtask individually. Parent-task payloads frequently omit
+    // `date_done` for closed subtasks, so we refetch in that case.
+    let authoritative = subtask;
+    let dateDoneIsTrusted = !!subtask.date_done || subtask.status?.type !== "closed";
+
+    if (!dateDoneIsTrusted) {
+        try {
+            authoritative = await clickupApi<any>(`/task/${subtask.id}`);
+            dateDoneIsTrusted = true; // standalone /task/{id} returns the real date_done (or null)
+        } catch (err) {
+            // Refetch failed (network, server error after all retries). Update
+            // everything else from the parent payload, but do NOT touch
+            // dateDone/tat in DB — leaving existing values is the safe default.
+            console.warn(
+                `[Sync] could not refetch subtask ${subtask.id} — leaving dateDone untouched:`,
+                (err as Error).message
+            );
+        }
+    }
+
+    const subtaskAssigneeId = await resolveUserId(authoritative.assignees?.[0]?.id);
+    const stStartDate = authoritative.start_date
+        ? new Date(parseInt(authoritative.start_date))
+        : null;
+    const stDateDone = authoritative.date_done
+        ? new Date(parseInt(authoritative.date_done))
+        : null;
+    const stTat = stStartDate && stDateDone
+        ? calcBusinessDaysTat(stStartDate, stDateDone)
+        : null;
+
+    // Fields we always update from ClickUp.
+    const baseUpdate: any = {
+        name: authoritative.name,
+        status: authoritative.status?.status || "unknown",
+        statusType: authoritative.status?.type || null,
+        assigneeUserId: subtaskAssigneeId,
+        startDate: stStartDate,
+        dueDate: authoritative.due_date ? new Date(parseInt(authoritative.due_date)) : null,
+        lastSyncedAt: new Date(),
+    };
+
+    // Only touch dateDone/tat when we have authoritative data. Otherwise leave
+    // the existing DB values alone — never overwrite with guesses.
+    const update: any = dateDoneIsTrusted
+        ? { ...baseUpdate, dateDone: stDateDone, tat: stTat }
+        : baseUpdate;
+
+    // CREATE uses null when we're not trusted (better than a wrong value).
+    const create: any = {
+        clickupTaskId: authoritative.id,
+        caseId,
+        ...baseUpdate,
+        dateDone: dateDoneIsTrusted ? stDateDone : null,
+        tat: dateDoneIsTrusted ? stTat : null,
+        orderIndex: authoritative.orderindex ? parseInt(authoritative.orderindex) : null,
+        dateCreated: authoritative.date_created ? new Date(parseInt(authoritative.date_created)) : null,
+    };
+
+    await prisma.subtask.upsert({
+        where: { clickupTaskId: authoritative.id },
+        create,
+        update,
+    });
+}
+
 // ═══ STEP 5: Sync Tasks + Subtasks ═══
 export async function syncTasks(): Promise<number> {
     // Read admin-selected lists from DB (fallback to all lists if none configured)
@@ -212,6 +344,11 @@ export async function syncTasks(): Promise<number> {
     const lists = selectedListIds.length > 0
         ? allLists.filter(l => selectedListIds.includes(l.clickupListId))
         : allLists;
+
+    // Clear every case's deep-subtask flag at the start of a sync so that cases
+    // fixed in ClickUp since the last sync stop being highlighted. The sync
+    // re-flags any case that still has a level-3+ descendant.
+    await prisma.case.updateMany({ data: { hasDeepSubtasks: false } });
 
     let count = 0;
 
@@ -325,76 +462,77 @@ export async function syncTasks(): Promise<number> {
                     }
                 }
 
-                // Second pass: process subtasks (they have a parent field)
+                // Second pass (A): process subtasks that were returned inline with the list
+                // (works only for subtasks that live in the same list).
                 for (const subtask of subtaskEntries) {
                     try {
-                        // Find the parent case by the parent's clickup task ID
                         const parentCase = await prisma.case.findUnique({
                             where: { clickupTaskId: subtask.parent },
                             select: { id: true },
                         });
-
                         if (!parentCase) {
-                            console.warn(`Subtask ${subtask.id} has parent ${subtask.parent} which is not a synced case, skipping`);
+                            // Parent isn't a case, so this is a level-3+ sub-subtask
+                            // (ClickUp allows nesting; our schema only models 2 levels).
+                            // Walk up to the top-level case and mark it so the UI can
+                            // surface it for manual cleanup in ClickUp.
+                            let topCase: { id: number } | null = null;
+                            if (subtask.top_level_parent) {
+                                topCase = await prisma.case.findUnique({
+                                    where: { clickupTaskId: subtask.top_level_parent },
+                                    select: { id: true },
+                                });
+                            }
+                            if (!topCase && subtask.parent) {
+                                const parentSubtask = await prisma.subtask.findUnique({
+                                    where: { clickupTaskId: subtask.parent },
+                                    select: { caseId: true },
+                                });
+                                if (parentSubtask) topCase = { id: parentSubtask.caseId };
+                            }
+                            if (topCase) {
+                                await prisma.case.update({
+                                    where: { id: topCase.id },
+                                    data: { hasDeepSubtasks: true },
+                                });
+                                console.warn(`[Sync] Subtask ${subtask.id} is a level-3+ descendant of case ${topCase.id} — case flagged for review`);
+                            } else {
+                                console.warn(`Subtask ${subtask.id} has parent ${subtask.parent} which is not a synced case, skipping`);
+                            }
                             continue;
                         }
-
-                        const subtaskAssigneeId = await resolveUserId(
-                            subtask.assignees?.[0]?.id
-                        );
-
-                        // Build dates first so we can compute TAT
-                        const stStartDate = subtask.start_date
-                            ? new Date(parseInt(subtask.start_date))
-                            : null;
-                        const stDateDone = subtask.date_done
-                            ? new Date(parseInt(subtask.date_done))
-                            : subtask.status?.type === "closed" && subtask.date_updated
-                                ? new Date(parseInt(subtask.date_updated))
-                                : null;
-                        const stTat = stStartDate && stDateDone
-                            ? calcBusinessDaysTat(stStartDate, stDateDone)
-                            : null;
-
-                        await prisma.subtask.upsert({
-                            where: { clickupTaskId: subtask.id },
-                            create: {
-                                clickupTaskId: subtask.id,
-                                caseId: parentCase.id,
-                                name: subtask.name,
-                                status: subtask.status?.status || "unknown",
-                                statusType: subtask.status?.type || null,
-                                assigneeUserId: subtaskAssigneeId,
-                                startDate: stStartDate,
-                                dueDate: subtask.due_date
-                                    ? new Date(parseInt(subtask.due_date))
-                                    : null,
-                                dateDone:  stDateDone,
-                                tat:       stTat,
-                                orderIndex: subtask.orderindex
-                                    ? parseInt(subtask.orderindex)
-                                    : null,
-                                dateCreated: subtask.date_created
-                                    ? new Date(parseInt(subtask.date_created))
-                                    : null,
-                                lastSyncedAt: new Date(),
-                            },
-                            update: {
-                                name: subtask.name,
-                                status: subtask.status?.status || "unknown",
-                                statusType: subtask.status?.type || null,
-                                assigneeUserId: subtaskAssigneeId,
-                                startDate: stStartDate,
-                                dueDate: subtask.due_date
-                                    ? new Date(parseInt(subtask.due_date))
-                                    : null,
-                                dateDone:  stDateDone,
-                                tat:       stTat,
-                                lastSyncedAt: new Date(),
-                            },
-                        });
+                        await upsertSubtaskFromClickup(subtask, parentCase.id);
                     } catch (subtaskError) {
                         console.error(`Error syncing subtask ${subtask.id}:`, subtaskError);
+                    }
+                }
+
+                // Second pass (B): explicitly fetch each parent task with include_subtasks=true.
+                // ClickUp's list endpoint only returns subtasks that live IN the list;
+                // this per-task call returns ALL subtasks (including those outside the list).
+                for (const task of parentTasks) {
+                    try {
+                        await delay(200);
+                        const detail = await clickupApi<any>(
+                            `/task/${task.id}?include_subtasks=true`
+                        );
+                        const childSubtasks: any[] = detail?.subtasks || [];
+                        if (childSubtasks.length === 0) continue;
+
+                        const parentCase = await prisma.case.findUnique({
+                            where: { clickupTaskId: task.id },
+                            select: { id: true },
+                        });
+                        if (!parentCase) continue;
+
+                        for (const subtask of childSubtasks) {
+                            try {
+                                await upsertSubtaskFromClickup(subtask, parentCase.id);
+                            } catch (subtaskError) {
+                                console.error(`Error syncing child subtask ${subtask.id}:`, subtaskError);
+                            }
+                        }
+                    } catch (detailError) {
+                        console.error(`Error fetching subtasks for task ${task.id}:`, detailError);
                     }
                 }
 

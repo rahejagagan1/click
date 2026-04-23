@@ -336,6 +336,11 @@ export default function MonthlyReportPage() {
         yearParam != null && yearParam !== "" && Number.isFinite(Number(yearParam))
             ? Number(yearParam)
             : new Date().getFullYear();
+    // Reporting window: day 4 of month M → day 3 of month M+1. See
+    // src/lib/reports/monthly-window.ts for the canonical definition.
+    const nextMonthIndex = (monthIndex + 1) % 12;
+    const nextMonthName = MONTH_NAMES[nextMonthIndex] || "Unknown";
+    const periodEndYear = monthIndex === 11 ? year + 1 : year;
 
     const { data: session, status: sessionStatus } = useSession();
     const sessionUser = session?.user as any;
@@ -382,6 +387,8 @@ export default function MonthlyReportPage() {
     );
     const editorStats: Record<number, number> = contributorData?.editorStats ?? {};
     const writerStats: Record<number, number> = contributorData?.writerStats ?? {};
+    const editorCases: Record<number, { id: number; name: string }[]> = contributorData?.editorCases ?? {};
+    const writerCases: Record<number, { id: number; name: string }[]> = contributorData?.writerCases ?? {};
 
     const editors = useMemo(() => {
         if (!data?.teamMembers) return [];
@@ -401,6 +408,20 @@ export default function MonthlyReportPage() {
     // ── Editable state for all manager fields ──────────────
     const [executiveSummary, setExecutiveSummary] = useState("");
     const [shortfallSummary, setShortfallSummary] = useState("");
+    // Production Volume: Target is free-form (manager input). Actual is auto-computed
+    // from qualified Video QA1 cases unless a CEO/developer has overridden it.
+    const [totalVideoTarget, setTotalVideoTarget] = useState("");
+    const [totalVideoActual, setTotalVideoActual] = useState("");
+    const [totalVideoVariance, setTotalVideoVariance] = useState("");
+    const [heroContentTarget, setHeroContentTarget] = useState("");
+    const [heroContentActual, setHeroContentActual] = useState("");
+    const [heroContentVariance, setHeroContentVariance] = useState("");
+    const [videosPublishedTarget, setVideosPublishedTarget] = useState("");
+    const [videosPublishedActual, setVideosPublishedActual] = useState("");
+    const [videosPublishedVariance, setVideosPublishedVariance] = useState("");
+    const [totalVideoActualOverridden, setTotalVideoActualOverridden]   = useState(false);
+    const [heroContentActualOverridden, setHeroContentActualOverridden] = useState(false);
+    const [videosPublishedActualOverridden, setVideosPublishedActualOverridden] = useState(false);
     const [editorNotes, setEditorNotes] = useState<Record<number, string>>({});
     const [writerNotes, setWriterNotes] = useState<Record<number, string>>({});
     const handleEditorNoteChange = (userId: number, value: string) => {
@@ -470,6 +491,19 @@ export default function MonthlyReportPage() {
         fetcher
     );
 
+    // Auto-fill Production Monthly Section 4 — videos published in the prior
+    // month by the PM's capsule, ranked by first-30-day views.
+    const { data: contentPerfData } = useSWR<{
+        totalViews: string;
+        top3: Array<{ caseId: number; title: string; videoUrl: string; views: string; capsule: string }>;
+        bottom3: Array<{ caseId: number; title: string; videoUrl: string; views: string; capsule: string }>;
+    }>(
+        managerId && !isNaN(monthIndex)
+            ? `/api/reports/${managerId}/monthly/${monthIndex}/content-performance?year=${year}`
+            : null,
+        fetcher,
+    );
+
     // ── Nishant Bhatia monthly researcher state ──
     const defaultNishantRows = useMemo((): NishantResearcherRow[] => {
         return researchers.length > 0
@@ -506,11 +540,25 @@ export default function MonthlyReportPage() {
         fetch(`/api/reports/${managerId}/monthly/${monthIndex}?year=${year}`)
             .then(r => r.json())
             .then(d => {
+                // Production Volume actuals are auto-computed on GET — load them
+                // even for unsubmitted reports so the table is pre-filled.
+                const saved = d.data as any;
+                if (saved?.totalVideoTarget)    setTotalVideoTarget(saved.totalVideoTarget);
+                if (saved?.totalVideoActual)    setTotalVideoActual(saved.totalVideoActual);
+                if (saved?.totalVideoVariance)  setTotalVideoVariance(saved.totalVideoVariance);
+                if (saved?.heroContentTarget)   setHeroContentTarget(saved.heroContentTarget);
+                if (saved?.heroContentActual)   setHeroContentActual(saved.heroContentActual);
+                if (saved?.heroContentVariance) setHeroContentVariance(saved.heroContentVariance);
+                if (saved?.videosPublishedTarget)   setVideosPublishedTarget(saved.videosPublishedTarget);
+                if (saved?.videosPublishedActual)   setVideosPublishedActual(saved.videosPublishedActual);
+                if (saved?.videosPublishedVariance) setVideosPublishedVariance(saved.videosPublishedVariance);
+                setTotalVideoActualOverridden(!!saved?.totalVideoActualOverridden);
+                setHeroContentActualOverridden(!!saved?.heroContentActualOverridden);
+                setVideosPublishedActualOverridden(!!saved?.videosPublishedActualOverridden);
                 if (d.submitted) {
                     setIsSubmitted(d.locked);
                     setIsDraftSaved(!d.locked);
                     setIsLocked(d.locked);
-                    const saved = d.data as any;
                     if (saved?.executiveSummary)   setExecutiveSummary(saved.executiveSummary);
                     if (saved?.shortfallSummary)   setShortfallSummary(saved.shortfallSummary);
                     if (saved?.editorNotes)        setEditorNotes(saved.editorNotes);
@@ -739,6 +787,18 @@ export default function MonthlyReportPage() {
                     isDraft,
                     executiveSummary,
                     shortfallSummary,
+                    totalVideoTarget,
+                    totalVideoActual,
+                    totalVideoVariance,
+                    heroContentTarget,
+                    heroContentActual,
+                    heroContentVariance,
+                    videosPublishedTarget,
+                    videosPublishedActual,
+                    videosPublishedVariance,
+                    totalVideoActualOverridden,
+                    heroContentActualOverridden,
+                    videosPublishedActualOverridden,
                     editorNotes,
                     writerNotes,
                     teamRecognition,
@@ -1454,7 +1514,7 @@ export default function MonthlyReportPage() {
                             <div>
                                 <p className="text-[10px] font-semibold tracking-[0.15em] uppercase mb-1" style={{ color: "#ffffff" }}>NB Media Productions</p>
                                 <h1 className="text-2xl font-bold leading-tight" style={{ color: "#ffffff" }}>HR Manager Monthly Report</h1>
-                                <p className="text-sm mt-1.5" style={{ color: "#ffffff" }}>Reporting Period: <span className="font-medium" style={{ color: "#ffffff" }}>{monthName} 1 – {monthName} {new Date(year, monthIndex + 1, 0).getDate()}, {year}</span></p>
+                                <p className="text-sm mt-1.5" style={{ color: "#ffffff" }}>Reporting Period: <span className="font-medium" style={{ color: "#ffffff" }}>{monthName} 4 – {nextMonthName} 3, {periodEndYear}</span></p>
                             </div>
                             <div className="text-right shrink-0">
                                 {isSubmitted && (
@@ -1946,7 +2006,7 @@ export default function MonthlyReportPage() {
                         </div>
                         <div>
                             <span className="text-slate-500 dark:text-slate-400 font-medium">From: </span>
-                            <span className="text-slate-700 dark:text-slate-300">Head of Production</span>
+                            <span className="text-slate-700 dark:text-slate-300">{manager?.name || "—"}</span>
                         </div>
                         <div>
                             <span className="text-slate-500 dark:text-slate-400 font-medium">Date: </span>
@@ -1954,7 +2014,7 @@ export default function MonthlyReportPage() {
                         </div>
                         <div>
                             <span className="text-slate-500 dark:text-slate-400 font-medium">Reporting Period: </span>
-                            <span className="text-yellow-500 dark:text-yellow-400 font-medium">{monthName.slice(0, 3)} 1 to {monthName.slice(0, 3)} {new Date(year, monthIndex + 1, 0).getDate()}, {year}</span>
+                            <span className="text-yellow-500 dark:text-yellow-400 font-medium">{monthName.slice(0, 3)} 4 to {nextMonthName.slice(0, 3)} 3, {periodEndYear}</span>
                         </div>
                     </div>
                 </div>
@@ -2005,17 +2065,55 @@ export default function MonthlyReportPage() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {[
-                                        { metric: "Total Video Completed", target: "[X]", actual: "[X]", variance: "[X]" },
-                                        { metric: "Hero Content Completed", target: "[X]", actual: "[X]", variance: "[X]" },
-                                    ].map((row, i) => (
-                                        <tr key={i} className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
-                                            <td className="py-2 px-3 text-slate-700 dark:text-slate-300 font-medium">{row.metric}</td>
-                                            <td className="py-2 px-3"><ClickUpField value={row.target} /></td>
-                                            <td className="py-2 px-3"><ClickUpField value={row.actual} /></td>
-                                            <td className="py-2 px-3"><ClickUpField value={row.variance} /></td>
-                                        </tr>
-                                    ))}
+                                    {/* Actual columns auto-fill from qualified Video QA1 cases; only CEO/developer/special_access can override. */}
+                                    <tr className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
+                                        <td className="py-2 px-3 text-slate-700 dark:text-slate-300 font-medium">Total Video Completed</td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell value={totalVideoTarget} onChange={setTotalVideoTarget} readOnly={viewOnly} />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell
+                                                value={totalVideoActual}
+                                                onChange={(v) => { setTotalVideoActual(v); setTotalVideoActualOverridden(true); }}
+                                                readOnly={viewOnly || !(isCeo || isAdmin)}
+                                            />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell value={totalVideoVariance} onChange={setTotalVideoVariance} readOnly={viewOnly} />
+                                        </td>
+                                    </tr>
+                                    <tr className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
+                                        <td className="py-2 px-3 text-slate-700 dark:text-slate-300 font-medium">Hero Content Completed</td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell value={heroContentTarget} onChange={setHeroContentTarget} readOnly={viewOnly} />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell
+                                                value={heroContentActual}
+                                                onChange={(v) => { setHeroContentActual(v); setHeroContentActualOverridden(true); }}
+                                                readOnly={viewOnly || !(isCeo || isAdmin)}
+                                            />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell value={heroContentVariance} onChange={setHeroContentVariance} readOnly={viewOnly} />
+                                        </td>
+                                    </tr>
+                                    <tr className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
+                                        <td className="py-2 px-3 text-slate-700 dark:text-slate-300 font-medium">Videos Published</td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell value={videosPublishedTarget} onChange={setVideosPublishedTarget} readOnly={viewOnly} />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell
+                                                value={videosPublishedActual}
+                                                onChange={(v) => { setVideosPublishedActual(v); setVideosPublishedActualOverridden(true); }}
+                                                readOnly={viewOnly || !(isCeo || isAdmin)}
+                                            />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell value={videosPublishedVariance} onChange={setVideosPublishedVariance} readOnly={viewOnly} />
+                                        </td>
+                                    </tr>
                                 </tbody>
                             </table>
                         </div>
@@ -2040,28 +2138,42 @@ export default function MonthlyReportPage() {
                                     <tr className="border-b border-slate-200 dark:border-white/10">
                                         <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Editor</th>
                                         <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Videos Completed</th>
-                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Consistency/Quality Note</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Case Names</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Manual Override Reason & Production Days</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {isLoading ? (
-                                        <tr><td colSpan={3} className="py-4 text-center text-sm text-slate-500">Loading editors...</td></tr>
+                                        <tr><td colSpan={4} className="py-4 text-center text-sm text-slate-500">Loading editors...</td></tr>
                                     ) : editors.length === 0 ? (
-                                        <tr><td colSpan={3} className="py-4 text-center text-sm text-slate-500">No editors found</td></tr>
+                                        <tr><td colSpan={4} className="py-4 text-center text-sm text-slate-500">No editors found</td></tr>
                                     ) : (
                                         editors.map((editor: any) => (
                                             <tr key={editor.id} className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
-                                                <td className="py-2 px-3 w-1/4">
+                                                <td className="py-2 px-3 w-1/5 align-top">
                                                     <ClickUpField value={editor.name} />
                                                 </td>
-                                                <td className="py-2 px-3 w-1/4">
+                                                <td className="py-2 px-3 w-[12%] align-top">
                                                     <ClickUpField value={
                                                         contributorData
                                                             ? String(editorStats[editor.id] ?? 0)
                                                             : "…"
                                                     } />
                                                 </td>
-                                                <td className="py-2 px-3">
+                                                <td className="py-2 px-3 w-1/3 align-top">
+                                                    {!contributorData ? (
+                                                        <span className="text-xs text-slate-400">…</span>
+                                                    ) : (editorCases[editor.id]?.length ?? 0) === 0 ? (
+                                                        <span className="text-xs text-slate-400">—</span>
+                                                    ) : (
+                                                        <ul className="text-xs text-slate-600 dark:text-slate-300 list-disc pl-4 space-y-0.5">
+                                                            {editorCases[editor.id].map((c) => (
+                                                                <li key={c.id} className="break-words">{c.name}</li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
+                                                </td>
+                                                <td className="py-2 px-3 align-top">
                                                     <div className="flex flex-col gap-1">
                                                         <EditableCell value={editorNotes[editor.id] || ""} onChange={(v) => handleEditorNoteChange(editor.id, v)} readOnly={viewOnly} />
                                                     </div>
@@ -2085,28 +2197,42 @@ export default function MonthlyReportPage() {
                                     <tr className="border-b border-slate-200 dark:border-white/10">
                                         <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Writer</th>
                                         <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Scripts Completed</th>
-                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Consistency/Quality Note</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Case Names</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Manual Override Reason & Production Days</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {isLoading ? (
-                                        <tr><td colSpan={3} className="py-4 text-center text-sm text-slate-500">Loading writers...</td></tr>
+                                        <tr><td colSpan={4} className="py-4 text-center text-sm text-slate-500">Loading writers...</td></tr>
                                     ) : writers.length === 0 ? (
-                                        <tr><td colSpan={3} className="py-4 text-center text-sm text-slate-500">No writers found</td></tr>
+                                        <tr><td colSpan={4} className="py-4 text-center text-sm text-slate-500">No writers found</td></tr>
                                     ) : (
                                         writers.map((writer: any) => (
                                             <tr key={writer.id} className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
-                                                <td className="py-2 px-3 w-1/4">
+                                                <td className="py-2 px-3 w-1/5 align-top">
                                                     <ClickUpField value={writer.name} />
                                                 </td>
-                                                <td className="py-2 px-3 w-1/4">
+                                                <td className="py-2 px-3 w-[12%] align-top">
                                                     <ClickUpField value={
                                                         contributorData
                                                             ? String(writerStats[writer.id] ?? 0)
                                                             : "…"
                                                     } />
                                                 </td>
-                                                <td className="py-2 px-3">
+                                                <td className="py-2 px-3 w-1/3 align-top">
+                                                    {!contributorData ? (
+                                                        <span className="text-xs text-slate-400">…</span>
+                                                    ) : (writerCases[writer.id]?.length ?? 0) === 0 ? (
+                                                        <span className="text-xs text-slate-400">—</span>
+                                                    ) : (
+                                                        <ul className="text-xs text-slate-600 dark:text-slate-300 list-disc pl-4 space-y-0.5">
+                                                            {writerCases[writer.id].map((c) => (
+                                                                <li key={c.id} className="break-words">{c.name}</li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
+                                                </td>
+                                                <td className="py-2 px-3 align-top">
                                                     <div className="flex flex-col gap-1">
                                                         <EditableCell value={writerNotes[writer.id] || ""} onChange={(v) => handleWriterNoteChange(writer.id, v)} readOnly={viewOnly} />
                                                     </div>
@@ -2145,7 +2271,13 @@ export default function MonthlyReportPage() {
                                 <tbody>
                                     <tr className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
                                         <td className="py-2 px-3 text-slate-700 dark:text-slate-300">Total Views (All Videos)</td>
-                                        <td className="py-2 px-3"><ClickUpField value="[X]" /></td>
+                                        <td className="py-2 px-3">
+                                            <ClickUpField value={
+                                                contentPerfData?.totalViews && contentPerfData.totalViews !== "0"
+                                                    ? Number(contentPerfData.totalViews).toLocaleString()
+                                                    : "—"
+                                            } />
+                                        </td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -2153,7 +2285,7 @@ export default function MonthlyReportPage() {
 
                         {/* Top 3 and Bottom 3 */}
                         <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mt-5 mb-3">
-                            Top 3 and Bottom 3 Performing Videos (Published in {MONTH_NAMES[monthIndex === 0 ? 11 : monthIndex - 1]})
+                            Top 3 and Bottom 3 Performing Videos (Published in {monthName})
                         </h3>
 
                         <div className="overflow-x-auto">
@@ -2163,16 +2295,42 @@ export default function MonthlyReportPage() {
                                         <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Rank</th>
                                         <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Video Title</th>
                                         <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Views</th>
-                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Capsule</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Channel</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {["Top 1", "Top 2", "Top 3", "Bottom 1", "Bottom 2", "Bottom 3"].map((rank, i) => (
+                                    {[
+                                        { rank: "Top 1",    video: contentPerfData?.top3?.[0] },
+                                        { rank: "Top 2",    video: contentPerfData?.top3?.[1] },
+                                        { rank: "Top 3",    video: contentPerfData?.top3?.[2] },
+                                        { rank: "Bottom 1", video: contentPerfData?.bottom3?.[0] },
+                                        { rank: "Bottom 2", video: contentPerfData?.bottom3?.[1] },
+                                        { rank: "Bottom 3", video: contentPerfData?.bottom3?.[2] },
+                                    ].map(({ rank, video }, i) => (
                                         <tr key={i} className={`border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02] ${i === 3 ? "border-t-2 border-t-slate-300 dark:border-t-white/10" : ""}`}>
                                             <td className="py-2 px-3 text-slate-500 dark:text-slate-400 text-xs font-medium">{rank}</td>
-                                            <td className="py-2 px-3"><ClickUpField value="[Video Title]" /></td>
-                                            <td className="py-2 px-3"><ClickUpField value="[X]" /></td>
-                                            <td className="py-2 px-3"><ClickUpField value="[X]" /></td>
+                                            <td className="py-2 px-3">
+                                                {video?.videoUrl ? (
+                                                    <a
+                                                        href={video.videoUrl}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-sky-600 dark:text-sky-400 hover:underline"
+                                                    >
+                                                        {video.title}
+                                                    </a>
+                                                ) : (
+                                                    <ClickUpField value={video?.title ?? "—"} />
+                                                )}
+                                            </td>
+                                            <td className="py-2 px-3">
+                                                <ClickUpField value={
+                                                    video?.views ? Number(video.views).toLocaleString() : "—"
+                                                } />
+                                            </td>
+                                            <td className="py-2 px-3">
+                                                <ClickUpField value={video?.capsule || "—"} />
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -2245,9 +2403,7 @@ export default function MonthlyReportPage() {
                 {/* ── Footer / Submit ────────────────────────── */}
                 <div className="px-6 py-4 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02] flex items-center justify-between gap-4">
                     <div className="space-y-0.5">
-                        <p className="text-[11px] text-slate-400 dark:text-slate-500 italic">
-                            Fields marked with [X] are auto-filled from ClickUp and cannot be edited.
-                        </p>
+                        
                         <p className="text-[11px] text-slate-400 dark:text-slate-500 italic">
                             Fields marked <span className="text-red-400 font-semibold not-italic">*</span> are required before submitting.
                         </p>
