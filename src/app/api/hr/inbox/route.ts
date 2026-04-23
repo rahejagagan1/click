@@ -1,68 +1,87 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+/**
+ * GET /api/hr/inbox
+ *
+ * Query params:
+ *   view=pending   (default) → items awaiting approval
+ *   view=archive            → recently resolved items (approved / rejected)
+ *                             from the last 90 days, newest first
+ *
+ * Travel was removed — the product no longer surfaces travel in the inbox.
+ */
+export async function GET(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
-  const user = session!.user as any;
-  const myId = await resolveUserId(session);
+  const user  = session!.user as any;
+  const myId  = await resolveUserId(session);
   if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
   const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
 
   try {
-    const teamFilter = isAdmin ? {} : { user: { managerId: myId } };
+    const { searchParams } = new URL(req.url);
+    const view = searchParams.get("view") === "archive" ? "archive" : "pending";
 
-    const [pendingLeaves, pendingExpenses, pendingRegs, pendingWFH, pendingOD, pendingCompOff, pendingTravel] = await Promise.all([
+    const teamFilter = isAdmin ? {} : { user: { managerId: myId } };
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+
+    // Status filter differs per view. Archive looks at decided items updated
+    // within the last 90 days; pending is the classic approvals inbox.
+    const statusFilter =
+      view === "archive"
+        ? { status: { in: ["approved", "rejected", "partially_approved"] }, updatedAt: { gte: ninetyDaysAgo } }
+        : { status: "pending" };
+    const orderBy = view === "archive" ? { updatedAt: "desc" as const } : { createdAt: "desc" as const };
+
+    const userSelect = { select: { id: true, name: true, profilePictureUrl: true } };
+
+    const [leaves, expenses, regs, wfh, onDuty, compOff] = await Promise.all([
       prisma.leaveApplication.findMany({
-        where: { status: "pending", ...teamFilter },
-        include: { user: { select: { id: true, name: true, profilePictureUrl: true } }, leaveType: { select: { name: true } } },
-        orderBy: { appliedAt: "desc" }, take: 20,
+        where: { ...statusFilter, ...teamFilter },
+        include: { user: userSelect, leaveType: { select: { name: true } } },
+        orderBy: view === "archive" ? { updatedAt: "desc" } : { appliedAt: "desc" },
+        take: 30,
       }),
       prisma.expense.findMany({
-        where: { status: "pending", ...teamFilter },
-        include: { user: { select: { id: true, name: true, profilePictureUrl: true } } },
-        orderBy: { createdAt: "desc" }, take: 20,
+        where: { ...statusFilter, ...teamFilter },
+        include: { user: userSelect },
+        orderBy, take: 30,
       }),
       prisma.attendanceRegularization.findMany({
-        where: { status: "pending", ...teamFilter },
-        include: { user: { select: { id: true, name: true, profilePictureUrl: true } } },
-        orderBy: { createdAt: "desc" }, take: 20,
+        where: { ...statusFilter, ...teamFilter },
+        include: { user: userSelect },
+        orderBy, take: 30,
       }),
       prisma.wFHRequest.findMany({
-        where: { status: "pending", ...teamFilter },
-        include: { user: { select: { id: true, name: true, profilePictureUrl: true } } },
-        orderBy: { createdAt: "desc" }, take: 20,
+        where: { ...statusFilter, ...teamFilter },
+        include: { user: userSelect },
+        orderBy, take: 30,
       }),
       prisma.onDutyRequest.findMany({
-        where: { status: "pending", ...teamFilter },
-        include: { user: { select: { id: true, name: true, profilePictureUrl: true } } },
-        orderBy: { createdAt: "desc" }, take: 20,
+        where: { ...statusFilter, ...teamFilter },
+        include: { user: userSelect },
+        orderBy, take: 30,
       }),
       prisma.compOffRequest.findMany({
-        where: { status: "pending", ...teamFilter },
-        include: { user: { select: { id: true, name: true, profilePictureUrl: true } } },
-        orderBy: { createdAt: "desc" }, take: 20,
-      }),
-      prisma.travelRequest.findMany({
-        where: { status: "pending", ...teamFilter },
-        include: { user: { select: { id: true, name: true, profilePictureUrl: true } } },
-        orderBy: { createdAt: "desc" }, take: 20,
+        where: { ...statusFilter, ...teamFilter },
+        include: { user: userSelect },
+        orderBy, take: 30,
       }),
     ]);
 
     return NextResponse.json({
-      leaves:          pendingLeaves,
-      expenses:        pendingExpenses,
-      regularizations: pendingRegs,
-      wfh:             pendingWFH,
-      onDuty:          pendingOD,
-      compOff:         pendingCompOff,
-      travel:          pendingTravel,
-      total: pendingLeaves.length + pendingExpenses.length + pendingRegs.length +
-             pendingWFH.length + pendingOD.length + pendingCompOff.length + pendingTravel.length,
+      view,
+      leaves,
+      expenses,
+      regularizations: regs,
+      wfh,
+      onDuty,
+      compOff,
+      total: leaves.length + expenses.length + regs.length + wfh.length + onDuty.length + compOff.length,
     });
   } catch (e) { return serverError(e, "GET /api/hr/inbox"); }
 }
