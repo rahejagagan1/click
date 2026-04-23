@@ -3,11 +3,12 @@ import prisma from "@/lib/prisma";
 import { requireAdmin, serverError } from "@/lib/api-auth";
 
 // PUT /api/hr/assets/:id — update or assign/return. Admin-only.
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { errorResponse } = await requireAdmin();
   if (errorResponse) return errorResponse;
   try {
-    const assetId = Number(params.id);
+    const { id: idParam } = await params;
+    const assetId = Number(idParam);
     if (!Number.isInteger(assetId)) return NextResponse.json({ error: "Invalid asset id" }, { status: 400 });
 
     const body = await req.json().catch(() => ({}));
