@@ -6,12 +6,13 @@ import { serializeBigInt } from "@/lib/utils";
 // GET /api/hr/people/:id
 // Returns the shape expected by /dashboard/hr/people/[id]/page.tsx:
 //   { id, name, email, role, orgLevel, profilePictureUrl, profile, documents, assets, directReports, manager, shift, leaveBalances }
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
 
   try {
-    const id = parseInt(params.id);
+    const { id: idParam } = await params;
+    const id = parseInt(idParam);
     if (!Number.isFinite(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
     const user = await prisma.user.findUnique({

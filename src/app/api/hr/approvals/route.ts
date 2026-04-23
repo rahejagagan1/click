@@ -16,39 +16,58 @@ export async function GET(req: NextRequest) {
   if (errorResponse) return errorResponse;
   try {
     const self = session!.user as any;
-    const myId = await resolveUserId(session);
-    if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
     const isFinalApprover =
         self.orgLevel === "ceo" ||
         self.isDeveloper ||
         self.orgLevel === "hr_manager" ||
         self.role === "admin";
-    const reportCount = await prisma.user.count({ where: { managerId: myId, isActive: true } });
-    const isManager = reportCount > 0;
-    if (!isFinalApprover && !isManager) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    // Final approvers see everything — they don't need a DB row to view.
+    // Everyone else must resolve to a User id so we can scope to their team.
+    let myId: number | null = null;
+    let isManager = false;
+    if (!isFinalApprover) {
+      myId = await resolveUserId(session);
+      if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
+      const reportCount = await prisma.user.count({ where: { managerId: myId, isActive: true } });
+      isManager = reportCount > 0;
+      if (!isManager) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const { searchParams } = new URL(req.url);
-    const tab = (searchParams.get("tab") || "leave").toLowerCase();
+    const tab   = (searchParams.get("tab") || "leave").toLowerCase();
+    // scope: "pending" (default — only actionable rows) or "all" (history audit
+    // trail — includes approved, rejected, cancelled, partially_approved).
+    const scope = (searchParams.get("scope") || "pending").toLowerCase();
 
-    // Team scope for managers (self excluded).
+    // Team scope for managers (self excluded). Final approvers see everything.
     const teamWhere: any = isFinalApprover
       ? {}
-      : { user: { managerId: myId } };
+      : { user: { managerId: myId! } };
 
     const selectUser = { id: true, name: true, email: true, profilePictureUrl: true, teamCapsule: true, role: true };
     const selectProfile = { department: true, designation: true, workLocation: true, employeeId: true };
 
+    const includeUser = {
+      user: { select: { ...selectUser, employeeProfile: { select: selectProfile } } },
+      approver: { select: { id: true, name: true } },
+    };
+
+    // Status filter — "all" shows the full history for audit; "pending"
+    // shows only actionable rows.
+    const statusFilter = (pendingStatuses: string[]) =>
+      scope === "all" ? {} : { status: { in: pendingStatuses } };
+
     if (tab === "leave") {
       const rows = await prisma.leaveApplication.findMany({
         where: {
-          status: { in: ["pending", "partially_approved"] },
+          ...statusFilter(["pending", "partially_approved"]),
           ...teamWhere,
         },
         include: {
           leaveType: true,
-          user: { select: { ...selectUser, employeeProfile: { select: selectProfile } } },
-          approver:      { select: { id: true, name: true } },
+          ...includeUser,
           finalApprover: { select: { id: true, name: true } },
         },
         orderBy: { appliedAt: "desc" },
@@ -70,7 +89,51 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(serializeBigInt({ items: rows, count: pendingForViewer }));
     }
 
-    // Placeholder for other tabs — not yet wired, returns empty.
+    if (tab === "regularize") {
+      const rows = await prisma.attendanceRegularization.findMany({
+        where: { ...statusFilter(["pending"]), ...teamWhere },
+        include: includeUser,
+        orderBy: { createdAt: "desc" },
+        take: 300,
+      });
+      return NextResponse.json(serializeBigInt({ items: rows, count: rows.length }));
+    }
+
+    if (tab === "wfh") {
+      // "WFH / OD" tab combines both request types — they're workflow-identical.
+      const [wfhRows, odRows] = await Promise.all([
+        prisma.wFHRequest.findMany({
+          where: { ...statusFilter(["pending"]), ...teamWhere },
+          include: includeUser,
+          orderBy: { createdAt: "desc" },
+          take: 300,
+        }),
+        prisma.onDutyRequest.findMany({
+          where: { ...statusFilter(["pending"]), ...teamWhere },
+          include: includeUser,
+          orderBy: { createdAt: "desc" },
+          take: 300,
+        }),
+      ]);
+      const items = [
+        ...wfhRows.map((r) => ({ ...r, _kind: "wfh" as const })),
+        ...odRows.map((r)  => ({ ...r, _kind: "on_duty" as const })),
+      ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return NextResponse.json(serializeBigInt({ items, count: items.length }));
+    }
+
+    if (tab === "comp_off") {
+      const rows = await prisma.compOffRequest.findMany({
+        where: { ...statusFilter(["pending"]), ...teamWhere },
+        include: includeUser,
+        orderBy: { createdAt: "desc" },
+        take: 300,
+      });
+      return NextResponse.json(serializeBigInt({ items: rows, count: rows.length }));
+    }
+
+    // Other tabs (leave_encashment, half_day, shift_weekly_off) don't have
+    // backing tables yet — return empty + surface a consistent shape.
     return NextResponse.json({ items: [], count: 0 });
   } catch (e) { return serverError(e, "GET /api/hr/approvals"); }
 }

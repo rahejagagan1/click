@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { Bell, CheckCheck, Activity, Home, Briefcase, ShieldCheck, Coffee } from "lucide-react";
+import { Bell, CheckCheck, Activity, Home, Briefcase, ShieldCheck, Coffee, Trash2 } from "lucide-react";
 import Link from "next/link";
 
 function timeAgo(iso: string): string {
@@ -80,6 +80,11 @@ export default function NotificationBell() {
     mutate((k: any) => typeof k === "string" && k.startsWith("/api/hr/notifications"));
   };
 
+  const deleteAllRead = async () => {
+    await fetch("/api/hr/notifications?scope=read", { method: "DELETE" });
+    mutate((k: any) => typeof k === "string" && k.startsWith("/api/hr/notifications"));
+  };
+
   return (
     <>
       <button
@@ -115,21 +120,47 @@ export default function NotificationBell() {
           className="fixed w-[380px] max-w-[calc(100vw-16px)] max-h-[520px] bg-white dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-xl shadow-2xl flex flex-col overflow-hidden"
           style={{ zIndex: 9999, top, right }}
         >
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-white/[0.06]">
-            <span className="text-[14px] font-semibold text-slate-900 dark:text-white">Notifications</span>
-            <button
-              type="button"
-              onClick={markAllRead}
-              disabled={unread === 0}
-              aria-disabled={unread === 0}
-              className={`text-[12px] font-medium flex items-center gap-1 transition-colors ${
-                unread === 0
-                  ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
-                  : "text-[#008CFF] hover:underline cursor-pointer"
-              }`}
-            >
-              <CheckCheck size={13} /> Mark all as read
-            </button>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-white/[0.06] gap-3">
+            <span className="text-[14px] font-semibold text-slate-900 dark:text-white shrink-0">Notifications</span>
+            <div className="flex items-center gap-3 text-[12px] font-medium">
+              <button
+                type="button"
+                onClick={markAllRead}
+                disabled={unread === 0}
+                aria-disabled={unread === 0}
+                className={`flex items-center gap-1 transition-colors ${
+                  unread === 0
+                    ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
+                    : "text-[#008CFF] hover:underline cursor-pointer"
+                }`}
+              >
+                <CheckCheck size={13} /> Mark all as read
+              </button>
+              {(() => {
+                const readCount = items.filter((n: any) => n.isRead).length;
+                const disabled = readCount === 0;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (disabled) return;
+                      if (!confirm(`Delete ${readCount} read notification${readCount === 1 ? "" : "s"}?`)) return;
+                      deleteAllRead();
+                    }}
+                    disabled={disabled}
+                    aria-disabled={disabled}
+                    title={disabled ? "No read notifications to delete" : `Delete ${readCount} read notification${readCount === 1 ? "" : "s"}`}
+                    className={`flex items-center gap-1 transition-colors ${
+                      disabled
+                        ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
+                        : "text-rose-500 hover:underline cursor-pointer"
+                    }`}
+                  >
+                    <Trash2 size={13} /> Delete read
+                  </button>
+                );
+              })()}
+            </div>
           </div>
           <div className="overflow-y-auto flex-1">
             {items.length === 0 ? (

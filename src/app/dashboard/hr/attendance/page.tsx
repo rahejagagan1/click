@@ -31,8 +31,6 @@ const TOP_TABS = [
   { key: "attendance",       label: "ATTENDANCE",         href: "/dashboard/hr/attendance" },
   { key: "leave",            label: "LEAVE",              href: "/dashboard/hr/leaves"     },
   { key: "performance",      label: "PERFORMANCE",        href: "/dashboard/hr/goals"      },
-  { key: "expenses",         label: "EXPENSES & TRAVEL",  href: "/dashboard/hr/expenses"   },
-  { key: "helpdesk",         label: "HELPDESK",           href: "/dashboard/hr/tickets"    },
   { key: "apps",             label: "APPS",               href: "/dashboard/hr/apps"       },
 ];
 
@@ -45,8 +43,10 @@ type RowMenuProps = {
   onWFH:        () => void;
   onOnDuty:     () => void;
   onLeave:      () => void;
+  disableRegularize?: boolean;
+  disableRegularizeReason?: string;
 };
-function RowMenu({ onRegularize, onWFH, onOnDuty, onLeave }: RowMenuProps) {
+function RowMenu({ onRegularize, onWFH, onOnDuty, onLeave, disableRegularize, disableRegularizeReason }: RowMenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -64,8 +64,9 @@ function RowMenu({ onRegularize, onWFH, onOnDuty, onLeave }: RowMenuProps) {
     };
   }, [open]);
 
-  const items: { label: string; Icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>; onSelect: () => void }[] = [
-    { label: "Regularize",        Icon: ShieldCheck, onSelect: onRegularize },
+  const items: { label: string; Icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>; onSelect: () => void; disabled?: boolean; title?: string }[] = [
+    { label: "Regularize",        Icon: ShieldCheck, onSelect: onRegularize,
+      disabled: !!disableRegularize, title: disableRegularizeReason },
     { label: "Apply WFH Request", Icon: Home,        onSelect: onWFH        },
     { label: "Apply On Duty",     Icon: Briefcase,   onSelect: onOnDuty     },
     { label: "Request Leave",     Icon: Coffee,      onSelect: onLeave      },
@@ -84,13 +85,19 @@ function RowMenu({ onRegularize, onWFH, onOnDuty, onLeave }: RowMenuProps) {
       </button>
       {open && (
         <div className="absolute z-40 right-0 top-8 w-[210px] bg-white dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg shadow-2xl py-1">
-          {items.map(({ label, Icon, onSelect }, i) => (
+          {items.map(({ label, Icon, onSelect, disabled, title }, i) => (
             <button
               key={label}
               type="button"
-              onClick={() => { setOpen(false); onSelect(); }}
-              className={`w-full text-left px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 hover:bg-[#008CFF]/[0.06] dark:hover:bg-[#008CFF]/[0.1] hover:text-[#008CFF] dark:hover:text-[#4a9cff] transition-colors flex items-center gap-2.5 ${
+              disabled={disabled}
+              title={disabled ? title : undefined}
+              onClick={() => { if (disabled) return; setOpen(false); onSelect(); }}
+              className={`w-full text-left px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 transition-colors flex items-center gap-2.5 ${
                 i === 0 ? "border-b border-slate-200 dark:border-white/[0.06]" : ""
+              } ${
+                disabled
+                  ? "opacity-40 cursor-not-allowed"
+                  : "hover:bg-[#008CFF]/[0.06] dark:hover:bg-[#008CFF]/[0.1] hover:text-[#008CFF] dark:hover:text-[#4a9cff]"
               }`}
             >
               <Icon size={14} strokeWidth={2} className="text-[#008CFF] dark:text-[#4a9cff] shrink-0" />
@@ -157,8 +164,8 @@ function LocationPin({ raw }: { raw?: string | null }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         title={has ? (info.address || `${info.lat!.toFixed(4)}, ${info.lng!.toFixed(4)}`) : "Location not captured — click to view"}
-        className="shrink-0 cursor-pointer hover:scale-110 transition-transform"
-        style={{ color: tint }}
+        className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full border border-[#008CFF]/20 bg-[#008CFF]/5 text-[#008CFF] cursor-pointer transition-all hover:bg-[#008CFF]/15 hover:border-[#008CFF]/40 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30"
+        style={has ? { color: tint, borderColor: `${tint}33`, background: `${tint}14` } : undefined}
         aria-label="Clock-in location"
       >
         <MapPin size={14} strokeWidth={2} />
@@ -256,7 +263,59 @@ function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefil
   const [form, setForm] = useState({ date: prefillDate || "", requestedIn: "", requestedOut: "", reason: "" });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const [loadingDay, setLoadingDay] = useState(false);
+  const [balance, setBalance] = useState<{ used: number; limit: number; remaining: number; month: string } | null>(null);
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  // Fetch the caller's monthly regularization quota for whichever month the
+  // selected date falls into. Refreshes whenever the date changes so users see
+  // accurate "X of 2 used for Month YYYY" when toggling between months.
+  useEffect(() => {
+    let cancelled = false;
+    const url = form.date
+      ? `/api/hr/attendance/regularize/balance?date=${form.date}`
+      : `/api/hr/attendance/regularize/balance`;
+    fetch(url)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (!cancelled && data) setBalance(data); })
+      .catch(() => { /* silent — the POST will still enforce */ });
+    return () => { cancelled = true; };
+  }, [form.date]);
+
+  // Auto-fill Clock In / Clock Out from the existing attendance row for the
+  // selected date. If a field already has a value on the server, we show it
+  // so the user only needs to correct what's actually missing; empty fields
+  // remain empty for manual entry. Re-runs whenever the date changes.
+  useEffect(() => {
+    if (!form.date) return;
+    let cancelled = false;
+    setLoadingDay(true);
+    const fmtTime = (iso?: string | null) => {
+      if (!iso) return "";
+      try {
+        // IST wall-clock HH:MM — matches what <input type="time"> expects.
+        return new Date(iso).toLocaleTimeString("en-IN", {
+          timeZone: "Asia/Kolkata", hour12: false, hour: "2-digit", minute: "2-digit",
+        });
+      } catch { return ""; }
+    };
+    fetch(`/api/hr/attendance?from=${form.date}&to=${form.date}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (cancelled || !data) return;
+        const rec = Array.isArray(data?.records)
+          ? data.records.find((r: any) => String(r.date).slice(0, 10) === form.date)
+          : null;
+        setForm((f) => ({
+          ...f,
+          requestedIn:  rec?.clockIn  ? fmtTime(rec.clockIn)  : f.requestedIn,
+          requestedOut: rec?.clockOut ? fmtTime(rec.clockOut) : f.requestedOut,
+        }));
+      })
+      .catch(() => { /* silent — user can still fill manually */ })
+      .finally(() => { if (!cancelled) setLoadingDay(false); });
+    return () => { cancelled = true; };
+  }, [form.date]);
 
   const submit = async () => {
     setErr("");
@@ -281,6 +340,18 @@ function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefil
         </div>
         <div className="px-6 py-5 space-y-4">
           {err && <p className="text-[12px] text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
+          {balance && (
+            <div className={`flex items-center justify-between px-3 py-2 rounded-lg text-[12px] ${
+              balance.remaining === 0
+                ? "bg-red-500/10 text-red-500"
+                : balance.remaining === 1
+                ? "bg-amber-500/10 text-amber-600"
+                : "bg-[#008CFF]/10 text-[#008CFF]"
+            }`}>
+              <span className="font-semibold">{balance.used} of {balance.limit} used · {balance.month}</span>
+              <span>{balance.remaining} left</span>
+            </div>
+          )}
           <div>
             <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>
             <input type="date" value={form.date} onChange={e => set("date", e.target.value)}
@@ -290,14 +361,17 @@ function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefil
             <div>
               <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Clock In</label>
               <input type="time" value={form.requestedIn} onChange={e => set("requestedIn", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none" />
+                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]" />
             </div>
             <div>
               <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Clock Out</label>
               <input type="time" value={form.requestedOut} onChange={e => set("requestedOut", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none" />
+                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]" />
             </div>
           </div>
+          {loadingDay && (
+            <p className="text-[11px] text-slate-400">Pulling attendance for {form.date}…</p>
+          )}
           <div>
             <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Reason *</label>
             <textarea value={form.reason} onChange={e => set("reason", e.target.value)} rows={3}
@@ -307,9 +381,9 @@ function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefil
         </div>
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-white/[0.06]">
           <button onClick={onClose} className="h-8 px-4 text-[13px] font-medium text-slate-500">Cancel</button>
-          <button onClick={submit} disabled={saving}
-            className="h-8 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50">
-            {saving ? "Submitting..." : "Submit Request"}
+          <button onClick={submit} disabled={saving || balance?.remaining === 0}
+            className="h-8 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+            {saving ? "Submitting..." : balance?.remaining === 0 ? "Quota exhausted" : "Submit Request"}
           </button>
         </div>
       </div>
@@ -479,6 +553,9 @@ export default function AttendancePage() {
   const { data: regsData = [] } = useSWR(`/api/hr/attendance/regularize?view=${regView}`, fetcher);
   const { data: wfhData  = [] } = useSWR(`/api/hr/attendance/wfh?view=${regView}`, fetcher);
   const { data: odData   = [] } = useSWR(`/api/hr/attendance/on-duty?view=${regView}`, fetcher);
+  // My pending leave applications — used to show "Pending leave" on affected days.
+  const { data: leavesData } = useSWR(`/api/hr/leaves?view=my`, fetcher);
+  const myLeaves: any[] = Array.isArray(leavesData) ? leavesData : (leavesData?.applications ?? leavesData?.items ?? []);
   const { data: leaveTypesData = [] } = useSWR(`/api/hr/admin/leave-types`, fetcher);
   // Rolling team-stats comparison: me vs everyone sharing my `teamCapsule`.
   const { data: teamStats } = useSWR(`/api/hr/attendance/team-stats?period=week`, fetcher);
@@ -837,7 +914,6 @@ export default function AttendancePage() {
                   { label: "Work From Home",    Icon: Home,       onClick: () => openForm("wfh")       },
                   { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
                   { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
-                  { label: "Remote Clock-In",   Icon: MapPin,     onClick: () => openForm("wfh")       },
                   { label: "Half Day",          Icon: PieChart,   onClick: () => openForm("half_day")  },
                 ].map(({ label, Icon, onClick }) => (
                   <button key={label} onClick={onClick}
@@ -938,20 +1014,80 @@ export default function AttendancePage() {
                 <tbody>
                   {recsWithToday.map((rec: any) => {
                     const date      = new Date(rec.date);
+                    const dateIso   = String(rec.date).slice(0, 10);
+                    const isTodayRow = dateIso === istTodayIso;
                     const isWeekend = date.getDay() === 0 || date.getDay() === 6;
                     const isHoliday = rec.status === "holiday";
                     const isLeave   = rec.status === "on_leave";
                     const isPending = rec.status === "pending" && !rec.clockIn;
-                    // Live elapsed for the open session: fall back to (now - clockIn) until clock-out lands.
-                    const liveMins  = rec.clockIn && !rec.clockOut && clock
+                    // Has a pending request for this date? Any type (regularize, WFH,
+                    // On-Duty, or Leave that covers this date) flips the row to
+                    // "Pending approval" and disables re-submission of the same kind.
+                    const hasPendingReg = Array.isArray(regsData) && regsData.some(
+                      (r: any) => r.status === "pending" && String(r.date).slice(0, 10) === dateIso
+                    );
+                    const hasPendingWfh = Array.isArray(wfhData) && wfhData.some(
+                      (r: any) => r.status === "pending" && String(r.date).slice(0, 10) === dateIso
+                    );
+                    const hasPendingOd  = Array.isArray(odData) && odData.some(
+                      (r: any) => r.status === "pending" && String(r.date).slice(0, 10) === dateIso
+                    );
+                    const hasPendingLeave = myLeaves.some((l: any) => {
+                      if (l.status !== "pending" && l.status !== "partially_approved") return false;
+                      const from = String(l.fromDate).slice(0, 10);
+                      const to   = String(l.toDate).slice(0, 10);
+                      return dateIso >= from && dateIso <= to;
+                    });
+                    const pendingKind =
+                      hasPendingReg   ? "regularization" :
+                      hasPendingLeave ? "leave" :
+                      hasPendingWfh   ? "WFH" :
+                      hasPendingOd    ? "On-Duty" :
+                      null;
+                    const hasPendingAny = pendingKind !== null;
+                    // Approved WFH for this date — drives the "WFH" / "Half Day WFH" attendance label.
+                    const approvedWfh = Array.isArray(wfhData) && wfhData.find(
+                      (r: any) => r.status === "approved" && String(r.date).slice(0, 10) === dateIso
+                    );
+                    const approvedWfhKind = approvedWfh
+                      ? (String(approvedWfh.reason ?? "").startsWith("[Half Day]") ? "Half Day WFH" : "WFH")
+                      : null;
+                    // Approved leave that covers this date — shows "On Leave" plus the type name.
+                    const approvedLeave = myLeaves.find((l: any) => {
+                      if (l.status !== "approved") return false;
+                      const from = String(l.fromDate).slice(0, 10);
+                      const to   = String(l.toDate).slice(0, 10);
+                      return dateIso >= from && dateIso <= to;
+                    });
+                    const onLeave = !!approvedLeave || rec.status === "on_leave";
+                    const leaveLabel = approvedLeave?.leaveType?.name
+                      ? `On Leave · ${approvedLeave.leaveType.name}`
+                      : "On Leave";
+                    // Missed clock-out: clocked in on a past day but never clocked out.
+                    // Either the server has already flagged it (status === "missed_clock_out")
+                    // or the sweeper hasn't run yet but the row is stale. Either way, we must
+                    // NOT tick the timer — otherwise the display drifts to 24h+ forever.
+                    // Once a regularization is approved (isRegularized = true), the row is
+                    // considered settled regardless of whether clockOut got a value, so the
+                    // missed-clockout banner clears. Same for on-leave days.
+                    // NOTE: `onLeave` is computed a few lines down but declared via `var`-like
+                    // hoisting via `const` isn't possible; we inline the same check here.
+                    const _onLeaveQuickCheck = rec.status === "on_leave" || myLeaves.some((l: any) => {
+                      if (l.status !== "approved") return false;
+                      const from = String(l.fromDate).slice(0, 10);
+                      const to   = String(l.toDate).slice(0, 10);
+                      return dateIso >= from && dateIso <= to;
+                    });
+                    const missedClockOut = rec.clockIn && !rec.clockOut && !isTodayRow && !rec.isRegularized && !_onLeaveQuickCheck;
+                    // Live elapsed: only for today's open session. Past days freeze at the
+                    // recorded totalMinutes (which is 0 until a regularization lands).
+                    const liveMins  = isTodayRow && rec.clockIn && !rec.clockOut && clock
                       ? Math.floor((clock.getTime() - new Date(rec.clockIn).getTime()) / 60000)
                       : (rec.totalMinutes || 0);
                     const hrs       = liveMins ? fmtMins(liveMins) : "0h 0m";
                     const pct       = liveMins ? Math.min((liveMins / 540) * 100, 100) : 0;
                     const met9h     = liveMins >= 540;
                     const hasClock  = !!rec.clockIn;
-                    const dateIso   = String(rec.date).slice(0, 10);
-                    const isTodayRow = dateIso === istTodayIso;
 
                     return (
                       <tr key={rec.id || rec.date}
@@ -977,15 +1113,36 @@ export default function AttendancePage() {
                             {isWeekend && !isHoliday && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-white/10 text-slate-500 dark:text-slate-400 font-bold">W-OFF</span>
                             )}
-                            {isLeave && (
+                            {onLeave && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400 font-bold">LEAVE</span>
+                            )}
+                            {missedClockOut && !hasPendingAny && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold uppercase tracking-wider">Missed</span>
+                            )}
+                            {hasPendingAny && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#008CFF]/15 text-[#008CFF] font-bold uppercase tracking-wider">Pending</span>
+                            )}
+                            {!hasPendingAny && approvedWfhKind && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold uppercase tracking-wider">
+                                {approvedWfhKind}
+                              </span>
                             )}
                           </div>
                         </td>
 
                         {/* ATTENDANCE VISUAL */}
                         <td className="px-5 py-3">
-                          {hasClock ? (
+                          {hasPendingAny ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[12px] text-[#008CFF] font-semibold">Pending {pendingKind}</span>
+                              <span className="text-[11px] text-slate-500">— awaiting approval</span>
+                            </div>
+                          ) : missedClockOut ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[12px] text-amber-600 font-semibold">Missed clock-out</span>
+                              <span className="text-[11px] text-slate-500">— regularize to log hours</span>
+                            </div>
+                          ) : hasClock ? (
                             <div className="flex items-center gap-3">
                               <TimelineBar liveMins={liveMins} />
                               <LocationPin raw={rec.location} />
@@ -994,8 +1151,8 @@ export default function AttendancePage() {
                             <span className="text-[12px] text-amber-500 font-medium">Holiday</span>
                           ) : isWeekend ? (
                             <span className="text-[12px] text-slate-400">Full day Weekly-off</span>
-                          ) : isLeave ? (
-                            <span className="text-[12px] text-violet-400">On Leave</span>
+                          ) : onLeave ? (
+                            <span className="text-[12px] text-violet-500 dark:text-violet-400 font-medium">{leaveLabel}</span>
                           ) : isTodayRow ? (
                             <span className="text-[12px] text-[#008CFF] font-medium">Not clocked in yet</span>
                           ) : (
@@ -1005,7 +1162,9 @@ export default function AttendancePage() {
 
                         {/* EFFECTIVE HOURS */}
                         <td className="px-5 py-3">
-                          {liveMins > 0 ? (
+                          {missedClockOut ? (
+                            <span className="text-[12px] text-slate-400">—</span>
+                          ) : liveMins > 0 ? (
                             <div className="flex items-center gap-2">
                               <span className={`w-2 h-2 rounded-full shrink-0 ${pct >= 90 ? "bg-emerald-400" : pct >= 50 ? "bg-[#008CFF]" : "bg-orange-400"}`} />
                               <span className="text-[13px] text-slate-800 dark:text-white">{hrs}</span>
@@ -1018,12 +1177,20 @@ export default function AttendancePage() {
 
                         {/* GROSS HOURS */}
                         <td className="px-5 py-3 text-[13px] text-slate-700 dark:text-slate-300">
-                          {liveMins > 0 ? hrs : (isHoliday || isWeekend) ? <span className="text-slate-400 text-lg">···</span> : ""}
+                          {missedClockOut
+                            ? <span className="text-slate-400">—</span>
+                            : liveMins > 0
+                              ? hrs
+                              : (isHoliday || isWeekend)
+                                ? <span className="text-slate-400 text-lg">···</span>
+                                : ""}
                         </td>
 
                         {/* LOG: 9h threshold \u2192 green tick when met, red cross otherwise (once clocked in). */}
                         <td className="px-5 py-3">
-                          {hasClock ? (
+                          {missedClockOut ? (
+                            <XCircle size={20} strokeWidth={2} className="text-amber-500" aria-label="Missed clock-out" />
+                          ) : hasClock ? (
                             met9h ? (
                               <CheckCircle2 size={20} strokeWidth={2} className="text-emerald-500" aria-label="9h shift completed" />
                             ) : (
@@ -1048,6 +1215,8 @@ export default function AttendancePage() {
                               onWFH={() => openForm("wfh", dateIso)}
                               onOnDuty={() => openForm("on_duty", dateIso)}
                               onLeave={() => openForm("leave", dateIso)}
+                              disableRegularize={hasPendingReg}
+                              disableRegularizeReason="You already have a pending regularization for this date"
                             />
                           )}
                         </td>
