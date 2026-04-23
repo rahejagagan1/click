@@ -2,15 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+
+        const { id: idRaw } = await params;
   const user = session!.user as any;
   const myId = await resolveUserId(session);
   const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
 
   try {
-    const id = parseInt(params.id);
+    const id = parseInt(idRaw);
     const { action, approvalNote } = await req.json();
     const record = await prisma.travelRequest.findUnique({ where: { id } });
     if (!record) return NextResponse.json({ error: "Not found" }, { status: 404 });

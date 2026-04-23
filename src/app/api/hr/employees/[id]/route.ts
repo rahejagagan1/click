@@ -3,12 +3,14 @@ import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 
 // GET /api/hr/employees/:id
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
 
+
+        const { id: idRaw } = await params;
   try {
-    const id = parseInt(params.id);
+    const id = parseInt(idRaw);
     const user = await prisma.user.findUnique({
       where: { id },
       include: {
@@ -29,12 +31,14 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 }
 
 // PUT /api/hr/employees/:id
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
 
+
+        const { id: idRaw } = await params;
   try {
-    const id = parseInt(params.id);
+    const id = parseInt(idRaw);
     const body = await req.json();
     const { name, role, orgLevel, managerId, isActive, teamCapsule, ...profileData } = body;
 
