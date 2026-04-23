@@ -493,8 +493,8 @@ export default function HRHomePage() {
             <div className={`${C.card} p-4`}>
               <p className={`text-[16px] font-semibold ${C.t1} mb-4 leading-none`}>Leave Balances</p>
               {balances.length > 0 ? (
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex gap-5">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex gap-5 flex-wrap">
                     {balances.slice(0, 2).map((b: any, i: number) => {
                       const avail = Math.max(0, (b.totalDays || 0) - (b.usedDays || 0));
                       return (
@@ -508,23 +508,23 @@ export default function HRHomePage() {
                       );
                     })}
                   </div>
-                  <div className="flex flex-col gap-1.5 min-w-[120px]">
-                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline leading-none">
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline whitespace-nowrap">
                       Request Leave
                     </Link>
-                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline leading-none">
+                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline whitespace-nowrap">
                       View All Balances
                     </Link>
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
                   <p className={`text-[12px] ${C.t3}`}>No leave balances configured</p>
-                  <div className="flex flex-col gap-1.5 min-w-[110px]">
-                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline">
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline whitespace-nowrap">
                       Request Leave
                     </Link>
-                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline">
+                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline whitespace-nowrap">
                       View All Balances
                     </Link>
                   </div>
