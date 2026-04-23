@@ -4,13 +4,15 @@ import { generatePersonExcel } from "@/lib/excel/generator";
 
 export async function GET(
     request: Request,
-    { params }: { params: { userId: string } }
+    { params }: { params: Promise<{ userId: string }> }
 ) {
     const { session, errorResponse } = await requireAuth();
     if (errorResponse) return errorResponse;
 
+
+        const { userId: userIdRaw } = await params;
     try {
-        const userId = parseInt(params.userId);
+        const userId = parseInt(userIdRaw);
         if (isNaN(userId)) {
             return NextResponse.json({ error: "Invalid user ID" }, { status: 400 });
         }
