@@ -1,0 +1,783 @@
+"use client";
+import { useState, useMemo, useEffect } from "react";
+import useSWR from "swr";
+import { fetcher } from "@/lib/swr";
+import { useRouter } from "next/navigation";
+import { User as UserIcon, Briefcase, Settings as SettingsIcon, IndianRupee, Check, X } from "lucide-react";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LocalStorage key for the draft. Bump the suffix if the Form shape changes
+// incompatibly — otherwise a stale draft can crash the next load.
+// ─────────────────────────────────────────────────────────────────────────────
+const DRAFT_KEY = "nb.hr.onboard.draft.v1";
+
+function fmtRel(ms: number): string {
+  const diff = Date.now() - ms;
+  if (diff < 5_000)      return "just now";
+  if (diff < 60_000)     return `${Math.floor(diff / 1_000)}s ago`;
+  if (diff < 3_600_000)  return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Theme tokens — match the rest of the HR module.
+// ─────────────────────────────────────────────────────────────────────────────
+const C = {
+  shell:   "bg-[#f1f5f9] dark:bg-[#0b1220]",
+  card:    "bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06]",
+  input:   "w-full h-9 px-3 bg-white dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#008CFF]/60",
+  label:   "text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider",
+  section: "text-[14px] font-semibold text-slate-800 dark:text-white",
+  t1:      "text-slate-800 dark:text-white",
+  t2:      "text-slate-600 dark:text-slate-300",
+  t3:      "text-slate-400 dark:text-slate-500",
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Form state shape — one place, flat, easy to scan.
+// ─────────────────────────────────────────────────────────────────────────────
+type Form = {
+  // Step 1 — Basic
+  workCountry:     string;
+  firstName:       string;
+  middleName:      string;
+  lastName:        string;
+  displayName:     string;
+  gender:          string;
+  dateOfBirth:     string;
+  nationality:     string;
+  numberSeries:    string;
+  employeeNumber:  string;
+  workEmail:       string;
+  mobileCountry:   string;
+  mobileNumber:    string;
+
+  // Step 2 — Job
+  joiningDate:       string;
+  jobTitle:          string;
+  secondaryJobTitle: string;
+  timeType:          string;
+  legalEntity:       string;
+  businessUnit:      string;
+  department:        string;
+  location:          string;
+  workerType:        string;
+  reportingManagerId: string;
+  dottedLineManagerId: string;
+  probationPolicy:   string;
+  noticePeriodDays:  string;
+  jobLocation:       string;
+  internshipEndDate: string;
+
+  // Step 3 — Work
+  inviteToClickup:  boolean;
+  inviteToLogin:    boolean;
+  enableOnboarding: boolean;
+  leavePlan:        string;
+  holidayList:      string;
+  attendanceTracking: boolean;
+  shiftId:          string;
+  weeklyOff:        string;
+  attendanceNumber: string;
+  timeTrackingPolicy: string;
+  penalizationPolicy: string;
+  overtimePolicy:   string;
+  expensePolicy:    string;
+  orgLevel:         string;
+  role:             string;
+
+  // Step 4 — Compensation (fields visible, not persisted to DB)
+  payGroup:     string;
+  annualSalary: string;
+  bonusIncluded: boolean;
+  pfEligible:    boolean;
+  salaryStructure: string;
+  taxRegime:     string;
+};
+
+const EMPTY: Form = {
+  workCountry: "India", firstName: "", middleName: "", lastName: "",
+  displayName: "", gender: "male", dateOfBirth: "", nationality: "India",
+  numberSeries: "NB Media series", employeeNumber: "", workEmail: "",
+  mobileCountry: "+91", mobileNumber: "",
+  joiningDate: new Date().toISOString().slice(0, 10),
+  jobTitle: "", secondaryJobTitle: "", timeType: "Full Time",
+  legalEntity: "NB Media Productions", businessUnit: "", department: "",
+  location: "Mohali", workerType: "Permanent",
+  reportingManagerId: "", dottedLineManagerId: "",
+  probationPolicy: "Regular Employees (3 Months)", noticePeriodDays: "30",
+  jobLocation: "Mohali", internshipEndDate: "",
+  inviteToClickup: true, inviteToLogin: true, enableOnboarding: true,
+  leavePlan: "Regular Leave Plan", holidayList: "Default Holiday List",
+  attendanceTracking: true, shiftId: "", weeklyOff: "Standard Weekly Off",
+  attendanceNumber: "", timeTrackingPolicy: "On-Site Capture",
+  penalizationPolicy: "Default", overtimePolicy: "",
+  expensePolicy: "Default", orgLevel: "member", role: "member",
+  payGroup: "NB Media", annualSalary: "",
+  bonusIncluded: false, pfEligible: false,
+  salaryStructure: "Range Based", taxRegime: "New Regime (Section 115BAC)",
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main
+// ─────────────────────────────────────────────────────────────────────────────
+export default function OnboardEmployeePage() {
+  const router = useRouter();
+  const [step, setStep]       = useState<1 | 2 | 3 | 4>(1);
+  const [form, setForm]       = useState<Form>(EMPTY);
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState("");
+  const [success, setSuccess] = useState("");
+
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm(f => ({ ...f, [k]: v }));
+
+  const { data: opts } = useSWR("/api/hr/onboard/options", fetcher);
+  const shifts    = opts?.shifts    ?? [];
+  const leaveTypes = opts?.leaveTypes ?? [];
+  const managers  = opts?.managers  ?? [];
+
+  // Auto-keep display name in sync unless the user edits it themselves.
+  const [displayTouched, setDisplayTouched] = useState(false);
+  useEffect(() => {
+    if (displayTouched) return;
+    const dn = [form.firstName, form.middleName, form.lastName].filter(Boolean).join(" ").trim();
+    if (dn !== form.displayName) setForm(f => ({ ...f, displayName: dn }));
+  }, [form.firstName, form.middleName, form.lastName, displayTouched]);
+
+  // ── Draft autosave ──────────────────────────────────────────────────
+  // Persists the entire wizard state to localStorage so users can reload
+  // the page, close the tab, or come back days later and continue where
+  // they left off. Debounced 500ms so we don't hammer storage on every
+  // keystroke. Cleared on successful submit + on the Discard button.
+  const [draftRestoredAt, setDraftRestoredAt] = useState<number | null>(null);
+  const [draftSavedAt,    setDraftSavedAt]    = useState<number | null>(null);
+  const [draftLoaded,     setDraftLoaded]     = useState(false);
+
+  // Restore on mount (runs once — client-only to avoid hydration issues).
+  useEffect(() => {
+    if (typeof window === "undefined") { setDraftLoaded(true); return; }
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.form)  setForm({ ...EMPTY, ...parsed.form });
+        if (parsed?.step && parsed.step >= 1 && parsed.step <= 4) {
+          setStep(parsed.step as 1 | 2 | 3 | 4);
+        }
+        if (parsed?.displayTouched) setDisplayTouched(true);
+        if (parsed?.savedAt) {
+          setDraftRestoredAt(parsed.savedAt);
+          setDraftSavedAt(parsed.savedAt);
+        }
+      }
+    } catch { /* malformed draft — ignore and start fresh */ }
+    setDraftLoaded(true);
+  }, []);
+
+  // Save on any meaningful change, debounced. Only starts AFTER the initial
+  // restore completes so the first "write" isn't the empty default form
+  // overwriting a real draft that's about to be loaded.
+  useEffect(() => {
+    if (!draftLoaded) return;
+    if (typeof window === "undefined") return;
+    const t = setTimeout(() => {
+      try {
+        const savedAt = Date.now();
+        localStorage.setItem(
+          DRAFT_KEY,
+          JSON.stringify({ form, step, displayTouched, savedAt })
+        );
+        setDraftSavedAt(savedAt);
+      } catch { /* storage full / private mode — silent */ }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [form, step, displayTouched, draftLoaded]);
+
+  const clearDraft = () => {
+    try { localStorage.removeItem(DRAFT_KEY); } catch {}
+    setForm(EMPTY);
+    setStep(1);
+    setDisplayTouched(false);
+    setDraftRestoredAt(null);
+    setDraftSavedAt(null);
+  };
+
+  // Tick every 20s so the relative "Draft saved Xm ago" label refreshes
+  // while the user is still on the page.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 20_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ── Validation per step ─────────────────────────────────────────────
+  const stepValid = useMemo(() => {
+    if (step === 1) return !!(form.firstName && form.lastName && form.workEmail);
+    if (step === 2) return !!(form.joiningDate && form.jobTitle);
+    return true;
+  }, [step, form]);
+
+  // ── Submit ──────────────────────────────────────────────────────────
+  const submit = async () => {
+    setError(""); setSuccess(""); setSaving(true);
+    try {
+      const payload: any = {
+        name:  [form.firstName, form.middleName, form.lastName].filter(Boolean).join(" ").trim(),
+        email: form.workEmail,
+        role:  form.role,
+        orgLevel: form.orgLevel,
+        managerId: form.reportingManagerId ? Number(form.reportingManagerId) : undefined,
+        inviteToClickup: form.inviteToClickup,
+        profile: {
+          employeeId: form.employeeNumber || undefined,
+          designation: form.jobTitle || undefined,
+          department:  form.department || undefined,
+          employmentType: form.workerType === "Intern" ? "intern"
+                         : form.workerType === "Contract" ? "contract"
+                         : form.timeType   === "Part Time" ? "parttime" : "fulltime",
+          workLocation: form.location?.toLowerCase().includes("remote") ? "remote" : "office",
+          joiningDate:  form.joiningDate || undefined,
+          phone:        form.mobileNumber ? `${form.mobileCountry} ${form.mobileNumber}` : undefined,
+          dateOfBirth:  form.dateOfBirth || undefined,
+          gender:       form.gender || undefined,
+          noticePeriodDays: Number(form.noticePeriodDays) || 30,
+        },
+        shiftId: form.shiftId ? Number(form.shiftId) : undefined,
+        leaveBalances: leaveTypes.map((lt: any) => ({ leaveTypeId: lt.id, totalDays: lt.daysPerYear })),
+      };
+
+      const res  = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to onboard");
+
+      setSuccess(
+        data.clickupInviteNote
+          ? `${data.name} onboarded. ${data.clickupInviteNote}`
+          : `${data.name} onboarded successfully.`
+      );
+      // Wipe the draft so the next visit starts clean.
+      try { localStorage.removeItem(DRAFT_KEY); } catch {}
+      setTimeout(() => router.push("/dashboard/hr/people"), 1400);
+    } catch (e: any) {
+      setError(e?.message || "Failed to onboard");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────
+  const steps = [
+    { n: 1, label: "Basic Details",   Icon: UserIcon },
+    { n: 2, label: "Job Details",     Icon: Briefcase },
+    { n: 3, label: "Work Details",    Icon: SettingsIcon },
+    { n: 4, label: "Compensation",    Icon: IndianRupee },
+  ] as const;
+
+  return (
+    <div className={`min-h-screen ${C.shell}`}>
+      {/* ── Header with stepper ── */}
+      <div className={`${C.card} border-b px-6 py-4 rounded-none`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-start gap-4">
+            <div>
+              <h1 className={`text-[17px] font-semibold ${C.t1}`}>Add Employee Wizard</h1>
+              <p className={`text-[12px] ${C.t3} mt-0.5`}>
+                Onboard a new employee and optionally invite them to ClickUp
+              </p>
+            </div>
+            {/* Draft status — shows "restored" on first load, then flips to
+                "saved" as the user makes edits. */}
+            {draftSavedAt && (
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[11px] font-semibold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  {draftRestoredAt && draftRestoredAt === draftSavedAt
+                    ? `Draft restored · ${fmtRel(draftRestoredAt)}`
+                    : `Draft saved · ${fmtRel(draftSavedAt)}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm("Discard the saved draft and start over?")) clearDraft();
+                  }}
+                  className="text-[11px] text-slate-500 hover:text-red-500 underline-offset-2 hover:underline"
+                >
+                  Discard
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.push("/dashboard/hr/people")}
+              className="h-9 px-4 text-[13px] font-medium text-slate-500 hover:text-slate-800 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-white/5"
+            >Cancel</button>
+            {step > 1 && (
+              <button
+                onClick={() => setStep(s => (s - 1) as any)}
+                className="h-9 px-5 text-[13px] font-semibold text-[#008CFF] border border-[#008CFF]/40 rounded-lg hover:bg-[#008CFF]/5"
+              >Back</button>
+            )}
+            {step < 4 ? (
+              <button
+                onClick={() => stepValid && setStep(s => (s + 1) as any)}
+                disabled={!stepValid}
+                className="h-9 px-6 bg-[#008CFF] hover:bg-[#0070cc] disabled:opacity-40 text-white rounded-lg text-[13px] font-semibold"
+              >Continue</button>
+            ) : (
+              <button
+                onClick={submit}
+                disabled={saving}
+                className="h-9 px-6 bg-[#008CFF] hover:bg-[#0070cc] disabled:opacity-40 text-white rounded-lg text-[13px] font-semibold"
+              >{saving ? "Saving..." : "Finish"}</button>
+            )}
+          </div>
+        </div>
+
+        {/* Stepper row */}
+        <div className="flex items-center gap-2 mt-5 justify-center">
+          {steps.map((s, i) => {
+            const done    = step > s.n;
+            const current = step === s.n;
+            return (
+              <div key={s.n} className="flex items-center gap-2">
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold transition-colors ${
+                  done    ? "bg-emerald-500 text-white"
+                  : current ? "bg-[#008CFF] text-white"
+                            : "bg-slate-200 dark:bg-white/10 text-slate-500"
+                }`}>{done ? <Check size={13} /> : s.n}</div>
+                <span className={`text-[11px] font-bold tracking-widest uppercase ${
+                  current ? "text-[#008CFF]" : "text-slate-500 dark:text-slate-400"
+                }`}>{s.label}</span>
+                {i < steps.length - 1 && (
+                  <div className={`w-10 h-px ${done ? "bg-emerald-400" : "bg-slate-300 dark:bg-white/10"}`} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Banners ── */}
+      {error && (
+        <div className="px-6 pt-4">
+          <div className="flex items-start gap-2 px-4 py-2.5 rounded-lg bg-red-500/10 text-red-500 text-[12.5px]">
+            <X className="w-4 h-4 shrink-0 mt-0.5" /> {error}
+          </div>
+        </div>
+      )}
+      {success && (
+        <div className="px-6 pt-4">
+          <div className="flex items-start gap-2 px-4 py-2.5 rounded-lg bg-emerald-500/10 text-emerald-500 text-[12.5px]">
+            <Check className="w-4 h-4 shrink-0 mt-0.5" /> {success}
+          </div>
+        </div>
+      )}
+
+      {/* ── Body ── */}
+      <div className="p-6 max-w-5xl mx-auto">
+        {step === 1 && (
+          <StepCard title="Employee Details">
+            <Grid cols={1}>
+              <Field label="Work Country">
+                <Select v={form.workCountry} set={v => set("workCountry", v)} opts={["India", "USA", "UK", "UAE", "Singapore"]} />
+              </Field>
+            </Grid>
+            <Grid>
+              <Field label="First Name" required>
+                <Input v={form.firstName} set={v => set("firstName", v)} placeholder="Write first name" />
+              </Field>
+              <Field label="Middle Name">
+                <Input v={form.middleName} set={v => set("middleName", v)} placeholder="Write middle name (optional)" />
+              </Field>
+              <Field label="Last Name" required>
+                <Input v={form.lastName} set={v => set("lastName", v)} placeholder="Write last name" />
+              </Field>
+              <Field label="Display Name" required>
+                <Input v={form.displayName} set={v => { set("displayName", v); setDisplayTouched(true); }} />
+              </Field>
+              <Field label="Gender" required>
+                <Select v={form.gender} set={v => set("gender", v)} opts={["male", "female", "other"]} />
+              </Field>
+              <Field label="Date of Birth" required>
+                <Input type="date" v={form.dateOfBirth} set={v => set("dateOfBirth", v)} />
+              </Field>
+              <Field label="Nationality">
+                <Select v={form.nationality} set={v => set("nationality", v)} opts={["India", "USA", "UK", "Other"]} />
+              </Field>
+              <Field label="Number Series">
+                <Select v={form.numberSeries} set={v => set("numberSeries", v)} opts={["NB Media series", "Contractor series"]} />
+              </Field>
+              <Field label="Employee Number" hint="Auto-generated if empty">
+                <Input v={form.employeeNumber} set={v => set("employeeNumber", v)} placeholder="Leave empty to auto-generate" />
+              </Field>
+            </Grid>
+
+            <SectionTitle>Contact Details</SectionTitle>
+            <Grid>
+              <Field label="Work Email" required>
+                <Input type="email" v={form.workEmail} set={v => set("workEmail", v)} placeholder="Write work email" />
+              </Field>
+              <Field label="Mobile Number">
+                <div className="flex gap-2">
+                  <div className="w-20">
+                    <Select v={form.mobileCountry} set={v => set("mobileCountry", v)} opts={["+91", "+1", "+44", "+971"]} />
+                  </div>
+                  <Input v={form.mobileNumber} set={v => set("mobileNumber", v)} placeholder="Write mobile number" />
+                </div>
+              </Field>
+            </Grid>
+          </StepCard>
+        )}
+
+        {step === 2 && (
+          <StepCard title="Employment Details">
+            <Grid>
+              <Field label="Joining Date" required>
+                <Input type="date" v={form.joiningDate} set={v => set("joiningDate", v)} />
+              </Field>
+              <Field label="Job Title" required>
+                <Input v={form.jobTitle} set={v => set("jobTitle", v)} placeholder="Write job title" />
+              </Field>
+              <Field label="Secondary Job Title">
+                <Input v={form.secondaryJobTitle} set={v => set("secondaryJobTitle", v)} />
+              </Field>
+              <Field label="Time Type" required>
+                <Select v={form.timeType} set={v => set("timeType", v)} opts={["Full Time", "Part Time"]} />
+              </Field>
+            </Grid>
+
+            <SectionTitle>Organisational Details</SectionTitle>
+            <Grid>
+              <Field label="Legal Entity" required>
+                <Input v={form.legalEntity} set={v => set("legalEntity", v)} />
+              </Field>
+              <Field label="Business Unit">
+                <Input v={form.businessUnit} set={v => set("businessUnit", v)} />
+              </Field>
+              <Field label="Department" required>
+                <Input v={form.department} set={v => set("department", v)} placeholder="Write department" />
+              </Field>
+              <Field label="Location" required>
+                <Select v={form.location} set={v => set("location", v)} opts={["Mohali", "Remote", "Hybrid"]} />
+              </Field>
+              <Field label="Worker Type" required>
+                <Select v={form.workerType} set={v => set("workerType", v)} opts={["Permanent", "Contract", "Intern"]} />
+              </Field>
+              <Field label="Reporting Manager" required>
+                <Select
+                  v={form.reportingManagerId}
+                  set={v => set("reportingManagerId", v)}
+                  opts={[{ value: "", label: "— Select —" }, ...managers.map((m: any) => ({ value: String(m.id), label: `${m.name} · ${m.orgLevel}` }))]}
+                />
+              </Field>
+              <Field label="Dotted Line Manager">
+                <Select
+                  v={form.dottedLineManagerId}
+                  set={v => set("dottedLineManagerId", v)}
+                  opts={[{ value: "", label: "— None —" }, ...managers.map((m: any) => ({ value: String(m.id), label: m.name }))]}
+                />
+              </Field>
+            </Grid>
+
+            <SectionTitle>Employment Terms</SectionTitle>
+            <Grid>
+              <Field label="Probation Policy" required>
+                <Select v={form.probationPolicy} set={v => set("probationPolicy", v)} opts={[
+                  "Interns (3 Months)", "Interns (6 Months)", "Regular Employees (3 Months)", "Regular Employees (6 Months)",
+                ]} />
+              </Field>
+              <Field label="Notice Period (days)" required>
+                <Input type="number" v={form.noticePeriodDays} set={v => set("noticePeriodDays", v)} placeholder="30" />
+              </Field>
+              <Field label="Job Location" required>
+                <Select v={form.jobLocation} set={v => set("jobLocation", v)} opts={["Mohali", "Delhi", "Mumbai", "Remote"]} />
+              </Field>
+              {form.workerType === "Intern" && (
+                <Field label="Internship End Date">
+                  <Input type="date" v={form.internshipEndDate} set={v => set("internshipEndDate", v)} />
+                </Field>
+              )}
+            </Grid>
+          </StepCard>
+        )}
+
+        {step === 3 && (
+          <StepCard title="Onboarding Settings">
+            <div className="space-y-3">
+              <Toggle
+                checked={form.inviteToClickup}
+                onChange={v => set("inviteToClickup", v)}
+                label="Invite to ClickUp"
+                hint="Sends a ClickUp workspace invitation email to this address. The returned ClickUp user ID will be linked to this employee automatically."
+              />
+              <Toggle
+                checked={form.inviteToLogin}
+                onChange={v => set("inviteToLogin", v)}
+                label="Invite employee to login"
+                hint="Employee will receive an email to set their password on this dashboard."
+              />
+              <Toggle
+                checked={form.enableOnboarding}
+                onChange={v => set("enableOnboarding", v)}
+                label="Enable onboarding flow"
+                hint="Walks the employee through document uploads, profile setup, etc. on first login."
+              />
+            </div>
+
+            <SectionTitle>Access</SectionTitle>
+            <Grid>
+              <Field label="Org Level">
+                <Select v={form.orgLevel} set={v => set("orgLevel", v)} opts={[
+                  "member", "production_team", "sub_lead", "lead",
+                  "manager", "hr_manager", "hod", "special_access", "ceo",
+                ]} />
+              </Field>
+              <Field label="Role">
+                <Select v={form.role} set={v => set("role", v)} opts={["member", "admin"]} />
+              </Field>
+            </Grid>
+
+            <SectionTitle>Leave Settings</SectionTitle>
+            <Grid>
+              <Field label="Leave Plan">
+                <Select v={form.leavePlan} set={v => set("leavePlan", v)} opts={["Regular Leave Plan", "Intern Leave Plan"]} />
+              </Field>
+              <Field label="Holiday List">
+                <Select v={form.holidayList} set={v => set("holidayList", v)} opts={["Default Holiday List"]} />
+              </Field>
+            </Grid>
+            {leaveTypes.length > 0 && (
+              <p className={`text-[11px] ${C.t3} mt-1`}>
+                {leaveTypes.length} leave types will be credited: {leaveTypes.map((l: any) => `${l.code} (${l.daysPerYear}d)`).join(", ")}
+              </p>
+            )}
+
+            <SectionTitle>Attendance Settings</SectionTitle>
+            <Toggle
+              checked={form.attendanceTracking}
+              onChange={v => set("attendanceTracking", v)}
+              label="Attendance Tracking"
+              hint="Track daily clock-in/clock-out for this employee."
+            />
+            <Grid>
+              <Field label="Shift" required>
+                <Select
+                  v={form.shiftId}
+                  set={v => set("shiftId", v)}
+                  opts={[{ value: "", label: "— Select —" }, ...shifts.map((s: any) => ({ value: String(s.id), label: `${s.name} (${s.startTime}–${s.endTime})` }))]}
+                />
+              </Field>
+              <Field label="Weekly Off">
+                <Select v={form.weeklyOff} set={v => set("weeklyOff", v)} opts={["Standard Weekly Off", "Saturday Off Alt"]} />
+              </Field>
+              <Field label="Attendance Number">
+                <Input v={form.attendanceNumber} set={v => set("attendanceNumber", v)} />
+              </Field>
+              <Field label="Time Tracking Policy">
+                <Select v={form.timeTrackingPolicy} set={v => set("timeTrackingPolicy", v)} opts={["On-Site Capture", "Remote Capture", "Hybrid"]} />
+              </Field>
+              <Field label="Penalization Policy">
+                <Select v={form.penalizationPolicy} set={v => set("penalizationPolicy", v)} opts={["Default", "Strict", "Lenient"]} />
+              </Field>
+              <Field label="Overtime">
+                <Input v={form.overtimePolicy} set={v => set("overtimePolicy", v)} placeholder="None" />
+              </Field>
+            </Grid>
+
+            <SectionTitle>Expense Settings</SectionTitle>
+            <Grid cols={1}>
+              <Field label="Expense Policy">
+                <Select v={form.expensePolicy} set={v => set("expensePolicy", v)} opts={["Default", "Senior", "No Reimbursement"]} />
+              </Field>
+            </Grid>
+          </StepCard>
+        )}
+
+        {step === 4 && (
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_360px] gap-6">
+            <StepCard title="Compensation">
+              <Grid>
+                <Field label="Pay Group">
+                  <Select v={form.payGroup} set={v => set("payGroup", v)} opts={["NB Media", "Contractor"]} />
+                </Field>
+                <Field label="Annual Salary (INR)">
+                  <Input type="number" v={form.annualSalary} set={v => set("annualSalary", v)} placeholder="Enter annual salary" />
+                </Field>
+              </Grid>
+
+              <SectionTitle>Bonus Details</SectionTitle>
+              <label className={`flex items-center gap-2 text-[12.5px] ${C.t2}`}>
+                <input type="checkbox" checked={form.bonusIncluded} onChange={e => set("bonusIncluded", e.target.checked)} />
+                Bonus included in annual salary of INR {Number(form.annualSalary || 0).toLocaleString("en-IN")}
+              </label>
+              <button className="h-8 px-3 text-[12px] font-semibold text-[#008CFF] border border-[#008CFF]/40 rounded-lg hover:bg-[#008CFF]/5 w-fit">+ Add Bonus</button>
+
+              <SectionTitle>Payroll Settings</SectionTitle>
+              <label className={`flex items-center gap-2 text-[12.5px] ${C.t2}`}>
+                <input type="checkbox" checked={form.pfEligible} onChange={e => set("pfEligible", e.target.checked)} />
+                Provident fund (PF) eligible
+              </label>
+              <div className="px-3 py-2 bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-lg text-[11.5px]">
+                ESI is not applicable for the selected Pay Group
+              </div>
+
+              <Grid>
+                <Field label="Salary Structure Type">
+                  <Select v={form.salaryStructure} set={v => set("salaryStructure", v)} opts={["Range Based", "Fixed"]} />
+                </Field>
+                <Field label="Tax Regime">
+                  <Select v={form.taxRegime} set={v => set("taxRegime", v)} opts={["New Regime (Section 115BAC)", "Old Regime"]} />
+                </Field>
+              </Grid>
+              <p className={`text-[10.5px] ${C.t3} italic`}>
+                Compensation fields are collected for reference only; your DB has no payroll tables yet.
+              </p>
+            </StepCard>
+
+            {/* Salary Breakup preview */}
+            <div className={`${C.card} rounded-2xl p-5 h-fit`}>
+              <p className={`text-[14px] font-semibold ${C.t1}`}>Salary Breakup</p>
+              <p className={`text-[10.5px] ${C.t3} uppercase tracking-widest mt-3`}>Salary Effective From</p>
+              <p className={`text-[13px] ${C.t1} mt-0.5`}>{new Date(form.joiningDate || Date.now()).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
+
+              {/* Column headers — monthly first, annual second (matches the
+                  policy table in the Keka screenshots). */}
+              <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mt-5 pb-1 border-b border-slate-200 dark:border-white/[0.06]">
+                <span className={C.t3}>Component</span>
+                <span className={C.t3}>Monthly / Annually</span>
+              </div>
+              <div className="mt-2 space-y-2">
+                {salaryBreakup(Number(form.annualSalary) || 0, form.pfEligible).map(([label, monthly, annual]) => (
+                  <div key={label} className="flex items-center justify-between text-[12px]">
+                    <span className={C.t2}>{label}</span>
+                    <span className={`${C.t1} font-mono`}>
+                      {monthly.toLocaleString("en-IN")} / {annual.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                ))}
+                <div className="pt-2 mt-2 border-t border-slate-200 dark:border-white/[0.08] flex items-center justify-between text-[12.5px] font-semibold">
+                  <span className={C.t1}>CTC</span>
+                  <span className={`${C.t1} font-mono`}>
+                    {Math.round(Number(form.annualSalary || 0) / 12).toLocaleString("en-IN")} / {Number(form.annualSalary || 0).toLocaleString("en-IN")}
+                  </span>
+                </div>
+              </div>
+              <p className={`text-[10.5px] ${C.t3} mt-3 leading-relaxed`}>
+                {form.pfEligible
+                  ? "PF is 12% of Basic, capped at ₹1,800/month (₹15,000 basic ceiling)."
+                  : "PF is disabled — enable the toggle above to include it."}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tiny presentational helpers — keep the page file self-contained.
+// ─────────────────────────────────────────────────────────────────────────────
+function StepCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className={`${C.card} rounded-2xl p-6 space-y-5`}>
+      <h2 className={C.section}>{title}</h2>
+      {children}
+    </div>
+  );
+}
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <h3 className={`${C.section} pt-3`}>{children}</h3>;
+}
+function Grid({ children, cols = 2 }: { children: React.ReactNode; cols?: 1 | 2 | 3 }) {
+  const cls = cols === 1 ? "grid-cols-1" : cols === 3 ? "grid-cols-1 md:grid-cols-3" : "grid-cols-1 md:grid-cols-2";
+  return <div className={`grid ${cls} gap-4`}>{children}</div>;
+}
+function Field({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className={C.label}>{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>
+      <div className="mt-1">{children}</div>
+      {hint && <p className={`text-[10.5px] ${C.t3} mt-0.5`}>{hint}</p>}
+    </div>
+  );
+}
+function Input({ v, set, type = "text", placeholder }: {
+  v: string;
+  set: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+}) {
+  return <input type={type} value={v} onChange={e => set(e.target.value)} placeholder={placeholder} className={C.input} />;
+}
+function Select({ v, set, opts }: { v: string; set: (v: string) => void; opts: (string | { value: string; label: string })[] }) {
+  return (
+    <select value={v} onChange={e => set(e.target.value)} className={C.input}>
+      {opts.map(o => {
+        const { value, label } = typeof o === "string" ? { value: o, label: o } : o;
+        return <option key={value} value={value}>{label}</option>;
+      })}
+    </select>
+  );
+}
+function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
+  return (
+    <label className="flex items-start gap-3 cursor-pointer select-none">
+      <button
+        type="button"
+        onClick={() => onChange(!checked)}
+        className={`relative w-9 h-5 rounded-full transition-colors shrink-0 mt-0.5 ${
+          checked ? "bg-[#008CFF]" : "bg-slate-200 dark:bg-white/10"
+        }`}
+      >
+        <span className={`block w-3.5 h-3.5 bg-white rounded-full absolute top-[3px] transition-transform ${
+          checked ? "translate-x-[18px]" : "translate-x-[3px]"
+        }`} />
+      </button>
+      <div>
+        <p className={`text-[13px] font-medium ${C.t1}`}>{label}</p>
+        {hint && <p className={`text-[11px] ${C.t3} mt-0.5`}>{hint}</p>}
+      </div>
+    </label>
+  );
+}
+
+// Salary breakdown — matches the NB Media policy:
+//   Basic              50% of monthly CTC
+//   HRA                20%
+//   PF (if enabled)    min(Basic × 12%, ₹1,800/mo)   — statutory cap on ₹15k basic
+//   Dearness Allowance 10%
+//   Conveyance         7.5%
+//   Medical Allowance  Flat ₹1,250/mo (₹15,000/yr)
+//   Special Allowance  Remaining balance
+// Returns [label, monthly, annual] tuples in display order.
+function salaryBreakup(annual: number, pfEligible: boolean): [string, number, number][] {
+  const monthly = annual / 12;
+  const basic      = Math.round(monthly * 0.50);
+  const hra        = Math.round(monthly * 0.20);
+  const da         = Math.round(monthly * 0.10);
+  const conveyance = Math.round(monthly * 0.075);
+  const medical    = 1250;
+  const pf = pfEligible ? Math.min(Math.round(basic * 0.12), 1800) : 0;
+
+  const consumed = basic + hra + da + conveyance + medical + pf;
+  const special  = Math.max(0, Math.round(monthly) - consumed);
+
+  const row = (l: string, m: number): [string, number, number] => [l, m, m * 12];
+
+  const rows: [string, number, number][] = [row("Basic", basic), row("HRA", hra)];
+  if (pfEligible) rows.push(row("PF", pf));
+  rows.push(
+    row("Dearness Allowance",  da),
+    row("Conveyance Allowance", conveyance),
+    row("Medical Allowance",    medical),
+    row("Special Allowance",    special),
+  );
+  return rows;
+}

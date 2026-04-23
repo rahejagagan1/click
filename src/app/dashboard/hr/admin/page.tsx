@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare } from "lucide-react";
+import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus } from "lucide-react";
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
@@ -170,6 +170,19 @@ export default function HRAdminPage() {
               </button>
             );
           })}
+
+          {/* ── Onboard Employee — full-page wizard, not a tab ── */}
+          <div className="pt-2 mt-2 border-t border-slate-200 dark:border-white/[0.06]" />
+          <Link
+            href="/dashboard/hr/onboard"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span className="flex-1">Onboard Employee</span>
+            <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </Link>
         </div>
 
         {/* Content */}
