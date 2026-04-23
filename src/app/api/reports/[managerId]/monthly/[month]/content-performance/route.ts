@@ -8,8 +8,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-type Params = { managerId: string; month: string };
-
+type Params = Promise<{ managerId: string; month: string }>;
 /**
  * Auto-fill for PM monthly report section 4 ("Content Performance Review").
  *
@@ -25,8 +24,10 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const managerId = parseInt(params.managerId);
-        const month     = parseInt(params.month); // 0-indexed report month
+
+        const { managerId: managerIdRaw, month: monthRaw } = await params;
+        const managerId = parseInt(managerIdRaw);
+        const month     = parseInt(monthRaw); // 0-indexed report month
         const year      = parseInt(req.nextUrl.searchParams.get("year") ?? "");
 
         if (isNaN(managerId) || isNaN(month) || isNaN(year)) {

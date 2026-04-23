@@ -3,14 +3,15 @@ import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
-type Params = { managerId: string; month: string };
-
+type Params = Promise<{ managerId: string; month: string }>;
 export async function GET(req: NextRequest, { params }: { params: Params }) {
     try {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const month = parseInt(params.month); // 0-11
+
+        const { month: monthRaw } = await params;
+        const month = parseInt(monthRaw); // 0-11
         const year  = parseInt(req.nextUrl.searchParams.get("year") ?? "");
         if (isNaN(month) || isNaN(year)) return NextResponse.json({ error: "Invalid parameters" }, { status: 400 });
 

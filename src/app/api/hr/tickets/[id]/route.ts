@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+
+        const { id: idRaw } = await params;
   try {
     const ticket = await prisma.ticket.findUnique({
-      where: { id: parseInt(params.id) },
+      where: { id: parseInt(idRaw) },
       include: {
         raisedBy: { select: { id: true, name: true, profilePictureUrl: true } },
         assignedTo: { select: { id: true, name: true } },
@@ -19,9 +21,11 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   } catch (e) { return serverError(e, "GET /api/hr/tickets/[id]"); }
 }
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+
+        const { id: idRaw } = await params;
   try {
     const body = await req.json();
     const data: any = {};
@@ -31,7 +35,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     if (body.status === "resolved" || body.status === "closed") data.resolvedAt = new Date();
 
     const ticket = await prisma.ticket.update({
-      where: { id: parseInt(params.id) }, data,
+      where: { id: parseInt(idRaw) }, data,
       include: { raisedBy: { select: { id: true, name: true } }, assignedTo: { select: { id: true, name: true } } },
     });
     return NextResponse.json(ticket);

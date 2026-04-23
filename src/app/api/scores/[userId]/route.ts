@@ -101,17 +101,21 @@ export async function GET(
             orderBy: { userId: "desc" }, // User-specific config takes priority
         });
 
-        // Get available months for this user
-        const distinctMonths = await prisma.monthlyRating.findMany({
+        // Get available months for this user. Prisma's `distinct: ["month"]`
+        // dedupes by raw Date (with time); we dedupe again on YYYY-MM so the
+        // month picker never sees duplicate keys.
+        const monthRows = await prisma.monthlyRating.findMany({
             where: { userId: targetUserId },
             select: { month: true },
             distinct: ["month"],
             orderBy: { month: "desc" },
         });
-        const availableMonths = distinctMonths.map((m) => {
-            const d = new Date(m.month);
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-        });
+        const availableMonths = Array.from(new Set(
+            monthRows.map((m) => {
+                const d = new Date(m.month);
+                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+            })
+        ));
 
         return NextResponse.json(
             serializeBigInt({
