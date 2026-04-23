@@ -278,7 +278,8 @@ function EmployeePicker({ selected, onChange }: {
 export default function LeaveRequestForm({
   kind, title, policyText, leaveTypes, prefillDate, onClose, onSaved,
 }: LeaveRequestFormProps) {
-  const today = prefillDate || new Date().toISOString().slice(0, 10);
+  // IST-anchored so evening users don't see yesterday as the default.
+  const today = prefillDate || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const [fromDate, setFromDate] = useState(today);
   const [toDate,   setToDate]   = useState(today);
   const [leaveTypeId, setLeaveTypeId] = useState<number | "">(leaveTypes?.[0]?.id ?? "");
@@ -286,6 +287,7 @@ export default function LeaveRequestForm({
   const [notify, setNotify]     = useState<{ id: number; name: string; email?: string; profilePictureUrl?: string | null }[]>([]);
   const [saving, setSaving]     = useState(false);
   const [err, setErr]           = useState("");
+  const [isHalfDayWfh, setIsHalfDayWfh] = useState(false);
 
   const days = useMemo(() => {
     if (!fromDate || !toDate) return 0;
@@ -310,7 +312,10 @@ export default function LeaveRequestForm({
 
     if (kind === "wfh") {
       url = "/api/hr/attendance/wfh";
-      payload = { date: fromDate, reason: note, notifyUserIds };
+      // Half-day WFH is encoded as a reason prefix so we don't need a schema
+      // migration. Approval + attendance display both detect "[Half Day]".
+      const reason = isHalfDayWfh ? `[Half Day] ${note}` : note;
+      payload = { date: fromDate, reason, notifyUserIds };
       refreshKeys = ["/api/hr/attendance/wfh"];
     } else if (kind === "on_duty") {
       url = "/api/hr/attendance/on-duty";
@@ -412,6 +417,19 @@ export default function LeaveRequestForm({
               value={leaveTypeId}
               onChange={setLeaveTypeId}
             />
+          )}
+
+          {/* Half-day WFH — only for kind=wfh. Tags the reason so approval + attendance render it as a half-day. */}
+          {kind === "wfh" && (
+            <label className="flex items-center gap-2 text-[12.5px] text-slate-700 dark:text-slate-200 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={isHalfDayWfh}
+                onChange={(e) => setIsHalfDayWfh(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 accent-[#008CFF]"
+              />
+              This is a half-day WFH (morning / afternoon only)
+            </label>
           )}
 
           {/* Note */}

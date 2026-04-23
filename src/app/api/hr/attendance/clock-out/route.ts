@@ -30,9 +30,11 @@ export async function POST(_req: NextRequest) {
     }
 
     const totalMinutes = Math.floor((now.getTime() - existing.clockIn.getTime()) / 60000);
+    // Strict 9-hour shift: must complete 540 minutes for a full day.
+    // ≥ 4.5h (270 min) but < 9h → half_day. "late" is preserved on full completion.
     let status = existing.status;
-    if (totalMinutes >= 480) status = existing.status === "late" ? "late" : "present";
-    else if (totalMinutes >= 240) status = "half_day";
+    if (totalMinutes >= 540) status = existing.status === "late" ? "late" : "present";
+    else if (totalMinutes >= 270) status = "half_day";
     const overtimeMinutes = Math.max(0, totalMinutes - 540);
 
     // ── Race-safe clock-out ─────────────────────────────────────────────

@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
-import { Users, Clock, TreePine, FileText, BarChart2, BarChart3, User, LifeBuoy, Target, IndianRupee, GitBranch, MessageCircle, Settings2, Settings, Package, FolderOpen, Inbox, Home, Plane, UserCircle, Building2, Sparkles, CalendarDays, Wallet, LayoutDashboard, Briefcase, Star, PlayCircle, AlertTriangle, UserCog, CheckSquare } from "lucide-react";
+import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle } from "lucide-react";
 
 // Consistent Keka-style icon: thin outline, fixed size / stroke.
 const icon = (Cmp: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>) => (
@@ -63,18 +63,14 @@ export default function Sidebar() {
 
     // HR sideways flyout state — portalled to body so overflow-y:auto can't clip them
     const isHRPath = pathname.startsWith("/dashboard/hr");
-    const [hrMeOpen,        setHrMeOpen]        = useState(false);
-    const [hrTeamOpen,      setHrTeamOpen]      = useState(false);
-    const [hrApprovalsOpen, setHrApprovalsOpen] = useState(false);
-    const [hrMeY,        setHrMeY]        = useState(0);
-    const [hrTeamY,      setHrTeamY]      = useState(0);
-    const [hrApprovalsY, setHrApprovalsY] = useState(0);
-    const hrMeTrigger        = useRef<HTMLDivElement>(null);
-    const hrTeamTrigger      = useRef<HTMLDivElement>(null);
-    const hrApprovalsTrigger = useRef<HTMLDivElement>(null);
-    const hrMeTimer        = useRef<NodeJS.Timeout | null>(null);
-    const hrTeamTimer      = useRef<NodeJS.Timeout | null>(null);
-    const hrApprovalsTimer = useRef<NodeJS.Timeout | null>(null);
+    const [hrMeOpen,   setHrMeOpen]   = useState(false);
+    const [hrTeamOpen, setHrTeamOpen] = useState(false);
+    const [hrMeY,      setHrMeY]      = useState(0);
+    const [hrTeamY,    setHrTeamY]    = useState(0);
+    const hrMeTrigger   = useRef<HTMLDivElement>(null);
+    const hrTeamTrigger = useRef<HTMLDivElement>(null);
+    const hrMeTimer     = useRef<NodeJS.Timeout | null>(null);
+    const hrTeamTimer   = useRef<NodeJS.Timeout | null>(null);
 
     const makeHrHandlers = (
         setOpen: (v: boolean) => void,
@@ -92,6 +88,15 @@ export default function Sidebar() {
 
     // Inbox badge count
     const { data: inboxData } = useSWR("/api/hr/inbox", fetcher, { refreshInterval: 30000 });
+
+    // Approvals badge count — total pending across all types (leave / regularize /
+    // wfh / on-duty / comp-off). Only fetched for users who can actually approve.
+    const { data: approvalsSummary } = useSWR<{ byTab: Record<string, number>; total: number }>(
+        isHRAdmin ? "/api/hr/approvals/summary" : null,
+        fetcher,
+        { refreshInterval: 30000 }
+    );
+    const approvalsCount = approvalsSummary?.total ?? 0;
 
     // Dept submenu state (portalled, like the HR flyouts)
     const [deptHovered, setDeptHovered] = useState(false);
@@ -219,6 +224,38 @@ export default function Sidebar() {
                 <p className="hidden text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-2 px-1 text-center">
                     Main Menu
                 </p>
+
+                {/* HR Home + Me — pinned to the top of the sidebar so they're always one click away. */}
+                {(() => {
+                    const meHandlers = makeHrHandlers(setHrMeOpen, setHrMeY, hrMeTrigger, hrMeTimer);
+                    const isMeActive = isHRPath
+                        && !pathname.startsWith("/dashboard/hr/my-team")
+                        && !pathname.startsWith("/dashboard/hr/inbox")
+                        && !pathname.startsWith("/dashboard/hr/people")
+                        && !pathname.startsWith("/dashboard/hr/org")
+                        && !pathname.startsWith("/dashboard/hr/engage")
+                        && !pathname.startsWith("/dashboard/hr/analytics")
+                        && !pathname.startsWith("/dashboard/hr/admin")
+                        && !pathname.startsWith("/dashboard/hr/assets")
+                        && pathname !== "/admin";
+                    const homeActive = pathname === "/dashboard/hr/analytics" || pathname.startsWith("/dashboard/hr/analytics/");
+                    const E = "text-[#31485f] hover:text-[#1f2f3f] hover:bg-[#d2ddea]";
+                    const A = "bg-[#dfe7f1] text-[#1f3b57] border border-[#c7d3e0]";
+                    return (
+                        <>
+                            <Link href="/dashboard/hr/analytics"
+                                className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", homeActive ? A : E)}>
+                                <Home size={15} strokeWidth={1.75} className={homeActive ? "text-[#3b82c4]" : ""} />
+                                Home
+                            </Link>
+                            <div ref={hrMeTrigger} {...meHandlers}
+                                className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isMeActive || hrMeOpen ? A : E)}>
+                                <User size={15} strokeWidth={1.75} className={isMeActive || hrMeOpen ? "text-[#3b82c4]" : ""} />
+                                Me
+                            </div>
+                        </>
+                    );
+                })()}
 
                 {/* Items before Admin */}
                 {beforeAdmin.map((item) => {
@@ -520,9 +557,8 @@ export default function Sidebar() {
                     const E = "text-[#31485f] hover:text-[#1f2f3f] hover:bg-[#d2ddea]";
                     const A = "bg-[#dfe7f1] text-[#1f3b57] border border-[#c7d3e0]";
 
-                    const meHandlers        = makeHrHandlers(setHrMeOpen,        setHrMeY,        hrMeTrigger,        hrMeTimer);
-                    const teamHandlers      = makeHrHandlers(setHrTeamOpen,      setHrTeamY,      hrTeamTrigger,      hrTeamTimer);
-                    const approvalsHandlers = makeHrHandlers(setHrApprovalsOpen, setHrApprovalsY, hrApprovalsTrigger, hrApprovalsTimer);
+                    const meHandlers   = makeHrHandlers(setHrMeOpen,   setHrMeY,   hrMeTrigger,   hrMeTimer);
+                    const teamHandlers = makeHrHandlers(setHrTeamOpen, setHrTeamY, hrTeamTrigger, hrTeamTimer);
 
                     const isMeActive    = isHRPath && !pathname.startsWith("/dashboard/hr/my-team") && !pathname.startsWith("/dashboard/hr/inbox") && !pathname.startsWith("/dashboard/hr/people") && !pathname.startsWith("/dashboard/hr/org") && !pathname.startsWith("/dashboard/hr/engage") && !pathname.startsWith("/dashboard/hr/analytics") && !pathname.startsWith("/dashboard/hr/admin") && !pathname.startsWith("/dashboard/hr/assets") && pathname !== "/admin";
                     const isTeamActive  = pathname.startsWith("/dashboard/hr/my-team") || pathname.startsWith("/dashboard/hr/inbox");
@@ -556,46 +592,18 @@ export default function Sidebar() {
                         <>
                             <p className="hidden text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mt-5 mb-2 px-1 text-center">HR & People</p>
 
-                            {/* HR Home — direct link */}
-                            {(() => {
-                                const active = pathname === "/dashboard/hr/analytics" || pathname.startsWith("/dashboard/hr/analytics/");
-                                return (
-                                    <Link href="/dashboard/hr/analytics"
-                                        className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", active ? A : E)}>
-                                        <Home size={15} strokeWidth={1.75} className={active ? "text-[#3b82c4]" : ""} />
-                                        Home
-                                    </Link>
-                                );
-                            })()}
-
-                            {/* ME trigger */}
-                            <div ref={hrMeTrigger} {...meHandlers}
-                                className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isMeActive || hrMeOpen ? A : E)}>
-                                <User size={15} strokeWidth={1.75} className={isMeActive || hrMeOpen ? "text-[#3b82c4]" : ""} />
-                                Me
-                            </div>
-
                             {/* MY TEAM trigger */}
                             <div ref={hrTeamTrigger} {...teamHandlers}
                                 className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isTeamActive || hrTeamOpen ? A : E)}>
-                                <span className="flex flex-col items-center gap-1">
+                                <span className="relative inline-flex">
                                     <Users size={15} strokeWidth={1.75} className={isTeamActive || hrTeamOpen ? "text-[#3b82c4]" : ""} />
-                                    My Team
+                                    {inboxCount > 0 && (
+                                        <span className="absolute -top-1.5 -right-2.5 min-w-[15px] h-[15px] px-[3px] rounded-full bg-[#008CFF] text-white text-[9px] font-bold flex items-center justify-center leading-none tabular-nums ring-2 ring-[#e7edf4]">
+                                            {inboxCount > 99 ? "99+" : inboxCount}
+                                        </span>
+                                    )}
                                 </span>
-                                {inboxCount > 0 && (
-                                    <span className="text-[10px] font-bold bg-red-500 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
-                                        {inboxCount > 99 ? "99+" : inboxCount}
-                                    </span>
-                                )}
-                            </div>
-
-                            {/* APPROVALS trigger — top-level, own flyout (Keka-style) */}
-                            <div ref={hrApprovalsTrigger} {...approvalsHandlers}
-                                className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", pathname.startsWith("/dashboard/hr/approvals") || hrApprovalsOpen ? A : E)}>
-                                <span className="flex flex-col items-center gap-1">
-                                    <CheckSquare size={15} strokeWidth={1.75} className={pathname.startsWith("/dashboard/hr/approvals") || hrApprovalsOpen ? "text-[#3b82c4]" : ""} />
-                                    Approvals
-                                </span>
+                                My Team
                             </div>
 
                             {/* ORGANISATION */}
@@ -620,7 +628,14 @@ export default function Sidebar() {
                                     <div className="mx-3 mt-4 mb-1.5 border-t border-[#d1dae5]" />
                                     <Link href="/dashboard/hr/admin"
                                         className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", isAdminActive ? A : E)}>
-                                        <BarChart2 size={15} strokeWidth={1.75} className={isAdminActive ? "text-[#3b82c4]" : ""} />
+                                        <span className="relative inline-flex">
+                                            <BarChart2 size={15} strokeWidth={1.75} className={isAdminActive ? "text-[#3b82c4]" : ""} />
+                                            {approvalsCount > 0 && (
+                                                <span className="absolute -top-1.5 -right-2.5 min-w-[15px] h-[15px] px-[3px] rounded-full bg-[#008CFF] text-white text-[9px] font-bold flex items-center justify-center leading-none tabular-nums ring-2 ring-[#e7edf4]">
+                                                    {approvalsCount > 99 ? "99+" : approvalsCount}
+                                                </span>
+                                            )}
+                                        </span>
                                         HR Dashboard
                                     </Link>
                                 </>
@@ -643,55 +658,6 @@ export default function Sidebar() {
                                 document.body
                             )}
 
-                            {hrApprovalsOpen && typeof document !== "undefined" && createPortal(
-                                (() => {
-                                    const viewportH = typeof window !== "undefined" ? window.innerHeight : 800;
-                                    const margin    = 16;
-                                    const desired   = 320;
-                                    const available = Math.max(220, viewportH - hrApprovalsY - margin);
-                                    const maxH      = Math.min(desired, available);
-                                    const items: [string, string][] = [
-                                        ["/dashboard/hr/approvals?tab=leave",            "Leave"             ],
-                                        ["/dashboard/hr/approvals?tab=leave_encashment", "Leave Encashment"  ],
-                                        ["/dashboard/hr/approvals?tab=comp_off",         "Comp Offs"         ],
-                                        ["/dashboard/hr/approvals?tab=regularize",       "Regularizations"   ],
-                                        ["/dashboard/hr/approvals?tab=wfh",              "WFH / OD"          ],
-                                        ["/dashboard/hr/approvals?tab=half_day",         "Half Day"          ],
-                                        ["/dashboard/hr/approvals?tab=shift_weekly_off", "Shift & Weekly off"],
-                                    ];
-                                    return (
-                                        <div
-                                            style={{
-                                                position: "fixed",
-                                                left: 88,
-                                                top:  hrApprovalsY,
-                                                zIndex: 9999,
-                                                maxHeight: maxH,
-                                            }}
-                                            className="approvals-flyout w-60 bg-[#eef2f6] border border-[#cfd8e3] rounded-xl shadow-xl shadow-slate-300/30 overflow-hidden animate-in fade-in slide-in-from-left-2 duration-150 flex flex-col"
-                                            {...approvalsHandlers}
-                                        >
-                                            {/* Fixed header */}
-                                            <div className="px-4 pt-3 pb-2 border-b border-[#d1dae5] flex items-center justify-between">
-                                                <span className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-semibold">Approvals</span>
-                                                <span className="text-[10px] text-slate-500 tabular-nums">{items.length}</span>
-                                            </div>
-                                            {/* Scrollable list */}
-                                            <div
-                                                className="approvals-flyout-scroll flex-1 overflow-y-auto py-1"
-                                                style={{
-                                                    scrollbarWidth: "thin",
-                                                    scrollbarColor: "rgba(255,255,255,0.3) transparent",
-                                                }}
-                                            >
-                                                {items.map(([href, label]) => fl(href, label))}
-                                            </div>
-                                        </div>
-                                    );
-                                })(),
-                                document.body
-                            )}
-
                             {hrTeamOpen && typeof document !== "undefined" && createPortal(
                                 <div style={{ position: "fixed", left: 88, top: hrTeamY, zIndex: 9999 }}
                                     className={panelCls} {...teamHandlers}>
@@ -699,7 +665,7 @@ export default function Sidebar() {
                                     {fl("/dashboard/hr/my-team", "Team Overview")}
                                     {fl("/dashboard/hr/inbox",   "Inbox",
                                         inboxCount > 0 ? (
-                                            <span className="text-[10px] font-bold bg-red-500 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                                            <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[#008CFF] text-white text-[10px] font-bold flex items-center justify-center leading-none tabular-nums">
                                                 {inboxCount > 99 ? "99+" : inboxCount}
                                             </span>
                                         ) : undefined
