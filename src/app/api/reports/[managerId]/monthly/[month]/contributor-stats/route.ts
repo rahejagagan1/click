@@ -5,8 +5,7 @@ import { getMonthlyReportWindow } from "@/lib/reports/monthly-window";
 
 export const dynamic = "force-dynamic";
 
-type Params = { managerId: string; month: string };
-
+type Params = Promise<{ managerId: string; month: string }>;
 // Reporting window: 4th of month M through end of day 3 of month M+1. See
 // src/lib/reports/monthly-window.ts for the canonical definition.
 
@@ -15,8 +14,10 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const managerId = parseInt(params.managerId);
-        const monthIndex = parseInt(params.month); // 0-based
+
+        const { managerId: managerIdRaw, month: monthRaw } = await params;
+        const managerId = parseInt(managerIdRaw);
+        const monthIndex = parseInt(monthRaw); // 0-based
         const year = parseInt(req.nextUrl.searchParams.get("year") ?? "");
 
         if (isNaN(managerId) || isNaN(monthIndex) || isNaN(year)) {

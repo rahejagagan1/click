@@ -4,8 +4,7 @@ import { requireAuth, serverError } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
-type Params = { managerId: string; month: string };
-
+type Params = Promise<{ managerId: string; month: string }>;
 /**
  * GET /api/reports/[managerId]/monthly/[month]/capsule-views?year=2026
  *
@@ -22,7 +21,9 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        const month = parseInt(params.month); // 0-indexed
+
+        const { month: monthRaw } = await params;
+        const month = parseInt(monthRaw); // 0-indexed
         const year  = parseInt(req.nextUrl.searchParams.get("year") ?? "");
         if (isNaN(month) || isNaN(year)) {
             return NextResponse.json({ error: "Invalid parameters" }, { status: 400 });

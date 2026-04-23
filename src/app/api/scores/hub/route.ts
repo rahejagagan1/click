@@ -48,18 +48,25 @@ export async function GET(request: NextRequest) {
             orderBy: [{ orgLevel: "asc" }, { name: "asc" }],
         });
 
-        // Get all available months for the month picker
+        // Get all available months for the month picker.
+        // Prisma's `distinct: ["month"]` dedupes by the raw Date (including time
+        // component), so two rows with timestamps in the same calendar month
+        // but different times will both survive. The month picker only cares
+        // about YYYY-MM, so we dedupe again after truncating. Using a Set
+        // preserves the newest-first ordering from the orderBy above.
         const userIds = users.map((u) => u.id);
-        const distinctMonths = await prisma.monthlyRating.findMany({
+        const monthRows = await prisma.monthlyRating.findMany({
             where: { userId: { in: userIds } },
             select: { month: true },
             distinct: ["month"],
             orderBy: { month: "desc" },
         });
-        const availableMonths = distinctMonths.map((m) => {
-            const d = new Date(m.month);
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-        });
+        const availableMonths = Array.from(new Set(
+            monthRows.map((m) => {
+                const d = new Date(m.month);
+                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+            })
+        ));
 
         // Parse optional month filter from query params
         const monthParam = request.nextUrl.searchParams.get("month"); // e.g. "2026-02"
