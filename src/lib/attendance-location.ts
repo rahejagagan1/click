@@ -35,27 +35,53 @@ export function parseAttLoc(raw?: string | null): AttLoc {
   return { mode: null, address: s };
 }
 
+export type GeoFailReason = "unsupported" | "denied" | "position_unavailable" | "timeout" | "unknown";
+export type GeoResult =
+  | { ok: true;  lat: number; lng: number; address?: string }
+  | { ok: false; reason: GeoFailReason; message: string };
+
 /**
  * Browser-only: request geolocation and best-effort reverse-geocode via Nominatim.
- * Never rejects — returns `{}` on denial/failure so clock-in can still proceed.
+ * Returns a tagged result so callers can show the user WHY it failed instead of
+ * a generic "location required" message.
  */
-export async function captureClockInGeo(): Promise<{ lat?: number; lng?: number; address?: string }> {
-  if (typeof navigator === "undefined" || !navigator.geolocation) return {};
-  const pos = await new Promise<GeolocationPosition | null>((resolve) => {
+export async function captureClockInGeo(): Promise<GeoResult> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return { ok: false, reason: "unsupported", message: "Your browser doesn't support geolocation." };
+  }
+  // Timeout raised to 20s — first-time location on Windows (which needs to
+  // query Wi-Fi SSIDs / the location service) can legitimately take 10–15s.
+  const pos = await new Promise<GeolocationPosition | GeolocationPositionError>((resolve) => {
     navigator.geolocation.getCurrentPosition(
       (p) => resolve(p),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+      (e) => resolve(e),
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 }
     );
   });
-  if (!pos) return {};
+  if ("code" in pos) {
+    const reason: GeoFailReason =
+      pos.code === 1 ? "denied" :
+      pos.code === 2 ? "position_unavailable" :
+      pos.code === 3 ? "timeout" : "unknown";
+    const message =
+      reason === "denied"               ? "Location permission is blocked for this site. Click the lock icon in the address bar and allow Location." :
+      reason === "position_unavailable" ? "Your device couldn't determine a location. On Windows, make sure Location services are ON in system settings." :
+      reason === "timeout"              ? "Location request timed out. Check your Wi-Fi / GPS, then try again." :
+                                          pos.message || "Unknown location error.";
+    return { ok: false, reason, message };
+  }
   const { latitude: lat, longitude: lng } = pos.coords;
+  // Reverse-geocode is best-effort and time-boxed to 3s so a slow Nominatim
+  // response can't block the clock-in.
   let address: string | undefined;
   try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 3000);
     const r = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=14&addressdetails=1`,
-      { headers: { "Accept": "application/json" } }
+      { headers: { "Accept": "application/json" }, signal: ctl.signal }
     );
+    clearTimeout(t);
     if (r.ok) {
       const j = await r.json();
       const a = j?.address || {};
@@ -63,6 +89,6 @@ export async function captureClockInGeo(): Promise<{ lat?: number; lng?: number;
         [a.suburb || a.neighbourhood || a.road, a.city || a.town || a.village, a.state]
           .filter(Boolean).join(", ") || j?.display_name || undefined;
     }
-  } catch { /* best-effort only */ }
-  return { lat, lng, address };
+  } catch { /* best-effort only — coords alone are enough */ }
+  return { ok: true, lat, lng, address };
 }

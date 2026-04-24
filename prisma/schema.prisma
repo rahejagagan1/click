@@ -107,6 +107,8 @@ model User {
   payslips               Payslip[]
   regularizations        AttendanceRegularization[] @relation("RegularizationUser")
   regularizationsApproved AttendanceRegularization[] @relation("RegularizationApprover")
+  regularizationsFinalApproved AttendanceRegularization[] @relation("RegularizationFinalApprover")
+  regularizationsGranted AttendanceRegularization[] @relation("RegularizationGrantedBy")
   wfhRequests            WFHRequest[]     @relation("WFHUser")
   wfhApprovals           WFHRequest[]     @relation("WFHApprover")
   onDutyRequests         OnDutyRequest[]  @relation("OnDutyUser")
@@ -1326,14 +1328,26 @@ model AttendanceRegularization {
   requestedIn   DateTime?
   requestedOut  DateTime?
   reason        String    @db.Text
-  status        String    @default("pending")  // pending | approved | rejected
+  // pending -> partially_approved (after L1 manager) -> approved (after L2 final) | rejected | cancelled
+  status        String    @default("pending")
+  // Stage 1 — direct manager (L1)
   approvedById  Int?
+  approvedAt    DateTime?
   approvalNote  String?
+  // Stage 2 — grand-manager in chain OR CEO / HR manager (hybrid)
+  finalApprovedById Int?
+  finalApprovedAt   DateTime?
+  finalApprovalNote String?
+  // Admin emergency grant — set to the CEO/Developer/HR who created this on behalf of the user.
+  // Null for normal self-applied requests. On-book: still counts toward monthly total.
+  grantedByAdminId Int?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  user          User      @relation("RegularizationUser",     fields: [userId],       references: [id], onDelete: Cascade)
-  approver      User?     @relation("RegularizationApprover", fields: [approvedById], references: [id])
+  user          User      @relation("RegularizationUser",          fields: [userId],            references: [id], onDelete: Cascade)
+  approver      User?     @relation("RegularizationApprover",      fields: [approvedById],      references: [id])
+  finalApprover User?     @relation("RegularizationFinalApprover", fields: [finalApprovedById], references: [id])
+  grantedByAdmin User?    @relation("RegularizationGrantedBy",     fields: [grantedByAdminId],  references: [id])
 
   @@index([userId])
   @@index([status])

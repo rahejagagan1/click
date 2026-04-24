@@ -111,10 +111,11 @@ function RowMenu({ onRegularize, onWFH, onOnDuty, onLeave, disableRegularize, di
 }
 
 // ── Location pin with click-to-view popover (Keka-style) ─────────────────────
+// Shows whatever location was captured at clock-in. Location is mandatory at
+// clock-in (enforced client + server), so new rows will always have coords.
+// Older rows created before that rule may have no location — we just say so.
 function LocationPin({ raw }: { raw?: string | null }) {
   const [open, setOpen] = useState(false);
-  const [liveGeo, setLiveGeo] = useState<{ lat?: number; lng?: number; address?: string } | null>(null);
-  const [locating, setLocating] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const info = parseAttLoc(raw);
@@ -125,7 +126,6 @@ function LocationPin({ raw }: { raw?: string | null }) {
     ? (info.mode === "remote" ? "#008CFF" : "#10b981")
     : "#94a3b8";
 
-  // Close on outside-click / Escape.
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
@@ -143,18 +143,6 @@ function LocationPin({ raw }: { raw?: string | null }) {
     };
   }, [open]);
 
-  const locateNow = async () => {
-    setLocating(true);
-    const geo = await captureClockInGeo();
-    setLiveGeo(geo);
-    setLocating(false);
-  };
-
-  const shownLat  = info.lat  ?? liveGeo?.lat;
-  const shownLng  = info.lng  ?? liveGeo?.lng;
-  const shownAddr = info.address ?? liveGeo?.address;
-  const shownCoords = typeof shownLat === "number" && typeof shownLng === "number";
-
   const rect = btnRef.current?.getBoundingClientRect() ?? null;
 
   return (
@@ -163,7 +151,7 @@ function LocationPin({ raw }: { raw?: string | null }) {
         ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title={has ? (info.address || `${info.lat!.toFixed(4)}, ${info.lng!.toFixed(4)}`) : "Location not captured — click to view"}
+        title={has ? (info.address || `${info.lat!.toFixed(4)}, ${info.lng!.toFixed(4)}`) : "No location recorded for this entry"}
         className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full border border-[#008CFF]/20 bg-[#008CFF]/5 text-[#008CFF] cursor-pointer transition-all hover:bg-[#008CFF]/15 hover:border-[#008CFF]/40 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30"
         style={has ? { color: tint, borderColor: `${tint}33`, background: `${tint}14` } : undefined}
         aria-label="Clock-in location"
@@ -188,42 +176,23 @@ function LocationPin({ raw }: { raw?: string | null }) {
             </span>
           </div>
 
-          {shownAddr && (
-            <p className="text-[12px] text-slate-700 dark:text-slate-200 leading-snug mb-1">{shownAddr}</p>
+          {info.address && (
+            <p className="text-[12px] text-slate-700 dark:text-slate-200 leading-snug mb-1">{info.address}</p>
           )}
-          {shownCoords && (
+          {hasCoords && (
             <>
-              <p className="text-[11px] text-slate-400 font-mono">{shownLat!.toFixed(5)}, {shownLng!.toFixed(5)}</p>
+              <p className="text-[11px] text-slate-400 font-mono">{info.lat!.toFixed(5)}, {info.lng!.toFixed(5)}</p>
               <a
-                href={`https://www.google.com/maps?q=${shownLat},${shownLng}`}
+                href={`https://www.google.com/maps?q=${info.lat},${info.lng}`}
                 target="_blank" rel="noopener noreferrer"
                 className="text-[11px] text-[#008CFF] hover:underline mt-1.5 inline-block"
               >Open in Maps ↗</a>
             </>
           )}
 
-          {!has && !liveGeo && (
-            <>
-              <p className="text-[11.5px] text-slate-500 leading-snug mb-2">
-                No location was captured at clock-in. You probably denied the browser's geolocation prompt.
-              </p>
-              <button
-                type="button"
-                onClick={locateNow}
-                disabled={locating}
-                className="w-full h-8 rounded-md bg-[#008CFF] text-white text-[11.5px] font-semibold hover:bg-[#0070cc] disabled:opacity-60"
-              >
-                {locating ? "Locating…" : "Locate me now"}
-              </button>
-              <p className="text-[10px] text-slate-400 mt-1.5 leading-tight">
-                Only shows your current position — doesn't overwrite the DB record.
-              </p>
-            </>
-          )}
-
-          {!has && liveGeo && !shownCoords && (
-            <p className="text-[11.5px] text-amber-600 leading-snug">
-              Couldn't get your current location. Check browser permissions.
+          {!has && (
+            <p className="text-[11.5px] text-slate-500 leading-snug">
+              No location recorded for this entry. (Older records may not have one — new clock-ins always do.)
             </p>
           )}
         </div>,
@@ -274,23 +243,17 @@ function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefil
   const [form, setForm] = useState({ date: prefillDate || "", reasonCategory: "", note: "" });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
-  const [balance, setBalance] = useState<{ used: number; limit: number; remaining: number; month: string } | null>(null);
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  // Fetch the caller's monthly regularization quota for whichever month the
-  // selected date falls into. Refreshes whenever the date changes so users see
-  // accurate "X of 2 used for Month YYYY" when toggling between months.
-  useEffect(() => {
-    let cancelled = false;
-    const url = form.date
-      ? `/api/hr/attendance/regularize/balance?date=${form.date}`
-      : `/api/hr/attendance/regularize/balance`;
-    fetch(url)
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => { if (!cancelled && data) setBalance(data); })
-      .catch(() => { /* silent — the POST will still enforce */ });
-    return () => { cancelled = true; };
-  }, [form.date]);
+  // Monthly regularization quota for the selected date's IST month. Uses the
+  // same SWR key as the prefetch on the parent page so the first open is
+  // instant; changing the date triggers a fresh fetch for that month.
+  const balanceUrl = form.date
+    ? `/api/hr/attendance/regularize/balance?date=${form.date}`
+    : `/api/hr/attendance/regularize/balance`;
+  const { data: balance } = useSWR<{ used: number; limit: number; remaining: number; month: string }>(
+    balanceUrl, fetcher, { keepPreviousData: true, revalidateOnFocus: false }
+  );
 
   const submit = async () => {
     setErr("");
@@ -512,10 +475,50 @@ export default function AttendancePage() {
   const openForm = (kind: LeaveRequestKind, prefillDate?: string) => setFormState({ kind, prefillDate });
   const [regView, setRegView] = useState<"my" | "team">("my");
 
+  // Browser geolocation permission state. Attendance needs location, so we
+  // check this up-front and show a banner + disable the clock-in button when
+  // permission has been permanently blocked. "prompt" is fine — clicking the
+  // button will trigger the browser's native ask.
+  type LocPerm = "granted" | "denied" | "prompt" | "unsupported" | "checking";
+  const [locPerm, setLocPerm] = useState<LocPerm>("checking");
+  // Shows a "Getting location…" label on the clock-in button so users know
+  // the browser is busy asking the OS for coordinates (first-time GPS/Wi-Fi
+  // lookup on Windows can take 10–15s).
+  const [clockingIn, setClockingIn] = useState(false);
+
   useEffect(() => {
     setClock(new Date());
     const t = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.permissions?.query) {
+      setLocPerm("unsupported");
+      return;
+    }
+    let status: PermissionStatus | null = null;
+    const check = () => {
+      navigator.permissions.query({ name: "geolocation" as PermissionName })
+        .then((s) => {
+          if (status) status.onchange = null;
+          status = s;
+          setLocPerm(s.state as LocPerm);
+          // `onchange` fires reliably in some cases but Chrome won't always
+          // fire it when the user toggles permission from the address-bar
+          // popup. The focus listener below covers that gap.
+          s.onchange = () => setLocPerm(s.state as LocPerm);
+        })
+        .catch(() => setLocPerm("unsupported"));
+    };
+    check();
+    // When the user closes the browser's site-settings popup, focus returns
+    // to this window — re-query so the banner clears immediately.
+    window.addEventListener("focus", check);
+    return () => {
+      window.removeEventListener("focus", check);
+      if (status) status.onchange = null;
+    };
   }, []);
 
   // Build the attendance query: rolling 30-day window when period="30d",
@@ -532,6 +535,9 @@ export default function AttendancePage() {
   const { data: myData }    = useSWR(`/api/hr/attendance?${attendanceQs}`, fetcher);
   const { data: boardData } = useSWR(`/api/hr/attendance/board`, fetcher);
   const { data: regsData = [] } = useSWR(`/api/hr/attendance/regularize?view=${regView}`, fetcher);
+  // Prefetch regularization balance so the modal shows it instantly on open.
+  // Same key the modal uses — SWR dedupes and serves from cache.
+  useSWR(`/api/hr/attendance/regularize/balance`, fetcher);
   const { data: wfhData  = [] } = useSWR(`/api/hr/attendance/wfh?view=${regView}`, fetcher);
   const { data: odData   = [] } = useSWR(`/api/hr/attendance/on-duty?view=${regView}`, fetcher);
   // My pending leave applications — used to show "Pending leave" on affected days.
@@ -545,15 +551,28 @@ export default function AttendancePage() {
     : [];
 
   const clockIn  = async () => {
-    const geo = await captureClockInGeo();
-    const res = await fetch("/api/hr/attendance/clock-in", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(geo),
-    });
-    const d = await res.json();
-    if (!res.ok) return alert(d.error);
-    mutate(`/api/hr/attendance?${attendanceQs}`);
+    // Location is mandatory. Always attempt a fresh geolocation read — the
+    // cached `locPerm` state can lag (Chrome doesn't always fire `onchange`
+    // when permission is toggled from the address-bar popup), so the real
+    // source of truth is whether coordinates come back.
+    setClockingIn(true);
+    try {
+      const geo = await captureClockInGeo();
+      if (!geo.ok) {
+        alert(`Can't clock in — ${geo.message}`);
+        return;
+      }
+      const res = await fetch("/api/hr/attendance/clock-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat: geo.lat, lng: geo.lng, address: geo.address }),
+      });
+      const d = await res.json();
+      if (!res.ok) { alert(d.error); return; }
+      mutate(`/api/hr/attendance?${attendanceQs}`);
+    } finally {
+      setClockingIn(false);
+    }
   };
   const clockOut = async () => { const res = await fetch("/api/hr/attendance/clock-out", { method: "POST" }); const d = await res.json(); if (!res.ok) return alert(d.error); mutate(`/api/hr/attendance?${attendanceQs}`); };
 
@@ -870,11 +889,23 @@ export default function AttendancePage() {
 
             {/* Right column: button → quick links → elapsed */}
             <div className="flex flex-col gap-2">
+              {/* Location permission warning — attendance requires location. */}
+              {!todayRec?.clockIn && locPerm === "denied" && (
+                <div className="max-w-xs px-3 py-2 rounded-md bg-red-50 text-red-700 border border-red-200 text-[11px] leading-snug">
+                  <strong>Location access blocked.</strong> You must enable location in your browser settings to clock in. Reload the page after allowing it.
+                </div>
+              )}
+              {!todayRec?.clockIn && locPerm === "unsupported" && (
+                <div className="max-w-xs px-3 py-2 rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-[11px] leading-snug">
+                  <strong>Location unavailable.</strong> Your browser can't share your location (HTTPS or a supported browser is required). Clock-in needs location.
+                </div>
+              )}
               {/* Button */}
               {!todayRec?.clockIn ? (
                 <button onClick={clockIn}
-                  className="h-9 px-5 bg-[#ff4a5c] hover:bg-[#ff3045] text-white rounded-lg text-[13px] font-bold transition-colors shadow-sm whitespace-nowrap w-fit">
-                  Web Clock-In
+                  disabled={clockingIn}
+                  className="h-9 px-5 bg-[#ff4a5c] hover:bg-[#ff3045] text-white rounded-lg text-[13px] font-bold transition-colors shadow-sm whitespace-nowrap w-fit disabled:opacity-70 disabled:cursor-wait">
+                  {clockingIn ? "Getting location…" : "Web Clock-In"}
                 </button>
               ) : !todayRec?.clockOut ? (
                 <button onClick={clockOut}
