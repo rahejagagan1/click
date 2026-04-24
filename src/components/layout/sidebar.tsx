@@ -162,7 +162,14 @@ export default function Sidebar() {
 
     const handleDeptMouseEnter = () => {
         if (deptHoverTimeoutRef.current) clearTimeout(deptHoverTimeoutRef.current);
-        if (deptTriggerRef.current) setDeptY(deptTriggerRef.current.getBoundingClientRect().top);
+        if (deptTriggerRef.current) {
+            const rect = deptTriggerRef.current.getBoundingClientRect();
+            const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+            const estHeight = Math.min(400, vh - 32);
+            const maxTop = vh - estHeight - 16;
+            const y = Math.max(16, Math.min(rect.top, maxTop));
+            setDeptY(y);
+        }
         setDeptHovered(true);
     };
 
@@ -193,7 +200,19 @@ export default function Sidebar() {
 
     const handleReportMouseEnter = () => {
         if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-        if (reportTriggerRef.current) setReportY(reportTriggerRef.current.getBoundingClientRect().top);
+        if (reportTriggerRef.current) {
+            // Clamp Y so the flyout fits the viewport. If the trigger is near
+            // the bottom, shift the panel up so its full height stays visible
+            // without the user needing to scroll the sidebar / the flyout.
+            const rect = reportTriggerRef.current.getBoundingClientRect();
+            const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+            // Rough estimate — capped at viewport minus top/bottom padding.
+            const estHeight = Math.min(520, vh - 32);
+            const preferred = rect.top;
+            const maxTop = vh - estHeight - 16;
+            const y = Math.max(16, Math.min(preferred, maxTop));
+            setReportY(y);
+        }
         setReportHovered(true);
     };
 
@@ -454,8 +473,8 @@ export default function Sidebar() {
                         {/* Flyout submenu — admins only, portalled to escape overflow clip */}
                         {reportHovered && typeof document !== "undefined" && createPortal(
                             <div
-                                style={{ position: "fixed", left: 108, top: reportY, zIndex: 9999 }}
-                                className="w-52 rounded-xl border border-[#cfd8e3] bg-[#eef2f6] py-2 shadow-xl shadow-slate-300/30 animate-in fade-in slide-in-from-left-2 duration-200"
+                                style={{ position: "fixed", left: 108, top: reportY, zIndex: 9999, maxHeight: "calc(100vh - 32px)" }}
+                                className="w-52 overflow-y-auto rounded-xl border border-[#cfd8e3] bg-[#eef2f6] py-2 shadow-xl shadow-slate-300/30 scrollbar-thin animate-in fade-in slide-in-from-left-2 duration-200"
                                 onMouseEnter={handleReportMouseEnter}
                                 onMouseLeave={handleReportMouseLeave}
                             >
@@ -539,8 +558,8 @@ export default function Sidebar() {
                             {/* Flyout submenu */}
                             {deptHovered && typeof document !== "undefined" && createPortal(
                                 <div
-                                    style={{ position: "fixed", left: 108, top: deptY, zIndex: 9999 }}
-                                    className="w-52 rounded-xl border border-[#cfd8e3] bg-[#eef2f6] py-2 shadow-xl shadow-slate-300/30 animate-in fade-in slide-in-from-left-2 duration-200"
+                                    style={{ position: "fixed", left: 108, top: deptY, zIndex: 9999, maxHeight: "calc(100vh - 32px)" }}
+                                    className="w-52 overflow-y-auto rounded-xl border border-[#cfd8e3] bg-[#eef2f6] py-2 shadow-xl shadow-slate-300/30 scrollbar-thin animate-in fade-in slide-in-from-left-2 duration-200"
                                     onMouseEnter={handleDeptMouseEnter}
                                     onMouseLeave={handleDeptMouseLeave}
                                 >
@@ -766,14 +785,14 @@ export default function Sidebar() {
                                             return (
                                                 <Link key={tab} href={`/dashboard/hr/payroll?tab=${tab}`}
                                                     className={cn(
-                                                        "flex items-center justify-between px-4 py-2 text-[13px] transition-all duration-150",
+                                                        "flex items-center justify-between px-4 py-2 text-[13px] transition-all duration-150 border-l-2",
                                                         active
-                                                            ? "bg-[#0f4e93] font-semibold text-white"
-                                                            : "text-[#34495e] hover:bg-[#dde4ec] hover:text-[#1f2f3f]"
+                                                            ? "bg-[#e8f1fc] font-semibold text-[#0f4e93] border-[#0f4e93]"
+                                                            : "text-[#34495e] border-transparent hover:bg-[#dde4ec] hover:text-[#1f2f3f]"
                                                     )}>
                                                     <span className="truncate">{label}</span>
                                                     {active ? (
-                                                        <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+                                                        <span className="h-1.5 w-1.5 rounded-full bg-[#0f4e93]" />
                                                     ) : (
                                                         <svg className="w-3 h-3 opacity-30 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
