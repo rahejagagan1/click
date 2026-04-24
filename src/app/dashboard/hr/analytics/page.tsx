@@ -467,7 +467,7 @@ export default function HRHomePage() {
   return (
     <div className={`min-h-screen ${C.page}`}>
       <div className="relative flex-1">
-        <div className="pointer-events-none absolute bottom-[-6px] right-0 top-[176px] hidden w-[318px] text-[#e9eef6] xl:block">
+        <div className="pointer-events-none absolute bottom-[-6px] right-0 top-[176px] hidden w-[318px] text-[#e9eef6] lg:block">
           <DecorativeTree />
         </div>
 
