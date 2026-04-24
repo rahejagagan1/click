@@ -424,11 +424,19 @@ export default function HRHomePage() {
 
   const clockIn = async () => {
     const geo = await captureClockInGeo();
-    await fetch("/api/hr/attendance/clock-in", {
+    if (!geo.ok) {
+      alert(`Can't clock in — ${geo.message}`);
+      return;
+    }
+    const res = await fetch("/api/hr/attendance/clock-in", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(geo),
+      body: JSON.stringify({ lat: geo.lat, lng: geo.lng, address: geo.address }),
     });
+    if (!res.ok) {
+      try { const d = await res.json(); alert(d.error || "Clock-in failed"); } catch { alert("Clock-in failed"); }
+      return;
+    }
     mutate(`/api/hr/attendance?month=${monthKey}`);
   };
   const clockOut = async () => { await fetch("/api/hr/attendance/clock-out", { method: "POST" }); mutate(`/api/hr/attendance?month=${monthKey}`); };
