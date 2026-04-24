@@ -259,11 +259,21 @@ const C = {
   t3:      "text-slate-400 dark:text-slate-500",
 };
 
+// Predefined reason categories for regularization. Picking one is required;
+// the free-text "note" below it is optional context for the approver.
+const REGULARIZATION_REASONS = [
+  "Early check-in and out",
+  "Late check-in and out",
+  "Early check-in",
+  "Late check-in",
+  "Early check-out",
+  "Late check-out",
+] as const;
+
 function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefillDate?: string }) {
-  const [form, setForm] = useState({ date: prefillDate || "", requestedIn: "", requestedOut: "", reason: "" });
+  const [form, setForm] = useState({ date: prefillDate || "", reasonCategory: "", note: "" });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
-  const [loadingDay, setLoadingDay] = useState(false);
   const [balance, setBalance] = useState<{ used: number; limit: number; remaining: number; month: string } | null>(null);
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
@@ -282,49 +292,20 @@ function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefil
     return () => { cancelled = true; };
   }, [form.date]);
 
-  // Auto-fill Clock In / Clock Out from the existing attendance row for the
-  // selected date. If a field already has a value on the server, we show it
-  // so the user only needs to correct what's actually missing; empty fields
-  // remain empty for manual entry. Re-runs whenever the date changes.
-  useEffect(() => {
-    if (!form.date) return;
-    let cancelled = false;
-    setLoadingDay(true);
-    const fmtTime = (iso?: string | null) => {
-      if (!iso) return "";
-      try {
-        // IST wall-clock HH:MM — matches what <input type="time"> expects.
-        return new Date(iso).toLocaleTimeString("en-IN", {
-          timeZone: "Asia/Kolkata", hour12: false, hour: "2-digit", minute: "2-digit",
-        });
-      } catch { return ""; }
-    };
-    fetch(`/api/hr/attendance?from=${form.date}&to=${form.date}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (cancelled || !data) return;
-        const rec = Array.isArray(data?.records)
-          ? data.records.find((r: any) => String(r.date).slice(0, 10) === form.date)
-          : null;
-        setForm((f) => ({
-          ...f,
-          requestedIn:  rec?.clockIn  ? fmtTime(rec.clockIn)  : f.requestedIn,
-          requestedOut: rec?.clockOut ? fmtTime(rec.clockOut) : f.requestedOut,
-        }));
-      })
-      .catch(() => { /* silent — user can still fill manually */ })
-      .finally(() => { if (!cancelled) setLoadingDay(false); });
-    return () => { cancelled = true; };
-  }, [form.date]);
-
   const submit = async () => {
     setErr("");
-    if (!form.date || !form.reason) return setErr("Date and reason are required");
+    if (!form.date || !form.reasonCategory) return setErr("Date and reason are required");
     setSaving(true);
-    const payload: any = { date: form.date, reason: form.reason };
-    if (form.requestedIn)  payload.requestedIn  = `${form.date}T${form.requestedIn}:00`;
-    if (form.requestedOut) payload.requestedOut = `${form.date}T${form.requestedOut}:00`;
-    const res = await fetch("/api/hr/attendance/regularize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    // Combine the dropdown reason + optional note into a single `reason`
+    // string for the API. Format: "<Reason>" or "<Reason> — <note>".
+    const reason = form.note.trim()
+      ? `${form.reasonCategory} — ${form.note.trim()}`
+      : form.reasonCategory;
+    const res = await fetch("/api/hr/attendance/regularize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: form.date, reason }),
+    });
     const data = await res.json();
     if (!res.ok) { setErr(data.error || "Failed"); setSaving(false); return; }
     mutate((k: string) => typeof k === "string" && k.includes("/api/hr/attendance/regularize"));
@@ -357,25 +338,25 @@ function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefil
             <input type="date" value={form.date} onChange={e => set("date", e.target.value)}
               className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Clock In</label>
-              <input type="time" value={form.requestedIn} onChange={e => set("requestedIn", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]" />
-            </div>
-            <div>
-              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Clock Out</label>
-              <input type="time" value={form.requestedOut} onChange={e => set("requestedOut", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]" />
-            </div>
-          </div>
-          {loadingDay && (
-            <p className="text-[11px] text-slate-400">Pulling attendance for {form.date}…</p>
-          )}
+          {/* Reason category dropdown — required */}
           <div>
-            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Reason *</label>
-            <textarea value={form.reason} onChange={e => set("reason", e.target.value)} rows={3}
-              placeholder="Explain why you need regularization..."
+            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Reason for Regularisation *</label>
+            <select
+              value={form.reasonCategory}
+              onChange={e => set("reasonCategory", e.target.value)}
+              className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]"
+            >
+              <option value="">Select a reason…</option>
+              {REGULARIZATION_REASONS.map(r => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </div>
+          {/* Optional free-text note for the approver */}
+          <div>
+            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Note</label>
+            <textarea value={form.note} onChange={e => set("note", e.target.value)} rows={3}
+              placeholder="Any additional context for the approver (optional)…"
               className="mt-1 w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none resize-none" />
           </div>
         </div>

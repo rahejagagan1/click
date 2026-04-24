@@ -118,11 +118,13 @@ export default function ProfilePage() {
         <div className="px-6 py-5">
           <div className="flex items-start gap-5">
 
-            {/* Avatar */}
+            {/* Avatar — falls back to Google OAuth profile picture
+                (session.user.image) when the DB profilePictureUrl is empty,
+                so users always see their photo without manually setting it. */}
             <div className="relative shrink-0">
               <div className="w-[72px] h-[72px] rounded-full bg-gradient-to-br from-[#008CFF] to-[#0055bb] flex items-center justify-center text-white text-[22px] font-bold overflow-hidden border-2 border-white dark:border-white/10 shadow-md">
-                {form.profilePictureUrl
-                  ? <img src={form.profilePictureUrl} alt="" className="w-full h-full object-cover" />
+                {(form.profilePictureUrl || user?.image)
+                  ? <img src={form.profilePictureUrl || user?.image} alt={profile?.name || "Profile"} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                   : nameInitials}
               </div>
             </div>
@@ -352,11 +354,15 @@ export default function ProfilePage() {
               </div>
               <div className="px-5 py-4 flex items-center gap-4">
                 <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#008CFF] to-[#0055bb] flex items-center justify-center text-white text-lg font-bold overflow-hidden">
-                  {form.profilePictureUrl ? <img src={form.profilePictureUrl} alt="" className="w-full h-full object-cover" /> : nameInitials}
+                  {(form.profilePictureUrl || user?.image)
+                    ? <img src={form.profilePictureUrl || user?.image} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                    : nameInitials}
                 </div>
                 <div>
-                  <p className="text-[13px] text-slate-700 dark:text-slate-200">{form.profilePictureUrl ? "Profile picture set" : "No profile picture"}</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Paste a direct image URL</p>
+                  <p className="text-[13px] text-slate-700 dark:text-slate-200">
+                    {form.profilePictureUrl ? "Profile picture set" : user?.image ? "Using Google account picture" : "No profile picture"}
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Paste a direct image URL to override</p>
                 </div>
               </div>
             </div>
