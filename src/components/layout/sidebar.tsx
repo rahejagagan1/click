@@ -46,12 +46,33 @@ export default function Sidebar() {
     const canSeeViolationLog = isAdmin || user?.orgLevel === "special_access" || user?.role === "hr_manager";
     const showFeedbackSubmenu = canViewFeedbackInbox(user);
 
+    // Tab-permission overrides — the caller's personal map from
+    // UserTabPermission, with protected roles getting `true` everywhere.
+    // Missing keys default to `true` so a brand-new install (before any
+    // permissions are written) doesn't break the sidebar.
+    const { data: perms } = useSWR<{ permissions: Record<string, boolean> }>(
+        "/api/hr/me/tab-permissions",
+        fetcher,
+        { revalidateOnFocus: false, dedupingInterval: 30_000 }
+    );
+    const tabAllowed = (key: string) => (perms?.permissions?.[key] ?? true);
+
     const visibleItems = NAV_ITEMS.filter((item) => {
         if ((item as any).ceoOnly && !isCeo) return false;
         if ((item as any).managersOnly && !canSeeReports) return false;
         if ((item as any).adminOnly && !isAdmin) return false;
         if ((item as any).developerOnly && user?.isDeveloper !== true) return false;
         if ((item as any).youtubeDashboardAccess && !userCanAccessYoutubeDashboard(user)) return false;
+        // Per-user tab permission gates. Label-to-key mapping mirrors TAB_CATALOG.
+        // Note: "Admin" isn't gated via permissions — it's governed by
+        // orgLevel/isDeveloper only, same as before.
+        const label = (item as any).label as string;
+        const keyMap: Record<string, string> = {
+            "Dashboard": "dashboard", "Cases": "cases", "Company": "company",
+            "Scores": "scores", "YouTube": "youtube", "Feedback": "feedback",
+        };
+        const k = keyMap[label];
+        if (k && !tabAllowed(k)) return false;
         return true;
     });
 
