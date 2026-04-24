@@ -6,17 +6,28 @@ html {
   font-size: 17px;
 }
 
-/* Keka-style typeface (Inter) everywhere. The `--font-mulish` variable is set
-   by next/font in layout.tsx — keeping the variable name lets Tailwind's
-   font-sans config and every existing reference stay untouched. */
+/* Device-native font stack — resolves to the OS's best UI font:
+     macOS / iOS / iPadOS → -apple-system / BlinkMacSystemFont (SF Pro)
+     Windows              → "Segoe UI"
+     Android              → Roboto
+     Linux                → "Noto Sans" / "Liberation Sans"
+     Final fallbacks      → Arial, sans-serif + emoji fonts.
+   Kept behind the `--font-mulish` variable so every existing
+   `font-[--font-mulish]` class continues to work with zero changes. */
+:root {
+  --font-mulish:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    "Noto Sans", "Liberation Sans", Arial, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+}
 html, body {
-  font-family: var(--font-mulish), "Inter", system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  font-family: var(--font-mulish) !important;
 }
 /* Override stray inline fontFamily declarations (pages that hardcode
    "Segoe UI", "Arial", etc.) — but keep monospace utility + rich-text
    editor fonts intact. */
 body *:not(pre):not(code):not(.font-mono):not([class*="font-["]):not([class*="ql-font-"]):not([class*="ql-picker"]):not(.ql-editor):not(.ql-editor *) {
-  font-family: var(--font-mulish), "Inter", system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  font-family: var(--font-mulish) !important;
 }
 
 :root {
