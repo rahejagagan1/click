@@ -698,7 +698,7 @@ export default function Sidebar() {
                                     <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">My Finances</p>
                                     {fl("/dashboard/hr/payroll/summary", "Summary"   )}
                                     {fl("/dashboard/hr/payroll",         "My Pay"    )}
-                                    {fl("/dashboard/hr/payroll?view=tax","Manage Tax")}
+                                    {fl("/dashboard/hr/payroll/tax",     "Manage Tax")}
                                 </div>,
                                 document.body
                             )}

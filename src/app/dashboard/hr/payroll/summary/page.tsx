@@ -5,12 +5,18 @@ import Link from "next/link";
 import { fetcher } from "@/lib/swr";
 import { Paperclip, Eye } from "lucide-react";
 
-const TOP_TABS = [
+const MODULE_TABS = [
   { key: "home",         label: "HOME",        href: "/dashboard/hr/analytics"       },
   { key: "attendance",   label: "ATTENDANCE",  href: "/dashboard/hr/attendance"      },
   { key: "leave",        label: "LEAVE",       href: "/dashboard/hr/leaves"          },
   { key: "performance",  label: "PERFORMANCE", href: "/dashboard/hr/goals"           },
   { key: "payroll",      label: "MY FINANCES", href: "/dashboard/hr/payroll/summary" },
+];
+
+const PAYROLL_TABS = [
+  { key: "summary",  label: "SUMMARY",    href: "/dashboard/hr/payroll/summary" },
+  { key: "my-pay",   label: "MY PAY",     href: "/dashboard/hr/payroll"         },
+  { key: "tax",      label: "MANAGE TAX", href: "/dashboard/hr/payroll/tax"     },
 ];
 
 const MONTHS_FULL = [
@@ -100,9 +106,9 @@ export default function PayrollSummaryPage() {
 
   return (
     <div className="min-h-screen bg-[#f4f7f8]">
-      {/* Top tabs — match the look of /dashboard/hr/payroll */}
-      <div className="flex items-center bg-white border-b border-slate-200 px-4">
-        {TOP_TABS.map((t) => (
+      {/* Module-level tabs (HR modules) */}
+      <div className="flex items-center bg-white border-b border-slate-200 px-4 overflow-x-auto">
+        {MODULE_TABS.map((t) => (
           <Link
             key={t.key}
             href={t.href}
@@ -113,6 +119,23 @@ export default function PayrollSummaryPage() {
             }`}
           >
             {t.label}
+          </Link>
+        ))}
+      </div>
+
+      {/* Payroll-area tabs: SUMMARY / MY PAY / MANAGE TAX */}
+      <div className="flex items-center bg-white border-b border-slate-200 px-4">
+        {PAYROLL_TABS.map((t) => (
+          <Link key={t.key} href={t.href}
+            className={`relative px-4 py-3 text-[11px] font-bold tracking-widest transition-colors whitespace-nowrap ${
+              t.key === "summary"
+                ? "text-[#0f4e93]"
+                : "text-slate-400 hover:text-slate-600"
+            }`}>
+            {t.label}
+            {t.key === "summary" && (
+              <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-0 w-0 h-0 border-l-[6px] border-r-[6px] border-b-[6px] border-l-transparent border-r-transparent border-b-[#0f4e93]" />
+            )}
           </Link>
         ))}
       </div>
