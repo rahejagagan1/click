@@ -614,18 +614,33 @@ export default function HRHomePage() {
               <HolidayScene />
               <div className="relative z-10">
                 <div className="mb-2 flex items-start justify-between">
-                  <span className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-white/90">Holidays</span>
-                  <Link href={isAdmin ? "/dashboard/hr/admin/holidays" : "/dashboard/hr/leaves"} className="text-[11px] text-white/80 transition hover:text-white">
+                  <span
+                    className="text-[9.5px] font-bold uppercase tracking-[0.14em]"
+                    style={{ color: "rgba(255,255,255,0.92)", WebkitTextFillColor: "rgba(255,255,255,0.92)" }}
+                  >
+                    Holidays
+                  </span>
+                  <Link
+                    href={isAdmin ? "/dashboard/hr/admin/holidays" : "/dashboard/hr/leaves"}
+                    className="text-[11px] transition"
+                    style={{ color: "rgba(255,255,255,0.85)", WebkitTextFillColor: "rgba(255,255,255,0.85)" }}
+                  >
                     View All
                   </Link>
                 </div>
 
                 {activeHoliday ? (
                   <>
-                    <p className="max-w-[220px] text-[16px] font-semibold leading-snug">
+                    <p
+                      className="max-w-[220px] text-[16px] font-semibold leading-snug"
+                      style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
+                    >
                       {activeHoliday.name}
                     </p>
-                    <p className="mt-1 text-[11px] text-white/85">
+                    <p
+                      className="mt-1 text-[11px]"
+                      style={{ color: "rgba(255,255,255,0.88)", WebkitTextFillColor: "rgba(255,255,255,0.88)" }}
+                    >
                       {new Date(activeHoliday.date).toLocaleDateString("en-IN", {
                         weekday: "short",
                         day: "numeric",
@@ -634,16 +649,30 @@ export default function HRHomePage() {
                       })}
                     </p>
                     <span
-                      className="mt-2 inline-block rounded-[3px] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-white"
-                      style={{ background: HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#008CFF" }}
+                      className="mt-2 inline-block rounded-[3px] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em]"
+                      style={{
+                        background: HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#008CFF",
+                        color: "#ffffff",
+                        WebkitTextFillColor: "#ffffff",
+                      }}
                     >
                       {HOLIDAY_TYPE_LABEL[activeHoliday.type] ?? "PUBLIC HOLIDAY"}
                     </span>
                   </>
                 ) : (
                   <>
-                    <p className="text-[15px] font-semibold">No event today</p>
-                    <p className="mt-1 text-[11px] text-white/85">No upcoming holidays on file.</p>
+                    <p
+                      className="text-[15px] font-semibold"
+                      style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
+                    >
+                      No event today
+                    </p>
+                    <p
+                      className="mt-1 text-[11px]"
+                      style={{ color: "rgba(255,255,255,0.88)", WebkitTextFillColor: "rgba(255,255,255,0.88)" }}
+                    >
+                      No upcoming holidays on file.
+                    </p>
                   </>
                 )}
               </div>
