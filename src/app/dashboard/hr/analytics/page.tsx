@@ -181,34 +181,99 @@ function timeAgo(date: string) {
 }
 
 function DecorativeTree() {
+  // Dense Keka-style silhouette: thick central trunk with Y-splits, many
+  // sub-branches, and leaves clustered at branch tips (not scattered).
+  const leaves: [number, number, number][] = [
+    // Main canopy cluster (top-center)
+    [180, 70, 17], [200, 82, 18], [162, 92, 18], [148, 108, 19], [220, 108, 18],
+    [234, 130, 17], [140, 144, 17], [188, 124, 16], [172, 148, 16],
+    // Upper-left branch cluster
+    [105, 126, 18], [88, 150, 19], [68, 170, 20], [50, 188, 18], [84, 186, 17],
+    [110, 170, 17], [130, 180, 16], [62, 218, 17], [96, 210, 17],
+    // Upper-right branch cluster
+    [260, 114, 18], [280, 130, 19], [302, 144, 18], [324, 160, 19], [310, 184, 18],
+    [288, 170, 17], [268, 168, 16], [332, 200, 17], [300, 214, 17],
+    // Mid-left foliage
+    [45, 254, 19], [72, 264, 18], [95, 252, 17], [52, 296, 18], [82, 300, 17],
+    [110, 284, 17], [134, 268, 16], [30, 232, 17], [130, 314, 16],
+    // Mid-right foliage
+    [290, 246, 19], [316, 256, 18], [264, 240, 17], [304, 282, 18], [280, 296, 17],
+    [254, 282, 17], [230, 262, 16], [336, 226, 17], [228, 308, 16],
+    // Lower-left drooping
+    [62, 340, 18], [92, 354, 17], [118, 344, 17], [44, 378, 17], [82, 392, 17],
+    [120, 376, 16], [64, 420, 17], [98, 432, 16],
+    // Lower-right drooping
+    [268, 342, 18], [294, 352, 17], [238, 344, 17], [318, 380, 17], [282, 394, 17],
+    [252, 378, 16], [298, 422, 17], [268, 438, 16],
+    // Bottom accents
+    [148, 226, 15], [214, 232, 15], [176, 210, 14], [198, 200, 14],
+    [120, 402, 15], [244, 410, 15], [160, 444, 14], [204, 446, 14],
+  ];
+
   return (
     <svg viewBox="0 0 360 620" className="h-full w-full">
-      <g fill="none" stroke="currentColor" strokeLinecap="round" opacity="0.9">
-        <path d="M286 602 C286 516 275 449 251 381 C229 321 220 272 225 210" strokeWidth="24" />
-        <path d="M248 396 C291 381 323 353 342 305" strokeWidth="11" />
-        <path d="M252 438 C301 430 334 405 358 360" strokeWidth="10" />
-        <path d="M237 345 C195 314 169 283 151 241" strokeWidth="11" />
-        <path d="M228 302 C183 278 148 248 121 204" strokeWidth="9" />
-        <path d="M221 253 C255 228 277 198 292 156" strokeWidth="9" />
-        <path d="M219 215 C180 186 154 158 135 117" strokeWidth="8" />
-        <path d="M288 485 C321 480 343 463 358 432" strokeWidth="8" />
+      <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" opacity="0.9">
+        {/* Trunk — central, slightly right of centre, with organic curve */}
+        <path d="M188 610 C190 540 186 470 184 400 C183 340 182 280 184 220" strokeWidth="28" />
+        {/* Secondary parallel trunk fibre for a thicker base */}
+        <path d="M198 612 C202 538 200 470 196 410" strokeWidth="14" opacity="0.55" />
+        <path d="M176 612 C172 540 174 470 178 410" strokeWidth="14" opacity="0.55" />
+
+        {/* Main Y split */}
+        <path d="M184 224 C160 190 140 166 120 140" strokeWidth="16" />
+        <path d="M184 224 C208 190 230 168 252 140" strokeWidth="16" />
+        <path d="M184 220 C184 190 188 170 192 148" strokeWidth="14" />
+
+        {/* Left branch web */}
+        <path d="M120 140 C100 124 82 110 64 92" strokeWidth="11" />
+        <path d="M120 140 C104 156 90 172 76 190" strokeWidth="11" />
+        <path d="M90 154 C66 170 50 188 40 212" strokeWidth="9" />
+        <path d="M108 168 C92 192 80 214 70 240" strokeWidth="9" />
+        <path d="M78 198 C62 224 52 252 48 280" strokeWidth="8" />
+        <path d="M96 210 C84 244 78 274 78 308" strokeWidth="8" />
+
+        {/* Right branch web */}
+        <path d="M252 140 C270 124 290 110 308 94" strokeWidth="11" />
+        <path d="M252 140 C266 156 280 172 294 192" strokeWidth="11" />
+        <path d="M280 156 C302 172 316 192 326 216" strokeWidth="9" />
+        <path d="M262 170 C278 198 290 220 298 246" strokeWidth="9" />
+        <path d="M294 204 C308 230 318 258 322 286" strokeWidth="8" />
+        <path d="M274 214 C286 244 292 276 292 310" strokeWidth="8" />
+
+        {/* Central upper branches */}
+        <path d="M184 220 C174 196 168 172 162 150" strokeWidth="9" />
+        <path d="M184 220 C194 194 200 172 208 152" strokeWidth="9" />
+
+        {/* Side droops down-left */}
+        <path d="M184 320 C160 334 138 348 110 360" strokeWidth="8" />
+        <path d="M184 380 C158 390 130 398 98 408" strokeWidth="7" />
+        <path d="M184 430 C158 440 130 452 104 460" strokeWidth="7" />
+
+        {/* Side droops down-right */}
+        <path d="M184 320 C208 334 232 348 260 360" strokeWidth="8" />
+        <path d="M184 380 C210 390 238 398 274 408" strokeWidth="7" />
+        <path d="M184 430 C210 442 240 454 266 462" strokeWidth="7" />
       </g>
-      {[
-        [316, 282, 20], [276, 329, 20], [250, 367, 21], [303, 392, 18], [331, 343, 17],
-        [176, 252, 19], [145, 218, 17], [119, 245, 18], [161, 295, 20], [138, 156, 17],
-        [283, 164, 18], [309, 130, 16], [170, 190, 16], [211, 151, 18], [332, 487, 18],
-        [297, 523, 20], [264, 482, 18], [237, 536, 17], [346, 546, 16], [205, 326, 16],
-        [191, 415, 17], [334, 420, 16], [287, 248, 16],
-      ].map(([x, y, r], idx) => (
-        <g key={idx} transform={`translate(${x} ${y}) rotate(${idx % 2 === 0 ? -18 : 18})`}>
-          <path
-            d={`M0 ${r} C${r * 0.9} ${r * 0.45} ${r * 0.95} ${r * -0.25} 0 ${-r} C${-r * 0.95} ${r * -0.25} ${-r * 0.9} ${r * 0.45} 0 ${r}Z`}
-            fill="currentColor"
-            opacity="0.45"
-          />
-          <path d={`M0 ${r - 3} L0 ${-r + 3}`} stroke="white" strokeOpacity="0.34" strokeWidth="1.1" />
-        </g>
-      ))}
+
+      {leaves.map(([x, y, r], idx) => {
+        const rot = ((idx * 37) % 180) - 90; // pseudo-random rotation for natural variance
+        return (
+          <g key={idx} transform={`translate(${x} ${y}) rotate(${rot})`}>
+            <path
+              d={`M0 ${r} C${r * 0.95} ${r * 0.5} ${r * 1.0} ${r * -0.3} 0 ${-r} C${-r * 1.0} ${r * -0.3} ${-r * 0.95} ${r * 0.5} 0 ${r}Z`}
+              fill="currentColor"
+              opacity="0.55"
+            />
+            <path
+              d={`M0 ${r - 3} L0 ${-r + 3}`}
+              stroke="white"
+              strokeOpacity="0.38"
+              strokeWidth="1.1"
+              strokeLinecap="round"
+            />
+          </g>
+        );
+      })}
     </svg>
   );
 }
