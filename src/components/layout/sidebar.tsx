@@ -270,11 +270,11 @@ export default function Sidebar() {
 
     return (
         <>
-        <aside className="fixed left-0 top-0 z-40 h-screen w-20 border-r border-[#c7d2df] flex flex-col bg-gradient-to-b from-[#e7edf4] to-[#dde6ef]">
+        <aside className="fixed left-0 top-0 z-40 flex h-screen w-[72px] flex-col border-r border-[#dbe4ee] bg-[#f7f9fc] shadow-[6px_0_24px_rgba(15,23,42,0.05)]">
             {/* Logo */}
-            <div className="p-3 border-b border-[#cfd8e3]">
-                <div className="flex flex-col items-center gap-1 text-center">
-                    <div className="w-9 h-9 rounded-lg bg-white flex items-center justify-center shadow-md overflow-hidden shrink-0">
+            <div className="border-b border-[#e4ebf2] px-2 py-3">
+                <div className="flex flex-col items-center gap-2 text-center">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white shadow-md">
                         <Image
                             src="/logo.png"
                             alt="NB"
@@ -286,19 +286,14 @@ export default function Sidebar() {
                         />
                     </div>
                     <div>
-                        <h1
-                            className="font-bold text-[11px] leading-none text-transparent bg-clip-text"
-                            style={{ backgroundImage: "linear-gradient(90deg, #f59e0b 0%, #ef4444 50%, #dc2626 100%)" }}
-                        >
-                            NB Media
-                        </h1>
-                        <p className="text-[9px] text-[#73879c] mt-1 leading-none">Dashboard</p>
+                        <h1 className="text-[11px] font-bold leading-none text-[#243445]">NB Media</h1>
+                        <p className="mt-1 text-[9px] leading-none text-[#7f91a4]">Dashboard</p>
                     </div>
                 </div>
             </div>
 
             {/* Navigation */}
-            <nav className="flex-1 p-3 space-y-1 overflow-y-auto scrollbar-thin">
+            <nav className="flex-1 space-y-1 overflow-y-auto p-2.5 scrollbar-thin">
                 <p className="hidden text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-2 px-1 text-center">
                     Main Menu
                 </p>
@@ -317,18 +312,18 @@ export default function Sidebar() {
                         && !pathname.startsWith("/dashboard/hr/assets")
                         && pathname !== "/admin";
                     const homeActive = pathname === "/dashboard/hr/analytics" || pathname.startsWith("/dashboard/hr/analytics/");
-                    const E = "text-[#31485f] hover:text-[#1f2f3f] hover:bg-[#d2ddea]";
-                    const A = "bg-[#dfe7f1] text-[#1f3b57] border border-[#c7d3e0]";
+                    const E = "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]";
+                    const A = "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]";
                     return (
                         <>
                             <Link href="/dashboard/hr/analytics"
                                 className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", homeActive ? A : E)}>
-                                <Home size={15} strokeWidth={1.75} className={homeActive ? "text-[#3b82c4]" : ""} />
+                                <Home size={15} strokeWidth={1.75} className={homeActive ? "text-[#0f6ecd]" : ""} />
                                 Home
                             </Link>
                             <div ref={hrMeTrigger} {...meHandlers}
                                 className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isMeActive || hrMeOpen ? A : E)}>
-                                <User size={15} strokeWidth={1.75} className={isMeActive || hrMeOpen ? "text-[#3b82c4]" : ""} />
+                                <User size={15} strokeWidth={1.75} className={isMeActive || hrMeOpen ? "text-[#0f6ecd]" : ""} />
                                 Me
                             </div>
                         </>
@@ -350,12 +345,12 @@ export default function Sidebar() {
                                     className={cn(
                                         "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer",
                                         isFeedbackNavActive
-                                            ? "bg-[#cfdbe8] text-[#1f3b57] border border-[#b8c9db] shadow-sm"
-                                            : "text-[#31485f] hover:text-[#1f2f3f] hover:bg-[#d2ddea]"
+                                            ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                            : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                                     )}
                                 >
                                     <span className="flex flex-col items-center gap-1">
-                                        <span className={cn(isFeedbackNavActive ? "text-[#3b82c4]" : "")}>
+                                        <span className={cn(isFeedbackNavActive ? "text-[#0f6ecd]" : "")}>
                                             {item.icon}
                                         </span>
                                         Feedback
@@ -424,11 +419,11 @@ export default function Sidebar() {
                             className={cn(
                                 "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
                                 isActive
-                                    ? "bg-[#cfdbe8] text-[#1f3b57] border border-[#b8c9db] shadow-sm"
-                                    : "text-[#31485f] hover:text-[#1f2f3f] hover:bg-[#d2ddea]"
+                                    ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                    : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                             )}
                         >
-                            <span className={cn(isActive ? "text-[#3b82c4]" : "")}>{item.icon}</span>
+                            <span className={cn(isActive ? "text-[#0f6ecd]" : "")}>{item.icon}</span>
                             {item.label}
                         </Link>
                     );
@@ -441,11 +436,11 @@ export default function Sidebar() {
                         className={cn(
                             "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
                             isReportActive
-                                ? "bg-[#cfdbe8] text-[#1f3b57] border border-[#b8c9db] shadow-sm"
-                                : "text-[#31485f] hover:text-[#1f2f3f] hover:bg-[#d2ddea]"
+                                ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                         )}
                     >
-                        <span className={cn(isReportActive ? "text-[#3b82c4]" : "")}>
+                        <span className={cn(isReportActive ? "text-[#0f6ecd]" : "")}>
                             <BarChart3 size={18} strokeWidth={1.5} />
                         </span>
                         Report
@@ -461,12 +456,12 @@ export default function Sidebar() {
                             className={cn(
                                 "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer",
                                 isReportActive
-                                    ? "bg-[#cfdbe8] text-[#1f3b57] border border-[#b8c9db] shadow-sm"
-                                    : "text-[#31485f] hover:text-[#1f2f3f] hover:bg-[#d2ddea]"
+                                    ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                    : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                             )}
                         >
                             <span className="flex flex-col items-center gap-1">
-                                <span className={cn(isReportActive ? "text-[#3b82c4]" : "")}>
+                                <span className={cn(isReportActive ? "text-[#0f6ecd]" : "")}>
                                     <BarChart3 size={18} strokeWidth={1.5} />
                                 </span>
                                 Report
@@ -544,12 +539,12 @@ export default function Sidebar() {
                                 className={cn(
                                     "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer",
                                     isDeptActive
-                                        ? "bg-[#cfdbe8] text-[#1f3b57] border border-[#b8c9db] shadow-sm"
-                                        : "text-[#31485f] hover:text-[#1f2f3f] hover:bg-[#d2ddea]"
+                                        ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                        : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                                 )}
                             >
                                 <span className="flex flex-col items-center gap-1">
-                                    <span className={cn(isDeptActive ? "text-[#3b82c4]" : "")}>
+                                    <span className={cn(isDeptActive ? "text-[#0f6ecd]" : "")}>
                                         <Users size={18} strokeWidth={1.5} />
                                     </span>
                                     Dept.
@@ -609,11 +604,11 @@ export default function Sidebar() {
                             className={cn(
                                 "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
                                 isActive
-                                    ? "bg-[#cfdbe8] text-[#1f3b57] border border-[#b8c9db] shadow-sm"
-                                    : "text-[#31485f] hover:text-[#1f2f3f] hover:bg-[#d2ddea]"
+                                    ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                    : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                             )}
                         >
-                            <span className={cn(isActive ? "text-[#3b82c4]" : "")}>
+                            <span className={cn(isActive ? "text-[#0f6ecd]" : "")}>
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                                 </svg>
@@ -626,8 +621,8 @@ export default function Sidebar() {
                 {/* ── HR & People Section ── */}
                 {(() => {
                     const inboxCount = (inboxData?.total || 0) as number;
-                    const E = "text-[#31485f] hover:text-[#1f2f3f] hover:bg-[#d2ddea]";
-                    const A = "bg-[#dfe7f1] text-[#1f3b57] border border-[#c7d3e0]";
+                    const E = "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]";
+                    const A = "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]";
 
                     const meHandlers   = makeHrHandlers(setHrMeOpen,   setHrMeY,   hrMeTrigger,   hrMeTimer);
                     const teamHandlers = makeHrHandlers(setHrTeamOpen, setHrTeamY, hrTeamTrigger, hrTeamTimer);
@@ -644,8 +639,8 @@ export default function Sidebar() {
                                 className={cn(
                                     "flex items-center justify-between px-4 py-2 text-[13px] transition-all duration-150",
                                     active
-                                        ? "bg-[#dfe7f1] text-[#1f3b57] font-semibold"
-                                        : "text-[#34495e] hover:text-[#1f2f3f] hover:bg-[#dde4ec]"
+                                        ? "bg-[#eef4fb] font-semibold text-[#1f3b57]"
+                                        : "text-[#34495e] hover:bg-[#dde4ec] hover:text-[#1f2f3f]"
                                 )}>
                                 <span className="truncate">{label}</span>
                                 {badge ?? (
@@ -658,7 +653,7 @@ export default function Sidebar() {
                     };
 
                     // Shared flyout panel class
-                    const panelCls = "w-56 bg-[#eef2f6] border border-[#cfd8e3] rounded-xl shadow-xl shadow-slate-300/30 py-2 animate-in fade-in slide-in-from-left-2 duration-150";
+                    const panelCls = "w-56 rounded-xl border border-[#cfd8e3] bg-[#eef2f6] py-2 shadow-xl shadow-slate-300/30 animate-in fade-in slide-in-from-left-2 duration-150";
 
                     return (
                         <>
@@ -668,9 +663,9 @@ export default function Sidebar() {
                             <div ref={hrTeamTrigger} {...teamHandlers}
                                 className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isTeamActive || hrTeamOpen ? A : E)}>
                                 <span className="relative inline-flex">
-                                    <Users size={15} strokeWidth={1.75} className={isTeamActive || hrTeamOpen ? "text-[#3b82c4]" : ""} />
+                                    <Users size={15} strokeWidth={1.75} className={isTeamActive || hrTeamOpen ? "text-[#0f6ecd]" : ""} />
                                     {inboxCount > 0 && (
-                                        <span className="absolute -top-1.5 -right-2.5 min-w-[15px] h-[15px] px-[3px] rounded-full bg-[#008CFF] text-white text-[9px] font-bold flex items-center justify-center leading-none tabular-nums ring-2 ring-[#e7edf4]">
+                                        <span className="absolute -top-1.5 -right-2.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-[#008CFF] px-[3px] text-[9px] font-bold leading-none text-white tabular-nums ring-2 ring-[#f7f9fc]">
                                             {inboxCount > 99 ? "99+" : inboxCount}
                                         </span>
                                     )}
@@ -679,7 +674,7 @@ export default function Sidebar() {
                             </div>
 
                             {/* ORGANISATION */}
-                            <div className="mx-3 mt-4 mb-1.5 border-t border-[#d1dae5]" />
+                            <div className="mx-3 mt-4 mb-1.5 border-t border-[#e4ebf2]" />
                             <p className="hidden text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1.5 px-1 text-center">Organisation</p>
                             {[
                                 { href: "/dashboard/hr/people", label: "People", Icon: Users },
@@ -688,7 +683,7 @@ export default function Sidebar() {
                                 return (
                                     <Link key={href} href={href}
                                         className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", active ? A : E)}>
-                                        <Icon size={15} strokeWidth={1.75} className={active ? "text-[#3b82c4]" : ""} />
+                                        <Icon size={15} strokeWidth={1.75} className={active ? "text-[#0f6ecd]" : ""} />
                                         {label}
                                     </Link>
                                 );
@@ -697,13 +692,13 @@ export default function Sidebar() {
                             {/* HR DASHBOARD — direct link to the tabbed hub page */}
                             {isHRAdmin && (
                                 <>
-                                    <div className="mx-3 mt-4 mb-1.5 border-t border-[#d1dae5]" />
+                                    <div className="mx-3 mt-4 mb-1.5 border-t border-[#e4ebf2]" />
                                     <Link href="/dashboard/hr/admin"
                                         className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", isAdminActive ? A : E)}>
                                         <span className="relative inline-flex">
-                                            <BarChart2 size={15} strokeWidth={1.75} className={isAdminActive ? "text-[#3b82c4]" : ""} />
+                                            <BarChart2 size={15} strokeWidth={1.75} className={isAdminActive ? "text-[#0f6ecd]" : ""} />
                                             {approvalsCount > 0 && (
-                                                <span className="absolute -top-1.5 -right-2.5 min-w-[15px] h-[15px] px-[3px] rounded-full bg-[#008CFF] text-white text-[9px] font-bold flex items-center justify-center leading-none tabular-nums ring-2 ring-[#e7edf4]">
+                                                <span className="absolute -top-1.5 -right-2.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-[#008CFF] px-[3px] text-[9px] font-bold leading-none text-white tabular-nums ring-2 ring-[#f7f9fc]">
                                                     {approvalsCount > 99 ? "99+" : approvalsCount}
                                                 </span>
                                             )}
@@ -755,11 +750,11 @@ export default function Sidebar() {
                             className={cn(
                                 "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
                                 isActive
-                                    ? "bg-[#cfdbe8] text-[#1f3b57] border border-[#b8c9db] shadow-sm"
-                                    : "text-[#31485f] hover:text-[#1f2f3f] hover:bg-[#d2ddea]"
+                                    ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                    : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                             )}
                         >
-                            <span className={cn(isActive ? "text-[#3b82c4]" : "")}>{item.icon}</span>
+                            <span className={cn(isActive ? "text-[#0f6ecd]" : "")}>{item.icon}</span>
                             {item.label}
                         </Link>
                     );
@@ -767,16 +762,11 @@ export default function Sidebar() {
             </nav>
 
             {/* Footer */}
-            <div className="p-2.5 border-t border-[#cfd8e3]">
-                <div className="px-1 py-1.5 rounded-md bg-gradient-to-br from-[#e6eef7] to-[#d5e0ec] border border-[#c7d2df] text-center overflow-hidden">
-                    <p className="text-[7px] text-[#73879c] uppercase tracking-[0.14em] font-semibold leading-none">Workspace</p>
-                    <p
-                        className="text-[9px] font-extrabold mt-1 leading-none text-transparent bg-clip-text whitespace-nowrap truncate"
-                        style={{ backgroundImage: "linear-gradient(90deg, #f59e0b 0%, #ef4444 50%, #dc2626 100%)" }}
-                    >
-                        NB Media
-                    </p>
-                    <p className="text-[6.5px] text-[#73879c] mt-0.5 leading-none whitespace-nowrap truncate">Productions</p>
+            <div className="border-t border-[#e4ebf2] p-2.5">
+                <div className="overflow-hidden rounded-md border border-[#dee6ee] bg-white px-1 py-2 text-center">
+                    <p className="text-[7px] font-semibold uppercase leading-none tracking-[0.14em] text-[#94a3b3]">Workspace</p>
+                    <p className="mt-1 truncate whitespace-nowrap text-[9px] font-extrabold leading-none text-[#243445]">NB Media</p>
+                    <p className="mt-0.5 truncate whitespace-nowrap text-[6.5px] leading-none text-[#9aa9b8]">Productions</p>
                 </div>
             </div>
         </aside>

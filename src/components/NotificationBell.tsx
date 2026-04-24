@@ -91,15 +91,15 @@ export default function NotificationBell() {
         ref={btnRef}
         type="button"
         onClick={toggle}
-        className="relative w-8 h-8 rounded-full border border-[#c8d2de] bg-[#e9eef4] hover:bg-[#dde4ec] flex items-center justify-center text-slate-500 hover:text-slate-700 cursor-pointer transition-colors"
+        className="relative flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-white/10 text-white transition-colors hover:bg-white/15"
         aria-label="Notifications"
         aria-expanded={open}
         style={{ zIndex: 40 }}
       >
-        <Bell size={15} strokeWidth={2} style={{ pointerEvents: "none" }} />
+        <Bell size={14} strokeWidth={2} style={{ pointerEvents: "none" }} />
         {unread > 0 && (
           <span
-            className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-white"
+            className="absolute -right-1 -top-1 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white ring-2 ring-[#0f6ecd]"
             style={{ pointerEvents: "none" }}
           >
             {unread > 99 ? "99+" : unread}
