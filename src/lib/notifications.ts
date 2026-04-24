@@ -1,4 +1,10 @@
 import prisma from "@/lib/prisma";
+import { sendEmail, emailsForUserIds } from "@/lib/email/sender";
+import {
+  leaveRequestEmail, wfhRequestEmail, onDutyRequestEmail,
+  regularizationRequestEmail, compOffRequestEmail, decisionEmail,
+  type EmailContent,
+} from "@/lib/email/templates";
 
 export type NotificationType =
   | "regularization"
@@ -6,6 +12,85 @@ export type NotificationType =
   | "on_duty"
   | "leave"
   | "comp_off";
+
+/**
+ * Map a notification's type + title/body into an EmailContent. Returns
+ * null when the notification doesn't have a corresponding email template
+ * (or when we can't decode the title format).
+ *
+ * Title format conventions (from the existing notify*() callers):
+ *   "<actor name> requested regularization"
+ *   "<actor name> requested WFH"
+ *   "<actor name> requested on-duty"
+ *   "<actor name> applied for leave"
+ *   "<actor name> requested comp-off"
+ *   "Your regularization was approved" / "rejected"
+ *   etc.
+ */
+function buildEmailFor(
+  type: NotificationType,
+  title: string,
+  body?: string
+): EmailContent | null {
+  // ── Decision emails (sent to the submitter) ────────────────────────
+  // Format: "Your <type> was approved" or "Your <type> request was rejected"
+  const decisionMatch = /^Your\s+(.+?)\s+was\s+(approved|rejected|partially approved)/i.exec(title);
+  if (decisionMatch) {
+    return decisionEmail({
+      applicantName: "there",                    // we don't have the name here; template handles "Hi there,"
+      typeLabel: decisionMatch[1],
+      outcome: (decisionMatch[2].toLowerCase().startsWith("rej") ? "rejected" : "approved"),
+      note: body,
+    });
+  }
+
+  // ── Submitter → approver request emails ────────────────────────────
+  // Pull the actor's name out of "<name> requested ___" / "<name> applied for ___".
+  const submitterMatch = /^(.+?)\s+(?:requested|applied for)/i.exec(title);
+  const applicantName = submitterMatch?.[1] ?? "An employee";
+
+  // Most fields (dates, etc.) live in the notification's body line —
+  // we surface the body as the "reason" so approvers see the context.
+  switch (type) {
+    case "leave":
+      return leaveRequestEmail({
+        applicantName,
+        leaveType: "Leave",
+        fromDate: new Date(),
+        toDate: new Date(),
+        totalDays: "—",
+        reason: body,
+      });
+    case "wfh":             return wfhRequestEmail({ applicantName, date: new Date(), reason: body });
+    case "on_duty":         return onDutyRequestEmail({ applicantName, date: new Date(), reason: body });
+    case "regularization":  return regularizationRequestEmail({ applicantName, date: new Date(), reason: body });
+    case "comp_off":        return compOffRequestEmail({ applicantName, workedDate: new Date(), creditDays: "—", reason: body });
+    default:                return null;
+  }
+}
+
+/**
+ * Internal: resolve emails for `userIds` and dispatch the templated
+ * email. Fire-and-forget — silently swallows failures so notifications
+ * never block the API.
+ */
+async function dispatchEmails(
+  userIds: number[],
+  type: NotificationType,
+  title: string,
+  body?: string
+): Promise<void> {
+  try {
+    const content = buildEmailFor(type, title, body);
+    if (!content) return;
+    const to = await emailsForUserIds(userIds);
+    if (to.length === 0) return;
+    // Don't await — emails go out in the background.
+    void sendEmail({ to, content });
+  } catch (e) {
+    console.error("[email] dispatchEmails failed:", e);
+  }
+}
 
 /**
  * Resolve the set of users who should be notified when `actorId` submits a
@@ -73,6 +158,8 @@ export async function notifyUsers(params: {
         linkUrl:  params.linkUrl,
       })),
     });
+    // Mirror the in-app notification as an email — fire-and-forget.
+    void dispatchEmails(ids, params.type, params.title, params.body);
   } catch (e) {
     console.error("notifyUsers failed:", e);
   }
@@ -97,8 +184,9 @@ export async function notifyApprovers(params: {
     const approvers = await approverIdsForUser(params.actorId);
     const all = new Set<number>([...approvers, ...(params.extraUserIds ?? [])]);
     if (all.size === 0) return;
+    const recipientIds = Array.from(all);
     await prisma.notification.createMany({
-      data: Array.from(all).map((userId) => ({
+      data: recipientIds.map((userId) => ({
         userId,
         actorId:  params.actorId,
         type:     params.type,
@@ -108,6 +196,7 @@ export async function notifyApprovers(params: {
         linkUrl:  params.linkUrl,
       })),
     });
+    void dispatchEmails(recipientIds, params.type, params.title, params.body);
   } catch (e) {
     console.error("notifyApprovers failed:", e);
   }
