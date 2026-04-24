@@ -1,18 +1,12 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/components/layout/auth-provider";
 import LayoutShell from "@/components/layout/layout-shell";
 import NextTopLoader from "nextjs-toploader";
 
-// Inter — the typeface Keka uses. Loaded globally, exposed as --font-mulish
-// so every existing `font-[--font-mulish]` reference continues to work.
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-  variable: "--font-mulish",
-  display: "swap",
-});
+// No web-font loader: the app uses the device's native system font via the
+// stack defined in globals.css. macOS/iOS → SF Pro, Windows → Segoe UI,
+// Android → Roboto, Linux → Noto Sans / Liberation Sans.
 
 export const metadata: Metadata = {
   title: "NB Media Productions — Dashboard",
@@ -34,7 +28,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${inter.variable} font-sans antialiased min-h-screen`}>
+      <body className="font-sans antialiased min-h-screen">
         <NextTopLoader color="#8b5cf6" height={3} showSpinner={false} />
         <AuthProvider>
           <LayoutShell>{children}</LayoutShell>

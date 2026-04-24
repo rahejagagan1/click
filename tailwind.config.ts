@@ -10,7 +10,14 @@ const config: Config = {
     theme: {
         extend: {
             fontFamily: {
-                sans: ["var(--font-inter)", "system-ui", "sans-serif"],
+                // Device-native system font stack: SF Pro on Apple, Segoe UI on
+                // Windows, Roboto on Android, Noto Sans / Liberation Sans on
+                // Linux — with Arial and generic sans-serif as final fallbacks.
+                sans: [
+                    "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto",
+                    "Helvetica Neue", "Noto Sans", "Liberation Sans", "Arial",
+                    "sans-serif", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
+                ],
             },
             keyframes: {
                 ytSectionReveal: {
