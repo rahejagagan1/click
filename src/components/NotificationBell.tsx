@@ -91,12 +91,12 @@ export default function NotificationBell() {
         ref={btnRef}
         type="button"
         onClick={toggle}
-        className="relative flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-white/10 text-white transition-colors hover:bg-white/15"
+        className="relative flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-all hover:brightness-110"
         aria-label="Notifications"
         aria-expanded={open}
-        style={{ zIndex: 40 }}
+        style={{ zIndex: 40, color: "#ffffff", background: "#4ba3ff", boxShadow: "0 0 0 1.5px rgba(255,255,255,0.85)" }}
       >
-        <Bell size={14} strokeWidth={2} style={{ pointerEvents: "none" }} />
+        <Bell size={16} strokeWidth={2.25} style={{ pointerEvents: "none", color: "#ffffff" }} />
         {unread > 0 && (
           <span
             className="absolute -right-1 -top-1 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white ring-2 ring-[#0f6ecd]"

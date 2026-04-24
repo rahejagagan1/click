@@ -943,7 +943,7 @@ export default function MonthlyReportPage() {
                         {andrewTab === "A" && (
                         <div>
                             <div className="mb-3 rounded-t-lg px-4 py-2" style={{background:"linear-gradient(90deg,#e87722,#f59e0b)"}}>
-                                <h2 className="text-base font-bold text-white">Section A <span className="text-[11px] font-normal opacity-90">(To be filled by Andrew and Abhishek both)</span></h2>
+                                <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section A <span className="text-[11px] font-normal opacity-90">(To be filled by Andrew and Abhishek both)</span></h2>
                             </div>
                             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 shadow-sm">
                                 <table ref={abTableRef as any} className="border-collapse w-full" style={{minWidth:1600}}>
@@ -1014,7 +1014,7 @@ export default function MonthlyReportPage() {
                         {andrewTab === "B" && (
                         <div>
                             <div className="mb-3 rounded-t-lg px-4 py-2 flex items-center gap-3" style={{background:"linear-gradient(90deg,#e87722,#f59e0b)"}}>
-                                <h2 className="text-base font-bold text-white">Section B: A Quick Overview of Rohini &amp; Shikha</h2>
+                                <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section B: A Quick Overview of Rohini &amp; Shikha</h2>
                                 <span className="text-[11px] text-amber-100 font-medium">(To be filled by Abhishek)</span>
                             </div>
                             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 shadow-sm">
@@ -1067,7 +1067,7 @@ export default function MonthlyReportPage() {
                         {andrewTab === "C" && (
                         <div>
                             <div className="mb-3 rounded-t-lg px-4 py-2" style={{background:"linear-gradient(90deg,#e87722,#f59e0b)"}}>
-                                <h2 className="text-base font-bold text-white">Section C: Monthly Views Comparison</h2>
+                                <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section C: Monthly Views Comparison</h2>
                                 <p className="text-[11px] text-amber-100 mt-0.5">Compare current month ({monthName} {year}) vs previous month views</p>
                             </div>
                             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 shadow-sm">
