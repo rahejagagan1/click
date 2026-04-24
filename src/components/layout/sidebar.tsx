@@ -30,7 +30,7 @@ const NAV_ITEMS = [
     { label: "Company",   href: "/dashboard/company",  icon: icon(Building2),      adminOnly: true                                           },
     { label: "Scores",    href: "/dashboard/scores",   icon: icon(Star),                                        managersOnly: true           },
     { label: "YouTube",   href: "/dashboard/youtube",  icon: icon(PlayCircle),     youtubeDashboardAccess: true                              },
-    { label: "NB Unplugged", href: "/dashboard/feedback", icon: icon(MessageCircle)                                                         },
+    { label: "Feedback",  href: "/dashboard/feedback", icon: icon(MessageCircle)                                                             },
     { label: "Admin",     href: "/admin",              icon: icon(Settings),       adminOnly: true                                           },
 ];
 
@@ -69,7 +69,7 @@ export default function Sidebar() {
         const label = (item as any).label as string;
         const keyMap: Record<string, string> = {
             "Dashboard": "dashboard", "Cases": "cases", "Company": "company",
-            "Scores": "scores", "YouTube": "youtube", "NB Unplugged": "feedback",
+            "Scores": "scores", "YouTube": "youtube", "Feedback": "feedback",
         };
         const k = keyMap[label];
         if (k && !tabAllowed(k)) return false;
@@ -275,7 +275,7 @@ export default function Sidebar() {
 
                 {/* Items before Admin */}
                 {beforeAdmin.map((item) => {
-                    if (item.label === "NB Unplugged" && showFeedbackSubmenu) {
+                    if (item.label === "Feedback" && showFeedbackSubmenu) {
                         return (
                             <div
                                 key={item.href}
@@ -296,7 +296,7 @@ export default function Sidebar() {
                                         <span className={cn(isFeedbackNavActive ? "text-[#0f6ecd]" : "")}>
                                             {item.icon}
                                         </span>
-                                        NB Unplugged
+                                        Feedback
                                     </span>
                                     <svg
                                         className={cn(
@@ -327,7 +327,7 @@ export default function Sidebar() {
                                                     : "text-[#34495e] hover:bg-[#dde4ec] hover:text-[#1f3b57]"
                                             )}
                                         >
-                                            <span className="truncate">Submit post</span>
+                                            <span className="truncate">NB Unplugged</span>
                                             <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                             </svg>
@@ -341,7 +341,7 @@ export default function Sidebar() {
                                                     : "text-[#34495e] hover:bg-[#dde4ec] hover:text-[#1f3b57]"
                                             )}
                                         >
-                                            <span className="truncate">Inbox</span>
+                                            <span className="truncate">NB Unplugged inbox</span>
                                             <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                             </svg>
