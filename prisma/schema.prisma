@@ -121,6 +121,8 @@ model User {
   engageComments         EngageComment[]  @relation("EngageCommentAuthor")
   notifications          Notification[]   @relation("NotificationRecipient")
   notificationsTriggered Notification[]   @relation("NotificationActor")
+  tabPermissions         UserTabPermission[] @relation("UserTabPermsOwner")
+  tabPermissionsUpdated  UserTabPermission[] @relation("UserTabPermsUpdater")
 
   @@index([managerId])
 }
@@ -1028,6 +1030,27 @@ model AnnouncementRead {
   user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([announcementId, userId])
+}
+
+// ═══════════════════════════════════════════════════════
+// Per-user tab permissions — HR can toggle which sidebar
+// tabs each employee can see/reach. Admins flip booleans
+// from /dashboard/hr/admin/permissions.
+// ═══════════════════════════════════════════════════════
+model UserTabPermission {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  tabKey     String   // matches TAB_KEYS in src/lib/permissions/tabs.ts
+  enabled    Boolean
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  updatedBy  Int?     // who last flipped the toggle
+
+  user       User     @relation("UserTabPermsOwner",   fields: [userId],    references: [id], onDelete: Cascade)
+  updater    User?    @relation("UserTabPermsUpdater", fields: [updatedBy], references: [id])
+
+  @@unique([userId, tabKey])
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════

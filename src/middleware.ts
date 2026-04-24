@@ -45,16 +45,11 @@ export async function middleware(request: NextRequest) {
         }
     }
 
-    // HR pages + HR APIs are developer-only while the module is under rollout
-    if (pathname.startsWith("/dashboard/hr") || pathname.startsWith("/api/hr")) {
-        const isDeveloper = (token as any).isDeveloper;
-        if (isDeveloper !== true) {
-            if (pathname.startsWith("/api/hr")) {
-                return NextResponse.json({ error: "Not available" }, { status: 403 });
-            }
-            return NextResponse.redirect(new URL("/dashboard", request.url));
-        }
-    }
+    // HR module is now generally available — every authenticated user can hit
+    // /dashboard/hr/* and /api/hr/*. Page- and endpoint-level ACLs (e.g.
+    // requireAdmin in /api/hr/admin/* and isHRAdmin gates inside admin pages)
+    // still keep manager-only views off-limits to regular employees.
+    // (Previously this was developer-only behind a rollout flag.)
 
     // YouTube dashboard: any authenticated user (see youtube-dashboard-access)
 
