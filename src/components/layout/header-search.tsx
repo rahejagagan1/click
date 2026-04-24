@@ -73,7 +73,7 @@ export default function HeaderSearch() {
 
   const anchorRect = anchorRef.current?.getBoundingClientRect() ?? null;
   const showPanel  = open && debounced.length >= 1;
-  const placeholder = useMemo(() => "Search anything...", []);
+  const placeholder = useMemo(() => "Search employees or actions (Ex: Apply Leave)", []);
   const close = () => setOpen(false);
   const clear = () => { setQuery(""); setDebounced(""); };
 
@@ -91,7 +91,7 @@ export default function HeaderSearch() {
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         placeholder={placeholder}
-        className="w-52 md:w-56 lg:w-64 pl-9 pr-8 py-1.5 bg-[#e9eef4] border border-[#c8d2de] rounded-full text-[12px] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#2563eb]/15 focus:border-[#93c5fd] transition-all text-[#1f2f3f]"
+        className="w-56 rounded-full border border-white/35 bg-white px-9 py-[7px] text-[11px] text-[#1f2f3f] placeholder:text-slate-400 transition-all focus:border-white focus:outline-none focus:ring-4 focus:ring-white/20 md:w-64 lg:w-[300px]"
       />
       {query && (
         <button

@@ -6,19 +6,25 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import {
-  ChevronLeft, ChevronRight, ChevronDown,
-  Send, BarChart2, Award, Mail, Users, Calendar,
-  MapPin, HardDrive, Plus
+  ChevronDown,
+  Send,
+  BarChart2,
+  Award,
+  Mail,
+  Plus,
+  MoreHorizontal,
+  ThumbsUp,
+  MessageSquare,
 } from "lucide-react";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
-  page:    "bg-[#f2f5f9]",
-  card:    "bg-white border border-[#dbe5ef] rounded-md shadow-[0_1px_2px_rgba(16,24,40,0.04)]",
+  page:    "bg-[#f5f7fb]",
+  card:    "bg-white border border-[#e3e9f1] rounded-[3px] shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
   t1:      "text-[#1b2b3c]",
   t2:      "text-[#415a73]",
   t3:      "text-[#6e8499]",
-  div:     "border-[#dbe5ef]",
+  div:     "border-[#e6ebf2]",
   ring:    "ring-white",
 } as const;
 
@@ -163,6 +169,190 @@ function EventsWidget({
   );
 }
 
+function timeAgo(date: string) {
+  const diff = Date.now() - new Date(date).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} mins ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function DecorativeTree() {
+  return (
+    <svg viewBox="0 0 360 620" className="h-full w-full">
+      <g fill="none" stroke="currentColor" strokeLinecap="round" opacity="0.9">
+        <path d="M286 602 C286 516 275 449 251 381 C229 321 220 272 225 210" strokeWidth="24" />
+        <path d="M248 396 C291 381 323 353 342 305" strokeWidth="11" />
+        <path d="M252 438 C301 430 334 405 358 360" strokeWidth="10" />
+        <path d="M237 345 C195 314 169 283 151 241" strokeWidth="11" />
+        <path d="M228 302 C183 278 148 248 121 204" strokeWidth="9" />
+        <path d="M221 253 C255 228 277 198 292 156" strokeWidth="9" />
+        <path d="M219 215 C180 186 154 158 135 117" strokeWidth="8" />
+        <path d="M288 485 C321 480 343 463 358 432" strokeWidth="8" />
+      </g>
+      {[
+        [316, 282, 20], [276, 329, 20], [250, 367, 21], [303, 392, 18], [331, 343, 17],
+        [176, 252, 19], [145, 218, 17], [119, 245, 18], [161, 295, 20], [138, 156, 17],
+        [283, 164, 18], [309, 130, 16], [170, 190, 16], [211, 151, 18], [332, 487, 18],
+        [297, 523, 20], [264, 482, 18], [237, 536, 17], [346, 546, 16], [205, 326, 16],
+        [191, 415, 17], [334, 420, 16], [287, 248, 16],
+      ].map(([x, y, r], idx) => (
+        <g key={idx} transform={`translate(${x} ${y}) rotate(${idx % 2 === 0 ? -18 : 18})`}>
+          <path
+            d={`M0 ${r} C${r * 0.9} ${r * 0.45} ${r * 0.95} ${r * -0.25} 0 ${-r} C${-r * 0.95} ${r * -0.25} ${-r * 0.9} ${r * 0.45} 0 ${r}Z`}
+            fill="currentColor"
+            opacity="0.45"
+          />
+          <path d={`M0 ${r - 3} L0 ${-r + 3}`} stroke="white" strokeOpacity="0.34" strokeWidth="1.1" />
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function BannerArt() {
+  return (
+    <svg viewBox="0 0 900 86" className="h-full w-full">
+      <defs>
+        <linearGradient id="bannerBase" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stopColor="#2f3642" />
+          <stop offset="55%" stopColor="#202731" />
+          <stop offset="100%" stopColor="#161c24" />
+        </linearGradient>
+        <filter id="bannerBlur">
+          <feGaussianBlur stdDeviation="6" />
+        </filter>
+      </defs>
+      <rect width="900" height="86" fill="url(#bannerBase)" />
+      <g opacity="0.95" filter="url(#bannerBlur)">
+        <path d="M186 64 C240 18 320 10 388 44 C445 71 507 66 571 39 C626 16 702 16 777 49" fill="none" stroke="#2b5f91" strokeWidth="24" strokeLinecap="round" />
+        <path d="M126 56 C182 27 254 20 306 49 C354 77 398 76 444 55 C503 28 563 29 621 56" fill="none" stroke="#4f84be" strokeWidth="18" strokeLinecap="round" />
+        <path d="M257 69 C305 31 370 27 427 56 C471 78 523 79 582 58 C631 41 690 42 756 65" fill="none" stroke="#22476f" strokeWidth="14" strokeLinecap="round" />
+        <path d="M95 48 C145 31 187 30 236 46 C280 60 320 63 355 57" fill="none" stroke="#36597e" strokeWidth="12" strokeLinecap="round" />
+      </g>
+      <g opacity="0.12">
+        {[
+          [22, 18], [48, 52], [95, 24], [128, 61], [171, 33], [214, 21], [276, 57], [314, 19],
+          [367, 49], [411, 24], [468, 61], [514, 18], [568, 53], [635, 24], [681, 55], [728, 23],
+          [782, 47], [838, 28],
+        ].map(([x, y], i) => (
+          <rect key={i} x={x} y={y} width="18" height="12" rx="1.5" fill="#ffffff" transform={`rotate(${(i % 4) * 11 - 8} ${x} ${y})`} />
+        ))}
+      </g>
+    </svg>
+  );
+}
+
+function HolidayScene() {
+  return (
+    <svg viewBox="0 0 340 88" className="pointer-events-none absolute inset-x-0 bottom-0 h-[62px] w-full">
+      <g fill="rgba(43,94,34,0.35)">
+        <rect x="0" y="76" width="340" height="12" />
+        <path d="M0 76 C32 61 59 59 88 71 C112 49 143 47 173 69 C196 56 213 54 232 65 C257 43 287 42 340 76Z" />
+        <rect x="44" y="48" width="8" height="28" />
+        <path d="M48 48 C38 53 37 69 48 72 C58 69 58 54 48 48Z" />
+        <rect x="114" y="44" width="8" height="32" />
+        <path d="M118 44 C104 48 102 69 118 72 C133 69 132 48 118 44Z" />
+        <rect x="210" y="42" width="8" height="34" />
+        <path d="M214 42 C201 47 199 70 214 72 C229 69 227 46 214 42Z" />
+        <rect x="274" y="46" width="8" height="30" />
+        <path d="M278 46 C266 51 264 68 278 72 C291 68 290 50 278 46Z" />
+      </g>
+    </svg>
+  );
+}
+
+function QuickLinksCard() {
+  const links = [
+    { label: "Attendance", href: "/dashboard/hr/attendance" },
+    { label: "Leave", href: "/dashboard/hr/leaves" },
+    { label: "People", href: "/dashboard/hr/people" },
+    { label: "Inbox", href: "/dashboard/hr/inbox" },
+    { label: "Engage", href: "/dashboard/hr/engage" },
+    { label: "Announcements", href: "/dashboard/hr/announcements" },
+  ];
+
+  return (
+    <div className={`${C.card} p-3.5`}>
+      <p className={`mb-3 text-[13px] font-semibold ${C.t1}`}>Quick Links</p>
+      <div className="flex flex-wrap gap-x-3 gap-y-2">
+        {links.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className="text-[12px] font-medium text-[#008CFF] transition-colors hover:text-[#0070d4] hover:underline"
+          >
+            {item.label}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FeedPostCard({ post }: { post: any }) {
+  return (
+    <article className={`${C.card} overflow-hidden`}>
+      <div className="px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <Av name={post.author?.name || "User"} url={post.author?.profilePictureUrl} size={34} />
+            <div className="min-w-0">
+              <p className="truncate text-[12.5px] font-semibold text-[#2e4051]">
+                {post.author?.name || "Team member"}
+                <span className="ml-1 font-normal text-[#8a98a8]">created a post</span>
+              </p>
+              <p className="mt-0.5 text-[11px] text-[#97a4b3]">{timeAgo(post.createdAt)}</p>
+            </div>
+          </div>
+          <button className="rounded-md p-1 text-[#95a3b1] transition hover:bg-[#f5f7fb] hover:text-[#607284]">
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-3 text-[13px] leading-6 text-[#526476]">
+          {post.content}
+        </div>
+
+        {post.mediaUrl ? (
+          <img
+            src={post.mediaUrl}
+            alt="Post media"
+            className="mt-3 max-h-[360px] w-full rounded-[3px] border border-[#ecf1f5] object-cover"
+          />
+        ) : null}
+      </div>
+
+      <div className="flex items-center justify-between border-t border-[#eef2f6] px-4 py-2.5 text-[11.5px] text-[#8393a3]">
+        <div className="flex items-center gap-3">
+          <span>{post.reactions?.length || 0} reactions</span>
+          <span>{post.comments?.length || 0} comments</span>
+        </div>
+      </div>
+
+      <div className="flex items-center border-t border-[#eef2f6]">
+        <Link
+          href="/dashboard/hr/engage"
+          className="flex flex-1 items-center justify-center gap-2 py-2.5 text-[12px] font-medium text-[#5f7183] transition hover:bg-[#f8fafc]"
+        >
+          <ThumbsUp className="h-4 w-4" />
+          Like
+        </Link>
+        <Link
+          href="/dashboard/hr/engage"
+          className="flex flex-1 items-center justify-center gap-2 border-l border-[#eef2f6] py-2.5 text-[12px] font-medium text-[#5f7183] transition hover:bg-[#f8fafc]"
+        >
+          <MessageSquare className="h-4 w-4" />
+          Comment
+        </Link>
+      </div>
+    </article>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 export default function HRHomePage() {
   const { data: session } = useSession();
@@ -192,11 +382,11 @@ export default function HRHomePage() {
   const [ss, setSs] = useState("--");
   const [ap, setAp] = useState("AM");
   const [dl, setDl] = useState("");
-  const [hidx, setHidx]   = useState(0);
   const [feedTab, setFT]  = useState<"post"|"poll"|"praise">("post");
   const [bTab, setBTab]   = useState<"birthday"|"anniversary"|"joinees">("birthday");
   const [postText, setPost] = useState("");
   const [orgTab, setOrgTab] = useState<"org"|"team">("org");
+  const [submittingPost, setSubmittingPost] = useState(false);
 
   useEffect(() => {
     const tick = () => {
@@ -210,7 +400,17 @@ export default function HRHomePage() {
       setMm(parts.minute || "00");
       setSs(parts.second || "00");
       setAp(h24 >= 12 ? "PM" : "AM");
-      setDl(d.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", weekday:"short", day:"numeric", month:"short", year:"numeric" }));
+      const dateParts = new Intl.DateTimeFormat("en-IN", {
+        timeZone: "Asia/Kolkata",
+        weekday: "short",
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }).formatToParts(d).reduce<Record<string, string>>((acc, p) => {
+        acc[p.type] = p.value;
+        return acc;
+      }, {});
+      setDl(`${dateParts.weekday || "Thu"}, ${dateParts.day || "23"} ${dateParts.month || "Apr"} ${dateParts.year || "2026"}`);
     };
     tick();
     const t = setInterval(tick, 1000);
@@ -226,9 +426,15 @@ export default function HRHomePage() {
     : [];
   const todaysHoliday = allHolidays.find((h) => h.date === istTodayStr) || null;
   const upcoming      = allHolidays.filter((h) => h.date >= istTodayStr);
-  const holiday       = upcoming[hidx] ?? upcoming[0] ?? null;
+  const holiday       = upcoming[0] ?? null;
   const todayRec = myData?.todayRecord;
   const todayLoc = parseAttLoc(todayRec?.location);
+  const teamScope = user?.teamCapsule || "team";
+  const postsUrl = orgTab === "org"
+    ? "/api/hr/engage/posts"
+    : `/api/hr/engage/posts?scope=${encodeURIComponent(teamScope)}`;
+  const { data: posts = [] } = useSWR(postsUrl, fetcher);
+  const { data: announcements = [] } = useSWR("/api/hr/announcements", fetcher);
 
   const clockIn = async () => {
     const geo = await captureClockInGeo();
@@ -244,287 +450,253 @@ export default function HRHomePage() {
   // Split clocked-in employees by their actual location mode (from Attendance.location JSON).
   const clockedIn = (boardData?.board || []).filter((u: any) => u.status === "present" || u.status === "late");
   const remote    = clockedIn.filter((u: any) => parseAttLoc(u.location).mode === "remote");
-  const inOffice  = clockedIn.filter((u: any) => parseAttLoc(u.location).mode !== "remote");
   const balances = (balanceData as any[]).filter(b => b.leaveType).slice(0, 3);
-  const ringColors = ["#008CFF", "#00bcd4", "#9c27b0"];
+  const activeHoliday = todaysHoliday || holiday;
+
+  const submitPost = async () => {
+    if (!postText.trim()) return;
+    setSubmittingPost(true);
+    await fetch("/api/hr/engage/posts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: postText.trim(),
+        type: feedTab,
+        scope: orgTab === "org" ? "org" : teamScope,
+      }),
+    });
+    setPost("");
+    setSubmittingPost(false);
+    mutate(postsUrl);
+  };
 
   return (
-    <div className={`min-h-screen ${C.page} flex flex-col`}>
+    <div className={`min-h-screen ${C.page}`}>
+      <div className="relative flex-1">
+        <div className="pointer-events-none absolute bottom-[-6px] right-0 top-[176px] hidden w-[318px] text-[#e9eef6] xl:block">
+          <DecorativeTree />
+        </div>
 
-      {/* ── Body ── (the welcome banner is now merged into the global Header) */}
-      <div className="flex flex-1 min-h-0 relative gap-2 pl-2 pr-3 py-2.5">
+        <div className="grid w-full gap-5 px-4 py-3 xl:grid-cols-[300px,470px] xl:justify-start xl:px-10">
+          <section className="relative hidden h-[64px] w-[860px] overflow-hidden rounded-[2px] border border-[#2b3440] shadow-[0_1px_2px_rgba(15,23,42,0.14)] xl:col-span-2 xl:block">
+            <div className="absolute inset-0">
+              <BannerArt />
+            </div>
+            <div className="relative px-8 py-5">
+              <p className="text-[15px] font-medium tracking-[-0.01em] text-white">
+                Welcome {user?.name || "back"}!
+              </p>
+            </div>
+          </section>
 
-        {/* ══ LEFT column ══ */}
-        <div className="w-[272px] shrink-0 overflow-y-auto">
-          <div className="space-y-2.5">
-
-            <p className={`text-[13px] font-semibold ${C.t1} pb-0.5 pt-1 leading-none`}>
+          <div className="space-y-3">
+            <p className={`pb-0.5 pt-1 text-[13px] font-semibold leading-none ${C.t1}`}>
               Quick Access
             </p>
 
-            {/* ── Clock widget ── */}
-            <div className="rounded-lg px-4 py-3.5 overflow-hidden relative"
-                 style={{ background: "#9182bf" }}>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[11px] leading-none font-semibold text-white/80" suppressHydrationWarning>
+            <div className="relative overflow-hidden rounded-[2px] px-[12px] py-[11px] text-white shadow-[0_1px_2px_rgba(15,23,42,0.08)]" style={{ background: "#9b8aca" }}>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-[11px] leading-none text-white/86" suppressHydrationWarning>
                   Time Today - {dl}
                 </span>
-                <Link href="/dashboard/hr/attendance" className="text-[11px] text-white/70 hover:text-white transition-colors leading-none">
+                <Link href="/dashboard/hr/attendance" className="text-[11px] font-medium text-white/78 transition-colors hover:text-white">
                   View All
                 </Link>
               </div>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[9px] font-bold uppercase tracking-[0.1em] text-white/60">Current Time</p>
-                {(() => {
-                  const activeRemote = todayLoc.mode
-                    ? todayLoc.mode === "remote"
-                    : isRemoteMode;
-                  return (
-                    <span className="text-[9px] font-bold uppercase tracking-[0.1em] px-1.5 py-0.5 rounded"
-                          style={{ background: activeRemote ? "rgba(0,140,255,0.35)" : "rgba(255,255,255,0.18)", color: "#fff" }}>
-                      {activeRemote ? "Remote" : "Office"}
-                    </span>
-                  );
-                })()}
+
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-white/68">Current Time</p>
+                <span className="rounded-[2px] bg-black/12 px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-[0.12em] text-white">
+                  {(todayLoc.mode ? todayLoc.mode : isRemoteMode ? "remote" : "office").toUpperCase()}
+                </span>
               </div>
 
-              {/* ── Digital clock display ── */}
-              <div className="rounded-md px-3 py-2 mb-2.5 flex items-start gap-0.5"
-                   style={{ background: "rgba(0,0,0,0.32)" }}>
-                <span suppressHydrationWarning
-                  style={{ fontFamily:"'Courier New',Courier,monospace", fontSize:36, letterSpacing:"0.04em",
-                           fontWeight:700, lineHeight:1, color:"#ffffff" }}>
+              <div className="mb-[11px] flex items-start gap-[1px] rounded-[2px] bg-[#6d5f99]/68 px-[10px] py-[9px]">
+                <span
+                  suppressHydrationWarning
+                  style={{
+                    fontFamily: "'Segoe UI', Arial, sans-serif",
+                    fontSize: 30,
+                    letterSpacing: "-0.03em",
+                    fontWeight: 400,
+                    lineHeight: 1,
+                    color: "#ffffff",
+                  }}
+                >
                   {hh}:{mm}
                 </span>
-                <div style={{ display:"flex", flexDirection:"column", paddingTop:2, gap:2 }}>
-                  <span suppressHydrationWarning
-                    style={{ fontFamily:"'Courier New',monospace", fontSize:13, letterSpacing:"0.04em",
-                             fontWeight:700, lineHeight:1, color:"rgba(255,255,255,0.75)" }}>
+                <div className="flex flex-col gap-[1px] pt-[2px]">
+                  <span
+                    suppressHydrationWarning
+                    style={{
+                      fontFamily: "'Segoe UI', Arial, sans-serif",
+                      fontSize: 13,
+                      lineHeight: 1,
+                      color: "rgba(255,255,255,0.9)",
+                    }}
+                  >
                     :{ss}
                   </span>
-                  <span suppressHydrationWarning
-                    style={{ fontFamily:"'Courier New',monospace", fontSize:12, lineHeight:1,
-                             color:"rgba(255,255,255,0.85)" }}>
+                  <span
+                    suppressHydrationWarning
+                    style={{
+                      fontFamily: "'Segoe UI', Arial, sans-serif",
+                      fontSize: 11,
+                      lineHeight: 1,
+                      color: "rgba(255,255,255,0.88)",
+                    }}
+                  >
                     {ap}
                   </span>
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2">
+              <div className="flex items-center justify-end gap-1.5">
                 {!todayRec?.clockIn ? (
-                  <button onClick={clockIn}
-                    className="h-7 px-4 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
-                    style={{ background: isRemoteMode ? "#008CFF" : "#ff6a6a" }}>
+                  <button
+                    onClick={clockIn}
+                    className="h-[24px] rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95"
+                    style={{ background: isRemoteMode ? "#008CFF" : "#ff6a63" }}
+                  >
                     {isRemoteMode ? "Remote Clock-in" : "Clock-in"}
                   </button>
                 ) : !todayRec?.clockOut ? (
-                  <button onClick={clockOut}
-                    className="h-7 px-4 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
-                    style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a6a" }}>
+                  <button
+                    onClick={clockOut}
+                    className="h-[24px] rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95"
+                    style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a63" }}
+                  >
                     {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
                   </button>
                 ) : (
-                  <span className="h-7 px-4 rounded-md text-[12px] font-semibold flex items-center text-white/90"
-                        style={{ background: "rgba(255,255,255,0.18)" }}>
-                    Done ✓
+                  <span className="flex h-[24px] items-center rounded-[3px] bg-white/15 px-3.5 text-[11px] font-semibold text-white/90">
+                    Done
                   </span>
                 )}
-                <button className="h-7 px-3 rounded-md text-[11px] font-medium flex items-center gap-1 text-[#2c2c2c]"
-                        style={{ background: "#ffffff" }}>
-                  Other <ChevronDown className="w-3 h-3"/>
+                <button className="flex h-[24px] items-center gap-1 rounded-[3px] bg-white px-2.5 text-[11px] font-medium text-[#4d5864] transition hover:bg-[#f4f6f8]">
+                  Other <ChevronDown className="h-3 w-3" />
                 </button>
               </div>
             </div>
 
-            {/* ── Inbox ── */}
-            <div className={`${C.card} p-3`}>
-              <p className={`text-[13px] font-semibold ${C.t1} mb-3`}>Inbox</p>
+            <div className={`${C.card} p-3.5`}>
+              <p className={`mb-3 text-[13px] font-semibold ${C.t1}`}>Inbox</p>
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                     style={{ background: "rgba(99,102,241,0.10)" }}>
-                  <Mail style={{ color: "#6366f1", width: 18, height: 18 }}/>
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#f2ecff]">
+                  <Mail className="h-[18px] w-[18px] text-[#8a79da]" />
                 </div>
                 <div>
                   <p className={`text-[13px] font-semibold ${C.t1}`}>Good job!</p>
-                  <p className={`text-[12px] ${C.t3} mt-0.5`}>You have no pending actions</p>
+                  <p className={`mt-0.5 text-[11.5px] ${C.t3}`}>You have no pending actions</p>
                 </div>
               </div>
             </div>
 
-            {/* ── Holidays ── today-only widget. If nothing today, show empty state
-                 regardless of whether upcoming holidays exist. */}
-            {!todaysHoliday && (
-              <div className="rounded-lg p-4 relative overflow-hidden border border-[#dbe5ef]" style={{ minHeight: 108, background: "#f8fafc" }}>
-                <div className="flex items-start justify-between mb-2">
-                  <span className={`text-[9.5px] font-bold uppercase tracking-[0.14em] ${C.t3}`}>Holidays</span>
-                  <Link
-                    href={isAdmin ? "/dashboard/hr/admin/holidays" : "/dashboard/hr/leaves"}
-                    className="text-[11px] text-[#008CFF] hover:underline"
-                  >
-                    {isAdmin ? "Manage" : "View All"}
+            <div className="relative min-h-[108px] overflow-hidden rounded-[3px] border border-[#cce2bf] px-4 py-3.5 text-white shadow-[0_1px_2px_rgba(15,23,42,0.08)]" style={{ background: "linear-gradient(180deg, #83c863 0%, #5da83e 100%)" }}>
+              <HolidayScene />
+              <div className="relative z-10">
+                <div className="mb-2 flex items-start justify-between">
+                  <span className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-white/90">Holidays</span>
+                  <Link href={isAdmin ? "/dashboard/hr/admin/holidays" : "/dashboard/hr/leaves"} className="text-[11px] text-white/80 transition hover:text-white">
+                    View All
                   </Link>
                 </div>
-                <p className={`text-[14px] font-semibold ${C.t1} mb-1`}>No event today</p>
-                <p className={`text-[11.5px] ${C.t3}`}>
-                  {upcoming.length > 0
-                    ? `Next: ${upcoming[0].name} · ${new Date(upcoming[0].date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
-                    : "No upcoming holidays on file."}
-                </p>
-              </div>
-            )}
-            {todaysHoliday && (
-              <div className="rounded-lg p-4 relative overflow-hidden" style={{ minHeight: 108,
-                   background: "linear-gradient(165deg, #1a6b42 0%, #0e4528 100%)" }}>
-                {/* Mosque silhouette */}
-                <svg viewBox="0 0 340 55" style={{ position: "absolute", bottom: 0, right: -4, width: "90%", height: 55 }}
-                     preserveAspectRatio="xMaxYMax meet">
-                  <g fill="rgba(0,0,0,0.28)">
-                    <rect x="30" y="50" width="280" height="6"/>
-                    <polygon points="52,50 52,14 55,6 58,14 58,50"/>
-                    <rect x="47" y="27" width="16" height="3" rx="1"/>
-                    <polygon points="282,50 282,14 285,6 288,14 288,50"/>
-                    <rect x="277" y="27" width="16" height="3" rx="1"/>
-                    <rect x="65" y="36" width="50" height="20"/>
-                    <path d="M65,36 A25,20 0 0 1 115,36Z"/>
-                    <rect x="115" y="40" width="110" height="16"/>
-                    <path d="M115,40 A55,36 0 0 1 225,40Z"/>
-                    <rect x="168" y="5" width="4" height="35"/>
-                    <circle cx="170" cy="5" r="3"/>
-                    <rect x="225" y="36" width="50" height="20"/>
-                    <path d="M225,36 A25,20 0 0 1 275,36Z"/>
-                  </g>
-                  <path d="M295,8 A11,11 0 1,1 309,20 A8,8 0 1,0 295,8Z" fill="rgba(255,255,255,0.40)"/>
-                  <circle cx="315" cy="10" r="1.8" fill="rgba(255,255,255,0.30)"/>
-                </svg>
-                <div className="relative z-10">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-white">Holidays</span>
-                      {todaysHoliday && (
-                        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-white text-[#0e4528]">
-                          Today
-                        </span>
-                      )}
-                    </div>
-                    <Link href={isAdmin ? "/dashboard/hr/admin/holidays" : "/dashboard/hr/leaves"} className="text-[11px] text-white/80 hover:text-white transition-colors">
-                      {isAdmin ? "Manage" : "View All"}
-                    </Link>
-                  </div>
-                  <p className="text-[17px] font-bold text-white leading-snug pr-14 mb-2">{todaysHoliday.name}</p>
-                  <div>
-                    <p className="text-[11px] text-white/80 mb-1.5">
-                      {new Date(todaysHoliday.date).toLocaleDateString("en-IN", { weekday:"short", day:"numeric", month:"long", year:"numeric" })}
-                    </p>
-                    <span className="inline-block px-2 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide text-white"
-                          style={{ background: HOLIDAY_TYPE_COLOR[todaysHoliday.type] ?? "#008CFF" }}>
-                      {HOLIDAY_TYPE_LABEL[todaysHoliday.type] ?? "PUBLIC HOLIDAY"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
 
-            {/* ── On Leave Today ── */}
-            <div className={`${C.card} p-3`}>
-              <p className={`text-[13px] font-semibold ${C.t1} mb-3`}>On Leave Today</p>
+                {activeHoliday ? (
+                  <>
+                    <p className="max-w-[220px] text-[16px] font-semibold leading-snug">
+                      {activeHoliday.name}
+                    </p>
+                    <p className="mt-1 text-[11px] text-white/85">
+                      {new Date(activeHoliday.date).toLocaleDateString("en-IN", {
+                        weekday: "short",
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </p>
+                    <span
+                      className="mt-2 inline-block rounded-[3px] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-white"
+                      style={{ background: HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#008CFF" }}
+                    >
+                      {HOLIDAY_TYPE_LABEL[activeHoliday.type] ?? "PUBLIC HOLIDAY"}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[15px] font-semibold">No event today</p>
+                    <p className="mt-1 text-[11px] text-white/85">No upcoming holidays on file.</p>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className={`${C.card} p-3.5`}>
+              <p className={`mb-3 text-[13px] font-semibold ${C.t1}`}>On Leave Today</p>
               {onLeave.length > 0 ? (
                 <div className="flex flex-wrap gap-3">
-                  {onLeave.slice(0, 6).map((u: any) => (
+                  {onLeave.slice(0, 4).map((u: any) => (
                     <div key={u.id} className="flex flex-col items-center gap-1">
-                      <Av name={u.name} url={u.profilePictureUrl} size={40}/>
-                      <span className={`text-[10px] ${C.t3} truncate text-center`} style={{ width: 40 }}>
-                        {u.name.split(" ")[0]}
-                      </span>
-                    </div>
-                  ))}
-                  {onLeave.length > 6 && (
-                    <div className="flex flex-col items-center gap-1">
-                      <div className={`rounded-full flex items-center justify-center text-[10px] font-semibold ring-2 ${C.ring}`}
-                           style={{ width: 40, height: 40, background: "rgba(0,140,255,0.1)", color: "#008CFF" }}>
-                        +{onLeave.length - 6}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className={`text-[12px] ${C.t3}`}>No one on leave today</p>
-              )}
-            </div>
-
-            {/* ── In Office ── */}
-            <div className={`${C.card} p-3`}>
-              <p className={`text-[13px] font-semibold ${C.t1} mb-3`}>In Office</p>
-              {inOffice.length > 0 ? (
-                <div className="flex flex-wrap gap-3">
-                  {inOffice.slice(0, 6).map((u: any) => (
-                    <div key={u.id} className="flex flex-col items-center gap-1">
-                      <Av name={u.name} url={u.profilePictureUrl} size={40}/>
-                      <span className={`text-[10px] ${C.t3} truncate text-center`} style={{ width: 40 }}>
-                        {u.name.split(" ")[0]}
-                      </span>
+                      <Av name={u.name} url={u.profilePictureUrl} size={36} />
+                      <span className={`w-11 truncate text-center text-[9.5px] ${C.t3}`}>{u.name.split(" ")[0]}</span>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className={`text-[12px] ${C.t3}`}>No one in office yet</p>
+                <p className={`text-[11.5px] ${C.t3}`}>No one on leave today</p>
               )}
             </div>
 
-            {/* ── Working Remotely ── */}
-            <div className={`${C.card} p-3`}>
-              <p className={`text-[13px] font-semibold ${C.t1} mb-3`}>Working Remotely</p>
+            <div className={`${C.card} p-3.5`}>
+              <p className={`mb-3 text-[13px] font-semibold ${C.t1}`}>Working Remotely</p>
               {remote.length > 0 ? (
                 <div className="flex flex-wrap gap-3">
-                  {remote.slice(0, 6).map((u: any) => (
+                  {remote.slice(0, 4).map((u: any) => (
                     <div key={u.id} className="flex flex-col items-center gap-1">
-                      <Av name={u.name} url={u.profilePictureUrl} size={40}/>
-                      <span className={`text-[10px] ${C.t3} truncate text-center`} style={{ width: 40 }}>
-                        {u.name.split(" ")[0]}
-                      </span>
+                      <Av name={u.name} url={u.profilePictureUrl} size={36} />
+                      <span className={`w-11 truncate text-center text-[9.5px] ${C.t3}`}>{u.name.split(" ")[0]}</span>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className={`text-[12px] ${C.t3}`}>No one working remotely</p>
+                <p className={`text-[11.5px] ${C.t3}`}>No one working remotely</p>
               )}
             </div>
 
-            {/* ── Leave Balances ── */}
-            <div className={`${C.card} p-4`}>
-              <p className={`text-[16px] font-semibold ${C.t1} mb-4 leading-none`}>Leave Balances</p>
+            <div className={`${C.card} p-3.5`}>
+              <p className={`mb-3 text-[13px] font-semibold ${C.t1}`}>Leave Balances</p>
               {balances.length > 0 ? (
-                <div className="flex items-center justify-between gap-4 flex-wrap">
-                  <div className="flex gap-5 flex-wrap">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex gap-4">
                     {balances.slice(0, 2).map((b: any, i: number) => {
                       const avail = Math.max(0, (b.totalDays || 0) - (b.usedDays || 0));
                       return (
-                        <div key={b.id} className="flex flex-col items-center gap-1.5">
-                          <BalanceRing avail={avail} total={b.totalDays || 1} color={["#34b3d9", "#84d7ef"][i % 2]} />
-                          <p className={`text-[10px] font-medium uppercase text-center leading-tight ${C.t3}`}
-                             style={{ letterSpacing: "0.05em", maxWidth: 95 }}>
+                        <div key={b.id} className="flex flex-col items-center gap-1">
+                          <BalanceRing avail={avail} total={b.totalDays || 1} color={["#64c8ec", "#90d6f1"][i % 2]} />
+                          <p className={`max-w-[88px] text-center text-[9px] font-medium uppercase leading-tight ${C.t3}`}>
                             {b.leaveType?.name}
                           </p>
                         </div>
                       );
                     })}
                   </div>
-                  <div className="flex flex-col gap-1.5 shrink-0">
-                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline whitespace-nowrap">
+                  <div className="flex shrink-0 flex-col gap-2">
+                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline">
                       Request Leave
                     </Link>
-                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline whitespace-nowrap">
+                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline">
                       View All Balances
                     </Link>
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center justify-between gap-4 flex-wrap">
-                  <p className={`text-[12px] ${C.t3}`}>No leave balances configured</p>
-                  <div className="flex flex-col gap-1.5 shrink-0">
-                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline whitespace-nowrap">
+                <div>
+                  <p className={`text-[11.5px] ${C.t3}`}>No leave balances configured</p>
+                  <div className="mt-3 flex flex-col gap-2">
+                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline">
                       Request Leave
                     </Link>
-                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline whitespace-nowrap">
+                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline">
                       View All Balances
                     </Link>
                   </div>
@@ -532,100 +704,100 @@ export default function HRHomePage() {
               )}
             </div>
 
+            <QuickLinksCard />
           </div>
-        </div>
 
-        {/* ══ RIGHT column (feed) ══ */}
-        <div className="flex-1 overflow-y-auto min-w-0">
-
-          <div className="space-y-3 pr-1">
-
-            {/* ── Compose card ── */}
-            <div className={`${C.card} overflow-hidden`}>
-              {/* Org / Team tabs */}
-              <div className={`flex items-center border-b ${C.div} px-1`}>
-                {[["org","Organization"],["team", user?.teamCapsule || "NB Media"]] .map(([k,l]) => (
-                  <button key={k} onClick={() => setOrgTab(k as any)}
-                    className={`px-4 py-2.5 text-[13px] font-medium border-b-2 -mb-px transition-colors ${
-                      orgTab === k
-                        ? "border-[#008CFF] text-[#008CFF]"
-                        : `border-transparent ${C.t2} hover:${C.t1}`
-                    }`}>
-                    {l}
-                  </button>
-                ))}
-              </div>
-              <div className="px-4 pt-3 pb-4">
-                {/* Feed type tabs */}
-                <div className="flex items-center gap-0.5 mb-3">
-                  {[
-                    { k:"post",   l:"Post",   I:<Send style={{ width:14,height:14 }}/>        },
-                    { k:"poll",   l:"Poll",   I:<BarChart2 style={{ width:14,height:14 }}/>   },
-                    { k:"praise", l:"Praise", I:<Award style={{ width:14,height:14 }}/>        },
-                  ].map(({ k, l, I }) => (
-                    <button key={k} onClick={() => setFT(k as any)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium transition-colors ${
-                        feedTab === k
-                          ? "bg-[#008CFF]/10 text-[#008CFF]"
-                          : `${C.t2} hover:bg-white/[0.04]`
-                      }`}>
-                      {I}{l}
+          <div className="min-w-0">
+            <div className="max-w-[470px] space-y-3">
+              <div className={`${C.card} overflow-hidden`}>
+                <div className={`flex items-center border-b ${C.div} px-1`}>
+                  {[["org", "Organization"], ["team", user?.teamCapsule || "NB Media"]].map(([k, l]) => (
+                    <button
+                      key={k}
+                      onClick={() => setOrgTab(k as "org" | "team")}
+                      className={`px-4 py-2.5 text-[12.5px] font-medium border-b-2 -mb-px transition-colors ${
+                        orgTab === k ? "border-[#008CFF] text-[#008CFF]" : `border-transparent ${C.t2}`
+                      }`}
+                    >
+                      {l}
                     </button>
                   ))}
                 </div>
-                <textarea value={postText} onChange={e => setPost(e.target.value)}
-                  placeholder="Write your post here and mention your peers"
-                  rows={2}
-                  className={`w-full resize-none bg-transparent text-[13px] ${C.t2} focus:outline-none placeholder-[#8a96a8] dark:placeholder-[#4e5e72]`}
-                  style={{ caretColor: "#008CFF" }}/>
-                {postText.trim() && (
-                  <div className={`flex justify-end mt-2 pt-2 border-t ${C.div}`}>
-                    <button onClick={() => setPost("")}
-                      className="h-8 px-5 rounded-lg text-[12px] font-semibold text-white bg-[#008CFF] hover:bg-[#0070d4] transition-colors">
-                      Post
-                    </button>
+
+                <div className="px-4 pt-3 pb-4">
+                  <div className="mb-3 flex items-center gap-0.5">
+                    {[
+                      { k: "post", l: "Post", I: <Send style={{ width: 14, height: 14 }} /> },
+                      { k: "poll", l: "Poll", I: <BarChart2 style={{ width: 14, height: 14 }} /> },
+                      { k: "praise", l: "Praise", I: <Award style={{ width: 14, height: 14 }} /> },
+                    ].map(({ k, l, I }) => (
+                      <button
+                        key={k}
+                        onClick={() => setFT(k as "post" | "poll" | "praise")}
+                        className={`flex items-center gap-1.5 rounded-[4px] px-3 py-1.5 text-[12px] font-medium transition-colors ${
+                          feedTab === k ? "bg-[#f5f9ff] text-[#008CFF]" : `${C.t2} hover:bg-[#f7f9fc]`
+                        }`}
+                      >
+                        {I}
+                        {l}
+                      </button>
+                    ))}
                   </div>
-                )}
+
+                  <textarea
+                    value={postText}
+                    onChange={(e) => setPost(e.target.value)}
+                    placeholder="Write your post here and mention your peers"
+                    rows={2}
+                    className={`w-full resize-none bg-transparent text-[13px] ${C.t2} placeholder-[#8a96a8] focus:outline-none`}
+                    style={{ caretColor: "#008CFF" }}
+                  />
+
+                  {postText.trim() ? (
+                    <div className={`mt-3 flex justify-end border-t ${C.div} pt-3`}>
+                      <button
+                        onClick={submitPost}
+                        disabled={submittingPost}
+                        className="h-8 rounded-[4px] bg-[#008CFF] px-5 text-[12px] font-semibold text-white transition hover:bg-[#0070d4] disabled:opacity-60"
+                      >
+                        {submittingPost ? "Posting..." : feedTab === "praise" ? "Send Praise" : "Post"}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className={`${C.card} flex items-center justify-between px-4 py-3`}>
+                <div className="min-w-0">
+                  <p className={`truncate text-[12.5px] ${C.t3}`}>
+                    {announcements.length > 0 ? announcements[0].title : "No announcements"}
+                  </p>
+                </div>
+                {isAdmin ? (
+                  <Link
+                    href="/dashboard/hr/announcements"
+                    className="flex h-7 w-7 items-center justify-center rounded-[4px] bg-[#008CFF] text-white transition hover:bg-[#0070d4]"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Link>
+                ) : null}
+              </div>
+
+              <EventsWidget bTab={bTab} setBTab={setBTab} C={C} />
+
+              <div className="space-y-3">
+                {posts.length > 0 ? (
+                  posts.slice(0, 4).map((post: any) => <FeedPostCard key={post.id} post={post} />)
+                ) : analyticsData ? (
+                  <div className={`${C.card} px-5 py-8 text-center`}>
+                    <p className="text-[13px] font-semibold text-[#334455]">No posts yet</p>
+                    <p className={`mt-1 text-[12px] ${C.t3}`}>Your home feed is ready and will fill as soon as the team starts posting.</p>
+                  </div>
+                ) : null}
               </div>
             </div>
-
-            {/* ── Announcements placeholder ── */}
-            {isAdmin && (
-              <div className={`${C.card} px-4 py-3 flex items-center justify-between`}>
-                <span className={`text-[12.5px] ${C.t3}`}>No announcements</span>
-                <button className="w-7 h-7 rounded-lg flex items-center justify-center bg-[#008CFF]/10 hover:bg-[#008CFF]/20 transition-colors">
-                  <Plus style={{ width:14,height:14,color:"#008CFF"}}/>
-                </button>
-              </div>
-            )}
-
-            {/* ── Birthdays / Anniversaries / New Joinees ── (auto-derived from EmployeeProfile) */}
-            <EventsWidget bTab={bTab} setBTab={setBTab} C={C} />
-
-            {/* ── HR Summary stats (admin) ── */}
-            {isAdmin && analyticsData && (
-              <div className="grid grid-cols-3 gap-3">
-                {[
-                  { lb: "Total Employees", val: analyticsData.workforce?.totalEmployees, color: "#008CFF",  Icon: Users,    href: "/dashboard/hr/people"    },
-                  { lb: "Present Today",   val: analyticsData.attendance?.present,       color: "#10b981",  Icon: Calendar, href: "/dashboard/hr/attendance" },
-                  { lb: "On Leave",        val: analyticsData.attendance?.onLeave,       color: "#8b5cf6",  Icon: MapPin,   href: "/dashboard/hr/leaves"     },
-                ].map(m => (
-                  <Link key={m.lb} href={m.href}
-                    className={`${C.card} p-4 flex flex-col items-center justify-center gap-1 hover:border-[#008CFF]/25 transition-all cursor-pointer`}>
-                    <p className="text-[24px] font-bold leading-none tabular-nums" style={{ color: m.color }}>
-                      {m.val ?? 0}
-                    </p>
-                    <p className={`text-[9.5px] font-semibold uppercase tracking-[0.1em] mt-1 text-center ${C.t3}`}>
-                      {m.lb}
-                    </p>
-                  </Link>
-                ))}
-              </div>
-            )}
-
           </div>
         </div>
-
       </div>
     </div>
   );

@@ -41,32 +41,16 @@ export default function Header({ title }: { title?: string }) {
         : "?";
 
     return (
-        <header
-            className="sticky top-0 z-30 h-[68px] border-b border-[#cdd6e2] flex items-center justify-between px-6 shadow-[0_1px_3px_rgba(15,23,42,0.08)]"
-            style={{ background: "linear-gradient(180deg, #eceff3 0%, #e5eaf0 100%)" }}
-        >
-
-            <div className="relative z-10 flex items-center gap-3 min-w-0">
-                {user?.image ? (
-                    <img
-                        src={user.image}
-                        alt={user.name || "Profile"}
-                        className="w-9 h-9 rounded-full object-cover ring-1 ring-[#cfd9e4]"
-                        referrerPolicy="no-referrer"
-                    />
-                ) : (
-                    <div className="w-9 h-9 rounded-full bg-[#0f6ecd] flex items-center justify-center text-white text-xs font-semibold ring-1 ring-[#cfd9e4]">
-                        {initials}
-                    </div>
-                )}
-                <div className="leading-tight min-w-0">
-                    <h2 className="text-[15px] font-semibold text-[#1d2b38] truncate">
-                        {user?.name ? `Welcome ${user.name}!` : (title || "Welcome!")}
-                    </h2>
-                    {user?.email && (
-                        <p className="text-[11px] text-[#7a8da1] leading-none mt-1 truncate">{user.email}</p>
-                    )}
-                </div>
+        <header className="sticky top-0 z-30 flex h-[54px] items-center justify-between border-b border-[#0d5db8] bg-[#0f6ecd] px-5 shadow-[0_8px_24px_rgba(15,110,205,0.18)]">
+            <div className="relative z-10 min-w-0">
+                <p className="truncate text-[12.5px] font-medium text-white/95">
+                    {title || "NB Media Productions Pvt. Ltd"}
+                </p>
+                {user?.email ? (
+                    <p className="mt-0.5 truncate text-[10px] text-white/70">
+                        {user.email}
+                    </p>
+                ) : null}
             </div>
 
             <div className="relative z-10 flex items-center gap-2.5">
@@ -81,17 +65,17 @@ export default function Header({ title }: { title?: string }) {
                     <button
                         ref={btnRef}
                         onClick={() => setShowMenu(!showMenu)}
-                        className="flex items-center gap-2 rounded-full hover:bg-[#dde4ec] transition-colors p-0.5"
+                        className="flex items-center gap-2 rounded-full border border-white/20 bg-white/10 p-0.5 transition-colors hover:bg-white/15"
                     >
                         {user?.image ? (
                             <img
                                 src={user.image}
                                 alt={user.name || "Profile"}
-                                className="w-8 h-8 rounded-full object-cover border border-[#cfd9e4]"
+                                className="h-7 w-7 rounded-full border border-white/25 object-cover"
                                 referrerPolicy="no-referrer"
                             />
                         ) : (
-                            <div className="w-8 h-8 rounded-full bg-[#0f6ecd] flex items-center justify-center text-white text-[11px] font-medium">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 text-[10px] font-medium text-white">
                                 {initials}
                             </div>
                         )}

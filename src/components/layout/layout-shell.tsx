@@ -20,25 +20,25 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
     // against the sidebar, looking unprofessional.
     const FULL_BLEED = ["/dashboard/hr", "/dashboard/reports"];
     const isFullBleed = FULL_BLEED.some((p) => pathname.startsWith(p));
-    const contentCls  = isFullBleed ? "flex-1" : "flex-1 p-6";
+    const contentCls  = isFullBleed ? "flex-1" : "flex-1 p-6 lg:p-7";
 
     return (
-        <div className="flex min-h-screen">
+        <div className="flex min-h-screen bg-[#f4f7fb]">
             <Sidebar />
-            {/* ml-20 clears the fixed w-20 sidebar; pl-2 adds a small gutter
-                so even full-bleed pages never sit flush against its border. */}
-            <main className="flex-1 ml-20 pl-2 flex flex-col min-h-screen">
+            <main className="ml-[72px] flex min-h-screen flex-1 flex-col bg-[#f4f7fb]">
                 <Header />
                 <div className={contentCls}>
                     {children}
                 </div>
-                <footer className="py-4 border-t border-slate-200 text-center">
-                    <p className="text-[11px] text-slate-400 font-medium tracking-wider">
-                        <span className="font-semibold text-slate-500">NB Media</span>
-                        <span className="mx-2">•</span>
-                        <span>© {new Date().getFullYear()} NB Media Productions</span>
-                    </p>
-                </footer>
+                {!pathname.startsWith("/dashboard") ? (
+                    <footer className="border-t border-[#dbe4ed] py-4 text-center">
+                        <p className="text-[11px] font-medium tracking-wider text-slate-400">
+                            <span className="font-semibold text-slate-500">NB Media</span>
+                            <span className="mx-2">•</span>
+                            <span>© {new Date().getFullYear()} NB Media Productions</span>
+                        </p>
+                    </footer>
+                ) : null}
             </main>
         </div>
     );
