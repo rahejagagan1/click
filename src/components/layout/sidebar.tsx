@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
-import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle } from "lucide-react";
+import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign } from "lucide-react";
 
 // Consistent Keka-style icon: thin outline, fixed size / stroke.
 const icon = (Cmp: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>) => (
@@ -118,6 +118,12 @@ export default function Sidebar() {
         { refreshInterval: 30000 }
     );
     const approvalsCount = approvalsSummary?.total ?? 0;
+
+    // My Finances — top-level pinned tile with its own flyout (Summary / My Pay / Manage Tax)
+    const [financesOpen, setFinancesOpen] = useState(false);
+    const [financesY, setFinancesY] = useState(0);
+    const financesTrigger = useRef<HTMLDivElement>(null);
+    const financesTimer   = useRef<NodeJS.Timeout | null>(null);
 
     // Dept submenu state (portalled, like the HR flyouts)
     const [deptHovered, setDeptHovered] = useState(false);
@@ -269,6 +275,18 @@ export default function Sidebar() {
                                 <User size={15} strokeWidth={1.75} className={isMeActive || hrMeOpen ? "text-[#0f6ecd]" : ""} />
                                 Me
                             </div>
+                            {/* My Finances — pinned tile with a Summary / My Pay / Manage Tax flyout */}
+                            {(() => {
+                                const financesHandlers = makeHrHandlers(setFinancesOpen, setFinancesY, financesTrigger, financesTimer);
+                                const financesActive = pathname.startsWith("/dashboard/hr/payroll");
+                                return (
+                                    <div ref={financesTrigger} {...financesHandlers}
+                                        className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", financesActive || financesOpen ? A : E)}>
+                                        <CircleDollarSign size={15} strokeWidth={1.75} className={financesActive || financesOpen ? "text-[#0f6ecd]" : ""} />
+                                        My Finances
+                                    </div>
+                                );
+                            })()}
                         </>
                     );
                 })()}
@@ -665,11 +683,22 @@ export default function Sidebar() {
                                     {fl("/dashboard/hr/attendance", "Attendance"       )}
                                     {fl("/dashboard/hr/leaves",     "Leave"            )}
                                     <div className="my-1 mx-3 border-t border-[#d1dae5]" />
-                                    {fl("/dashboard/hr/payroll",    "My Finances"      )}
-                                    <div className="my-1 mx-3 border-t border-[#d1dae5]" />
                                     {fl("/dashboard/hr/goals",      "Goals"            )}
                                     {fl("/dashboard/hr/documents",  "Documents"        )}
                                     {fl("/dashboard/hr/tickets",    "Helpdesk"         )}
+                                </div>,
+                                document.body
+                            )}
+
+                            {financesOpen && typeof document !== "undefined" && createPortal(
+                                <div style={{ position: "fixed", left: 108, top: financesY, zIndex: 9999 }}
+                                    className={panelCls}
+                                    onMouseEnter={() => { if (financesTimer.current) clearTimeout(financesTimer.current); setFinancesOpen(true); }}
+                                    onMouseLeave={() => { financesTimer.current = setTimeout(() => setFinancesOpen(false), 200); }}>
+                                    <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">My Finances</p>
+                                    {fl("/dashboard/hr/payroll?view=summary", "Summary"   )}
+                                    {fl("/dashboard/hr/payroll?view=pay",     "My Pay"    )}
+                                    {fl("/dashboard/hr/payroll?view=tax",     "Manage Tax")}
                                 </div>,
                                 document.body
                             )}
