@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, requireAdmin, resolveUserId, serverError } from "@/lib/api-auth";
+import { sendEmail, emailsForAllActiveUsers } from "@/lib/email/sender";
+import { announcementEmail } from "@/lib/email/templates";
 
 export async function GET(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
@@ -36,6 +38,27 @@ export async function POST(req: NextRequest) {
       data: { ...body, postedById: myId },
       include: { postedBy: { select: { id: true, name: true } } },
     });
+
+    // Broadcast email to every active user — fire-and-forget, never blocks
+    // the response. Skipped if the announcement is scheduled for later.
+    const publishesNow = !ann.publishAt || new Date(ann.publishAt).getTime() <= Date.now();
+    if (publishesNow) {
+      void (async () => {
+        try {
+          const to = await emailsForAllActiveUsers();
+          if (to.length === 0) return;
+          await sendEmail({
+            to,
+            content: announcementEmail({
+              title: (ann as any).title || "New announcement",
+              body:  (ann as any).body  || "",
+              authorName: ann.postedBy?.name || "NB Media HR",
+            }),
+          });
+        } catch (e) { console.error("[email] announcement broadcast failed:", e); }
+      })();
+    }
+
     return NextResponse.json(ann);
   } catch (e) { return serverError(e, "POST /api/hr/announcements"); }
 }
