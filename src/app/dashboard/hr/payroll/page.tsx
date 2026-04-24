@@ -1,13 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   Download, FileText, Play, CheckCircle2, Clock, Plus, X, TrendingUp, ChevronRight,
-  Lightbulb,
+  ChevronDown, Lightbulb,
 } from "lucide-react";
 
 const MODULE_TABS = [
@@ -139,7 +140,19 @@ export default function PayrollPage() {
   const user    = session?.user as any;
   const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper || user?.orgLevel === "hr_manager";
 
-  const [subTab, setSubTab] = useState<"my-salary"|"pay-slips"|"income-tax"|"admin">("my-salary");
+  const searchParams = useSearchParams();
+  const initialSubTab = (() => {
+    const t = searchParams?.get("tab");
+    if (t === "pay-slips" || t === "income-tax" || t === "admin" || t === "my-salary") return t;
+    return "my-salary" as const;
+  })();
+  const [subTab, setSubTab] = useState<"my-salary"|"pay-slips"|"income-tax"|"admin">(initialSubTab);
+  useEffect(() => {
+    const t = searchParams?.get("tab");
+    if (t === "pay-slips" || t === "income-tax" || t === "admin" || t === "my-salary") {
+      setSubTab(t);
+    }
+  }, [searchParams]);
   const [showBreakup, setShowBreakup] = useState(false);
 
   // Admin-only state for modals
@@ -347,44 +360,7 @@ export default function PayrollPage() {
 
         {/* ══════════════════════  Pay Slips  ══════════════════════ */}
         {subTab === "pay-slips" && (
-          <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <h3 className="text-[13px] font-bold text-slate-800">My Payslips</h3>
-            </div>
-            {myPayslips.length === 0 ? (
-              <div className="px-5 py-10 text-center">
-                <FileText className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                <p className="text-[13px] text-slate-500">No payslips generated yet</p>
-              </div>
-            ) : (
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    {["Month","Gross Earnings","Deductions","Net Pay","Status",""].map(h => (
-                      <th key={h} className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-500">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {myPayslips.map((p: any) => (
-                    <tr key={p.id} className="border-b border-slate-50 hover:bg-slate-50">
-                      <td className="px-5 py-3 text-[13px] font-medium text-slate-800">{MONTHS[p.month]} {p.year}</td>
-                      <td className="px-5 py-3 text-[13px] text-slate-700">₹{fmtInrWhole(p.grossEarnings)}</td>
-                      <td className="px-5 py-3 text-[13px] text-red-500">₹{fmtInrWhole(p.totalDeductions)}</td>
-                      <td className="px-5 py-3 text-[13px] font-bold text-emerald-600">₹{fmtInrWhole(p.netPay)}</td>
-                      <td className="px-5 py-3"><StatusBadge status={p.status} /></td>
-                      <td className="px-5 py-3">
-                        <button onClick={() => downloadPayslip(p, myStructure)}
-                          className="flex items-center gap-1 text-[12px] text-[#008CFF] hover:underline">
-                          <Download className="w-3.5 h-3.5" />Download
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
+          <PaySlipsView payslips={myPayslips} structure={myStructure} />
         )}
 
         {/* ══════════════════════  Income Tax  ══════════════════════ */}
@@ -655,4 +631,279 @@ export default function PayrollPage() {
       )}
     </div>
   );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Pay Slips — Keka-style two-pane layout: year selector + month list on the
+// left, inline payslip preview on the right.
+// ══════════════════════════════════════════════════════════════════════════════
+function PaySlipsView({ payslips, structure }: { payslips: any[]; structure: any }) {
+  const { data: summary } = useSWR<{ profile: any }>("/api/hr/payroll/summary", fetcher);
+  const profile = summary?.profile ?? null;
+
+  const years = useMemo(() => {
+    const set = new Set<number>();
+    for (const p of payslips) set.add(p.year);
+    const sorted = Array.from(set).sort((a, b) => b - a);
+    return sorted.length > 0 ? sorted : [new Date().getFullYear()];
+  }, [payslips]);
+
+  const [selectedYear, setSelectedYear] = useState<number>(years[0]);
+  useEffect(() => {
+    if (!years.includes(selectedYear)) setSelectedYear(years[0]);
+  }, [years, selectedYear]);
+
+  const monthsInYear = useMemo(
+    () => payslips.filter((p: any) => p.year === selectedYear).sort((a: any, b: any) => b.month - a.month),
+    [payslips, selectedYear]
+  );
+
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  useEffect(() => {
+    if (monthsInYear.length === 0) { setSelectedId(null); return; }
+    if (!selectedId || !monthsInYear.find((p: any) => p.id === selectedId)) {
+      setSelectedId(monthsInYear[0].id);
+    }
+  }, [monthsInYear, selectedId]);
+
+  const active = monthsInYear.find((p: any) => p.id === selectedId) || null;
+
+  const maskedAcct = (v?: string | null) =>
+    !v ? "—" : String(v).length <= 4 ? String(v) : String(v);
+  const maskedPan = (v?: string | null) => v || "—";
+
+  const fullName =
+    profile?.firstName || profile?.lastName
+      ? [profile.firstName, profile.middleName, profile.lastName].filter(Boolean).join(" ")
+      : profile?.name || "—";
+
+  return (
+    <div className="-mt-5">
+      {/* Header row */}
+      <div className="px-6 pb-4 pt-2">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-[18px] font-semibold text-slate-800">Pay Slips</h2>
+              <Download className="h-4 w-4 text-slate-400" />
+            </div>
+            <p className="mt-1 text-[12.5px] text-slate-500">
+              Here you can manage all generated payslips for applicable years.
+            </p>
+          </div>
+          {active ? (
+            <button
+              onClick={() => downloadPayslip(active, structure)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sky-300 text-sky-600 hover:bg-sky-50 text-[13px] font-semibold"
+            >
+              {MONTHS_FULL[active.month]} {active.year} Pay Slip
+              <Download className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-12 gap-5 px-6">
+        {/* Left: year dropdown + month list */}
+        <aside className="col-span-12 md:col-span-3 space-y-4">
+          <div className="relative">
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+              className="w-full appearance-none rounded-lg border border-slate-200 bg-white px-4 py-2.5 pr-9 text-[13px] font-medium text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-200"
+            >
+              {years.map((y) => (
+                <option key={y} value={y}>Year {y}</option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          </div>
+
+          <div className="rounded-lg bg-white overflow-hidden shadow-[0_1px_3px_rgba(15,23,42,0.04)] border border-slate-200">
+            <p className="bg-slate-100 px-4 py-2 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+              Payslips
+            </p>
+            {monthsInYear.length === 0 ? (
+              <p className="px-4 py-6 text-[12.5px] text-slate-400">No payslips for {selectedYear}.</p>
+            ) : (
+              <ul>
+                {monthsInYear.map((p: any) => {
+                  const isSel = p.id === selectedId;
+                  return (
+                    <li key={p.id}>
+                      <button
+                        onClick={() => setSelectedId(p.id)}
+                        className={`w-full text-left px-4 py-3 text-[13px] transition-colors ${
+                          isSel
+                            ? "bg-sky-50 text-sky-700 font-semibold"
+                            : "text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        {MONTHS_FULL[p.month]} {p.year}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </aside>
+
+        {/* Right: preview */}
+        <section className="col-span-12 md:col-span-9">
+          <div className="rounded-t-lg bg-[#3c4656] px-6 py-3 text-white text-[13px] font-medium">
+            {active ? `${MONTHS_FULL[active.month]} ${active.year}` : "—"}
+          </div>
+          <div className="bg-[#2a3140] px-6 py-8 rounded-b-lg min-h-[600px]">
+            {active ? (
+              <div className="mx-auto max-w-3xl rounded bg-white p-10 shadow-xl">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h1 className="text-[22px] font-bold text-slate-800 tracking-wide">
+                      PAYSLIP <span className="font-normal">{MONTHS_FULL[active.month].toUpperCase()} {active.year}</span>
+                    </h1>
+                    <p className="mt-3 text-[13px] font-semibold text-slate-700">NB MEDIA PRODUCTIONS PRIVATE LIMITED</p>
+                    <p className="mt-2 text-[11.5px] leading-relaxed text-slate-500">
+                      1st Floor, 209, NB Media, Model Town Main Road,<br />
+                      Bathinda, Punjab, 151001.
+                    </p>
+                  </div>
+                  <div className="flex h-14 w-14 items-center justify-center rounded-md bg-white ring-1 ring-slate-200 overflow-hidden">
+                    <img src="/logo.png" alt="NB" className="h-11 w-11 object-contain" />
+                  </div>
+                </div>
+
+                <h2 className="mt-8 text-[14px] font-bold text-slate-800 border-b border-slate-200 pb-2">
+                  {fullName.toUpperCase()}
+                </h2>
+
+                <div className="mt-4 grid grid-cols-4 gap-x-6 gap-y-5">
+                  <PayslipField label="Employee Number"  value={profile?.employeeId || "—"} />
+                  <PayslipField label="Date Joined"      value={formatDate(profile?.joiningDate)} />
+                  <PayslipField label="Department"       value={profile?.department || "—"} />
+                  <PayslipField label="Designation"      value={profile?.designation || "—"} />
+
+                  <PayslipField label="Date of Birth"    value={formatDate(profile?.dateOfBirth)} />
+                  <PayslipField label="Location"         value={profile?.city || "—"} />
+                  <PayslipField label="Payment Mode"     value="Bank Transfer" />
+                  <PayslipField label="Bank"             value={profile?.bankName || "—"} />
+
+                  <PayslipField label="Bank IFSC"        value={profile?.bankIfsc || "—"} />
+                  <PayslipField label="Bank Account"     value={maskedAcct(profile?.bankAccountNumber)} />
+                  <PayslipField label="Monthly Salary"   value={fmtInrWhole(active.grossEarnings)} />
+                  <PayslipField label="PAN Number"       value={maskedPan(profile?.panNumber)} />
+                </div>
+
+                {/* Salary Details */}
+                <h3 className="mt-10 text-[13px] font-bold text-slate-800 border-b border-slate-200 pb-2">
+                  SALARY DETAILS
+                </h3>
+                <div className="mt-4 grid grid-cols-4 gap-x-6">
+                  <PayslipField label="Actual Payable Days" value={String(active.presentDays ?? "—")} />
+                  <PayslipField label="Total Working Days"  value={String(active.workingDays ?? "—")} />
+                  <PayslipField label="Loss of Pay Days"    value={String(active.lopDays ?? 0)} />
+                  <PayslipField label="Days Payable"        value={String((active.workingDays ?? 0) - (active.lopDays ?? 0))} />
+                </div>
+
+                {/* Earnings */}
+                <h3 className="mt-8 text-[13px] font-bold text-slate-800 border-b border-slate-200 pb-2">
+                  EARNINGS
+                </h3>
+                <table className="mt-3 w-full text-[13px]">
+                  <tbody>
+                    {renderEarnings(active, structure).map((row) => (
+                      <tr key={row.label} className="border-b border-slate-100">
+                        <td className="py-2 text-slate-700">{row.label}</td>
+                        <td className="py-2 text-right text-slate-800 font-medium">{row.value}</td>
+                      </tr>
+                    ))}
+                    <tr className="border-b-2 border-slate-300">
+                      <td className="py-2 font-semibold text-slate-800">Total Earnings (A)</td>
+                      <td className="py-2 text-right font-semibold text-slate-800">{fmtInr(active.grossEarnings)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                {/* Deductions */}
+                <h3 className="mt-6 text-[13px] font-bold text-slate-800 border-b border-slate-200 pb-2">
+                  DEDUCTIONS
+                </h3>
+                <table className="mt-3 w-full text-[13px]">
+                  <tbody>
+                    <tr className="border-b border-slate-100">
+                      <td className="py-2 text-slate-700">Provident Fund (Employee)</td>
+                      <td className="py-2 text-right text-slate-800 font-medium">{fmtInr(active.pfEmployee)}</td>
+                    </tr>
+                    <tr className="border-b border-slate-100">
+                      <td className="py-2 text-slate-700">TDS / Income Tax</td>
+                      <td className="py-2 text-right text-slate-800 font-medium">{fmtInr(active.tds)}</td>
+                    </tr>
+                    <tr className="border-b border-slate-100">
+                      <td className="py-2 text-slate-700">Professional Tax</td>
+                      <td className="py-2 text-right text-slate-800 font-medium">{fmtInr(active.professionalTax)}</td>
+                    </tr>
+                    <tr className="border-b-2 border-slate-300">
+                      <td className="py-2 font-semibold text-slate-800">Total Deductions (B)</td>
+                      <td className="py-2 text-right font-semibold text-slate-800">{fmtInr(active.totalDeductions)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <div className="mt-5 flex items-center justify-between rounded bg-[#1e3a5f] px-5 py-3 text-white">
+                  <span className="text-[13px] font-semibold tracking-wide">NET PAY (A − B)</span>
+                  <span className="text-[18px] font-bold">{fmtInr(active.netPay)}</span>
+                </div>
+
+                <p className="mt-4 text-[10.5px] text-slate-400 text-center">
+                  This is a computer-generated payslip and does not require a physical signature.
+                </p>
+              </div>
+            ) : (
+              <div className="mx-auto max-w-3xl rounded bg-white p-10 text-center">
+                <FileText className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-[13px] text-slate-500">No payslip selected</p>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function PayslipField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">{label}</p>
+      <p className="mt-1.5 text-[12.5px] font-medium text-slate-800">{value}</p>
+    </div>
+  );
+}
+
+const MONTHS_FULL = [
+  "January","February","March","April","May","June",
+  "July","August","September","October","November","December",
+];
+
+function formatDate(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+function renderEarnings(p: any, structure: any): { label: string; value: string }[] {
+  const gross = parseFloat(p.grossEarnings || 0);
+  if (!structure) {
+    return [{ label: "Stipend", value: fmtInr(gross) }];
+  }
+  const basic   = parseFloat(structure.basic   || 0) / 12;
+  const hra     = parseFloat(structure.hra     || 0) / 12;
+  const special = Math.max(0, gross - basic - hra);
+  const rows: { label: string; value: string }[] = [];
+  if (basic)   rows.push({ label: "Basic Salary",              value: fmtInr(basic) });
+  if (hra)     rows.push({ label: "House Rent Allowance",      value: fmtInr(hra)   });
+  if (special) rows.push({ label: "Special Allowance",         value: fmtInr(special) });
+  if (rows.length === 0) rows.push({ label: "Stipend", value: fmtInr(gross) });
+  return rows;
 }
