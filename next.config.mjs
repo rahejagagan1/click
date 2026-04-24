@@ -26,8 +26,12 @@ const nextConfig = {
                     { key: "X-XSS-Protection",        value: "1; mode=block" },
                     { key: "Referrer-Policy",         value: "strict-origin-when-cross-origin" },
                     {
+                        // `geolocation=(self)` lets our own origin use the
+                        // geolocation API (required for attendance clock-in);
+                        // camera/mic remain disabled. Any other origin is
+                        // still blocked because they're not listed.
                         key: "Permissions-Policy",
-                        value: "camera=(), microphone=(), geolocation=()",
+                        value: "camera=(), microphone=(), geolocation=(self)",
                     },
                 ],
             },
