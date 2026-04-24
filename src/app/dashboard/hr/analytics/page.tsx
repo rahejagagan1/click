@@ -213,36 +213,22 @@ function DecorativeTree() {
   );
 }
 
+// Welcome banner — backed by /public/image_8b71d84b.png. The image is set
+// as a CSS background so it `cover`s the banner cleanly at any aspect
+// ratio without stretching. A faint left-side dark gradient keeps the
+// white "Welcome ___" text readable against bright wave details.
 function BannerArt() {
   return (
-    <svg viewBox="0 0 900 86" className="h-full w-full">
-      <defs>
-        <linearGradient id="bannerBase" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0%" stopColor="#2f3642" />
-          <stop offset="55%" stopColor="#202731" />
-          <stop offset="100%" stopColor="#161c24" />
-        </linearGradient>
-        <filter id="bannerBlur">
-          <feGaussianBlur stdDeviation="6" />
-        </filter>
-      </defs>
-      <rect width="900" height="86" fill="url(#bannerBase)" />
-      <g opacity="0.95" filter="url(#bannerBlur)">
-        <path d="M186 64 C240 18 320 10 388 44 C445 71 507 66 571 39 C626 16 702 16 777 49" fill="none" stroke="#2b5f91" strokeWidth="24" strokeLinecap="round" />
-        <path d="M126 56 C182 27 254 20 306 49 C354 77 398 76 444 55 C503 28 563 29 621 56" fill="none" stroke="#4f84be" strokeWidth="18" strokeLinecap="round" />
-        <path d="M257 69 C305 31 370 27 427 56 C471 78 523 79 582 58 C631 41 690 42 756 65" fill="none" stroke="#22476f" strokeWidth="14" strokeLinecap="round" />
-        <path d="M95 48 C145 31 187 30 236 46 C280 60 320 63 355 57" fill="none" stroke="#36597e" strokeWidth="12" strokeLinecap="round" />
-      </g>
-      <g opacity="0.12">
-        {[
-          [22, 18], [48, 52], [95, 24], [128, 61], [171, 33], [214, 21], [276, 57], [314, 19],
-          [367, 49], [411, 24], [468, 61], [514, 18], [568, 53], [635, 24], [681, 55], [728, 23],
-          [782, 47], [838, 28],
-        ].map(([x, y], i) => (
-          <rect key={i} x={x} y={y} width="18" height="12" rx="1.5" fill="#ffffff" transform={`rotate(${(i % 4) * 11 - 8} ${x} ${y})`} />
-        ))}
-      </g>
-    </svg>
+    <div
+      className="absolute inset-0"
+      style={{
+        backgroundImage:
+          "linear-gradient(90deg, rgba(8,18,38,0.55) 0%, rgba(8,18,38,0.20) 35%, rgba(8,18,38,0) 100%), url('/image_8b71d84b.png')",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+      }}
+    />
   );
 }
 
@@ -483,7 +469,17 @@ export default function HRHomePage() {
               <BannerArt />
             </div>
             <div className="relative px-8 py-5">
-              <p className="text-[15px] font-medium tracking-[-0.01em] text-white">
+              {/* Welcome text — pure white with a dark drop shadow so it
+                  stays readable against the busy painterly banner regardless
+                  of light/dark theme. */}
+              <p
+                className="text-[16px] font-semibold tracking-[-0.01em]"
+                style={{
+                  color: "#ffffff",
+                  WebkitTextFillColor: "#ffffff",
+                  textShadow: "0 1px 2px rgba(0,0,0,0.7), 0 0 12px rgba(0,0,0,0.5)",
+                }}
+              >
                 Welcome {user?.name || "back"}!
               </p>
             </div>
@@ -494,88 +490,110 @@ export default function HRHomePage() {
               Quick Access
             </p>
 
-            <div className="relative overflow-hidden rounded-[2px] px-[12px] py-[11px] text-white shadow-[0_1px_2px_rgba(15,23,42,0.08)]" style={{ background: "#9b8aca" }}>
+            <div
+              className="relative overflow-hidden rounded-[2px] px-[12px] py-[11px] shadow-[0_1px_2px_rgba(15,23,42,0.08)]"
+              style={{ background: "#9b8aca", color: "#ffffff" }}
+            >
               <div className="mb-1 flex items-center justify-between">
-                <span className="text-[11px] leading-none text-white/86" suppressHydrationWarning>
+                <span
+                  className="text-[11px] leading-none"
+                  style={{ color: "rgba(255,255,255,0.86)", WebkitTextFillColor: "rgba(255,255,255,0.86)" }}
+                  suppressHydrationWarning
+                >
                   Time Today - {dl}
                 </span>
-                <Link href="/dashboard/hr/attendance" className="text-[11px] font-medium text-white/78 transition-colors hover:text-white">
+                <Link
+                  href="/dashboard/hr/attendance"
+                  className="text-[11px] font-medium transition-colors hover:opacity-100"
+                  style={{ color: "rgba(255,255,255,0.78)", WebkitTextFillColor: "rgba(255,255,255,0.78)" }}
+                >
                   View All
                 </Link>
               </div>
 
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-white/68">Current Time</p>
-                <span className="rounded-[2px] bg-black/12 px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-[0.12em] text-white">
+                <p
+                  className="text-[9px] font-bold uppercase tracking-[0.14em]"
+                  style={{ color: "rgba(255,255,255,0.68)", WebkitTextFillColor: "rgba(255,255,255,0.68)" }}
+                >Current Time</p>
+                <span
+                  className="rounded-[2px] bg-black/12 px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-[0.12em]"
+                  style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
+                >
                   {(todayLoc.mode ? todayLoc.mode : isRemoteMode ? "remote" : "office").toUpperCase()}
                 </span>
               </div>
 
-              <div className="mb-[11px] flex items-start gap-[1px] rounded-[2px] bg-[#6d5f99]/68 px-[10px] py-[9px]">
-                <span
-                  suppressHydrationWarning
-                  style={{
-                    fontFamily: "'Segoe UI', Arial, sans-serif",
-                    fontSize: 30,
-                    letterSpacing: "-0.03em",
-                    fontWeight: 400,
-                    lineHeight: 1,
-                    color: "#ffffff",
-                  }}
-                >
-                  {hh}:{mm}
-                </span>
-                <div className="flex flex-col gap-[1px] pt-[2px]">
+              {/* Clock display + action buttons on the same row, vertically
+                  centered. The clock keeps its inner purple box; buttons sit
+                  parallel to it on the right. */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-start gap-[1px] rounded-[2px] bg-[#6d5f99]/68 px-[10px] py-[9px]">
                   <span
                     suppressHydrationWarning
                     style={{
                       fontFamily: "'Segoe UI', Arial, sans-serif",
-                      fontSize: 13,
+                      fontSize: 30,
+                      letterSpacing: "-0.03em",
+                      fontWeight: 400,
                       lineHeight: 1,
-                      color: "rgba(255,255,255,0.9)",
+                      color: "#ffffff",
                     }}
                   >
-                    :{ss}
+                    {hh}:{mm}
                   </span>
-                  <span
-                    suppressHydrationWarning
-                    style={{
-                      fontFamily: "'Segoe UI', Arial, sans-serif",
-                      fontSize: 11,
-                      lineHeight: 1,
-                      color: "rgba(255,255,255,0.88)",
-                    }}
-                  >
-                    {ap}
-                  </span>
+                  <div className="flex flex-col gap-[1px] pt-[2px]">
+                    <span
+                      suppressHydrationWarning
+                      style={{
+                        fontFamily: "'Segoe UI', Arial, sans-serif",
+                        fontSize: 13,
+                        lineHeight: 1,
+                        color: "rgba(255,255,255,0.9)",
+                      }}
+                    >
+                      :{ss}
+                    </span>
+                    <span
+                      suppressHydrationWarning
+                      style={{
+                        fontFamily: "'Segoe UI', Arial, sans-serif",
+                        fontSize: 11,
+                        lineHeight: 1,
+                        color: "rgba(255,255,255,0.88)",
+                      }}
+                    >
+                      {ap}
+                    </span>
+                  </div>
                 </div>
-              </div>
 
-              <div className="flex items-center justify-end gap-1.5">
-                {!todayRec?.clockIn ? (
-                  <button
-                    onClick={clockIn}
-                    className="h-[24px] rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95"
-                    style={{ background: isRemoteMode ? "#008CFF" : "#ff6a63" }}
-                  >
-                    {isRemoteMode ? "Remote Clock-in" : "Clock-in"}
+                <div className="flex items-center gap-1.5">
+                  {!todayRec?.clockIn ? (
+                    <button
+                      onClick={clockIn}
+                      className="h-[24px] rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95"
+                      style={{ background: isRemoteMode ? "#008CFF" : "#ff6a63" }}
+                    >
+                      {isRemoteMode ? "Remote Clock-in" : "Clock-in"}
+                    </button>
+                  ) : !todayRec?.clockOut ? (
+                    <button
+                      onClick={clockOut}
+                      className="h-[24px] rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95"
+                      style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a63" }}
+                    >
+                      {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
+                    </button>
+                  ) : (
+                    <span className="flex h-[24px] items-center rounded-[3px] bg-white/15 px-3.5 text-[11px] font-semibold text-white/90">
+                      Done
+                    </span>
+                  )}
+                  <button className="flex h-[24px] items-center gap-1 rounded-[3px] bg-white px-2.5 text-[11px] font-medium text-[#4d5864] transition hover:bg-[#f4f6f8]">
+                    Other <ChevronDown className="h-3 w-3" />
                   </button>
-                ) : !todayRec?.clockOut ? (
-                  <button
-                    onClick={clockOut}
-                    className="h-[24px] rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95"
-                    style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a63" }}
-                  >
-                    {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
-                  </button>
-                ) : (
-                  <span className="flex h-[24px] items-center rounded-[3px] bg-white/15 px-3.5 text-[11px] font-semibold text-white/90">
-                    Done
-                  </span>
-                )}
-                <button className="flex h-[24px] items-center gap-1 rounded-[3px] bg-white px-2.5 text-[11px] font-medium text-[#4d5864] transition hover:bg-[#f4f6f8]">
-                  Other <ChevronDown className="h-3 w-3" />
-                </button>
+                </div>
               </div>
             </div>
 
