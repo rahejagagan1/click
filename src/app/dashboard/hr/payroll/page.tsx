@@ -751,12 +751,13 @@ function PaySlipsView({ payslips, structure }: { payslips: any[]; structure: any
 
         {/* Right: preview */}
         <section className="col-span-12 md:col-span-9">
-          <div className="rounded-t-lg bg-[#3c4656] px-6 py-3 text-white text-[13px] font-medium">
-            {active ? `${MONTHS_FULL[active.month]} ${active.year}` : "—"}
-          </div>
-          <div className="bg-[#2a3140] px-6 py-8 rounded-b-lg min-h-[600px]">
-            {active ? (
-              <div className="mx-auto max-w-3xl rounded bg-white p-10 shadow-xl">
+          {active ? (
+            <>
+              <div className="rounded-t-lg bg-[#3c4656] px-6 py-3 text-white text-[13px] font-medium">
+                {`${MONTHS_FULL[active.month]} ${active.year}`}
+              </div>
+              <div className="bg-[#2a3140] px-6 py-8 rounded-b-lg">
+                <div className="mx-auto max-w-3xl rounded bg-white p-10 shadow-xl">
                 <div className="flex items-start justify-between">
                   <div>
                     <h1 className="text-[22px] font-bold text-slate-800 tracking-wide">
@@ -858,13 +859,19 @@ function PaySlipsView({ payslips, structure }: { payslips: any[]; structure: any
                   This is a computer-generated payslip and does not require a physical signature.
                 </p>
               </div>
-            ) : (
-              <div className="mx-auto max-w-3xl rounded bg-white p-10 text-center">
-                <FileText className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                <p className="text-[13px] text-slate-500">No payslip selected</p>
               </div>
-            )}
-          </div>
+            </>
+          ) : (
+            <div className="flex min-h-[280px] items-center justify-center rounded-lg border border-dashed border-slate-200 bg-white px-6 py-10 text-center shadow-[0_1px_3px_rgba(15,23,42,0.03)]">
+              <div>
+                <FileText className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-[13px] font-medium text-slate-600">No payslip selected</p>
+                <p className="mt-1 text-[12px] text-slate-400">
+                  Pick a month from the list on the left to preview your payslip.
+                </p>
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </div>
