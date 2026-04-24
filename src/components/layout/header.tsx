@@ -65,17 +65,25 @@ export default function Header({ title }: { title?: string }) {
                     <button
                         ref={btnRef}
                         onClick={() => setShowMenu(!showMenu)}
-                        className="flex items-center gap-2 rounded-full border border-white/20 bg-white/10 p-0.5 transition-colors hover:bg-white/15"
+                        className="flex items-center justify-center rounded-full p-[1px] transition-all hover:brightness-110"
+                        style={{
+                            color: "#ffffff",
+                            background: "#4ba3ff",
+                            boxShadow: "0 0 0 1.5px rgba(255,255,255,0.85)",
+                        }}
                     >
                         {user?.image ? (
                             <img
                                 src={user.image}
                                 alt={user.name || "Profile"}
-                                className="h-7 w-7 rounded-full border border-white/25 object-cover"
+                                className="h-[30px] w-[30px] rounded-full object-cover"
                                 referrerPolicy="no-referrer"
                             />
                         ) : (
-                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 text-[10px] font-medium text-white">
+                            <div
+                                className="flex h-[30px] w-[30px] items-center justify-center rounded-full text-[10.5px] font-semibold"
+                                style={{ background: "#4ba3ff", color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
+                            >
                                 {initials}
                             </div>
                         )}

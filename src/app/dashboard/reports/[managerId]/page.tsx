@@ -110,7 +110,7 @@ export default function ManagerReportPage() {
     const hideWeeklyForHr = reportFormat === "hr";
 
     return (
-        <div className="space-y-5 max-w-6xl">
+        <div className="space-y-5 max-w-6xl pl-6 pr-4 pt-2">
             {/* ── Page Title ──────────────────────────────────── */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -203,7 +203,14 @@ export default function ManagerReportPage() {
                                     {/* Month Content - Report Period Options */}
                                     {isSelected && (
                                         <div className="p-3 bg-slate-50/50 dark:bg-white/[0.01] animate-in slide-in-from-top-2 fade-in duration-300">
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                                            {/* Auto-fill responsive grid. Min-width is 158px so 6 cards
+                                                (Monthly + 5 weeks) still fit on a single row at common
+                                                laptop widths (1366px) once the sidebar is open. Cards
+                                                grow to fill any extra space via the `1fr` max. */}
+                                            <div
+                                                className="grid gap-3"
+                                                style={{ gridTemplateColumns: "repeat(auto-fill, minmax(158px, 1fr))" }}
+                                            >
                                                 
                                                 {/* 1. Monthly Report Card */}
                                                 {canViewReports ? (

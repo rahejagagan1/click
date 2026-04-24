@@ -1185,7 +1185,7 @@ export default function WeeklyReportPage() {
     const renderA1 = () => (
         <div>
             <div className="mb-3 rounded-t-lg bg-amber-500 px-4 py-2 flex items-center gap-3">
-                <h2 className="text-base font-bold text-white">Section A: Performance of Writers</h2>
+                <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section A: Performance of Writers</h2>
                 <span className="text-[11px] text-amber-100 font-medium">Fields marked <span className="text-white font-bold">*</span> are required</span>
                 {isAdmin && !isLocked && !isQaReport && !isResearcherReport && (
                     <button
@@ -1274,7 +1274,7 @@ export default function WeeklyReportPage() {
     const renderA2 = () => (
         <div>
             <div className="mb-3 rounded-t-lg bg-amber-500 px-4 py-2 flex items-center gap-3">
-                <h2 className="text-base font-bold text-white">Section A2: Performance of Editors</h2>
+                <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section A2: Performance of Editors</h2>
                 <span className="text-[11px] text-amber-100 font-medium">Fields marked <span className="text-white font-bold">*</span> are required</span>
                 {!isLocked && !viewOnly && !isQaReport && !isResearcherReport && (
                     <button
@@ -1363,7 +1363,7 @@ export default function WeeklyReportPage() {
     const renderBSimple = () => (
         <div>
             <div className="mb-3 rounded-t-lg bg-violet-600 px-4 py-2 flex items-center gap-3">
-                <h2 className="text-base font-bold text-white">Section B: Quick Overview</h2>
+                <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section B: Quick Overview</h2>
                 <span className="text-[11px] text-violet-200 font-medium">Fields marked <span className="text-white font-bold">*</span> are required</span>
             </div>
             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 dark:border-white/10 shadow-sm">
@@ -1418,7 +1418,7 @@ export default function WeeklyReportPage() {
     const renderA3 = () => (
         <div>
             <div className="mb-3 rounded-t-lg px-4 py-2 flex items-center gap-3" style={{ background: "linear-gradient(90deg, #e87722 0%, #c95f00 100%)" }}>
-                <h2 className="text-base font-bold text-white">Section A: Performance of Researchers</h2>
+                <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section A: Performance of Researchers</h2>
                 <span className="text-[11px] text-orange-100 font-medium">Fields marked <span className="text-white font-bold">*</span> are required</span>
             </div>
             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 dark:border-white/10 shadow-sm">
@@ -1485,7 +1485,7 @@ export default function WeeklyReportPage() {
     const renderB = () => (
         <div>
             <div className="mb-3 rounded-t-lg bg-violet-600 px-4 py-2 flex items-center gap-3">
-                <h2 className="text-base font-bold text-white">Section B: Quick Overview</h2>
+                <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section B: Quick Overview</h2>
                 <span className="text-[11px] text-violet-200 font-medium">Fields marked <span className="text-white font-bold">*</span> are required</span>
             </div>
             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 dark:border-white/10 shadow-sm">
@@ -1568,7 +1568,7 @@ export default function WeeklyReportPage() {
         return (
             <div>
                 <div className="mb-3 rounded-t-lg px-4 py-2 flex items-center gap-3" style={{ background: "linear-gradient(90deg, #1a6b3a 0%, #145c30 100%)" }}>
-                    <h2 className="text-base font-bold text-white">Section A: Detailed Analysis of the Reviewed Cases</h2>
+                    <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section A: Detailed Analysis of the Reviewed Cases</h2>
                     <span className="text-[11px] text-green-200 font-medium">(To be filled by Andrew)</span>
                     {!isLocked && !viewOnly && (
                         <button
@@ -1683,7 +1683,7 @@ export default function WeeklyReportPage() {
     const renderAndrewSectionB = () => (
         <div>
             <div className="mb-3 rounded-t-lg px-4 py-2 flex items-center gap-3" style={{ background: "linear-gradient(90deg, #c95f00 0%, #e87722 100%)" }}>
-                <h2 className="text-base font-bold text-white">Section B: A Quick Overview</h2>
+                <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section B: A Quick Overview</h2>
                 <span className="text-[11px] text-orange-100 font-medium">(To be filled by Andrew and Abhishek both)</span>
             </div>
             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 dark:border-white/10 shadow-sm">
@@ -1779,7 +1779,7 @@ export default function WeeklyReportPage() {
     const renderAndrewSectionC = () => (
         <div>
             <div className="mb-3 rounded-t-lg px-4 py-2 flex items-center gap-3" style={{ background: "linear-gradient(90deg, #e87722 0%, #f59e0b 100%)" }}>
-                <h2 className="text-base font-bold text-white">Section C: A Quick Overview of Rohini &amp; Shikha</h2>
+                <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section C: A Quick Overview of Rohini &amp; Shikha</h2>
                 <span className="text-[11px] text-amber-100 font-medium">(To be filled by Abhishek)</span>
             </div>
             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 dark:border-white/10 shadow-sm">
@@ -1859,7 +1859,7 @@ export default function WeeklyReportPage() {
     const renderAndrewSectionD = () => (
         <div>
             <div className="mb-3 rounded-t-lg px-4 py-2" style={{ background: "linear-gradient(90deg, #1e40af 0%, #3b82f6 100%)" }}>
-                <h2 className="text-base font-bold text-white">Section D - Views and Changes <span className="text-[11px] font-normal opacity-90">(To be filled by Andrew)</span></h2>
+                <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section D - Views and Changes <span className="text-[11px] font-normal opacity-90">(To be filled by Andrew)</span></h2>
             </div>
             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 dark:border-white/10 shadow-sm">
                 <table ref={sectionDTableRef} className="border-collapse" style={{ width: "100%", tableLayout: "auto", minWidth: 900 }}>
@@ -1956,7 +1956,7 @@ export default function WeeklyReportPage() {
         return (
             <div>
                 <div className="mb-3 rounded-t-lg px-4 py-2 flex items-center gap-3" style={{ background: "linear-gradient(90deg, #1a6b3a 0%, #145c30 100%)" }}>
-                    <h2 className="text-base font-bold text-white">Section A: Detailed Analysis of the Reviewed Cases</h2>
+                    <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section A: Detailed Analysis of the Reviewed Cases</h2>
                     <span className="text-[11px] text-green-200 font-medium">(To be filled by Abhishek)</span>
                     {!isLocked && !viewOnly && (
                         <button
