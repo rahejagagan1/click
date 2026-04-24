@@ -125,6 +125,13 @@ export default function Sidebar() {
     const financesTrigger = useRef<HTMLDivElement>(null);
     const financesTimer   = useRef<NodeJS.Timeout | null>(null);
 
+    // Nested sub-flyout for "My Pay" — reveals My Salary / Pay Slips / Income Tax
+    // to the right of the main My Finances flyout.
+    const [myPaySubOpen, setMyPaySubOpen] = useState(false);
+    const [myPaySubY, setMyPaySubY] = useState(0);
+    const myPayRowRef = useRef<HTMLDivElement>(null);
+    const myPaySubTimer = useRef<NodeJS.Timeout | null>(null);
+
     // Dept submenu state (portalled, like the HR flyouts)
     const [deptHovered, setDeptHovered] = useState(false);
     const [deptY, setDeptY] = useState(0);
@@ -697,8 +704,61 @@ export default function Sidebar() {
                                     onMouseLeave={() => { financesTimer.current = setTimeout(() => setFinancesOpen(false), 200); }}>
                                     <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">My Finances</p>
                                     {fl("/dashboard/hr/payroll/summary", "Summary"   )}
-                                    {fl("/dashboard/hr/payroll",         "My Pay"    )}
+                                    {/* My Pay — parent row with nested sub-flyout */}
+                                    {(() => {
+                                        const href = "/dashboard/hr/payroll";
+                                        const active = pathname === href || pathname.startsWith(href + "/") || pathname.startsWith(href + "?");
+                                        return (
+                                            <div ref={myPayRowRef}
+                                                onMouseEnter={() => {
+                                                    if (myPaySubTimer.current) clearTimeout(myPaySubTimer.current);
+                                                    if (myPayRowRef.current) setMyPaySubY(myPayRowRef.current.getBoundingClientRect().top);
+                                                    setMyPaySubOpen(true);
+                                                }}
+                                                onMouseLeave={() => {
+                                                    myPaySubTimer.current = setTimeout(() => setMyPaySubOpen(false), 200);
+                                                }}
+                                            >
+                                                <Link href={href}
+                                                    className={cn(
+                                                        "flex items-center justify-between px-4 py-2 text-[13px] transition-all duration-150",
+                                                        active
+                                                            ? "bg-[#eef4fb] font-semibold text-[#1f3b57]"
+                                                            : "text-[#34495e] hover:bg-[#dde4ec] hover:text-[#1f2f3f]"
+                                                    )}>
+                                                    <span className="truncate">My Pay</span>
+                                                    <svg className="w-3 h-3 opacity-50 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                    </svg>
+                                                </Link>
+                                            </div>
+                                        );
+                                    })()}
                                     {fl("/dashboard/hr/payroll/tax",     "Manage Tax")}
+                                </div>,
+                                document.body
+                            )}
+
+                            {/* Nested sub-flyout for My Pay — positioned to the right of the finances panel */}
+                            {myPaySubOpen && typeof document !== "undefined" && createPortal(
+                                <div
+                                    style={{ position: "fixed", left: 108 + 224 + 4, top: myPaySubY, zIndex: 10000 }}
+                                    className={panelCls}
+                                    onMouseEnter={() => {
+                                        if (myPaySubTimer.current) clearTimeout(myPaySubTimer.current);
+                                        setMyPaySubOpen(true);
+                                        // Keep the parent flyout open while the sub is open.
+                                        if (financesTimer.current) clearTimeout(financesTimer.current);
+                                        setFinancesOpen(true);
+                                    }}
+                                    onMouseLeave={() => {
+                                        myPaySubTimer.current = setTimeout(() => setMyPaySubOpen(false), 200);
+                                    }}
+                                >
+                                    <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">My Pay</p>
+                                    {fl("/dashboard/hr/payroll?tab=my-salary",  "My Salary" )}
+                                    {fl("/dashboard/hr/payroll?tab=pay-slips",  "Pay Slips" )}
+                                    {fl("/dashboard/hr/payroll?tab=income-tax", "Income Tax")}
                                 </div>,
                                 document.body
                             )}
