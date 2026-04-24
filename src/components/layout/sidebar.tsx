@@ -696,9 +696,9 @@ export default function Sidebar() {
                                     onMouseEnter={() => { if (financesTimer.current) clearTimeout(financesTimer.current); setFinancesOpen(true); }}
                                     onMouseLeave={() => { financesTimer.current = setTimeout(() => setFinancesOpen(false), 200); }}>
                                     <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">My Finances</p>
-                                    {fl("/dashboard/hr/payroll?view=summary", "Summary"   )}
-                                    {fl("/dashboard/hr/payroll?view=pay",     "My Pay"    )}
-                                    {fl("/dashboard/hr/payroll?view=tax",     "Manage Tax")}
+                                    {fl("/dashboard/hr/payroll/summary", "Summary"   )}
+                                    {fl("/dashboard/hr/payroll",         "My Pay"    )}
+                                    {fl("/dashboard/hr/payroll?view=tax","Manage Tax")}
                                 </div>,
                                 document.body
                             )}
