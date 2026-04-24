@@ -18,8 +18,11 @@ export default function DashboardPage() {
 
     useEffect(() => {
         if (status === "loading") return;
+        // Non-CEO/developers don't have access to the cases dashboard. Send
+        // them to the HR home (Keka-style analytics) which works for every
+        // role — instead of YouTube which used to be the dumping ground.
         if (!isCeo) {
-            router.replace("/dashboard/youtube");
+            router.replace("/dashboard/hr/analytics");
         }
     }, [status, isCeo]);
 
