@@ -30,7 +30,7 @@ const NAV_ITEMS = [
     { label: "Company",   href: "/dashboard/company",  icon: icon(Building2),      adminOnly: true                                           },
     { label: "Scores",    href: "/dashboard/scores",   icon: icon(Star),                                        managersOnly: true           },
     { label: "YouTube",   href: "/dashboard/youtube",  icon: icon(PlayCircle),     youtubeDashboardAccess: true                              },
-    { label: "Feedback",  href: "/dashboard/feedback", icon: icon(MessageCircle)                                                             },
+    { label: "NB Unplugged", href: "/dashboard/feedback", icon: icon(MessageCircle)                                                         },
     { label: "Admin",     href: "/admin",              icon: icon(Settings),       adminOnly: true                                           },
 ];
 
@@ -69,7 +69,7 @@ export default function Sidebar() {
         const label = (item as any).label as string;
         const keyMap: Record<string, string> = {
             "Dashboard": "dashboard", "Cases": "cases", "Company": "company",
-            "Scores": "scores", "YouTube": "youtube", "Feedback": "feedback",
+            "Scores": "scores", "YouTube": "youtube", "NB Unplugged": "feedback",
         };
         const k = keyMap[label];
         if (k && !tabAllowed(k)) return false;
@@ -213,7 +213,7 @@ export default function Sidebar() {
 
     return (
         <>
-        <aside className="fixed left-0 top-0 z-40 flex h-screen w-[72px] flex-col border-r border-[#dbe4ee] bg-[#f7f9fc] shadow-[6px_0_24px_rgba(15,23,42,0.05)]">
+        <aside className="fixed left-0 top-0 z-40 flex h-screen w-[92px] flex-col border-r border-[#dbe4ee] bg-[#f7f9fc] shadow-[6px_0_24px_rgba(15,23,42,0.05)]">
             {/* Logo */}
             <div className="border-b border-[#e4ebf2] px-2 py-3">
                 <div className="flex flex-col items-center gap-2 text-center">
@@ -256,16 +256,16 @@ export default function Sidebar() {
                         && pathname !== "/admin";
                     const homeActive = pathname === "/dashboard/hr/analytics" || pathname.startsWith("/dashboard/hr/analytics/");
                     const E = "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]";
-                    const A = "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]";
+                    const A = "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]";
                     return (
                         <>
                             <Link href="/dashboard/hr/analytics"
-                                className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", homeActive ? A : E)}>
+                                className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", homeActive ? A : E)}>
                                 <Home size={15} strokeWidth={1.75} className={homeActive ? "text-[#0f6ecd]" : ""} />
                                 Home
                             </Link>
                             <div ref={hrMeTrigger} {...meHandlers}
-                                className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isMeActive || hrMeOpen ? A : E)}>
+                                className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isMeActive || hrMeOpen ? A : E)}>
                                 <User size={15} strokeWidth={1.75} className={isMeActive || hrMeOpen ? "text-[#0f6ecd]" : ""} />
                                 Me
                             </div>
@@ -275,7 +275,7 @@ export default function Sidebar() {
 
                 {/* Items before Admin */}
                 {beforeAdmin.map((item) => {
-                    if (item.label === "Feedback" && showFeedbackSubmenu) {
+                    if (item.label === "NB Unplugged" && showFeedbackSubmenu) {
                         return (
                             <div
                                 key={item.href}
@@ -286,9 +286,9 @@ export default function Sidebar() {
                             >
                                 <div
                                     className={cn(
-                                        "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer",
+                                        "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer",
                                         isFeedbackNavActive
-                                            ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                            ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
                                             : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                                     )}
                                 >
@@ -296,7 +296,7 @@ export default function Sidebar() {
                                         <span className={cn(isFeedbackNavActive ? "text-[#0f6ecd]" : "")}>
                                             {item.icon}
                                         </span>
-                                        Feedback
+                                        NB Unplugged
                                     </span>
                                     <svg
                                         className={cn(
@@ -313,7 +313,7 @@ export default function Sidebar() {
 
                                 {feedbackHovered && typeof document !== "undefined" && createPortal(
                                     <div
-                                        style={{ position: "fixed", left: 88, top: feedbackY, zIndex: 9999 }}
+                                        style={{ position: "fixed", left: 108, top: feedbackY, zIndex: 9999 }}
                                         className="w-56 rounded-xl border border-[#cfd8e3] bg-[#eef2f6] py-2 shadow-xl shadow-slate-300/30 animate-in fade-in slide-in-from-left-2 duration-200"
                                         onMouseEnter={handleFeedbackMouseEnter}
                                         onMouseLeave={handleFeedbackMouseLeave}
@@ -327,7 +327,7 @@ export default function Sidebar() {
                                                     : "text-[#34495e] hover:bg-[#dde4ec] hover:text-[#1f3b57]"
                                             )}
                                         >
-                                            <span className="truncate">Anonymous feedback</span>
+                                            <span className="truncate">Submit post</span>
                                             <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                             </svg>
@@ -341,7 +341,7 @@ export default function Sidebar() {
                                                     : "text-[#34495e] hover:bg-[#dde4ec] hover:text-[#1f3b57]"
                                             )}
                                         >
-                                            <span className="truncate">Feedback inbox</span>
+                                            <span className="truncate">Inbox</span>
                                             <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                             </svg>
@@ -362,9 +362,9 @@ export default function Sidebar() {
                             key={item.href}
                             href={item.href}
                             className={cn(
-                                "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
+                                "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
                                 isActive
-                                    ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                    ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
                                     : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                             )}
                         >
@@ -379,9 +379,9 @@ export default function Sidebar() {
                     <Link
                         href={`/dashboard/reports/${user?.dbId}`}
                         className={cn(
-                            "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
+                            "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
                             isReportActive
-                                ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
                                 : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                         )}
                     >
@@ -399,9 +399,9 @@ export default function Sidebar() {
                     >
                         <div
                             className={cn(
-                                "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer",
+                                "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer",
                                 isReportActive
-                                    ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                    ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
                                     : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                             )}
                         >
@@ -427,7 +427,7 @@ export default function Sidebar() {
                         {/* Flyout submenu — admins only, portalled to escape overflow clip */}
                         {reportHovered && typeof document !== "undefined" && createPortal(
                             <div
-                                style={{ position: "fixed", left: 88, top: reportY, zIndex: 9999 }}
+                                style={{ position: "fixed", left: 108, top: reportY, zIndex: 9999 }}
                                 className="w-52 rounded-xl border border-[#cfd8e3] bg-[#eef2f6] py-2 shadow-xl shadow-slate-300/30 animate-in fade-in slide-in-from-left-2 duration-200"
                                 onMouseEnter={handleReportMouseEnter}
                                 onMouseLeave={handleReportMouseLeave}
@@ -484,9 +484,9 @@ export default function Sidebar() {
                         >
                             <div
                                 className={cn(
-                                    "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer",
+                                    "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer",
                                     isDeptActive
-                                        ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                        ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
                                         : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                                 )}
                             >
@@ -512,7 +512,7 @@ export default function Sidebar() {
                             {/* Flyout submenu */}
                             {deptHovered && typeof document !== "undefined" && createPortal(
                                 <div
-                                    style={{ position: "fixed", left: 88, top: deptY, zIndex: 9999 }}
+                                    style={{ position: "fixed", left: 108, top: deptY, zIndex: 9999 }}
                                     className="w-52 rounded-xl border border-[#cfd8e3] bg-[#eef2f6] py-2 shadow-xl shadow-slate-300/30 animate-in fade-in slide-in-from-left-2 duration-200"
                                     onMouseEnter={handleDeptMouseEnter}
                                     onMouseLeave={handleDeptMouseLeave}
@@ -551,9 +551,9 @@ export default function Sidebar() {
                         <Link
                             href="/dashboard/violations"
                             className={cn(
-                                "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
+                                "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
                                 isActive
-                                    ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                    ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
                                     : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                             )}
                         >
@@ -571,7 +571,7 @@ export default function Sidebar() {
                 {(() => {
                     const inboxCount = (inboxData?.total || 0) as number;
                     const E = "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]";
-                    const A = "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]";
+                    const A = "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]";
 
                     const meHandlers   = makeHrHandlers(setHrMeOpen,   setHrMeY,   hrMeTrigger,   hrMeTimer);
                     const teamHandlers = makeHrHandlers(setHrTeamOpen, setHrTeamY, hrTeamTrigger, hrTeamTimer);
@@ -610,7 +610,7 @@ export default function Sidebar() {
 
                             {/* MY TEAM trigger */}
                             <div ref={hrTeamTrigger} {...teamHandlers}
-                                className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isTeamActive || hrTeamOpen ? A : E)}>
+                                className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isTeamActive || hrTeamOpen ? A : E)}>
                                 <span className="relative inline-flex">
                                     <Users size={15} strokeWidth={1.75} className={isTeamActive || hrTeamOpen ? "text-[#0f6ecd]" : ""} />
                                     {inboxCount > 0 && (
@@ -631,7 +631,7 @@ export default function Sidebar() {
                                 const active = pathname === href || pathname.startsWith(href + "/");
                                 return (
                                     <Link key={href} href={href}
-                                        className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", active ? A : E)}>
+                                        className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", active ? A : E)}>
                                         <Icon size={15} strokeWidth={1.75} className={active ? "text-[#0f6ecd]" : ""} />
                                         {label}
                                     </Link>
@@ -643,7 +643,7 @@ export default function Sidebar() {
                                 <>
                                     <div className="mx-3 mt-4 mb-1.5 border-t border-[#e4ebf2]" />
                                     <Link href="/dashboard/hr/admin"
-                                        className={cn("flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", isAdminActive ? A : E)}>
+                                        className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", isAdminActive ? A : E)}>
                                         <span className="relative inline-flex">
                                             <BarChart2 size={15} strokeWidth={1.75} className={isAdminActive ? "text-[#0f6ecd]" : ""} />
                                             {approvalsCount > 0 && (
@@ -659,7 +659,7 @@ export default function Sidebar() {
 
                             {/* ── Portal flyouts — escape overflow-y:auto, open sideways ── */}
                             {hrMeOpen && typeof document !== "undefined" && createPortal(
-                                <div style={{ position: "fixed", left: 88, top: hrMeY, zIndex: 9999 }}
+                                <div style={{ position: "fixed", left: 108, top: hrMeY, zIndex: 9999 }}
                                     className={panelCls} {...meHandlers}>
                                     <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">My Space</p>
                                     {fl("/dashboard/hr/attendance", "Attendance"       )}
@@ -675,7 +675,7 @@ export default function Sidebar() {
                             )}
 
                             {hrTeamOpen && typeof document !== "undefined" && createPortal(
-                                <div style={{ position: "fixed", left: 88, top: hrTeamY, zIndex: 9999 }}
+                                <div style={{ position: "fixed", left: 108, top: hrTeamY, zIndex: 9999 }}
                                     className={panelCls} {...teamHandlers}>
                                     <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">My Team</p>
                                     {fl("/dashboard/hr/my-team", "Team Overview")}
@@ -705,9 +705,9 @@ export default function Sidebar() {
                             key={item.href}
                             href={item.href}
                             className={cn(
-                                "flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-md text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
+                                "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
                                 isActive
-                                    ? "border border-[#c7d8ea] bg-white text-[#17324d] shadow-[0_6px_16px_rgba(15,23,42,0.06)]"
+                                    ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
                                     : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                             )}
                         >

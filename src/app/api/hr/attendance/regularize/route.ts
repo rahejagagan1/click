@@ -39,22 +39,63 @@ export async function GET(req: NextRequest) {
     if (!myId && view !== "all") return NextResponse.json([]);
     if (!myId && view === "all" && !admin) return NextResponse.json([]);
 
-    const where = view === "team" && !admin
-      ? { user: { managerId: myId! } }
-      : view === "all" && admin
-      ? {}
-      : { userId: myId! };
+    // Raw SQL — the generated Prisma client may be stale on dev machines
+    // that haven't re-run `prisma generate` after the two-stage approval
+    // migration. Scalar columns (finalApprovedById, grantedByAdminId, etc.)
+    // and their relations would otherwise throw "Unknown field" errors.
+    let whereSql = `r."userId" = $1`;
+    let params: any[] = [myId];
+    if (view === "team" && !admin) {
+      whereSql = `u."managerId" = $1`;
+    } else if (view === "all" && admin) {
+      whereSql = `1=1`;
+      params = [];
+    }
 
-    const regs = await prisma.attendanceRegularization.findMany({
-      where,
-      include: {
-        user: { select: { id: true, name: true, profilePictureUrl: true } },
-        approver: { select: { id: true, name: true } },
-        finalApprover: { select: { id: true, name: true } },
-        grantedByAdmin: { select: { id: true, name: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT
+         r."id", r."userId", r."date", r."requestedIn", r."requestedOut",
+         r."reason", r."status",
+         r."approvedById", r."approvedAt", r."approvalNote",
+         r."finalApprovedById", r."finalApprovedAt", r."finalApprovalNote",
+         r."grantedByAdminId",
+         r."createdAt", r."updatedAt",
+         u."id" AS "u_id", u."name" AS "u_name", u."profilePictureUrl" AS "u_pic",
+         a."id" AS "a_id", a."name" AS "a_name",
+         fa."id" AS "fa_id", fa."name" AS "fa_name",
+         g."id"  AS "g_id",  g."name"  AS "g_name"
+       FROM "AttendanceRegularization" r
+       JOIN "User" u  ON u."id"  = r."userId"
+       LEFT JOIN "User" a  ON a."id"  = r."approvedById"
+       LEFT JOIN "User" fa ON fa."id" = r."finalApprovedById"
+       LEFT JOIN "User" g  ON g."id"  = r."grantedByAdminId"
+       WHERE ${whereSql}
+       ORDER BY r."createdAt" DESC`,
+      ...params
+    );
+
+    const regs = rows.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      date: r.date,
+      requestedIn: r.requestedIn,
+      requestedOut: r.requestedOut,
+      reason: r.reason,
+      status: r.status,
+      approvedById: r.approvedById,
+      approvedAt: r.approvedAt,
+      approvalNote: r.approvalNote,
+      finalApprovedById: r.finalApprovedById,
+      finalApprovedAt: r.finalApprovedAt,
+      finalApprovalNote: r.finalApprovalNote,
+      grantedByAdminId: r.grantedByAdminId,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+      user: { id: r.u_id, name: r.u_name, profilePictureUrl: r.u_pic },
+      approver: r.a_id ? { id: r.a_id, name: r.a_name } : null,
+      finalApprover: r.fa_id ? { id: r.fa_id, name: r.fa_name } : null,
+      grantedByAdmin: r.g_id ? { id: r.g_id, name: r.g_name } : null,
+    }));
     return NextResponse.json(regs);
   } catch (e) { return serverError(e, "GET /api/hr/attendance/regularize"); }
 }
