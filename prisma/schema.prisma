@@ -838,6 +838,18 @@ model EmployeeProfile {
   city              String?
   state             String?
   noticePeriodDays  Int       @default(30)
+  // ── Payment Information (My Finances > Summary) ──
+  // Stored in plaintext for now; treat as PII — limit selects to the owning user / HR roles.
+  bankName          String?
+  bankAccountNumber String?
+  bankIfsc          String?
+  bankBranch        String?
+  accountHolderName String?
+  // ── Identity Information ──
+  panNumber         String?
+  parentName        String?          // father's / spouse's name, as printed on the PAN card
+  aadhaarNumber     String?
+  aadhaarEnrollment String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
