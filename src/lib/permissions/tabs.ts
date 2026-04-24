@@ -39,7 +39,7 @@ export const TAB_CATALOG: TabDef[] = [
   { key: "company",     label: "Company",       description: "Company health / org metrics",       pathPrefixes: ["/dashboard/company"],                   defaultForNewUser: false },
   { key: "scores",      label: "Scores",        description: "Team scorecards + ratings",          pathPrefixes: ["/dashboard/scores"],                    defaultForNewUser: false },
   { key: "youtube",     label: "YouTube",       description: "YouTube dashboard",                  pathPrefixes: ["/dashboard/youtube"],                   defaultForNewUser: true  },
-  { key: "feedback",    label: "Feedback",      description: "Feedback form + (HR) inbox",         pathPrefixes: ["/dashboard/feedback"],                  defaultForNewUser: true  },
+  { key: "feedback",    label: "NB Unplugged",  description: "NB Unplugged form + (HR) inbox",     pathPrefixes: ["/dashboard/feedback"],                  defaultForNewUser: true  },
   // `admin` is deliberately OFF this catalog — super-admin access is
   // governed by orgLevel/isDeveloper only. Keeping it out of the
   // permissions UI prevents admins from accidentally toggling each

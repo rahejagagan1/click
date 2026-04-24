@@ -25,7 +25,7 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
     return (
         <div className="flex min-h-screen bg-[#f4f7fb]">
             <Sidebar />
-            <main className="ml-[72px] flex min-h-screen flex-1 flex-col bg-[#f4f7fb]">
+            <main className="ml-[92px] flex min-h-screen flex-1 flex-col bg-[#f4f7fb]">
                 <Header />
                 <div className={contentCls}>
                     {children}
