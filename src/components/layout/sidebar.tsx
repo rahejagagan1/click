@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useState, useEffect, useRef, useCallback, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -36,6 +36,8 @@ const NAV_ITEMS = [
 
 export default function Sidebar() {
     const pathname = usePathname();
+    const searchParams = useSearchParams();
+    const currentTab = searchParams?.get("tab") || null;
     const { data: session } = useSession();
     const user = session?.user as any;
 
@@ -756,9 +758,38 @@ export default function Sidebar() {
                                     }}
                                 >
                                     <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">My Pay</p>
-                                    {fl("/dashboard/hr/payroll?tab=my-salary",  "My Salary" )}
-                                    {fl("/dashboard/hr/payroll?tab=pay-slips",  "Pay Slips" )}
-                                    {fl("/dashboard/hr/payroll?tab=income-tax", "Income Tax")}
+                                    {(() => {
+                                        const onPayroll = pathname === "/dashboard/hr/payroll";
+                                        const tabActive = (t: string) => onPayroll && (currentTab === t || (!currentTab && t === "my-salary"));
+                                        const subItem = (tab: string, label: string) => {
+                                            const active = tabActive(tab);
+                                            return (
+                                                <Link key={tab} href={`/dashboard/hr/payroll?tab=${tab}`}
+                                                    className={cn(
+                                                        "flex items-center justify-between px-4 py-2 text-[13px] transition-all duration-150",
+                                                        active
+                                                            ? "bg-[#0f4e93] font-semibold text-white"
+                                                            : "text-[#34495e] hover:bg-[#dde4ec] hover:text-[#1f2f3f]"
+                                                    )}>
+                                                    <span className="truncate">{label}</span>
+                                                    {active ? (
+                                                        <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+                                                    ) : (
+                                                        <svg className="w-3 h-3 opacity-30 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                        </svg>
+                                                    )}
+                                                </Link>
+                                            );
+                                        };
+                                        return (
+                                            <>
+                                                {subItem("my-salary",  "My Salary" )}
+                                                {subItem("pay-slips",  "Pay Slips" )}
+                                                {subItem("income-tax", "Income Tax")}
+                                            </>
+                                        );
+                                    })()}
                                 </div>,
                                 document.body
                             )}
