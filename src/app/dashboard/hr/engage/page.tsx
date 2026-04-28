@@ -40,7 +40,7 @@ function PostCard({ post, sessionUserId }: { post: any; sessionUserId: number })
   const [reactionCount, setReactionCount] = useState(post.reactions.length);
 
   const react = async () => {
-    setLocalReacted(p => !p);
+    setLocalReacted((p: boolean) => !p);
     setReactionCount((c: number) => localReacted ? c - 1 : c + 1);
     await fetch(`/api/hr/engage/posts/${post.id}/react`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
     mutate("/api/hr/engage/posts");
