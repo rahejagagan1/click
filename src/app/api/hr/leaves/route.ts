@@ -2,21 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { notifyUsers } from "@/lib/notifications";
-
-async function countWorkingDays(from: Date, to: Date): Promise<number> {
-  const holidays = await prisma.holidayCalendar.findMany({
-    where: { date: { gte: from, lte: to } }, select: { date: true },
-  });
-  const holidaySet = new Set(holidays.map((h) => h.date.toDateString()));
-  let count = 0;
-  const cur = new Date(from);
-  while (cur <= to) {
-    const day = cur.getDay();
-    if (day !== 0 && day !== 6 && !holidaySet.has(cur.toDateString())) count++;
-    cur.setDate(cur.getDate() + 1);
-  }
-  return count;
-}
+import { countWorkingDays } from "@/lib/hr/working-days";
 
 // GET /api/hr/leaves — list leave applications
 export async function GET(req: NextRequest) {
@@ -110,17 +96,34 @@ export async function POST(req: NextRequest) {
       }),
     ]);
 
-    // Stage-1 notification: direct manager + whoever the applicant tagged in the
-    // "Notify" picker. CEO / HR get notified only after stage 1 (manager approves).
+    // Initial notification recipients: the applicant's direct manager (L1
+    // approver), every CEO / HR manager / developer (L2 final approvers),
+    // and anyone the applicant tagged in the "Notify" picker. HR/CEO are
+    // included up-front so they see every new leave immediately rather
+    // than only after the manager forwards via L1 approval.
     const requesterName = application.user?.name || "An employee";
     const managerId = application.user?.managerId ?? null;
-    const stage1Recipients = [
+    const devEmails = (process.env.DEVELOPER_EMAILS || "")
+      .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+    const finalApprovers = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        OR: [
+          { orgLevel: { in: ["ceo", "hr_manager"] } },
+          { role: "admin" },
+          ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    const initialRecipients = Array.from(new Set([
       ...(managerId ? [managerId] : []),
+      ...finalApprovers.map((u) => u.id),
       ...extras,
-    ];
+    ]));
     await notifyUsers({
       actorId:  myId,
-      userIds:  stage1Recipients,
+      userIds:  initialRecipients,
       type:     "leave",
       entityId: application.id,
       title:    `${requesterName} requested ${application.leaveType?.name || "leave"}`,

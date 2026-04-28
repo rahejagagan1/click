@@ -97,40 +97,106 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "action must be 'approve' or 'reject'" }, { status: 400 });
     }
 
-    const record = await prisma.onDutyRequest.findUnique({ where: { id } });
-    if (!record) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-    if (!isAdmin) {
-      const isMgr = await prisma.user.findFirst({ where: { id: record.userId, managerId: myId } });
-      if (!isMgr) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    // Race-safe status transition: only write if the request is still pending.
-    const newStatus = action === "approve" ? "approved" : "rejected";
-    const { count } = await prisma.onDutyRequest.updateMany({
-      where: { id, status: "pending" },
-      data:  { status: newStatus, approvedById: myId, approvalNote },
+    const record = await prisma.onDutyRequest.findUnique({
+      where: { id },
+      include: { user: { select: { id: true, name: true, managerId: true } } },
     });
-    if (count === 0) {
+    if (!record) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (record.status !== "pending" && record.status !== "partially_approved") {
       return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
     }
-    const updated = await prisma.onDutyRequest.findUnique({ where: { id } });
 
-    // Notify the submitter of the outcome.
-    if (updated) {
-      const dateLabel = new Date(record.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    // Two-stage approval: pending (L1 manager) → partially_approved (L2 HR/CEO/Dev) → approved.
+    const isDirectManager = record.user?.managerId === myId;
+    if (record.status === "pending" && !isDirectManager && !isAdmin) {
+      return NextResponse.json({ error: "Forbidden — only the L1 manager or HR/CEO can act at stage 1." }, { status: 403 });
+    }
+    if (record.status === "partially_approved" && !isAdmin) {
+      return NextResponse.json({ error: "Forbidden — only HR / CEO / Developer can give final approval." }, { status: 403 });
+    }
+
+    const dateLabel = new Date(record.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    const requesterName = record.user?.name || "An employee";
+
+    // ── REJECT (any open stage) ────────────────────────────────────
+    if (action === "reject") {
+      const { count } = await prisma.onDutyRequest.updateMany({
+        where: { id, status: { in: ["pending", "partially_approved"] } },
+        data:  { status: "rejected", approvedById: record.approvedById ?? myId, approvalNote: approvalNote ?? record.approvalNote },
+      });
+      if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
       await notifyUsers({
         actorId:  myId,
         userIds:  [record.userId],
         type:     "on_duty",
         entityId: record.id,
-        title:    action === "approve"
-          ? `Your On Duty request for ${dateLabel} was approved`
-          : `Your On Duty request for ${dateLabel} was rejected`,
+        title:    `Your On Duty request for ${dateLabel} was rejected`,
         body:     approvalNote ? String(approvalNote).slice(0, 160) : undefined,
         linkUrl:  "/dashboard/hr/attendance",
       });
+      return NextResponse.json(await prisma.onDutyRequest.findUnique({ where: { id } }));
     }
-    return NextResponse.json(updated);
+
+    // ── APPROVE STAGE 1 — manager → partially_approved ─────────────
+    if (record.status === "pending") {
+      const { count } = await prisma.onDutyRequest.updateMany({
+        where: { id, status: "pending" },
+        data:  { status: "partially_approved", approvedById: myId, approvalNote },
+      });
+      if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
+
+      const devEmails = (process.env.DEVELOPER_EMAILS || "")
+        .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+      const finalApprovers = await prisma.user.findMany({
+        where: {
+          isActive: true,
+          OR: [
+            { orgLevel: { in: ["ceo", "hr_manager"] } },
+            { role: "admin" },
+            ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+          ],
+        },
+        select: { id: true },
+      });
+      await Promise.all([
+        notifyUsers({
+          actorId:  myId,
+          userIds:  finalApprovers.map((u) => u.id),
+          type:     "on_duty",
+          entityId: record.id,
+          title:    `${requesterName}'s On Duty for ${dateLabel} needs final approval`,
+          body:     `Manager approved — awaiting CEO / HR.${approvalNote ? `\nNote: ${String(approvalNote).slice(0, 240)}` : ""}`,
+          linkUrl:  "/dashboard/hr/approvals?tab=wfh",
+        }),
+        notifyUsers({
+          actorId:  myId,
+          userIds:  [record.userId],
+          type:     "on_duty",
+          entityId: record.id,
+          title:    `Your On Duty for ${dateLabel} is partially approved`,
+          body:     `Awaiting final approval from CEO / HR.${approvalNote ? `\nNote: ${String(approvalNote).slice(0, 240)}` : ""}`,
+          linkUrl:  "/dashboard/hr/attendance",
+        }),
+      ]);
+      return NextResponse.json(await prisma.onDutyRequest.findUnique({ where: { id } }));
+    }
+
+    // ── APPROVE STAGE 2 — HR/CEO/Dev → approved (final) ────────────
+    const { count } = await prisma.onDutyRequest.updateMany({
+      where: { id, status: "partially_approved" },
+      data:  { status: "approved", approvalNote: approvalNote ?? record.approvalNote },
+    });
+    if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
+
+    await notifyUsers({
+      actorId:  myId,
+      userIds:  [record.userId],
+      type:     "on_duty",
+      entityId: record.id,
+      title:    `Your On Duty for ${dateLabel} is approved`,
+      body:     `Final approval granted.${approvalNote ? `\nNote: ${String(approvalNote).slice(0, 240)}` : ""}`,
+      linkUrl:  "/dashboard/hr/attendance",
+    });
+    return NextResponse.json(await prisma.onDutyRequest.findUnique({ where: { id } }));
   } catch (e) { return serverError(e, "PUT /api/hr/attendance/on-duty"); }
 }

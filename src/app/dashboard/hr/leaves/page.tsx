@@ -369,14 +369,28 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
           <div className="grid grid-cols-3 gap-0">
             <div>
               <span className="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">From</span>
-              <input type="date" value={form.fromDate} onChange={(e) => setForm((p) => ({ ...p, fromDate: e.target.value }))} className="w-full bg-transparent text-[13px] text-[#008CFF] focus:outline-none cursor-pointer" />
+              <input
+                type="date"
+                value={form.fromDate}
+                onChange={(e) => setForm((p) => ({ ...p, fromDate: e.target.value }))}
+                onClick={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
+                onFocus={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
+                className="w-full bg-transparent text-[13px] text-[#008CFF] focus:outline-none cursor-pointer"
+              />
             </div>
             <div className="text-center flex items-center justify-center">
               <span className="text-[14px] font-bold text-slate-800 dark:text-white bg-slate-100 dark:bg-white/5 px-3 py-1 rounded">{dayCount} days</span>
             </div>
             <div className="text-right">
               <span className="text-[10px] text-slate-500 uppercase tracking-wider block mb-1 text-right">To</span>
-              <input type="date" value={form.toDate} onChange={(e) => setForm((p) => ({ ...p, toDate: e.target.value }))} className="w-full bg-transparent text-[13px] text-[#008CFF] focus:outline-none text-right cursor-pointer" />
+              <input
+                type="date"
+                value={form.toDate}
+                onChange={(e) => setForm((p) => ({ ...p, toDate: e.target.value }))}
+                onClick={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
+                onFocus={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
+                className="w-full bg-transparent text-[13px] text-[#008CFF] focus:outline-none text-right cursor-pointer"
+              />
             </div>
           </div>
         </div>
