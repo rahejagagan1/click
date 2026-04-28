@@ -537,6 +537,37 @@ function pickHolidayTheme(name: string | null | undefined): HolidayTheme {
   return HOLIDAY_THEMES.default;
 }
 
+// Per-event glyph that floats on the right side of the holiday card. Returns
+// a tuple of [emoji, accent-color] used for the big medallion. Picked from
+// the holiday name with the same word-boundary matching as the theme.
+function pickHolidayGlyph(name: string | null | undefined): { emoji: string; tone: string } {
+  const n = (name || "").toLowerCase();
+  const has = (...words: string[]) => words.some((w) => new RegExp(`(^|[^a-z])${w}([^a-z]|$)`, "i").test(n));
+  if (has("christmas", "xmas"))                                                          return { emoji: "🎄", tone: "rgba(255,255,255,0.18)" };
+  if (has("diwali", "deepavali", "govardhan", "bhai dooj"))                              return { emoji: "🪔", tone: "rgba(255,255,255,0.18)" };
+  if (has("eid", "bakrid", "ramadan", "ramzan"))                                         return { emoji: "🌙", tone: "rgba(255,255,255,0.18)" };
+  if (has("muharram"))                                                                   return { emoji: "🕊️", tone: "rgba(255,255,255,0.18)" };
+  if (has("holi") && !has("holiday"))                                                    return { emoji: "🎨", tone: "rgba(255,255,255,0.18)" };
+  if (has("independence day"))                                                           return { emoji: "🇮🇳", tone: "rgba(255,255,255,0.18)" };
+  if (has("republic day"))                                                               return { emoji: "🇮🇳", tone: "rgba(255,255,255,0.18)" };
+  if (has("gandhi jayanti", "ambedkar"))                                                 return { emoji: "🕊️", tone: "rgba(255,255,255,0.18)" };
+  if (has("labour day"))                                                                 return { emoji: "🛠️", tone: "rgba(255,255,255,0.18)" };
+  if (has("new year"))                                                                   return { emoji: "🎆", tone: "rgba(255,255,255,0.18)" };
+  if (has("janmashtami", "krishna"))                                                     return { emoji: "🪈", tone: "rgba(255,255,255,0.18)" };
+  if (has("ram navami", "ramanavami"))                                                   return { emoji: "🏹", tone: "rgba(255,255,255,0.18)" };
+  if (has("good friday", "easter"))                                                      return { emoji: "✝️", tone: "rgba(255,255,255,0.18)" };
+  if (has("ganesh", "ganpati"))                                                          return { emoji: "🐘", tone: "rgba(255,255,255,0.18)" };
+  if (has("dussehra", "vijayadashami"))                                                  return { emoji: "🏹", tone: "rgba(255,255,255,0.18)" };
+  if (has("shivratri", "shiva"))                                                         return { emoji: "🔱", tone: "rgba(255,255,255,0.18)" };
+  if (has("raksha bandhan", "rakhi"))                                                    return { emoji: "🪢", tone: "rgba(255,255,255,0.18)" };
+  if (has("onam"))                                                                       return { emoji: "🌺", tone: "rgba(255,255,255,0.18)" };
+  if (has("pongal", "sankranti", "lohri"))                                               return { emoji: "🌾", tone: "rgba(255,255,255,0.18)" };
+  if (has("mahavir"))                                                                    return { emoji: "🪷", tone: "rgba(255,255,255,0.18)" };
+  if (has("buddha", "purnima"))                                                          return { emoji: "🪷", tone: "rgba(255,255,255,0.18)" };
+  if (has("guru nanak", "gurpurab", "gurpurb"))                                          return { emoji: "📿", tone: "rgba(255,255,255,0.18)" };
+  return { emoji: "🎉", tone: "rgba(255,255,255,0.18)" };
+}
+
 function QuickLinksCard() {
   const links = [
     { label: "Attendance", href: "/dashboard/hr/attendance" },
@@ -1074,7 +1105,7 @@ export default function HRHomePage() {
   };
 
   return (
-    <div className={`h-[calc(100vh-54px)] overflow-hidden flex flex-col ${C.page}`}>
+    <div className={`h-[calc(100vh-68px)] overflow-hidden flex flex-col ${C.page}`}>
       <div className="relative flex-1 min-h-0 flex flex-col">
         <div
           className="pointer-events-none absolute inset-y-0 -right-[120px] hidden w-[600px] lg:block"
@@ -1250,10 +1281,33 @@ export default function HRHomePage() {
             </div>
 
             <div
-              className="relative min-h-[108px] overflow-hidden rounded-[3px] border px-4 py-3.5 text-white shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition-colors"
+              className="relative min-h-[140px] overflow-hidden rounded-xl border text-white shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors"
               style={{ background: holidayTheme.bg, borderColor: holidayTheme.border }}
             >
-              {holidayTheme.scene}
+              {/* Soft radial highlights for ambient depth — replaces the
+                  busy bottom scene with a polished glow. */}
+              <span
+                className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full"
+                style={{ background: "radial-gradient(closest-side, rgba(255,255,255,0.22), rgba(255,255,255,0))" }}
+              />
+              <span
+                className="pointer-events-none absolute -bottom-20 -left-16 h-44 w-44 rounded-full"
+                style={{ background: "radial-gradient(closest-side, rgba(0,0,0,0.18), rgba(0,0,0,0))" }}
+              />
+              {/* Faint dotted texture along the bottom — far more elegant
+                  than literal hills/sun/dots. */}
+              <svg className="pointer-events-none absolute inset-x-0 bottom-0 h-12 w-full opacity-40" viewBox="0 0 340 48" preserveAspectRatio="none">
+                <defs>
+                  <pattern id="holiday-dots" x="0" y="0" width="14" height="14" patternUnits="userSpaceOnUse">
+                    <circle cx="2" cy="2" r="1" fill="rgba(255,255,255,0.35)" />
+                  </pattern>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#holiday-dots)" />
+              </svg>
+
+              {/* Glossy top sheen — subtle white highlight that gives the
+                  card a polished, lit feel. */}
+              <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/15 to-transparent" />
 
               {/* Prev/next arrows — only render when there's more than one
                   holiday to page through. */}
@@ -1264,7 +1318,7 @@ export default function HRHomePage() {
                     onClick={() => setHolidayIdx((i) => Math.max(0, i - 1))}
                     disabled={!canPrevHoliday}
                     aria-label="Previous holiday"
-                    className="absolute left-1 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-black/15 text-white transition hover:bg-black/30 disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="absolute left-2 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/30 disabled:opacity-25 disabled:cursor-not-allowed"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </button>
@@ -1273,61 +1327,86 @@ export default function HRHomePage() {
                     onClick={() => setHolidayIdx((i) => Math.min(upcoming.length - 1, i + 1))}
                     disabled={!canNextHoliday}
                     aria-label="Next holiday"
-                    className="absolute right-1 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-black/15 text-white transition hover:bg-black/30 disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="absolute right-2 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/30 disabled:opacity-25 disabled:cursor-not-allowed"
                   >
                     <ChevronRight className="h-4 w-4" />
                   </button>
                 </>
               )}
 
-              <div className={`relative z-10 ${upcoming.length > 1 ? "px-7" : ""}`}>
+              <div className={`relative z-10 py-4 pl-4 pr-4 ${upcoming.length > 1 ? "pl-10 pr-10" : ""}`}>
                 <div className="mb-2 flex items-start justify-between">
                   <span
-                    className="text-[9.5px] font-bold uppercase tracking-[0.14em]"
+                    className="text-[10px] font-bold uppercase tracking-[0.16em]"
                     style={{ color: "rgba(255,255,255,0.92)", WebkitTextFillColor: "rgba(255,255,255,0.92)" }}
                   >
                     Holidays
                   </span>
                   <Link
                     href={isAdmin ? "/dashboard/hr/admin/holidays" : "/dashboard/hr/leaves"}
-                    className="text-[11px] transition"
-                    style={{ color: "rgba(255,255,255,0.85)", WebkitTextFillColor: "rgba(255,255,255,0.85)" }}
+                    className="text-[11px] font-medium underline-offset-2 hover:underline transition"
+                    style={{ color: "rgba(255,255,255,0.92)", WebkitTextFillColor: "rgba(255,255,255,0.92)" }}
                   >
                     View All
                   </Link>
                 </div>
 
                 {activeHoliday ? (
-                  <>
-                    <p
-                      className="max-w-full truncate text-[16px] font-semibold leading-snug"
-                      title={activeHoliday.name}
-                      style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
+                  <div className="flex items-start gap-4">
+                    {/* Date tile — calendar-style day-number prominent on the
+                        left, month abbreviation underneath. */}
+                    <div
+                      className="flex h-[58px] w-[58px] flex-shrink-0 flex-col items-center justify-center rounded-lg bg-white/15 backdrop-blur-sm ring-1 ring-inset ring-white/25"
                     >
-                      {activeHoliday.name}
-                    </p>
-                    <p
-                      className="mt-1 text-[11px]"
-                      style={{ color: "rgba(255,255,255,0.88)", WebkitTextFillColor: "rgba(255,255,255,0.88)" }}
-                    >
-                      {new Date(activeHoliday.date).toLocaleDateString("en-IN", {
-                        weekday: "short",
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
-                    </p>
-                    <span
-                      className="mt-2 inline-block rounded-[3px] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em]"
-                      style={{
-                        background: holidayTheme.badge ?? HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#008CFF",
-                        color: "#ffffff",
-                        WebkitTextFillColor: "#ffffff",
-                      }}
-                    >
-                      {HOLIDAY_TYPE_LABEL[activeHoliday.type] ?? "PUBLIC HOLIDAY"}
-                    </span>
-                  </>
+                      <span
+                        className="text-[22px] font-bold leading-none"
+                        style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
+                      >
+                        {new Date(activeHoliday.date).toLocaleDateString("en-IN", { day: "2-digit", timeZone: "UTC" })}
+                      </span>
+                      <span
+                        className="mt-1 text-[9.5px] font-bold uppercase tracking-[0.16em]"
+                        style={{ color: "rgba(255,255,255,0.92)", WebkitTextFillColor: "rgba(255,255,255,0.92)" }}
+                      >
+                        {new Date(activeHoliday.date).toLocaleDateString("en-IN", { month: "short", timeZone: "UTC" })}
+                      </span>
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className="max-w-full truncate text-[15.5px] font-semibold leading-tight tracking-[-0.005em]"
+                        title={activeHoliday.name}
+                        style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
+                      >
+                        {activeHoliday.name}
+                      </p>
+                      <p
+                        className="mt-1 text-[11px] font-medium"
+                        style={{ color: "rgba(255,255,255,0.85)", WebkitTextFillColor: "rgba(255,255,255,0.85)" }}
+                      >
+                        {new Date(activeHoliday.date).toLocaleDateString("en-IN", {
+                          weekday: "long",
+                          year: "numeric",
+                          timeZone: "UTC",
+                        })}
+                      </p>
+                      <span
+                        className="mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.12em] ring-1 ring-inset ring-white/20"
+                        style={{
+                          background: "rgba(255,255,255,0.18)",
+                          color: "#ffffff",
+                          WebkitTextFillColor: "#ffffff",
+                          backdropFilter: "blur(2px)",
+                        }}
+                      >
+                        <span
+                          className="inline-block h-1.5 w-1.5 rounded-full"
+                          style={{ background: holidayTheme.badge ?? HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#ffffff" }}
+                        />
+                        {HOLIDAY_TYPE_LABEL[activeHoliday.type] ?? "PUBLIC HOLIDAY"}
+                      </span>
+                    </div>
+                  </div>
                 ) : (
                   <>
                     <p
