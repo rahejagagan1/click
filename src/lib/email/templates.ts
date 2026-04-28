@@ -9,13 +9,25 @@ import { appUrl } from "./transport";
 export type EmailContent = { subject: string; html: string; text: string };
 
 // ── Shared chrome ──────────────────────────────────────────────────────
+// Logo is delivered as an inline CID attachment (cid:logo) by sender.ts —
+// works reliably in dev (no public APP_URL fetch needed) and in prod.
 const SHELL = (title: string, body: string) => `
 <!doctype html>
 <html><body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1f2937">
   <div style="max-width:560px;margin:0 auto;padding:24px 16px">
     <div style="background:#0f6ecd;color:#fff;padding:18px 22px;border-radius:8px 8px 0 0">
-      <p style="margin:0;font-size:11px;letter-spacing:0.18em;text-transform:uppercase;opacity:0.85">NB Media HR</p>
-      <h1 style="margin:4px 0 0;font-size:18px;font-weight:600">${title}</h1>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse">
+        <tr>
+          <td style="vertical-align:middle">
+            <p style="margin:0;font-size:11px;letter-spacing:0.18em;text-transform:uppercase;opacity:0.85">NB Media HR</p>
+            <h1 style="margin:4px 0 0;font-size:18px;font-weight:600;color:#ffffff;line-height:1.3">${title}</h1>
+          </td>
+          <td style="vertical-align:middle;text-align:right;width:52px">
+            <img src="cid:logo" alt="NB" width="40" height="40"
+                 style="display:inline-block;border-radius:8px;background:#ffffff;padding:4px;object-fit:contain" />
+          </td>
+        </tr>
+      </table>
     </div>
     <div style="background:#ffffff;padding:22px;border:1px solid #e2e8f0;border-top:0;border-radius:0 0 8px 8px">
       ${body}
@@ -206,6 +218,58 @@ export function decisionEmail(args: {
     `Your ${args.typeLabel} request was ${args.outcome}${args.approverName ? ` by ${args.approverName}` : ""}.`,
     ...(args.note ? ["", `Note: ${args.note}`] : []),
     "",
+    `Open: ${link}`,
+  ].join("\n");
+  return { subject, html: SHELL(subject, body), text };
+}
+
+export function attendanceReminderEmail(args: {
+  userName: string;
+  kind: "clock-in" | "clock-out";
+}): EmailContent {
+  const isIn  = args.kind === "clock-in";
+  const action = isIn ? "clock in" : "clock out";
+  const subject = isIn
+    ? "Reminder: please clock in for today"
+    : "Reminder: please clock out before you leave";
+  const link = `${appUrl()}/dashboard/hr/attendance`;
+  const accent = isIn ? "#f59e0b" : "#0f6ecd";
+  const body = `
+    <p style="margin:0 0 14px;font-size:14px;line-height:1.6">
+      Hi ${escape(args.userName)},
+    </p>
+    <p style="margin:0 0 14px;font-size:14px;line-height:1.6">
+      Friendly reminder — you haven't <strong style="color:${accent}">${action}ed</strong> on the dashboard yet today.
+    </p>
+    ${isIn ? `
+      <div style="margin:14px 0;padding:12px;background:#fff7ed;border-left:3px solid #f59e0b;border-radius:4px">
+        <p style="margin:0;font-size:13px;color:#7c2d12;line-height:1.55">
+          If you're on <strong>leave</strong>, working from home, or out for a meeting,
+          please file the matching request from the dashboard so your attendance
+          record stays accurate. Otherwise please clock in now — past 10:00 AM IST
+          counts as a half day.
+        </p>
+      </div>
+    ` : `
+      <div style="margin:14px 0;padding:12px;background:#eff6ff;border-left:3px solid #0f6ecd;border-radius:4px">
+        <p style="margin:0;font-size:13px;color:#1e3a8a;line-height:1.55">
+          Without a clock-out the day is logged as <strong>missed clock-out</strong>
+          and your hours don't count toward effective time. Take a moment to
+          clock out — or file a regularization if you've already left.
+        </p>
+      </div>
+    `}
+    ${ctaButton(isIn ? "Clock in now" : "Clock out now", link)}
+  `;
+  const text = [
+    `Hi ${args.userName},`,
+    ``,
+    `Reminder: you haven't ${action}ed on the NB Media dashboard yet today.`,
+    ``,
+    isIn
+      ? `If you're on leave, WFH, or out for a meeting, please file the matching request from the dashboard. Otherwise please clock in now — past 10:00 AM IST counts as a half day.`
+      : `Without a clock-out the day is logged as missed-clock-out and your hours don't count toward effective time. Please clock out, or file a regularization if you've already left.`,
+    ``,
     `Open: ${link}`,
   ].join("\n");
   return { subject, html: SHELL(subject, body), text };

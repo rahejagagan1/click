@@ -9,6 +9,7 @@ import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertC
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
+import LeavesAdminPanel from "@/components/hr/LeavesAdminPanel";
 
 // Every HR-admin section is an inline state tab — no sub-routes.
 type AdminTabDef = {
@@ -19,6 +20,7 @@ type AdminTabDef = {
 const ADMIN_TABS: AdminTabDef[] = [
   { key: "attendance-dashboard", label: "Attendance Dashboard", icon: LayoutDashboard },
   { key: "approvals",            label: "Approvals",            icon: CheckSquare     },
+  { key: "leaves",               label: "Leave Balances",       icon: Calendar        },
   { key: "holidays",             label: "Holidays & Calendar",  icon: CalendarDays    },
   { key: "assets",               label: "Assets",               icon: Package         },
   { key: "leave-types",          label: "Leave Types",          icon: Calendar        },
@@ -203,6 +205,9 @@ export default function HRAdminPage() {
 
           {/* ── Approvals — full multi-tab panel (Leave / Comp Offs / WFH / …) ── */}
           {tab === "approvals" && <ApprovalsPanel embedded />}
+
+          {/* ── Leaves — admin can edit / cancel / delete any leave ── */}
+          {tab === "leaves" && <LeavesAdminPanel leaveTypes={leaveTypes} />}
 
           {/* ── Assets ── */}
           {tab === "assets" && <AssetsPanel />}
