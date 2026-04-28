@@ -3,9 +3,18 @@ import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { notifyUsers } from "@/lib/notifications";
 import { writeAuditLog } from "@/lib/audit-log";
+import { countWorkingDays } from "@/lib/hr/working-days";
 
 function fmtRange(from: Date, to: Date, days: number) {
   return `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} (${days} day${days === 1 ? "" : "s"})`;
+}
+
+// Notification body suffix for approver-written notes. Always rendered on a
+// new line with a "Note: " prefix so the bell-panel can detect and pull it
+// out into a styled callout (and the "Notes" filter tab can find it).
+function noteSuffix(note: string | null | undefined): string {
+  const t = (note || "").trim();
+  return t ? `\nNote: ${t.slice(0, 240)}` : "";
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -59,17 +68,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (newReason !== undefined) data.reason = newReason;
       if (Number.isInteger(newTypeIdRaw)) data.leaveTypeId = newTypeIdRaw;
 
-      // Recompute totalDays if either date changed.
+      // Recompute totalDays if either date changed. Uses the same UTC-safe
+      // counter as the POST flow so weekend / holiday handling stays
+      // identical across "apply" and "edit".
       if (data.fromDate || data.toDate) {
         const f = data.fromDate ?? new Date(application.fromDate);
         const t = data.toDate   ?? new Date(application.toDate);
-        let n = 0;
-        const cur = new Date(f);
-        while (cur <= t) {
-          if (cur.getDay() !== 0 && cur.getDay() !== 6) n++;
-          cur.setDate(cur.getDate() + 1);
-        }
-        data.totalDays = n;
+        data.totalDays = await countWorkingDays(f, t);
       }
 
       const validStatuses = ["pending", "partially_approved", "approved", "rejected", "cancelled"];
@@ -147,7 +152,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         type:     "leave",
         entityId: appId,
         title:    `Your ${application.leaveType?.name || "leave"} request was rejected`,
-        body:     `${rangeLabel}${approvalNote ? ` — ${String(approvalNote).slice(0, 160)}` : ""}`,
+        body:     `${rangeLabel}${noteSuffix(approvalNote)}`,
         linkUrl:  "/dashboard/hr/leaves",
       });
       return NextResponse.json({ success: true });
@@ -180,7 +185,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         type:     "leave",
         entityId: appId,
         title:    `${application.user?.name || "An employee"}'s ${application.leaveType?.name || "leave"} needs final approval`,
-        body:     `${rangeLabel} — manager approved, awaiting CEO / HR.`,
+        body:     `${rangeLabel} — manager approved, awaiting CEO / HR.${noteSuffix(approvalNote)}`,
         linkUrl:  "/dashboard/hr/approvals",
       });
       await notifyUsers({
@@ -189,7 +194,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         type:     "leave",
         entityId: appId,
         title:    `Your ${application.leaveType?.name || "leave"} is partially approved`,
-        body:     `${rangeLabel} — awaiting final approval from CEO / HR.`,
+        body:     `${rangeLabel} — awaiting final approval from CEO / HR.${noteSuffix(approvalNote)}`,
         linkUrl:  "/dashboard/hr/leaves",
       });
       return NextResponse.json({ success: true });
@@ -246,7 +251,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         type:     "leave",
         entityId: appId,
         title:    `${application.user?.name || "An employee"}'s ${application.leaveType?.name || "leave"} is approved`,
-        body:     `${rangeLabel} — final approval granted.`,
+        body:     `${rangeLabel} — final approval granted.${noteSuffix(approvalNote)}`,
         linkUrl:  "/dashboard/hr/leaves",
       });
       return NextResponse.json({ success: true });
