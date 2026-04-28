@@ -499,6 +499,238 @@ function GoodFridayScene() {
   );
 }
 
+function RakhiScene() {
+  // Rakhi medallion with thread streamers + a small gift box on the right.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      {/* Faded mandala on left */}
+      <g transform="translate(36, 36)" fill="rgba(255,255,255,0.16)">
+        {[0,45,90,135,180,225,270,315].map((deg) => (
+          <ellipse key={deg} cx="0" cy="-12" rx="3.5" ry="11" transform={`rotate(${deg})`} />
+        ))}
+        <circle r="4" />
+      </g>
+      {/* Thread streamers + central rakhi */}
+      <g>
+        <path d="M 6 44 Q 80 30 148 44"  fill="none" stroke="rgba(255,200,80,0.75)" strokeWidth="2" />
+        <path d="M 6 50 Q 80 36 148 50"  fill="none" stroke="rgba(255,160,80,0.6)"  strokeWidth="1.5" />
+        <path d="M 192 44 Q 260 30 334 44" fill="none" stroke="rgba(255,200,80,0.75)" strokeWidth="2" />
+        <path d="M 192 50 Q 260 36 334 50" fill="none" stroke="rgba(255,160,80,0.6)"  strokeWidth="1.5" />
+      </g>
+      <g transform="translate(170, 46)">
+        <circle r="22" fill="rgba(255,180,100,0.85)" />
+        <circle r="16" fill="rgba(255,130,80,0.95)" />
+        <circle r="9"  fill="rgba(255,230,180,0.95)" />
+        {[0,45,90,135,180,225,270,315].map((deg) => {
+          const rad = deg * Math.PI / 180;
+          return <circle key={deg} cx={20*Math.cos(rad)} cy={20*Math.sin(rad)} r="2.5" fill="rgba(255,255,255,0.92)" />;
+        })}
+      </g>
+      {/* Gift box on the right */}
+      <g transform="translate(296, 60)">
+        <rect x="-16" y="-2" width="32" height="22" rx="1" fill="rgba(255,200,100,0.85)" />
+        <rect x="-16" y="-8" width="32" height="6"  rx="1" fill="rgba(255,170,60,0.95)" />
+        <rect x="-2"  y="-8" width="4"  height="28"        fill="rgba(180,70,40,0.8)" />
+        <path d="M -10 -10 Q -2 -18 0 -8 Q 2 -18 10 -10 Q 4 -8 0 -8 Q -4 -8 -10 -10 Z" fill="rgba(180,70,40,0.9)" />
+      </g>
+      <rect x="0" y="80" width="340" height="8" fill="rgba(80,30,90,0.4)" />
+    </svg>
+  );
+}
+
+function LotusScene() {
+  // Lotus blossom centred over a calm water line.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <line x1="0"  y1="68" x2="340" y2="68" stroke="rgba(255,255,255,0.25)" strokeWidth="0.6" />
+      <line x1="0"  y1="74" x2="340" y2="74" stroke="rgba(255,255,255,0.18)" strokeWidth="0.6" />
+      <g transform="translate(170, 56)">
+        {[0, 36, 72, 108, 144, 180, 216, 252, 288, 324].map((deg) => (
+          <ellipse key={`o-${deg}`} cx="0" cy="-22" rx="6" ry="22"
+            fill="rgba(255,255,255,0.4)"
+            transform={`rotate(${deg})`} />
+        ))}
+        {[18, 54, 90, 126, 162, 198, 234, 270, 306, 342].map((deg) => (
+          <ellipse key={`i-${deg}`} cx="0" cy="-12" rx="5" ry="14"
+            fill="rgba(255,255,255,0.65)"
+            transform={`rotate(${deg})`} />
+        ))}
+        <circle r="6" fill="rgba(255,225,140,0.95)" />
+      </g>
+      <rect x="0" y="80" width="340" height="8" fill="rgba(120,90,30,0.4)" />
+    </svg>
+  );
+}
+
+function TrishulScene() {
+  // Trident silhouette with a small mountain skyline.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <g fill="rgba(40,40,80,0.45)">
+        <path d="M 0 78 L 60 50 L 110 70 L 170 40 L 230 70 L 290 52 L 340 78 Z" />
+      </g>
+      <g transform="translate(170, 46)" stroke="rgba(255,255,255,0.85)" fill="rgba(255,255,255,0.85)" strokeLinecap="round">
+        <line x1="0" y1="-8" x2="0" y2="-30" strokeWidth="2.4" />
+        <polygon points="-4,-30 0,-44 4,-30" stroke="none" />
+        <line x1="-16" y1="-6" x2="-16" y2="-20" strokeWidth="1.8" />
+        <polygon points="-20,-20 -16,-30 -12,-20" stroke="none" />
+        <line x1="16" y1="-6" x2="16" y2="-20" strokeWidth="1.8" />
+        <polygon points="12,-20 16,-30 20,-20" stroke="none" />
+        <line x1="-20" y1="-6" x2="20" y2="-6" strokeWidth="2.6" />
+        <line x1="0" y1="-6" x2="0" y2="34" strokeWidth="2.4" />
+        <ellipse cx="0" cy="2" rx="6" ry="2" stroke="none" />
+      </g>
+      <rect x="0" y="80" width="340" height="8" fill="rgba(20,20,40,0.45)" />
+    </svg>
+  );
+}
+
+function SunScene() {
+  // Rising sun over a small harvest band — Pongal / Sankranti / Lohri.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <g stroke="rgba(255,230,150,0.7)" strokeWidth="1.2" strokeLinecap="round">
+        {[0, 22, 45, 67, 90, 112, 135, 157, 180].map((deg) => {
+          const rad = (deg * Math.PI) / 180;
+          const x1 = 170 + 28 * Math.cos(Math.PI + rad);
+          const y1 = 78 + 28 * Math.sin(Math.PI + rad);
+          const x2 = 170 + 44 * Math.cos(Math.PI + rad);
+          const y2 = 78 + 44 * Math.sin(Math.PI + rad);
+          return <line key={deg} x1={x1} y1={y1} x2={x2} y2={y2} />;
+        })}
+      </g>
+      <circle cx="170" cy="78" r="22" fill="rgba(255,210,100,0.85)" />
+      <circle cx="170" cy="78" r="14" fill="rgba(255,235,160,0.95)" />
+      {/* Wheat tufts */}
+      <g stroke="rgba(255,200,80,0.7)" strokeWidth="0.8" fill="none">
+        {[40, 70, 100, 240, 270, 300].map((cx) => (
+          <g key={cx}>
+            <line x1={cx} y1="80" x2={cx} y2="58" />
+            <line x1={cx} y1="64" x2={cx - 4} y2="60" />
+            <line x1={cx} y1="64" x2={cx + 4} y2="60" />
+            <line x1={cx} y1="70" x2={cx - 4} y2="66" />
+            <line x1={cx} y1="70" x2={cx + 4} y2="66" />
+          </g>
+        ))}
+      </g>
+      <rect x="0" y="80" width="340" height="8" fill="rgba(110,60,20,0.4)" />
+    </svg>
+  );
+}
+
+function KhandaScene() {
+  // Khanda emblem (Sikh) — central sword + chakra + crescent crossing.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <g transform="translate(170, 46)" stroke="rgba(255,255,255,0.85)" fill="rgba(255,255,255,0.85)">
+        {/* Centre double-edged sword */}
+        <line x1="0" y1="-30" x2="0" y2="34" strokeWidth="2.5" />
+        <polygon points="-4,-30 0,-44 4,-30" stroke="none" />
+        <ellipse cx="0" cy="6" rx="6" ry="2" stroke="none" />
+        {/* Outer crescents */}
+        <path d="M -28 4 Q -28 -22 0 -28" fill="none" strokeWidth="2.2" />
+        <path d="M  28 4 Q  28 -22 0 -28" fill="none" strokeWidth="2.2" />
+        {/* Inner single-edged daggers */}
+        <line x1="-14" y1="-22" x2="-14" y2="6" strokeWidth="1.8" />
+        <polygon points="-17,-22 -14,-32 -11,-22" stroke="none" />
+        <line x1="14" y1="-22" x2="14" y2="6" strokeWidth="1.8" />
+        <polygon points="11,-22 14,-32 17,-22" stroke="none" />
+        {/* Chakra ring */}
+        <circle r="14" fill="none" strokeWidth="2.4" />
+      </g>
+      <rect x="0" y="80" width="340" height="8" fill="rgba(80,30,30,0.45)" />
+    </svg>
+  );
+}
+
+function GaneshScene() {
+  // Stylised Om (Aum) with a soft halo + decorative band.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <g transform="translate(170, 44)">
+        <circle r="28" fill="rgba(255,225,140,0.18)" />
+        <g fill="none" stroke="rgba(255,225,140,0.95)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M -28 0 C -28 -14 -10 -18 0 -10 C 10 0 6 12 -8 12 L -12 12" />
+          <path d="M -8 12 C -22 12 -28 24 -10 32 C 6 36 18 28 14 12 L 14 6" />
+          <path d="M 14 0 C 18 -6 28 0 28 8" />
+          <path d="M 18 -22 Q 24 -28 30 -22" strokeWidth="1.8" />
+        </g>
+        <circle cx="30" cy="-18" r="3" fill="rgba(255,225,140,0.95)" />
+      </g>
+      {/* Marigold dots along the bottom */}
+      <g fill="rgba(255,150,80,0.7)">
+        {[20, 60, 100, 240, 280, 320].map((cx) => (
+          <circle key={cx} cx={cx} cy="80" r="3.5" />
+        ))}
+      </g>
+      <rect x="0" y="84" width="340" height="4" fill="rgba(120,40,30,0.4)" />
+    </svg>
+  );
+}
+
+function OnamScene() {
+  // Pookalam — concentric floral rings rising from the bottom edge.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <g transform="translate(170, 88)">
+        <circle r="42" fill="rgba(255,150,80,0.4)" />
+        <circle r="34" fill="rgba(255,200,80,0.5)" />
+        <circle r="26" fill="rgba(255,255,255,0.55)" />
+        <circle r="18" fill="rgba(255,150,80,0.65)" />
+        <circle r="10" fill="rgba(255,225,140,0.95)" />
+        {/* Petals */}
+        {[200,220,240,260,280,300,320,340,200-360,220-360,240-360,260-360,280-360,300-360,320-360,340-360].slice(0, 8).map((deg) => {
+          const rad = deg * Math.PI / 180;
+          return <ellipse key={deg} cx={28*Math.cos(rad)} cy={28*Math.sin(rad)} rx="5" ry="3" fill="rgba(255,255,255,0.6)" transform={`rotate(${deg+90} ${28*Math.cos(rad)} ${28*Math.sin(rad)})`} />;
+        })}
+      </g>
+      {/* Side dotted petals */}
+      <g fill="rgba(255,180,80,0.55)">
+        <circle cx="60" cy="68" r="3" />
+        <circle cx="80" cy="56" r="2.5" />
+        <circle cx="280" cy="68" r="3" />
+        <circle cx="260" cy="56" r="2.5" />
+      </g>
+    </svg>
+  );
+}
+
+function BowScene() {
+  // Bow & arrow — Ram Navami / Dussehra.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <g fill="rgba(60,30,10,0.5)">
+        <rect x="0" y="80" width="340" height="8" />
+      </g>
+      <g transform="translate(170, 44)" stroke="rgba(255,255,255,0.9)" fill="none" strokeLinecap="round">
+        <path d="M -50 -28 Q 30 0 -50 28" strokeWidth="2.6" />
+        <line x1="-50" y1="-28" x2="-50" y2="28" strokeWidth="1" />
+        <line x1="-50" y1="0" x2="60" y2="0" strokeWidth="2.2" />
+        <polygon points="60,0 50,-5 50,5" fill="rgba(255,255,255,0.9)" stroke="none" />
+        <line x1="-44" y1="0" x2="-38" y2="-6" strokeWidth="1.6" />
+        <line x1="-44" y1="0" x2="-38" y2="6"  strokeWidth="1.6" />
+      </g>
+    </svg>
+  );
+}
+
+function MuharramScene() {
+  // Restrained — crescent + horizon line.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      {[40, 80, 120, 220, 260].map((x, i) => (
+        <circle key={i} cx={x} cy={6 + (i % 3) * 4} r="0.8" fill="rgba(255,255,255,0.6)" />
+      ))}
+      <g>
+        <circle cx="170" cy="36" r="22" fill="rgba(255,255,255,0.85)" />
+        <circle cx="178" cy="32" r="20" fill="rgba(40,40,90,1)" />
+      </g>
+      <line x1="0" y1="62" x2="340" y2="62" stroke="rgba(255,255,255,0.2)" strokeWidth="0.6" />
+      <rect x="0" y="80" width="340" height="8" fill="rgba(20,20,50,0.55)" />
+    </svg>
+  );
+}
+
 type HolidayTheme = {
   bg: string;
   border: string;
@@ -509,14 +741,23 @@ type HolidayTheme = {
 const HOLIDAY_THEMES: Record<string, HolidayTheme> = {
   christmas:   { bg: "linear-gradient(180deg, #d4453a 0%, #6f1818 100%)", border: "#9b2222", scene: <ChristmasScene />,   badge: "#0a8a3a" },
   diwali:      { bg: "linear-gradient(180deg, #f29a35 0%, #5a1a55 100%)", border: "#a04060", scene: <DiwaliScene />,      badge: "#ffb84d" },
-  eid:         { bg: "linear-gradient(180deg, #6cb454 0%, #2d6c25 100%)", border: "#cce2bf", scene: <EidScene />,         badge: "#0e6a2a" },
+  eid:         { bg: "linear-gradient(180deg, #6cb454 0%, #2d6c25 100%)", border: "#1d5a28", scene: <EidScene />,         badge: "#0e6a2a" },
   holi:        { bg: "linear-gradient(180deg, #ff6f9c 0%, #5a2078 100%)", border: "#a04080", scene: <HoliScene />,        badge: "#7a1f6e" },
-  tricolor:    { bg: "linear-gradient(180deg, #ff9933 0%, #138808 100%)", border: "#cc6622", scene: <TricolorScene />,    badge: "#000080" },
+  tricolor:    { bg: "linear-gradient(180deg, #4fb6d8 0%, #2c7da3 100%)", border: "#1e6a8a", scene: <TricolorScene />,    badge: "#000080" },
   newyear:     { bg: "linear-gradient(180deg, #1e2a78 0%, #050828 100%)", border: "#1e2a78", scene: <NewYearScene />,     badge: "#ffb84d" },
   krishna:     { bg: "linear-gradient(180deg, #1e63b8 0%, #08234a 100%)", border: "#1e4ea0", scene: <KrishnaScene />,     badge: "#ffb84d" },
   festive:     { bg: "linear-gradient(180deg, #e87a3a 0%, #8a2a16 100%)", border: "#aa4422", scene: <FestiveScene />,     badge: "#a82c12" },
   goodfriday:  { bg: "linear-gradient(180deg, #5b4783 0%, #1c1233 100%)", border: "#3b2c5e", scene: <GoodFridayScene />,  badge: "#3b2c5e" },
-  default:     { bg: "linear-gradient(180deg, #83c863 0%, #5da83e 100%)", border: "#cce2bf", scene: <HillsScene />,                            },
+  rakhi:       { bg: "linear-gradient(180deg, #8a4a9e 0%, #3d1a55 100%)", border: "#6a3380", scene: <RakhiScene />,       badge: "#0a8aff" },
+  lotus:       { bg: "linear-gradient(180deg, #e0a35e 0%, #7a4a1e 100%)", border: "#aa6a2a", scene: <LotusScene />,       badge: "#ffd770" },
+  trishul:     { bg: "linear-gradient(180deg, #4a6a8e 0%, #1a2a4a 100%)", border: "#2a3a5a", scene: <TrishulScene />,     badge: "#ffd770" },
+  sun:         { bg: "linear-gradient(180deg, #f4a83a 0%, #a04a14 100%)", border: "#c46422", scene: <SunScene />,         badge: "#ffe1a0" },
+  khanda:      { bg: "linear-gradient(180deg, #b86846 0%, #5a2014 100%)", border: "#7a3424", scene: <KhandaScene />,      badge: "#ffe1a0" },
+  ganesh:      { bg: "linear-gradient(180deg, #d46c3a 0%, #6a1a14 100%)", border: "#a04022", scene: <GaneshScene />,      badge: "#ffe1a0" },
+  onam:        { bg: "linear-gradient(180deg, #58a04a 0%, #1d5a28 100%)", border: "#3a7030", scene: <OnamScene />,        badge: "#ffd770" },
+  bow:         { bg: "linear-gradient(180deg, #d6884a 0%, #6a2a12 100%)", border: "#a04830", scene: <BowScene />,         badge: "#ffe1a0" },
+  muharram:    { bg: "linear-gradient(180deg, #404a6a 0%, #14182a 100%)", border: "#2a304a", scene: <MuharramScene />,    badge: "#aabad5" },
+  default:     { bg: "linear-gradient(180deg, #83c863 0%, #5da83e 100%)", border: "#3a7030", scene: <HillsScene />,                            },
 };
 
 // Pick a theme based on the holiday name. Word-boundary matches keep us
@@ -525,15 +766,24 @@ const HOLIDAY_THEMES: Record<string, HolidayTheme> = {
 function pickHolidayTheme(name: string | null | undefined): HolidayTheme {
   const n = (name || "").toLowerCase();
   const has = (...words: string[]) => words.some((w) => new RegExp(`(^|[^a-z])${w}([^a-z]|$)`, "i").test(n));
-  if (has("christmas", "xmas")) return HOLIDAY_THEMES.christmas;
-  if (has("diwali", "deepavali", "govardhan", "bhai dooj")) return HOLIDAY_THEMES.diwali;
-  if (has("eid", "bakrid", "ramadan", "ramzan", "muharram")) return HOLIDAY_THEMES.eid;
-  if (has("holi") && !has("holiday")) return HOLIDAY_THEMES.holi;
-  if (has("independence day", "republic day", "gandhi jayanti", "ambedkar", "labour day")) return HOLIDAY_THEMES.tricolor;
-  if (has("new year")) return HOLIDAY_THEMES.newyear;
-  if (has("janmashtami", "krishna", "ram navami")) return HOLIDAY_THEMES.krishna;
-  if (has("good friday", "easter")) return HOLIDAY_THEMES.goodfriday;
-  if (has("ganesh", "dussehra", "shivratri", "raksha bandhan", "onam", "pongal", "sankranti", "mahavir", "buddha", "guru nanak")) return HOLIDAY_THEMES.festive;
+  if (has("christmas", "xmas"))                                      return HOLIDAY_THEMES.christmas;
+  if (has("diwali", "deepavali", "govardhan", "bhai dooj"))          return HOLIDAY_THEMES.diwali;
+  if (has("eid", "bakrid", "ramadan", "ramzan"))                     return HOLIDAY_THEMES.eid;
+  if (has("muharram"))                                               return HOLIDAY_THEMES.muharram;
+  if (has("holi") && !has("holiday"))                                return HOLIDAY_THEMES.holi;
+  if (has("independence day", "republic day", "gandhi jayanti", "ambedkar")) return HOLIDAY_THEMES.tricolor;
+  if (has("labour day"))                                             return HOLIDAY_THEMES.tricolor;
+  if (has("new year"))                                               return HOLIDAY_THEMES.newyear;
+  if (has("janmashtami", "krishna"))                                 return HOLIDAY_THEMES.krishna;
+  if (has("ram navami", "ramanavami", "dussehra", "vijayadashami"))  return HOLIDAY_THEMES.bow;
+  if (has("good friday", "easter"))                                  return HOLIDAY_THEMES.goodfriday;
+  if (has("raksha bandhan", "rakhi"))                                return HOLIDAY_THEMES.rakhi;
+  if (has("buddha", "purnima", "mahavir"))                           return HOLIDAY_THEMES.lotus;
+  if (has("shivratri", "shiva"))                                     return HOLIDAY_THEMES.trishul;
+  if (has("pongal", "sankranti", "lohri"))                           return HOLIDAY_THEMES.sun;
+  if (has("guru nanak", "gurpurab", "gurpurb"))                      return HOLIDAY_THEMES.khanda;
+  if (has("ganesh", "ganpati"))                                      return HOLIDAY_THEMES.ganesh;
+  if (has("onam"))                                                   return HOLIDAY_THEMES.onam;
   return HOLIDAY_THEMES.default;
 }
 
@@ -566,6 +816,297 @@ function pickHolidayGlyph(name: string | null | undefined): { emoji: string; ton
   if (has("buddha", "purnima"))                                                          return { emoji: "🪷", tone: "rgba(255,255,255,0.18)" };
   if (has("guru nanak", "gurpurab", "gurpurb"))                                          return { emoji: "📿", tone: "rgba(255,255,255,0.18)" };
   return { emoji: "🎉", tone: "rgba(255,255,255,0.18)" };
+}
+
+// Per-festival "decoration" — picks both a soft pastel accent colour and
+// the kind of corner ornament to draw. Each holiday gets a distinct visual
+// motif (diya / crescent / cross / lotus / etc.) so the card feels unique
+// to the event rather than wearing a generic flower for every entry.
+type OrnamentKind =
+  | "snowflake" | "diya" | "crescent" | "splash" | "chakra" | "fireworks"
+  | "feather"   | "bow"  | "cross"    | "om"     | "trishul"| "lotus"
+  | "sun"       | "rakhi"| "khanda"   | "mandala";
+
+function pickHolidayDeco(name: string | null | undefined): { accent: string; kind: OrnamentKind } {
+  const n = (name || "").toLowerCase();
+  const has = (...words: string[]) => words.some((w) => new RegExp(`(^|[^a-z])${w}([^a-z]|$)`, "i").test(n));
+  if (has("christmas", "xmas"))                                              return { accent: "#c97a7a", kind: "snowflake" };
+  if (has("diwali", "deepavali", "govardhan", "bhai dooj"))                  return { accent: "#d4a85e", kind: "diya"      };
+  if (has("eid", "bakrid", "ramadan", "ramzan"))                             return { accent: "#7aa86a", kind: "crescent"  };
+  if (has("muharram"))                                                       return { accent: "#7a8aa8", kind: "crescent"  };
+  if (has("holi") && !has("holiday"))                                        return { accent: "#c98aaf", kind: "splash"    };
+  if (has("independence day", "republic day", "gandhi jayanti", "ambedkar")) return { accent: "#c89466", kind: "chakra"    };
+  if (has("new year"))                                                       return { accent: "#8a8ab5", kind: "fireworks" };
+  if (has("janmashtami", "krishna"))                                         return { accent: "#7a98c8", kind: "feather"   };
+  if (has("ram navami", "ramanavami", "dussehra", "vijayadashami"))          return { accent: "#c89466", kind: "bow"       };
+  if (has("good friday", "easter"))                                          return { accent: "#a394c2", kind: "cross"     };
+  if (has("ganesh", "ganpati"))                                              return { accent: "#c47a5e", kind: "om"        };
+  if (has("shivratri", "shiva"))                                             return { accent: "#7a8aa8", kind: "trishul"   };
+  if (has("mahavir", "buddha", "purnima"))                                   return { accent: "#c8a55e", kind: "lotus"     };
+  if (has("pongal", "sankranti", "lohri"))                                   return { accent: "#c8a35e", kind: "sun"       };
+  if (has("raksha bandhan", "rakhi"))                                        return { accent: "#c98a8a", kind: "rakhi"     };
+  if (has("guru nanak", "gurpurab", "gurpurb"))                              return { accent: "#a08a6a", kind: "khanda"    };
+  if (has("onam"))                                                           return { accent: "#88b079", kind: "mandala"   };
+  if (has("labour day"))                                                     return { accent: "#a08a6a", kind: "mandala"   };
+  return { accent: "#7aa1c8", kind: "mandala" };
+}
+
+// Polar-coordinate helper used by several ornaments. Returns
+// [cx + r*cos(θ), cy + r*sin(θ)] with θ measured clockwise from 12 o'clock.
+function polar(cx: number, cy: number, r: number, deg: number): [number, number] {
+  const rad = ((deg - 90) * Math.PI) / 180;
+  return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+}
+
+// Decorative corner ornament for the holiday card. Renders one of the
+// festival-specific SVGs sized to a 120×120 viewBox; the parent positions
+// it via `className`. All artwork is drawn in the accent colour at ~18%
+// opacity so it sits behind the text as a tasteful watermark.
+function HolidayOrnament({ accent, kind, className }: {
+  accent: string; kind: OrnamentKind; className?: string;
+}) {
+  const wrap = (children: React.ReactNode, opacity = 0.18) => (
+    <svg
+      viewBox="0 0 120 120" aria-hidden="true"
+      className={`pointer-events-none absolute ${className ?? ""}`}
+      style={{ color: accent }}
+    >
+      <g style={{ opacity }}>{children}</g>
+    </svg>
+  );
+
+  switch (kind) {
+    case "snowflake": return wrap(
+      <>
+        {[0, 60, 120, 180, 240, 300].map((deg) => (
+          <g key={deg} transform={`rotate(${deg} 60 60)`} stroke="currentColor" strokeLinecap="round" fill="none">
+            <line x1="60" y1="60" x2="60" y2="14" strokeWidth="2.2" />
+            <line x1="60" y1="28" x2="52" y2="22" strokeWidth="1.8" />
+            <line x1="60" y1="28" x2="68" y2="22" strokeWidth="1.8" />
+            <line x1="60" y1="42" x2="54" y2="38" strokeWidth="1.4" />
+            <line x1="60" y1="42" x2="66" y2="38" strokeWidth="1.4" />
+          </g>
+        ))}
+        <circle cx="60" cy="60" r="3.5" fill="currentColor" />
+      </>,
+    );
+
+    case "diya": return wrap(
+      <>
+        {/* Bowl with rim highlight */}
+        <path d="M 24 70 Q 60 100 96 70 L 88 64 Q 60 78 32 64 Z" fill="currentColor" />
+        <ellipse cx="60" cy="64" rx="28" ry="3" fill="currentColor" opacity="0.7" />
+        {/* Wick */}
+        <line x1="60" y1="64" x2="60" y2="46" stroke="currentColor" strokeWidth="2.2" />
+        {/* Flame — outer + inner */}
+        <path d="M 60 46 Q 53 32 60 14 Q 67 32 60 46 Z" fill="currentColor" opacity="0.85" />
+        <path d="M 60 38 Q 56 32 60 22 Q 64 32 60 38 Z" fill="white"        opacity="0.45" />
+        {/* Surrounding sparkles */}
+        <circle cx="20" cy="40" r="1.5" fill="currentColor" />
+        <circle cx="100" cy="40" r="1.5" fill="currentColor" />
+        <circle cx="14" cy="78" r="1"   fill="currentColor" />
+        <circle cx="106" cy="78" r="1"  fill="currentColor" />
+      </>,
+    );
+
+    case "crescent": return wrap(
+      <>
+        <defs>
+          <mask id="crescent-mask">
+            <rect width="120" height="120" fill="white" />
+            <circle cx="65" cy="50" r="30" fill="black" />
+          </mask>
+        </defs>
+        <circle cx="50" cy="50" r="34" fill="currentColor" mask="url(#crescent-mask)" />
+        <polygon points="92,38 95,46 103,46 96,51 99,59 92,54 85,59 88,51 81,46 89,46"
+                 fill="currentColor" opacity="0.85" />
+      </>,
+    );
+
+    case "splash": return wrap(
+      <>
+        <circle cx="42" cy="42" r="14" fill="currentColor" opacity="0.55" />
+        <circle cx="78" cy="58" r="20" fill="currentColor" opacity="0.4"  />
+        <circle cx="55" cy="84" r="10" fill="currentColor" opacity="0.5"  />
+        <circle cx="20"  cy="65" r="3"   fill="currentColor" />
+        <circle cx="98"  cy="32" r="3"   fill="currentColor" />
+        <circle cx="100" cy="86" r="2"   fill="currentColor" />
+        <circle cx="30"  cy="100" r="2"  fill="currentColor" />
+        <circle cx="14"  cy="40" r="1.5" fill="currentColor" />
+        <circle cx="106" cy="60" r="1.5" fill="currentColor" />
+      </>, 0.20,
+    );
+
+    case "chakra": return wrap(
+      <g fill="none" stroke="currentColor" strokeWidth="1.4">
+        <circle cx="60" cy="60" r="44" />
+        <circle cx="60" cy="60" r="38" />
+        {Array.from({ length: 24 }).map((_, i) => {
+          const [x, y] = polar(60, 60, 38, i * 15);
+          return <line key={i} x1="60" y1="60" x2={x} y2={y} strokeWidth="1" />;
+        })}
+        <circle cx="60" cy="60" r="5" fill="currentColor" stroke="none" />
+      </g>,
+    );
+
+    case "fireworks": return wrap(
+      <g stroke="currentColor" strokeLinecap="round">
+        {[0,30,60,90,120,150,180,210,240,270,300,330].map((deg, i) => {
+          const [x1, y1] = polar(60, 60, 8,  deg);
+          const [x2, y2] = polar(60, 60, i % 2 === 0 ? 38 : 30, deg);
+          return <line key={`r-${deg}`} x1={x1} y1={y1} x2={x2} y2={y2} strokeWidth="2" />;
+        })}
+        {[0,30,60,90,120,150,180,210,240,270,300,330].map((deg, i) => {
+          const [x, y] = polar(60, 60, i % 2 === 0 ? 44 : 36, deg);
+          return <circle key={`d-${deg}`} cx={x} cy={y} r="1.5" fill="currentColor" stroke="none" />;
+        })}
+        <circle cx="60" cy="60" r="3" fill="currentColor" stroke="none" />
+      </g>,
+    );
+
+    case "feather": return wrap(
+      <>
+        <ellipse cx="60" cy="50" rx="22" ry="38" fill="currentColor" opacity="0.4" />
+        <ellipse cx="60" cy="50" rx="14" ry="28" fill="currentColor" opacity="0.6" />
+        <line x1="60" y1="42" x2="60" y2="106" stroke="currentColor" strokeWidth="2" />
+        {/* Feather "eye" */}
+        <ellipse cx="60" cy="48" rx="11" ry="14" fill="white"        opacity="0.8" />
+        <ellipse cx="60" cy="48" rx="6"  ry="9"  fill="currentColor" />
+        {/* Side filaments */}
+        {[-22,-14,-6,2,10,18].map((y, i) => (
+          <g key={i}>
+            <line x1={45} y1={60 + y} x2={32} y2={60 + y * 1.2} stroke="currentColor" strokeWidth="0.7" />
+            <line x1={75} y1={60 + y} x2={88} y2={60 + y * 1.2} stroke="currentColor" strokeWidth="0.7" />
+          </g>
+        ))}
+      </>, 0.20,
+    );
+
+    case "bow": return wrap(
+      <g fill="none" stroke="currentColor" strokeLinecap="round">
+        {/* Bow */}
+        <path d="M 35 22 Q 100 60 35 98" strokeWidth="2.4" />
+        <line x1="35" y1="22" x2="35" y2="98" strokeWidth="1" />
+        {/* Arrow */}
+        <line x1="35" y1="60" x2="105" y2="60" strokeWidth="2" />
+        <polygon points="106,60 96,55 96,65" fill="currentColor" stroke="none" />
+        <line x1="40" y1="60" x2="46" y2="55" strokeWidth="1.5" />
+        <line x1="40" y1="60" x2="46" y2="65" strokeWidth="1.5" />
+      </g>,
+    );
+
+    case "cross": return wrap(
+      <>
+        <rect x="55" y="14"  width="10" height="92" fill="currentColor" rx="2" />
+        <rect x="30" y="38"  width="60" height="10" fill="currentColor" rx="2" />
+        <circle cx="60" cy="20" r="14" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      </>,
+    );
+
+    case "om": return wrap(
+      <g fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M 30 50 C 30 35 50 30 60 40 C 70 50 65 65 50 65 L 45 65" />
+        <path d="M 50 65 C 35 65 30 78 46 88 C 62 92 76 80 70 64 L 70 58" />
+        <path d="M 70 50 C 76 44 88 50 88 60" />
+        <path d="M 78 28 Q 85 22 92 28" strokeWidth="1.6" />
+        <circle cx="92" cy="34" r="3" fill="currentColor" stroke="none" />
+      </g>,
+    );
+
+    case "trishul": return wrap(
+      <g stroke="currentColor" fill="currentColor" strokeLinecap="round">
+        <line x1="60" y1="48" x2="60" y2="14" strokeWidth="2.5" />
+        <polygon points="55,16 60,2 65,16"  stroke="none" />
+        <line x1="38" y1="48" x2="38" y2="22" strokeWidth="2" />
+        <polygon points="34,24 38,12 42,24" stroke="none" />
+        <line x1="82" y1="48" x2="82" y2="22" strokeWidth="2" />
+        <polygon points="78,24 82,12 86,24" stroke="none" />
+        <line x1="34" y1="50" x2="86" y2="50" strokeWidth="3" />
+        <line x1="60" y1="50" x2="60" y2="108" strokeWidth="2.5" />
+        <ellipse cx="60" cy="58" rx="6" ry="2.5" stroke="none" />
+      </g>,
+    );
+
+    case "lotus": return wrap(
+      <>
+        {[0, 36, 72, 108, 144, 180, 216, 252, 288, 324].map((deg) => (
+          <ellipse key={`o-${deg}`} cx="60" cy="34" rx="6" ry="22"
+            fill="currentColor" opacity="0.4"
+            transform={`rotate(${deg} 60 60)`} />
+        ))}
+        {[18, 54, 90, 126, 162, 198, 234, 270, 306, 342].map((deg) => (
+          <ellipse key={`i-${deg}`} cx="60" cy="44" rx="5" ry="14"
+            fill="currentColor" opacity="0.6"
+            transform={`rotate(${deg} 60 60)`} />
+        ))}
+        <circle cx="60" cy="60" r="6" fill="currentColor" />
+      </>,
+    );
+
+    case "sun": return wrap(
+      <>
+        <circle cx="60" cy="60" r="22" fill="currentColor" opacity="0.4" />
+        <circle cx="60" cy="60" r="14" fill="currentColor" opacity="0.7" />
+        {[0,30,60,90,120,150,180,210,240,270,300,330].map((deg) => {
+          const [x1, y1] = polar(60, 60, 28, deg);
+          const [x2, y2] = polar(60, 60, 42, deg);
+          return <line key={deg} x1={x1} y1={y1} x2={x2} y2={y2}
+                       stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />;
+        })}
+      </>,
+    );
+
+    case "rakhi": return wrap(
+      <>
+        <path d="M 0 60 Q 25 50 44 60"   fill="none" stroke="currentColor" strokeWidth="2"   strokeLinecap="round" />
+        <path d="M 120 60 Q 95 70 76 60" fill="none" stroke="currentColor" strokeWidth="2"   strokeLinecap="round" />
+        <path d="M 0 65 Q 22 56 42 64"   fill="none" stroke="currentColor" strokeWidth="1"   opacity="0.6" />
+        <path d="M 120 65 Q 98 73 78 65" fill="none" stroke="currentColor" strokeWidth="1"   opacity="0.6" />
+        <circle cx="60" cy="60" r="18" fill="currentColor" opacity="0.4" />
+        <circle cx="60" cy="60" r="10" fill="currentColor" opacity="0.7" />
+        {[0,45,90,135,180,225,270,315].map((deg) => {
+          const [x, y] = polar(60, 60, 18, deg);
+          return <circle key={deg} cx={x} cy={y} r="2" fill="currentColor" />;
+        })}
+      </>,
+    );
+
+    case "khanda": return wrap(
+      <g stroke="currentColor" fill="currentColor">
+        {/* Centre double-edged sword */}
+        <line x1="60" y1="14" x2="60" y2="106" strokeWidth="2.5" />
+        <polygon points="56,16 60,4 64,16" stroke="none" />
+        <ellipse cx="60" cy="60" rx="6" ry="3" stroke="none" />
+        {/* Outer crescents */}
+        <path d="M 28 60 Q 28 32 60 28" fill="none" strokeWidth="2.2" />
+        <path d="M 92 60 Q 92 32 60 28" fill="none" strokeWidth="2.2" />
+        {/* Inner single-edged daggers */}
+        <line x1="40" y1="32" x2="40" y2="64" strokeWidth="1.8" />
+        <polygon points="37,34 40,24 43,34" stroke="none" />
+        <line x1="80" y1="32" x2="80" y2="64" strokeWidth="1.8" />
+        <polygon points="77,34 80,24 83,34" stroke="none" />
+        {/* Bottom chakra ring */}
+        <circle cx="60" cy="80" r="14" fill="none" strokeWidth="2.2" />
+      </g>,
+    );
+
+    case "mandala":
+    default: return wrap(
+      <>
+        {Array.from({ length: 24 }).map((_, i) => {
+          const [x, y] = polar(60, 60, 54, (i * 360) / 24);
+          return <circle key={`d-${i}`} cx={x} cy={y} r="0.9" fill="currentColor" />;
+        })}
+        {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
+          <ellipse key={`p-${deg}`} cx="60" cy="32" rx="9" ry="22"
+            fill="currentColor" opacity="0.55"
+            transform={`rotate(${deg} 60 60)`} />
+        ))}
+        <circle cx="60" cy="60" r="14" fill="none" stroke="currentColor" strokeWidth="0.8" />
+        <circle cx="60" cy="60" r="6"  fill="currentColor" />
+      </>, 0.16,
+    );
+  }
 }
 
 function QuickLinksCard() {
@@ -1051,8 +1592,6 @@ export default function HRHomePage() {
   const activeHoliday = upcoming[holidayIdx] ?? null;
   const canPrevHoliday = holidayIdx > 0;
   const canNextHoliday = holidayIdx < upcoming.length - 1;
-  // Per-holiday visual theme (background gradient + bottom decoration).
-  const holidayTheme = pickHolidayTheme(activeHoliday?.name);
 
   const submitPost = async () => {
     let content: string;
@@ -1280,37 +1819,35 @@ export default function HRHomePage() {
               </div>
             </div>
 
+            {/* Holidays card — colourful themed gradient with a
+                festival-specific illustration along the bottom. Each
+                holiday gets its own background palette and scene
+                (mosque + crescent for Eid, tricolor flag for
+                Independence, rakhi + gift for Raksha Bandhan, lotus
+                for Buddha Purnima, etc.) so the template visibly
+                changes from one festival to the next. */}
+            {(() => {
+              const theme = pickHolidayTheme(activeHoliday?.name);
+              return (
             <div
               className="relative min-h-[140px] overflow-hidden rounded-xl border text-white shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors"
-              style={{ background: holidayTheme.bg, borderColor: holidayTheme.border }}
+              style={{ background: theme.bg, borderColor: theme.border }}
             >
-              {/* Soft radial highlights for ambient depth — replaces the
-                  busy bottom scene with a polished glow. */}
+              {/* Bottom illustration — switches per festival. */}
+              {theme.scene}
+              {/* Soft top sheen that gives the card a polished, lit feel. */}
+              <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/15 to-transparent" />
+              {/* Subtle radial highlight in the top-right corner. */}
               <span
+                aria-hidden="true"
                 className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full"
                 style={{ background: "radial-gradient(closest-side, rgba(255,255,255,0.22), rgba(255,255,255,0))" }}
               />
-              <span
-                className="pointer-events-none absolute -bottom-20 -left-16 h-44 w-44 rounded-full"
-                style={{ background: "radial-gradient(closest-side, rgba(0,0,0,0.18), rgba(0,0,0,0))" }}
-              />
-              {/* Faint dotted texture along the bottom — far more elegant
-                  than literal hills/sun/dots. */}
-              <svg className="pointer-events-none absolute inset-x-0 bottom-0 h-12 w-full opacity-40" viewBox="0 0 340 48" preserveAspectRatio="none">
-                <defs>
-                  <pattern id="holiday-dots" x="0" y="0" width="14" height="14" patternUnits="userSpaceOnUse">
-                    <circle cx="2" cy="2" r="1" fill="rgba(255,255,255,0.35)" />
-                  </pattern>
-                </defs>
-                <rect width="100%" height="100%" fill="url(#holiday-dots)" />
-              </svg>
 
-              {/* Glossy top sheen — subtle white highlight that gives the
-                  card a polished, lit feel. */}
-              <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/15 to-transparent" />
-
-              {/* Prev/next arrows — only render when there's more than one
-                  holiday to page through. */}
+              {/* Prev/next pagination chevrons — fully transparent so the
+                  arrows feel like a part of the gradient itself. Only the
+                  glyph carries colour; a faint white tint shows up on
+                  hover for affordance. */}
               {upcoming.length > 1 && (
                 <>
                   <button
@@ -1318,46 +1855,44 @@ export default function HRHomePage() {
                     onClick={() => setHolidayIdx((i) => Math.max(0, i - 1))}
                     disabled={!canPrevHoliday}
                     aria-label="Previous holiday"
-                    className="absolute left-2 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/30 disabled:opacity-25 disabled:cursor-not-allowed"
+                    className="group absolute left-1 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-transparent text-white/85 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-25"
                   >
-                    <ChevronLeft className="h-4 w-4" />
+                    <ChevronLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
                   </button>
                   <button
                     type="button"
                     onClick={() => setHolidayIdx((i) => Math.min(upcoming.length - 1, i + 1))}
                     disabled={!canNextHoliday}
                     aria-label="Next holiday"
-                    className="absolute right-2 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/30 disabled:opacity-25 disabled:cursor-not-allowed"
+                    className="group absolute right-1 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-transparent text-white/85 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-25"
                   >
-                    <ChevronRight className="h-4 w-4" />
+                    <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
                   </button>
                 </>
               )}
 
-              <div className={`relative z-10 py-4 pl-4 pr-4 ${upcoming.length > 1 ? "pl-10 pr-10" : ""}`}>
-                <div className="mb-2 flex items-start justify-between">
-                  <span
-                    className="text-[10px] font-bold uppercase tracking-[0.16em]"
-                    style={{ color: "rgba(255,255,255,0.92)", WebkitTextFillColor: "rgba(255,255,255,0.92)" }}
-                  >
-                    Holidays
-                  </span>
-                  <Link
-                    href={isAdmin ? "/dashboard/hr/admin/holidays" : "/dashboard/hr/leaves"}
-                    className="text-[11px] font-medium underline-offset-2 hover:underline transition"
-                    style={{ color: "rgba(255,255,255,0.92)", WebkitTextFillColor: "rgba(255,255,255,0.92)" }}
-                  >
-                    View All
-                  </Link>
-                </div>
+              <div className={`relative z-10 flex items-start justify-between p-4 pb-2 ${upcoming.length > 1 ? "px-10" : ""}`}>
+                <span
+                  className="text-[10px] font-bold uppercase tracking-[0.16em]"
+                  style={{ color: "rgba(255,255,255,0.92)", WebkitTextFillColor: "rgba(255,255,255,0.92)" }}
+                >
+                  Holidays
+                </span>
+                <Link
+                  href={isAdmin ? "/dashboard/hr/admin/holidays" : "/dashboard/hr/leaves"}
+                  className="text-[11px] font-medium underline-offset-2 transition hover:underline"
+                  style={{ color: "rgba(255,255,255,0.92)", WebkitTextFillColor: "rgba(255,255,255,0.92)" }}
+                >
+                  View All
+                </Link>
+              </div>
 
-                {activeHoliday ? (
+              {activeHoliday ? (
+                <div className={`relative z-10 px-4 pb-4 ${upcoming.length > 1 ? "px-10" : ""}`}>
                   <div className="flex items-start gap-4">
-                    {/* Date tile — calendar-style day-number prominent on the
-                        left, month abbreviation underneath. */}
-                    <div
-                      className="flex h-[58px] w-[58px] flex-shrink-0 flex-col items-center justify-center rounded-lg bg-white/15 backdrop-blur-sm ring-1 ring-inset ring-white/25"
-                    >
+                    {/* Date tile — translucent white over the themed bg
+                        for a frosted-glass feel. */}
+                    <div className="flex h-[60px] w-[60px] flex-shrink-0 flex-col items-center justify-center rounded-lg bg-white/15 ring-1 ring-inset ring-white/25 backdrop-blur-sm">
                       <span
                         className="text-[22px] font-bold leading-none"
                         style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
@@ -1381,17 +1916,30 @@ export default function HRHomePage() {
                         {activeHoliday.name}
                       </p>
                       <p
-                        className="mt-1 text-[11px] font-medium"
+                        className="mt-1 text-[11.5px] font-medium"
                         style={{ color: "rgba(255,255,255,0.85)", WebkitTextFillColor: "rgba(255,255,255,0.85)" }}
                       >
-                        {new Date(activeHoliday.date).toLocaleDateString("en-IN", {
-                          weekday: "long",
-                          year: "numeric",
-                          timeZone: "UTC",
-                        })}
+                        {new Date(activeHoliday.date).toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" })}
+                        <span style={{ color: "rgba(255,255,255,0.6)", WebkitTextFillColor: "rgba(255,255,255,0.6)" }} className="mx-1.5">·</span>
+                        {new Date(activeHoliday.date).toLocaleDateString("en-IN", { year: "numeric", timeZone: "UTC" })}
+                        {(() => {
+                          const today = new Date(); today.setHours(0, 0, 0, 0);
+                          const target = new Date(activeHoliday.date);
+                          const days = Math.round((target.getTime() - today.getTime()) / 86_400_000);
+                          if (days < 0)  return null;
+                          if (days === 0) return <span className="ml-1.5 font-semibold" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>· today</span>;
+                          return (
+                            <>
+                              <span className="mx-1.5" style={{ color: "rgba(255,255,255,0.6)", WebkitTextFillColor: "rgba(255,255,255,0.6)" }}>·</span>
+                              <span className="font-semibold" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>
+                                {days === 1 ? "tomorrow" : `in ${days} days`}
+                              </span>
+                            </>
+                          );
+                        })()}
                       </p>
                       <span
-                        className="mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.12em] ring-1 ring-inset ring-white/20"
+                        className="mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.12em] ring-1 ring-inset ring-white/20"
                         style={{
                           background: "rgba(255,255,255,0.18)",
                           color: "#ffffff",
@@ -1401,30 +1949,32 @@ export default function HRHomePage() {
                       >
                         <span
                           className="inline-block h-1.5 w-1.5 rounded-full"
-                          style={{ background: holidayTheme.badge ?? HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#ffffff" }}
+                          style={{ background: theme.badge ?? HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#ffffff" }}
                         />
                         {HOLIDAY_TYPE_LABEL[activeHoliday.type] ?? "PUBLIC HOLIDAY"}
                       </span>
                     </div>
                   </div>
-                ) : (
-                  <>
-                    <p
-                      className="text-[15px] font-semibold"
-                      style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
-                    >
-                      No event today
-                    </p>
-                    <p
-                      className="mt-1 text-[11px]"
-                      style={{ color: "rgba(255,255,255,0.88)", WebkitTextFillColor: "rgba(255,255,255,0.88)" }}
-                    >
-                      No upcoming holidays on file.
-                    </p>
-                  </>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="relative z-10 px-4 pb-4">
+                  <p
+                    className="text-[15px] font-semibold"
+                    style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
+                  >
+                    No event today
+                  </p>
+                  <p
+                    className="mt-1 text-[11px]"
+                    style={{ color: "rgba(255,255,255,0.88)", WebkitTextFillColor: "rgba(255,255,255,0.88)" }}
+                  >
+                    No upcoming holidays on file.
+                  </p>
+                </div>
+              )}
             </div>
+              );
+            })()}
 
             <div className={`${C.card} p-3.5`}>
               <p className={`mb-3 text-[13px] font-semibold ${C.t1}`}>On Leave Today</p>

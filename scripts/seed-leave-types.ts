@@ -4,10 +4,11 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-// Only the five leave types the company actually offers — nothing extra.
+// Only the leave types the company actually offers — nothing extra.
 const TYPES = [
   { code: "COMP", name: "Comp Offs",          daysPerYear: 0,  carryForward: false, isPaid: true  },
   { code: "FL",   name: "Floater Leave",      daysPerYear: 2,  carryForward: false, isPaid: true  },
+  { code: "HD",   name: "Half Day",           daysPerYear: 0,  carryForward: false, isPaid: true  },
   { code: "LWP",  name: "Leave Without Pay",  daysPerYear: 0,  carryForward: false, isPaid: false },
   { code: "SL",   name: "Sick Leave",         daysPerYear: 12, carryForward: false, isPaid: true  },
   { code: "SPL",  name: "Special Paid Leave", daysPerYear: 0,  carryForward: false, isPaid: true  },
