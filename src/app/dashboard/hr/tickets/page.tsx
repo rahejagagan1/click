@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 
 const TOP_TABS = [
-  { key: "home",       label: "HOME",       href: "/dashboard/hr/analytics"  },
+  { key: "home",       label: "HOME",       href: "/dashboard/hr/home"  },
   { key: "attendance", label: "ATTENDANCE", href: "/dashboard/hr/attendance" },
   { key: "leave",      label: "LEAVE",      href: "/dashboard/hr/leaves"     },
   { key: "performance",label: "PERFORMANCE",href: "/dashboard/hr/goals"      },

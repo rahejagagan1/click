@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Target, Plus, ChevronDown, TrendingUp, AlertTriangle, Clock, CheckCircle2, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
 
 const TOP_TABS = [
-  { key: "home",        label: "HOME",              href: "/dashboard/hr/analytics"  },
+  { key: "home",        label: "HOME",              href: "/dashboard/hr/home"  },
   { key: "attendance",  label: "ATTENDANCE",        href: "/dashboard/hr/attendance" },
   { key: "leave",       label: "LEAVE",             href: "/dashboard/hr/leaves"     },
   { key: "performance", label: "PERFORMANCE",       href: "/dashboard/hr/goals"      },
