@@ -1,15 +1,17 @@
 import { serverError } from "@/lib/api-auth";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { getServerSession } from "next-auth";
 import type { Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
+import { parseBody } from "@/lib/validate";
 import { serializeBigInt } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-const ALLOWED = new Set([
+const ALLOWED_CATEGORIES = [
     "people_team_dynamics",
     "work_culture_environment",
     "ideas_improvements",
@@ -17,9 +19,14 @@ const ALLOWED = new Set([
     "compensation_support",
     "unfiltered_unsaid",
     "anything_else",
-]);
-const DEFAULT_CATEGORY = "anything_else";
+] as const;
+const DEFAULT_CATEGORY: (typeof ALLOWED_CATEGORIES)[number] = "anything_else";
 const MAX_LEN = 8000;
+
+const FeedbackBody = z.object({
+    category: z.string().trim().toLowerCase().optional(),
+    message: z.string().trim().min(1, "Message is required").max(MAX_LEN, `Message must be at most ${MAX_LEN} characters`),
+});
 
 /** GET — CEO, Developer, HR: list feedback (no submitter PII — anonymous inbox) */
 export async function GET() {
@@ -66,17 +73,11 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        const body = await request.json().catch(() => ({}));
-        const rawCat = typeof body.category === "string" ? body.category.trim().toLowerCase() : DEFAULT_CATEGORY;
-        const category = ALLOWED.has(rawCat) ? rawCat : DEFAULT_CATEGORY;
-        const message = typeof body.message === "string" ? body.message.trim() : "";
-
-        if (!message) {
-            return NextResponse.json({ error: "Message is required" }, { status: 400 });
-        }
-        if (message.length > MAX_LEN) {
-            return NextResponse.json({ error: `Message must be at most ${MAX_LEN} characters` }, { status: 400 });
-        }
+        const parsed = await parseBody(request, FeedbackBody);
+        if (!parsed.ok) return parsed.error;
+        const { message } = parsed.data;
+        const rawCat = parsed.data.category ?? DEFAULT_CATEGORY;
+        const category = (ALLOWED_CATEGORIES as readonly string[]).includes(rawCat) ? rawCat : DEFAULT_CATEGORY;
 
         await prisma.userFeedback.create({
             data: {

@@ -123,6 +123,7 @@ model User {
   notificationsTriggered Notification[]   @relation("NotificationActor")
   tabPermissions         UserTabPermission[] @relation("UserTabPermsOwner")
   tabPermissionsUpdated  UserTabPermission[] @relation("UserTabPermsUpdater")
+  auditLogs              AuditLog[]          @relation("AuditLogActor")
 
   @@index([managerId])
 }
@@ -1515,5 +1516,41 @@ model Notification {
   actor      User?     @relation("NotificationActor",     fields: [actorId], references: [id])
 
   @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+
+// ═══════════════════════════════════════════════════════
+// AUDIT LOG — every important write produces a row here
+// ═══════════════════════════════════════════════════════
+//
+// Append-only ledger of who changed what, when, and from where.
+// Required for compliance audits (SOC 2 / ISO 27001) and for
+// answering "who deleted this row?" type questions.
+//
+// `action`     — dot-namespaced verb, e.g. "leave.approve",
+//                "payroll.assign", "user.permissions.update"
+// `entityType` — model name the change applied to ("LeaveApplication")
+// `entityId`   — string-typed so it works for any id shape
+// `before`/`after` — JSON snapshots; helper redacts PII columns.
+model AuditLog {
+  id          Int       @id @default(autoincrement())
+  actorId     Int?
+  actorEmail  String?
+  action      String
+  entityType  String
+  entityId    String?
+  before      Json?
+  after       Json?
+  ip          String?
+  userAgent   String?
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+
+  actor       User?     @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([action])
+  @@index([entityType, entityId])
   @@index([createdAt])
 }
