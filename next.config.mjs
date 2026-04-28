@@ -9,13 +9,14 @@ const nextConfig = {
     // Enable compression
     compress: true,
     // ── Build-time check escape hatches ────────────────────────────────
-    // CI gates type/lint correctness via the dedicated jobs in
-    // .github/workflows/ci.yml. Disabling them here lets `next build`
-    // succeed even while pre-existing type / lint debt is still being
-    // cleaned up incrementally. Remove these once the codebase passes
-    // strict tsc + eslint cleanly.
+    // CI gates type correctness via the dedicated job in
+    // .github/workflows/ci.yml. Disabling tsc here lets `next build`
+    // succeed even while pre-existing type debt is cleaned up incrementally.
+    // Remove this once the codebase passes strict tsc cleanly.
+    // (Next.js 16+ no longer lints during `next build`, so the previous
+    // `eslint: { ignoreDuringBuilds: true }` override is no longer needed —
+    // and is rejected as an unrecognized config key.)
     typescript: { ignoreBuildErrors: true },
-    eslint:     { ignoreDuringBuilds: true },
     // Log fetch details in dev for debugging slow API calls
     logging: {
         fetches: {
