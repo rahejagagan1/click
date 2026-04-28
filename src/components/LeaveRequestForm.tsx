@@ -87,7 +87,7 @@ function LeaveTypePicker({
           ${open ? "border-[#008CFF] dark:border-[#4a9cff] ring-1 ring-[#008CFF]/20" : "hover:border-[#008CFF]/40"}
         `}
       >
-        <span className={selected ? "" : "text-slate-400"}>{selected?.name ?? "Select"}</span>
+        <span className={selected ? "" : "text-slate-400"}>{selected?.name ?? "Select Leave"}</span>
         <ChevronDown size={16} strokeWidth={2} className={`transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
@@ -282,19 +282,28 @@ export default function LeaveRequestForm({
   const today = prefillDate || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const [fromDate, setFromDate] = useState(today);
   const [toDate,   setToDate]   = useState(today);
-  const [leaveTypeId, setLeaveTypeId] = useState<number | "">(leaveTypes?.[0]?.id ?? "");
+  // Start with no leave type chosen — the picker shows the "Select Leave"
+  // placeholder so the user makes a deliberate choice rather than accidentally
+  // submitting against the first type in the list.
+  const [leaveTypeId, setLeaveTypeId] = useState<number | "">("");
   const [note, setNote]         = useState("");
   const [notify, setNotify]     = useState<{ id: number; name: string; email?: string; profilePictureUrl?: string | null }[]>([]);
   const [saving, setSaving]     = useState(false);
   const [err, setErr]           = useState("");
   const [isHalfDayWfh, setIsHalfDayWfh] = useState(false);
+  // Full vs half day, with which half — only meaningful on the leave form. The
+  // half-day form (`kind=half_day`) keeps its own legacy flow and ignores this.
+  const [dayKind, setDayKind] = useState<"full" | "first_half" | "second_half">("full");
+  const isHalfLeave = kind === "leave" && dayKind !== "full";
 
   const days = useMemo(() => {
     if (!fromDate || !toDate) return 0;
+    // Half-day leave is always a single date and counts as 0.5.
+    if (isHalfLeave) return 0.5;
     const a = new Date(fromDate), b = new Date(toDate);
     if (isNaN(a.getTime()) || isNaN(b.getTime()) || a > b) return 0;
     return Math.round((b.getTime() - a.getTime()) / 86_400_000) + 1;
-  }, [fromDate, toDate]);
+  }, [fromDate, toDate, isHalfLeave]);
 
   const submit = async () => {
     setErr("");
@@ -339,7 +348,15 @@ export default function LeaveRequestForm({
       }
     } else if (kind === "leave") {
       url = "/api/hr/leaves";
-      payload = { leaveTypeId, fromDate, toDate, reason: note, notifyUserIds };
+      // Half-day leave: force a single-date range and tag the reason so the
+      // home-page board badge + downstream consumers can detect which half.
+      // Markers must match the regexes in /api/hr/attendance/board/route.ts.
+      const reason =
+        dayKind === "first_half"  ? `[First Half] ${note}`  :
+        dayKind === "second_half" ? `[Second Half] ${note}` :
+                                    note;
+      const halfDayTo = isHalfLeave ? fromDate : toDate;
+      payload = { leaveTypeId, fromDate, toDate: halfDayTo, reason, notifyUserIds };
       refreshKeys = ["/api/hr/leaves", "/api/hr/leaves/balance"];
     }
 
@@ -382,7 +399,12 @@ export default function LeaveRequestForm({
                 <input
                   type="date"
                   value={fromDate}
-                  onChange={(e) => { setFromDate(e.target.value); if (!toDate || new Date(e.target.value) > new Date(toDate)) setToDate(e.target.value); }}
+                  onChange={(e) => {
+                    setFromDate(e.target.value);
+                    // Half-day must stay on a single date; keep To pinned to From.
+                    if (isHalfLeave) setToDate(e.target.value);
+                    else if (!toDate || new Date(e.target.value) > new Date(toDate)) setToDate(e.target.value);
+                  }}
                   className="mt-1 w-full bg-transparent text-[13px] font-semibold text-slate-900 dark:text-white focus:outline-none"
                 />
               </div>
@@ -393,14 +415,84 @@ export default function LeaveRequestForm({
                 <p className="text-[10.5px] uppercase tracking-widest font-semibold text-slate-500 dark:text-slate-400">To</p>
                 <input
                   type="date"
-                  value={toDate}
+                  value={isHalfLeave ? fromDate : toDate}
                   min={fromDate}
+                  disabled={isHalfLeave}
                   onChange={(e) => setToDate(e.target.value)}
-                  className="mt-1 w-full bg-transparent text-[13px] font-semibold text-slate-900 dark:text-white text-right focus:outline-none"
+                  className="mt-1 w-full bg-transparent text-[13px] font-semibold text-slate-900 dark:text-white text-right focus:outline-none disabled:text-slate-400 disabled:cursor-not-allowed"
                 />
               </div>
             </div>
           </div>
+
+          {/* Full vs Half day toggle — leave form only. Half day collapses the
+              date range to a single date and saves with a [First Half] /
+              [Second Half] reason marker. The First / Second sub-toggle nests
+              under the Half Day column so it's visually scoped to that choice. */}
+          {kind === "leave" && (
+            <div className="grid grid-cols-2 gap-2 items-start">
+              {/* Left column — Full Day */}
+              <button
+                type="button"
+                onClick={() => setDayKind("full")}
+                className={`h-9 rounded-lg border text-[12.5px] font-semibold transition-colors ${
+                  dayKind === "full"
+                    ? "border-[#008CFF] bg-[#008CFF]/10 text-[#008CFF] dark:border-[#4a9cff] dark:bg-[#4a9cff]/15 dark:text-[#4a9cff]"
+                    : "border-slate-200 dark:border-white/[0.08] text-slate-600 dark:text-slate-300 hover:border-[#008CFF]/40"
+                }`}
+              >
+                Full Day
+              </button>
+
+              {/* Right column — Half Day, with First / Second sub-toggle stacked
+                  directly underneath it so the two are visually grouped. */}
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Collapse the range to a single date when switching to half-day —
+                    // the API + leave-balance math both assume one calendar day.
+                    setToDate(fromDate);
+                    setDayKind((d) => (d === "full" ? "first_half" : d));
+                  }}
+                  className={`h-9 w-full rounded-lg border text-[12.5px] font-semibold transition-colors ${
+                    isHalfLeave
+                      ? "border-[#008CFF] bg-[#008CFF]/10 text-[#008CFF] dark:border-[#4a9cff] dark:bg-[#4a9cff]/15 dark:text-[#4a9cff]"
+                      : "border-slate-200 dark:border-white/[0.08] text-slate-600 dark:text-slate-300 hover:border-[#008CFF]/40"
+                  }`}
+                >
+                  Half Day
+                </button>
+
+                {isHalfLeave && (
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setDayKind("first_half")}
+                      className={`h-8 rounded-md border text-[11.5px] font-medium transition-colors ${
+                        dayKind === "first_half"
+                          ? "border-[#008CFF] bg-[#008CFF]/[0.06] text-[#008CFF] dark:border-[#4a9cff] dark:text-[#4a9cff]"
+                          : "border-slate-200 dark:border-white/[0.08] text-slate-500 dark:text-slate-400 hover:border-[#008CFF]/40"
+                      }`}
+                    >
+                      First Half
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDayKind("second_half")}
+                      className={`h-8 rounded-md border text-[11.5px] font-medium transition-colors ${
+                        dayKind === "second_half"
+                          ? "border-[#008CFF] bg-[#008CFF]/[0.06] text-[#008CFF] dark:border-[#4a9cff] dark:text-[#4a9cff]"
+                          : "border-slate-200 dark:border-white/[0.08] text-slate-500 dark:text-slate-400 hover:border-[#008CFF]/40"
+                      }`}
+                    >
+                      Second Half
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Policy */}
           {policyText && (
