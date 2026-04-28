@@ -244,10 +244,12 @@ async function main() {
         data[f] = ["dateOfBirth","joiningDate"].includes(f) ? parseDate(rec[f]) : rec[f];
       }
     }
+    // Cast: this one-off bulk import skips the typed firstName/lastName/etc.
+    // requirements; whatever's in `data` is whatever the spreadsheet had.
     await prisma.employeeProfile.upsert({
       where: { userId: user.id },
-      create: { userId: user.id, ...data },
-      update: data,
+      create: { userId: user.id, ...data } as any,
+      update: data as any,
     });
     profiled++;
   }

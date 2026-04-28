@@ -122,10 +122,31 @@ export async function POST(request: NextRequest) {
 
             if (profile && typeof profile === "object") {
                 const employeeId = profile.employeeId || `NB-${new Date().getFullYear()}-${String(created.id).padStart(4, "0")}`;
+                // Derive firstName / lastName from `name` if the caller didn't
+                // supply them — schema requires both.
+                const nameParts = String(name ?? "").trim().split(/\s+/).filter(Boolean);
+                const firstName = profile.firstName || nameParts[0] || "Unknown";
+                const lastName  = profile.lastName  || nameParts.slice(1).join(" ") || "Unknown";
+                // Default nationality. numberSeriesId is best-effort: the
+                // EmployeeNumberSeries table is the source of truth, but for
+                // ad-hoc creates we fall back to the lowest active series id.
+                const fallbackSeries = await tx.employeeNumberSeries.findFirst({
+                    where: { isActive: true },
+                    orderBy: { id: "asc" },
+                    select: { id: true },
+                });
+                const numberSeriesId = profile.numberSeriesId ?? fallbackSeries?.id;
+                if (!numberSeriesId) {
+                    throw new Error("No active EmployeeNumberSeries — create one before adding employees.");
+                }
                 await tx.employeeProfile.create({
                     data: {
                         userId:           created.id,
                         employeeId,
+                        firstName,
+                        lastName,
+                        nationality:      profile.nationality      ?? "Indian",
+                        numberSeriesId,
                         designation:      profile.designation      ?? null,
                         department:       profile.department       ?? null,
                         employmentType:   profile.employmentType   ?? "fulltime",
