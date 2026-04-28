@@ -32,22 +32,29 @@ export async function GET() {
     }
 
     const teamWhere: any = isFinalApprover ? {} : { user: { managerId: myId! } };
+    // Open-status filter: every request type now uses the L1 → L2 flow,
+    // except regularization (HR-admin-only, single-stage). For non-leave
+    // request types, both pending (awaiting L1) and partially_approved
+    // (awaiting L2) count toward the inbox badge.
+    const openTwoStage = { status: { in: ["pending", "partially_approved"] } };
 
     const [leaveCount, regCount, wfhCount, odCount, compOffCount] = await Promise.all([
       prisma.leaveApplication.count({
-        where: { status: { in: ["pending", "partially_approved"] }, ...teamWhere },
+        where: { ...openTwoStage, ...teamWhere },
       }),
-      prisma.attendanceRegularization.count({
-        where: { status: "pending", ...teamWhere },
-      }),
+      // Regularization is HR-admin-only — managers don't see it in their
+      // count at all. Final approvers see every open row.
+      isFinalApprover
+        ? prisma.attendanceRegularization.count({ where: openTwoStage })
+        : Promise.resolve(0),
       prisma.wFHRequest.count({
-        where: { status: "pending", ...teamWhere },
+        where: { ...openTwoStage, ...teamWhere },
       }),
       prisma.onDutyRequest.count({
-        where: { status: "pending", ...teamWhere },
+        where: { ...openTwoStage, ...teamWhere },
       }),
       prisma.compOffRequest.count({
-        where: { status: "pending", ...teamWhere },
+        where: { ...openTwoStage, ...teamWhere },
       }),
     ]);
 
