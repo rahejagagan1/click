@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, arpit, gagan]
+
+# Cancel in-progress runs for the same branch when a new commit lands.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-typecheck:
+    name: Lint + TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true   # advisory until the existing lint debt is cleared
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+        continue-on-error: true   # advisory until the existing type debt is cleared
+        # Pre-existing type errors live in scripts/import-users.ts,
+        # src/app/api/users/route.ts, src/app/api/hr/admin/leave-types/route.ts,
+        # src/app/api/hr/admin/shifts/route.ts (refers to a non-existent
+        # `shiftTemplate` model), src/app/dashboard/hr/engage/page.tsx, etc.
+        # Track these as a follow-up cleanup; the CI surfaces them but
+        # doesn't block merges yet.
+
+  prisma-validate:
+    name: Prisma schema sanity
+    runs-on: ubuntu-latest
+    # `prisma validate` reads the datasource block which references
+    # env vars (DATABASE_URL etc.) — supply dummy values so the schema
+    # check itself passes. We're not running migrations here.
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      SHADOW_DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_shadow
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate prisma schema
+        run: npx prisma validate
+
+      - name: Format check (advisory)
+        run: npx prisma format --check
+        continue-on-error: true
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Build (Next.js)
+        run: npm run build
+        env:
+          # CI doesn't run a real DB — the build step only needs valid env
+          # *shape*, not real connectivity.
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          NEXTAUTH_SECRET: ci-secret-not-for-prod
+          NEXTAUTH_URL: http://localhost:3000
+          GOOGLE_CLIENT_ID: ci-client-id
+          GOOGLE_CLIENT_SECRET: ci-client-secret
+          PII_ENCRYPTION_KEY: ci-only-32-char-encryption-key-12345
+          NODE_ENV: production
