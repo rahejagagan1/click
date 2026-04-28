@@ -3,8 +3,42 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { Bell, CheckCheck, Activity, Home, Briefcase, ShieldCheck, Coffee, Trash2 } from "lucide-react";
+import { Bell, BellOff, CheckCheck, Activity, Home, Briefcase, ShieldCheck, Coffee, Trash2 } from "lucide-react";
 import Link from "next/link";
+
+// ── Notification sound ──────────────────────────────────────────────────────
+// Browser-generated ping (no asset file). Two-note "bing" — short and gentle
+// enough to never be annoying. Silently fails on browsers that block audio
+// before the first user interaction (Safari / mobile autoplay policies).
+const SOUND_PREF_KEY = "nbm:notif:sound";
+function playNotificationSound() {
+  try {
+    const Ctx = (typeof window !== "undefined")
+      ? ((window as any).AudioContext || (window as any).webkitAudioContext)
+      : null;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const now = ctx.currentTime;
+    const tones: { freq: number; start: number; dur: number }[] = [
+      { freq: 880,  start: 0,    dur: 0.12 }, // A5
+      { freq: 1175, start: 0.10, dur: 0.18 }, // D6 — overlap for a soft chord
+    ];
+    for (const t of tones) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = t.freq;
+      gain.gain.setValueAtTime(0, now + t.start);
+      gain.gain.linearRampToValueAtTime(0.18, now + t.start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + t.start + t.dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + t.start);
+      osc.stop(now + t.start + t.dur + 0.02);
+    }
+    setTimeout(() => { try { ctx.close(); } catch {} }, 800);
+  } catch { /* autoplay blocked or no audio support — silently ignore */ }
+}
 
 function timeAgo(iso: string): string {
   const t  = new Date(iso).getTime();
@@ -40,6 +74,32 @@ export default function NotificationBell() {
   const { data } = useSWR("/api/hr/notifications?limit=10", fetcher, { refreshInterval: 30_000 });
   const items = (data?.items as any[]) || [];
   const unread = data?.unreadCount ?? 0;
+
+  // Sound preference — persisted in localStorage, default ON.
+  const [soundOn, setSoundOn] = useState<boolean>(true);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const v = window.localStorage.getItem(SOUND_PREF_KEY);
+    if (v != null) setSoundOn(v === "1");
+  }, []);
+  const toggleSound = () => {
+    setSoundOn((s) => {
+      const next = !s;
+      try { window.localStorage.setItem(SOUND_PREF_KEY, next ? "1" : "0"); } catch {}
+      return next;
+    });
+  };
+
+  // Play a soft ping when unread count goes UP — including a missed-poll jump
+  // (3 → 5 plays once). Skip on first render so the page doesn't ping on load.
+  const prevUnreadRef = useRef<number | null>(null);
+  useEffect(() => {
+    const prev = prevUnreadRef.current;
+    if (prev != null && unread > prev && soundOn) {
+      playNotificationSound();
+    }
+    prevUnreadRef.current = unread;
+  }, [unread, soundOn]);
 
   // Close on outside click. Use click (not mousedown) so the button's own
   // onClick can run first and flip state without racing a close.
@@ -123,6 +183,18 @@ export default function NotificationBell() {
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-white/[0.06] gap-3">
             <span className="text-[14px] font-semibold text-slate-900 dark:text-white shrink-0">Notifications</span>
             <div className="flex items-center gap-3 text-[12px] font-medium">
+              <button
+                type="button"
+                onClick={() => { toggleSound(); if (!soundOn) playNotificationSound(); }}
+                title={soundOn ? "Mute notification sound" : "Unmute notification sound"}
+                aria-label={soundOn ? "Mute notification sound" : "Unmute notification sound"}
+                className={`flex items-center gap-1 transition-colors ${
+                  soundOn ? "text-slate-500 hover:text-[#008CFF]" : "text-slate-400 hover:text-slate-600"
+                }`}
+              >
+                {soundOn ? <Bell size={13} /> : <BellOff size={13} />}
+                {soundOn ? "Sound on" : "Muted"}
+              </button>
               <button
                 type="button"
                 onClick={markAllRead}

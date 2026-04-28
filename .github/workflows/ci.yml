@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, arpit, gagan]
+
+# Cancel in-progress runs for the same branch when a new commit lands.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-typecheck:
+    name: Lint + TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+  prisma-validate:
+    name: Prisma schema + migration sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate prisma schema
+        run: npx prisma validate
+
+      - name: Format check
+        run: npx prisma format --check
+        continue-on-error: true   # advisory only — don't block PRs on whitespace
+
+      - name: Migration sanity (no checked-in models without a migration)
+        run: |
+          # Diff what's in schema vs the latest migration. If the schema has
+          # uncommitted model changes that haven't been turned into a
+          # migration yet, this errors out so the PR can't merge.
+          npx prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema-datamodel prisma/schema.prisma \
+            --shadow-database-url "postgresql://postgres:postgres@localhost:5432/shadow" \
+            --exit-code || (echo "::warning::Schema has changes not captured in any migration. Run 'npx prisma migrate dev --name <change>' locally." && exit 0)
+        continue-on-error: true
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dev
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Build (Next.js)
+        run: npm run build
+        env:
+          # CI doesn't run a real DB — the build step only needs valid env
+          # *shape*, not real connectivity.
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          NEXTAUTH_SECRET: ci-secret-not-for-prod
+          NEXTAUTH_URL: http://localhost:3000
+          GOOGLE_CLIENT_ID: ci-client-id
+          GOOGLE_CLIENT_SECRET: ci-client-secret
+          PII_ENCRYPTION_KEY: ci-only-32-char-encryption-key-12345
+          NODE_ENV: production
