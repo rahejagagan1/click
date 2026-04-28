@@ -15,6 +15,18 @@ const nextConfig = {
         },
     },
 
+    async redirects() {
+        // Old HR home URL — keep saved bookmarks working after the
+        // /dashboard/hr/analytics → /dashboard/hr/home rename.
+        return [
+            {
+                source: "/dashboard/hr/analytics",
+                destination: "/dashboard/hr/home",
+                permanent: true,
+            },
+        ];
+    },
+
     async headers() {
         return [
             {

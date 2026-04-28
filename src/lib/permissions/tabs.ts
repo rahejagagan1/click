@@ -44,7 +44,7 @@ export const TAB_CATALOG: TabDef[] = [
   // governed by orgLevel/isDeveloper only. Keeping it out of the
   // permissions UI prevents admins from accidentally toggling each
   // other out of the control panel.
-  { key: "hr_home",     label: "HR Home",       description: "Personal HR analytics / home",       pathPrefixes: ["/dashboard/hr/analytics"],              defaultForNewUser: true  },
+  { key: "hr_home",     label: "HR Home",       description: "Personal HR analytics / home",       pathPrefixes: ["/dashboard/hr/home"],              defaultForNewUser: true  },
   { key: "hr_me",       label: "Me",            description: "My Profile, Attendance, Leaves…",    pathPrefixes: ["/dashboard/hr/profile","/dashboard/hr/attendance","/dashboard/hr/leaves","/dashboard/hr/payroll","/dashboard/hr/goals","/dashboard/hr/documents","/dashboard/hr/tickets"],
                                                                                                                                                             defaultForNewUser: true  },
   { key: "hr_my_team",  label: "My Team",       description: "Team overview + inbox (managers)",   pathPrefixes: ["/dashboard/hr/my-team","/dashboard/hr/inbox"], defaultForNewUser: false },
