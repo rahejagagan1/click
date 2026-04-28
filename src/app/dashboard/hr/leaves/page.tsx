@@ -338,16 +338,32 @@ function CompOffModal({ onClose }: { onClose: () => void }) {
 
 function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose: () => void }) {
   const [form, setForm] = useState({ leaveTypeId: "", fromDate: "", toDate: "", reason: "" });
+  // Full vs half day with which half. Markers below match the regexes in
+  // /api/hr/attendance/board/route.ts so the home-page badge picks them up.
+  const [dayKind, setDayKind] = useState<"full" | "first_half" | "second_half">("full");
+  const isHalfLeave = dayKind !== "full";
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const dayCount = form.fromDate && form.toDate ? Math.max(0, Math.ceil((new Date(form.toDate).getTime() - new Date(form.fromDate).getTime()) / 86400000) + 1) : 0;
+  const dayCount = isHalfLeave
+    ? (form.fromDate ? 0.5 : 0)
+    : (form.fromDate && form.toDate ? Math.max(0, Math.ceil((new Date(form.toDate).getTime() - new Date(form.fromDate).getTime()) / 86400000) + 1) : 0);
 
   const apply = async () => {
     setError("");
     if (!form.leaveTypeId || !form.fromDate || !form.toDate || !form.reason) return setError("All fields are required");
     setSaving(true);
-    const res = await fetch("/api/hr/leaves", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, leaveTypeId: parseInt(form.leaveTypeId) }) });
+    // Half-day pins toDate to fromDate and tags the reason; the api stays the same.
+    const reason =
+      dayKind === "first_half"  ? `[First Half] ${form.reason}`  :
+      dayKind === "second_half" ? `[Second Half] ${form.reason}` :
+                                  form.reason;
+    const toDate = isHalfLeave ? form.fromDate : form.toDate;
+    const res = await fetch("/api/hr/leaves", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...form, toDate, reason, leaveTypeId: parseInt(form.leaveTypeId) }),
+    });
     const data = await res.json();
     if (!res.ok) { setError(data.error); setSaving(false); return; }
     mutate((key: string) => typeof key === "string" && key.includes("/api/hr/leaves"));
@@ -372,26 +388,94 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
               <input
                 type="date"
                 value={form.fromDate}
-                onChange={(e) => setForm((p) => ({ ...p, fromDate: e.target.value }))}
+                onChange={(e) => setForm((p) => ({
+                  ...p,
+                  fromDate: e.target.value,
+                  // Half-day must stay on a single date; keep To pinned to From.
+                  toDate: isHalfLeave ? e.target.value : (!p.toDate || new Date(e.target.value) > new Date(p.toDate) ? e.target.value : p.toDate),
+                }))}
                 onClick={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
                 onFocus={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
                 className="w-full bg-transparent text-[13px] text-[#008CFF] focus:outline-none cursor-pointer"
               />
             </div>
             <div className="text-center flex items-center justify-center">
-              <span className="text-[14px] font-bold text-slate-800 dark:text-white bg-slate-100 dark:bg-white/5 px-3 py-1 rounded">{dayCount} days</span>
+              <span className="text-[14px] font-bold text-slate-800 dark:text-white bg-slate-100 dark:bg-white/5 px-3 py-1 rounded">{dayCount} day{dayCount === 1 ? "" : "s"}</span>
             </div>
             <div className="text-right">
               <span className="text-[10px] text-slate-500 uppercase tracking-wider block mb-1 text-right">To</span>
               <input
                 type="date"
-                value={form.toDate}
+                value={isHalfLeave ? form.fromDate : form.toDate}
+                disabled={isHalfLeave}
                 onChange={(e) => setForm((p) => ({ ...p, toDate: e.target.value }))}
                 onClick={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
                 onFocus={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
-                className="w-full bg-transparent text-[13px] text-[#008CFF] focus:outline-none text-right cursor-pointer"
+                className="w-full bg-transparent text-[13px] text-[#008CFF] focus:outline-none text-right cursor-pointer disabled:text-slate-400 disabled:cursor-not-allowed"
               />
             </div>
+          </div>
+        </div>
+
+        {/* Full vs Half day toggle. First/Second Half nests under Half Day so
+            the sub-choice is visually scoped to that side. Markers in the
+            reason field drive the half-circle badge on the home-page board. */}
+        <div className="grid grid-cols-2 gap-2 items-start">
+          <button
+            type="button"
+            onClick={() => setDayKind("full")}
+            className={`h-9 rounded-lg border text-[12.5px] font-semibold transition-colors ${
+              dayKind === "full"
+                ? "border-[#008CFF] bg-[#008CFF]/10 text-[#008CFF] dark:border-[#4a9cff] dark:bg-[#4a9cff]/15 dark:text-[#4a9cff]"
+                : "border-slate-200 dark:border-white/[0.08] text-slate-600 dark:text-slate-300 hover:border-[#008CFF]/40"
+            }`}
+          >
+            Full Day
+          </button>
+
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => {
+                // Collapse the range to a single date when switching to half-day.
+                setForm((p) => ({ ...p, toDate: p.fromDate }));
+                setDayKind((d) => (d === "full" ? "first_half" : d));
+              }}
+              className={`h-9 w-full rounded-lg border text-[12.5px] font-semibold transition-colors ${
+                isHalfLeave
+                  ? "border-[#008CFF] bg-[#008CFF]/10 text-[#008CFF] dark:border-[#4a9cff] dark:bg-[#4a9cff]/15 dark:text-[#4a9cff]"
+                  : "border-slate-200 dark:border-white/[0.08] text-slate-600 dark:text-slate-300 hover:border-[#008CFF]/40"
+              }`}
+            >
+              Half Day
+            </button>
+
+            {isHalfLeave && (
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setDayKind("first_half")}
+                  className={`h-8 rounded-md border text-[11.5px] font-medium transition-colors ${
+                    dayKind === "first_half"
+                      ? "border-[#008CFF] bg-[#008CFF]/[0.06] text-[#008CFF] dark:border-[#4a9cff] dark:text-[#4a9cff]"
+                      : "border-slate-200 dark:border-white/[0.08] text-slate-500 dark:text-slate-400 hover:border-[#008CFF]/40"
+                  }`}
+                >
+                  First Half
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDayKind("second_half")}
+                  className={`h-8 rounded-md border text-[11.5px] font-medium transition-colors ${
+                    dayKind === "second_half"
+                      ? "border-[#008CFF] bg-[#008CFF]/[0.06] text-[#008CFF] dark:border-[#4a9cff] dark:text-[#4a9cff]"
+                      : "border-slate-200 dark:border-white/[0.08] text-slate-500 dark:text-slate-400 hover:border-[#008CFF]/40"
+                  }`}
+                >
+                  Second Half
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
