@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { decryptPII } from "@/lib/pii-crypto";
+
+// Columns that are encrypted at rest. Decrypt on the way out so the
+// frontend always sees plaintext, while a DB dump only shows ciphertext.
+const PII_COLUMNS = ["bankAccountNumber", "bankIfsc", "panNumber", "aadhaarNumber", "aadhaarEnrollment"] as const;
 
 export const dynamic = "force-dynamic";
 
@@ -57,8 +62,17 @@ export async function GET() {
       myId
     );
 
+    // Decrypt PII columns before returning. Non-encrypted (legacy plaintext)
+    // values pass through unchanged so existing rows keep working.
+    const profileDecrypted = profile ? { ...profile } : null;
+    if (profileDecrypted) {
+      for (const col of PII_COLUMNS) {
+        if (profileDecrypted[col]) profileDecrypted[col] = decryptPII(profileDecrypted[col]);
+      }
+    }
+
     return NextResponse.json({
-      profile: profile || null,
+      profile: profileDecrypted,
       docCount,
       latestPayslip: latest || null,
     });

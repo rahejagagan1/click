@@ -64,9 +64,13 @@ function RowMenu({ onRegularize, onWFH, onOnDuty, onLeave, disableRegularize, di
     };
   }, [open]);
 
+  // When a regularization is already in flight for this date, drop the
+  // "Regularize" option from the menu entirely instead of greying it out —
+  // a pending request can't be re-submitted, so showing it is just noise.
   const items: { label: string; Icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>; onSelect: () => void; disabled?: boolean; title?: string }[] = [
-    { label: "Regularize",        Icon: ShieldCheck, onSelect: onRegularize,
-      disabled: !!disableRegularize, title: disableRegularizeReason },
+    ...(disableRegularize
+      ? []
+      : [{ label: "Regularize", Icon: ShieldCheck, onSelect: onRegularize, title: disableRegularizeReason }]),
     { label: "Apply WFH Request", Icon: Home,        onSelect: onWFH        },
     { label: "Apply On Duty",     Icon: Briefcase,   onSelect: onOnDuty     },
     { label: "Request Leave",     Icon: Coffee,      onSelect: onLeave      },
@@ -85,25 +89,30 @@ function RowMenu({ onRegularize, onWFH, onOnDuty, onLeave, disableRegularize, di
       </button>
       {open && (
         <div className="absolute z-40 right-0 top-8 w-[210px] bg-white dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg shadow-2xl py-1">
-          {items.map(({ label, Icon, onSelect, disabled, title }, i) => (
-            <button
-              key={label}
-              type="button"
-              disabled={disabled}
-              title={disabled ? title : undefined}
-              onClick={() => { if (disabled) return; setOpen(false); onSelect(); }}
-              className={`w-full text-left px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 transition-colors flex items-center gap-2.5 ${
-                i === 0 ? "border-b border-slate-200 dark:border-white/[0.06]" : ""
-              } ${
-                disabled
-                  ? "opacity-40 cursor-not-allowed"
-                  : "hover:bg-[#008CFF]/[0.06] dark:hover:bg-[#008CFF]/[0.1] hover:text-[#008CFF] dark:hover:text-[#4a9cff]"
-              }`}
-            >
-              <Icon size={14} strokeWidth={2} className="text-[#008CFF] dark:text-[#4a9cff] shrink-0" />
-              {label}
-            </button>
-          ))}
+          {items.map(({ label, Icon, onSelect, disabled, title }, i) => {
+            // Hairline divider after "Regularize" — separates "fix the past"
+            // from "request the future". Skip when Regularize was filtered out.
+            const showDivider = i === 0 && label === "Regularize";
+            return (
+              <button
+                key={label}
+                type="button"
+                disabled={disabled}
+                title={disabled ? title : undefined}
+                onClick={() => { if (disabled) return; setOpen(false); onSelect(); }}
+                className={`w-full text-left px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 transition-colors flex items-center gap-2.5 ${
+                  showDivider ? "border-b border-slate-200 dark:border-white/[0.06]" : ""
+                } ${
+                  disabled
+                    ? "opacity-40 cursor-not-allowed"
+                    : "hover:bg-[#008CFF]/[0.06] dark:hover:bg-[#008CFF]/[0.1] hover:text-[#008CFF] dark:hover:text-[#4a9cff]"
+                }`}
+              >
+                <Icon size={14} strokeWidth={2} className="text-[#008CFF] dark:text-[#4a9cff] shrink-0" />
+                {label}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -1140,6 +1149,27 @@ export default function AttendancePage() {
                     const leaveLabel = approvedLeave?.leaveType?.name
                       ? `On Leave · ${approvedLeave.leaveType.name}`
                       : "On Leave";
+
+                    // Specific request rows for this date — used to surface the
+                    // requested time window in the centered text label.
+                    const pendingRegRow = Array.isArray(regsData)
+                      ? regsData.find((r: any) => (r.status === "pending" || r.status === "partially_approved") && String(r.date).slice(0, 10) === dateIso)
+                      : null;
+                    const approvedRegRow = Array.isArray(regsData)
+                      ? regsData.find((r: any) => r.status === "approved" && String(r.date).slice(0, 10) === dateIso)
+                      : null;
+                    const pendingLeaveRow = myLeaves.find((l: any) => {
+                      if (l.status !== "pending" && l.status !== "partially_approved") return false;
+                      const from = String(l.fromDate).slice(0, 10);
+                      const to   = String(l.toDate).slice(0, 10);
+                      return dateIso >= from && dateIso <= to;
+                    });
+                    const fmtT = (d: any) => d
+                      ? new Date(d).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" })
+                      : null;
+                    const regWindow = (r: any) => r?.requestedIn && r?.requestedOut
+                      ? `${fmtT(r.requestedIn)} → ${fmtT(r.requestedOut)}`
+                      : null;
                     // Missed clock-out: clocked in on a past day but never clocked out.
                     // Either the server has already flagged it (status === "missed_clock_out")
                     // or the sweeper hasn't run yet but the row is stale. Either way, we must
@@ -1207,31 +1237,42 @@ export default function AttendancePage() {
                           </div>
                         </td>
 
-                        {/* ATTENDANCE VISUAL */}
+                        {/* ATTENDANCE VISUAL — centered text labels for non-clocked rows
+                            (matches the admin profile's attendance tab format). */}
                         <td className="px-5 py-3">
                           {hasPendingAny ? (
-                            <div className="flex items-center gap-2">
-                              <span className="text-[12px] text-[#008CFF] font-semibold">Pending {pendingKind}</span>
-                              <span className="text-[11px] text-slate-500">— awaiting approval</span>
-                            </div>
+                            <span className="text-[12px] font-medium text-amber-600 dark:text-amber-400">
+                              {pendingKind === "regularization" && pendingRegRow
+                                ? `Regularization Pending${regWindow(pendingRegRow) ? ` · ${regWindow(pendingRegRow)}` : ""}`
+                                : pendingKind === "leave" && pendingLeaveRow
+                                  ? `Leave Pending — ${pendingLeaveRow?.leaveType?.name || "Leave"}`
+                                  : pendingKind === "WFH"
+                                    ? "WFH Pending Approval"
+                                    : pendingKind === "On-Duty"
+                                      ? "On-Duty Pending Approval"
+                                      : `Pending ${pendingKind}`}
+                            </span>
                           ) : missedClockOut ? (
-                            <div className="flex items-center gap-2">
-                              <span className="text-[12px] text-amber-600 font-semibold">Missed clock-out</span>
-                              <span className="text-[11px] text-slate-500">— regularize to log hours</span>
-                            </div>
+                            <span className="text-[12px] font-medium text-amber-600 dark:text-amber-400">
+                              Missed clock-out — regularize to log hours
+                            </span>
                           ) : hasClock ? (
                             <div className="flex items-center gap-3">
                               <TimelineBar liveMins={liveMins} />
                               <LocationPin raw={rec.location} />
                             </div>
+                          ) : approvedRegRow && !rec.clockIn ? (
+                            <span className="text-[12px] font-medium text-emerald-600 dark:text-emerald-400">
+                              Regularized{regWindow(approvedRegRow) ? ` · ${regWindow(approvedRegRow)}` : ""}
+                            </span>
                           ) : isHoliday ? (
-                            <span className="text-[12px] text-amber-500 font-medium">Holiday</span>
+                            <span className="text-[12px] font-medium text-amber-600 dark:text-amber-400">Holiday</span>
                           ) : isWeekend ? (
-                            <span className="text-[12px] text-slate-400">Full day Weekly-off</span>
+                            <span className="text-[12px] text-slate-500 dark:text-slate-400">Full day Weekly-off</span>
                           ) : onLeave ? (
-                            <span className="text-[12px] text-violet-500 dark:text-violet-400 font-medium">{leaveLabel}</span>
+                            <span className="text-[12px] font-medium text-violet-600 dark:text-violet-400">{leaveLabel}</span>
                           ) : isTodayRow ? (
-                            <span className="text-[12px] text-[#008CFF] font-medium">Not clocked in yet</span>
+                            <span className="text-[12px] font-medium text-[#008CFF]">Not clocked in yet</span>
                           ) : (
                             <span className="text-[12px] text-slate-400">—</span>
                           )}

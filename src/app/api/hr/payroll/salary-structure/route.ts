@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
+import { writeAuditLog } from "@/lib/audit-log";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,9 @@ export async function POST(req: NextRequest) {
     if (!userId || !ctc || !basic || !hra || !effectiveFrom)
       return NextResponse.json({ error: "userId, ctc, basic, hra, effectiveFrom required" }, { status: 400 });
 
+    // Capture the previous structure (if any) for the audit trail.
+    const before = await prisma.salaryStructure.findUnique({ where: { userId: parseInt(userId) } });
+
     const structure = await prisma.salaryStructure.upsert({
       where: { userId: parseInt(userId) },
       create: {
@@ -57,6 +61,26 @@ export async function POST(req: NextRequest) {
       },
       include: { user: { select: { id: true, name: true } } },
     });
+
+    // Audit trail — admin assigns / updates a salary structure for an employee.
+    await writeAuditLog({
+      req,
+      actorId: user.dbId ?? null,
+      actorEmail: user.email ?? null,
+      action: before ? "payroll.structure.update" : "payroll.structure.assign",
+      entityType: "SalaryStructure",
+      entityId: structure.id,
+      before: before ? {
+        ctc: String(before.ctc), basic: String(before.basic), hra: String(before.hra),
+        effectiveFrom: before.effectiveFrom,
+      } : null,
+      after: {
+        userId: structure.userId,
+        ctc: String(structure.ctc), basic: String(structure.basic), hra: String(structure.hra),
+        effectiveFrom: structure.effectiveFrom,
+      },
+    });
+
     return NextResponse.json(structure, { status: 201 });
   } catch (e) { return serverError(e, "POST /api/hr/payroll/salary-structure"); }
 }

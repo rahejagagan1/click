@@ -41,13 +41,13 @@ export default function Header({ title }: { title?: string }) {
         : "?";
 
     return (
-        <header className="sticky top-0 z-30 flex h-[54px] items-center justify-between border-b border-[#0d5db8] bg-[#0f6ecd] px-5 shadow-[0_8px_24px_rgba(15,110,205,0.18)]">
+        <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between border-b border-[#0d5db8] bg-[#0f6ecd] px-6 shadow-[0_8px_24px_rgba(15,110,205,0.18)]">
             <div className="relative z-10 min-w-0">
-                <p className="truncate text-[12.5px] font-medium text-white/95">
+                <p className="truncate text-[15px] font-semibold text-white/95">
                     {title || "NB Media Productions Pvt. Ltd"}
                 </p>
                 {user?.email ? (
-                    <p className="mt-0.5 truncate text-[10px] text-white/70">
+                    <p className="mt-0.5 truncate text-[12px] text-white/75">
                         {user.email}
                     </p>
                 ) : null}
@@ -76,12 +76,12 @@ export default function Header({ title }: { title?: string }) {
                             <img
                                 src={user.image}
                                 alt={user.name || "Profile"}
-                                className="h-[30px] w-[30px] rounded-full object-cover"
+                                className="h-[38px] w-[38px] rounded-full object-cover"
                                 referrerPolicy="no-referrer"
                             />
                         ) : (
                             <div
-                                className="flex h-[30px] w-[30px] items-center justify-center rounded-full text-[10.5px] font-semibold"
+                                className="flex h-[38px] w-[38px] items-center justify-center rounded-full text-[13px] font-semibold"
                                 style={{ background: "#4ba3ff", color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
                             >
                                 {initials}
