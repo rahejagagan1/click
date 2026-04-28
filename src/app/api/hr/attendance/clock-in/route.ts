@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
+import { parseBody } from "@/lib/validate";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { istTodayDateOnly, istHour } from "@/lib/ist-date";
+
+// Real GPS coordinates required so the attendance log always has a verifiable
+// physical location. Address is optional and capped to keep payloads small.
+const ClockInBody = z.object({
+  lat: z.number().finite().min(-90).max(90),
+  lng: z.number().finite().min(-180).max(180),
+  address: z.string().trim().max(240).optional(),
+});
 
 export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
@@ -18,19 +28,10 @@ export async function POST(req: NextRequest) {
     if (!userId) return NextResponse.json({ error: "User not found" }, { status: 404 });
     const ip = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || undefined;
 
-    // Location is mandatory: the client must send real GPS coordinates, so an
-    // attendance log always has a verifiable physical location. Reject the
-    // clock-in if lat/lng are missing or not finite numbers.
-    let bodyLat: number | undefined, bodyLng: number | undefined, bodyAddr: string | undefined;
-    try {
-      const body = await req.json();
-      if (body) {
-        if (typeof body.lat === "number" && isFinite(body.lat)) bodyLat = body.lat;
-        if (typeof body.lng === "number" && isFinite(body.lng)) bodyLng = body.lng;
-        if (typeof body.address === "string" && body.address.trim()) bodyAddr = body.address.trim().slice(0, 240);
-      }
-    } catch { /* fall through — handled below */ }
-    if (bodyLat === undefined || bodyLng === undefined) {
+    const parsed = await parseBody(req, ClockInBody);
+    if (!parsed.ok) {
+      // Treat any validation failure here as missing/invalid location — that's
+      // the only thing the client sends, and the frontend prompts geolocation.
       return NextResponse.json(
         {
           error: "Location is required to clock in. Please allow location access in your browser and try again.",
@@ -39,6 +40,7 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    const { lat: bodyLat, lng: bodyLng, address: bodyAddr } = parsed.data;
 
     const now = new Date();
     const today = istTodayDateOnly();

@@ -1,8 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { parseBody } from "@/lib/validate";
 import { notifyApprovers, notifyUsers } from "@/lib/notifications";
+import { writeAuditLog } from "@/lib/audit-log";
 import { istTimeOnDate, istMonthRange, istTodayDateOnly, istDateOnlyFrom } from "@/lib/ist-date";
+
+// Schema covers both self-apply and admin-grant flavours of regularize POST.
+const RegularizePost = z.object({
+  date: z.string().min(1).max(40),
+  reason: z.string().trim().min(1, "Reason is required").max(500),
+  requestedIn:  z.union([z.string().min(1).max(40), z.null()]).optional(),
+  requestedOut: z.union([z.string().min(1).max(40), z.null()]).optional(),
+  notifyUserIds: z.array(z.number().int()).max(50).optional(),
+  userId: z.number().int().optional(),
+  forceGrant: z.boolean().optional(),
+});
+
+const RegularizePut = z.object({
+  id: z.number().int(),
+  action: z.enum(["approve", "reject"]),
+  approvalNote: z.string().max(500).optional().nullable(),
+});
 
 // Monthly quota: each user can have at most this many active (approved + pending +
 // partially_approved) regularizations per IST calendar month. Rejected / cancelled
@@ -108,12 +128,12 @@ export async function POST(req: NextRequest) {
   if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   try {
-    const body = await req.json();
-    const { date, requestedIn, requestedOut, reason, notifyUserIds } = body;
-    const bodyUserId = Number.isInteger(body.userId) ? (body.userId as number) : null;
-    const forceGrant = body.forceGrant === true;
-    if (!date || !reason) return NextResponse.json({ error: "date and reason required" }, { status: 400 });
-    const extras = Array.isArray(notifyUserIds) ? notifyUserIds.filter((x: any) => Number.isInteger(x)) : [];
+    const parsed = await parseBody(req, RegularizePost);
+    if (!parsed.ok) return parsed.error;
+    const { date, requestedIn, requestedOut, reason, notifyUserIds } = parsed.data;
+    const bodyUserId = parsed.data.userId ?? null;
+    const forceGrant = parsed.data.forceGrant === true;
+    const extras = notifyUserIds ?? [];
 
     // Normalize the target date to UTC-midnight of the IST calendar day. Input
     // may be "YYYY-MM-DD" (from a date picker) or a full ISO timestamp.
@@ -255,14 +275,10 @@ export async function PUT(req: NextRequest) {
   const admin = isHRAdmin(callerUser);
 
   try {
-    const body = await req.json();
-    const id = Number(body.id);
-    const action = body.action;
-    const approvalNote = typeof body.approvalNote === "string" ? body.approvalNote : null;
-    if (!Number.isInteger(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
-    if (action !== "approve" && action !== "reject") {
-      return NextResponse.json({ error: "action must be 'approve' or 'reject'" }, { status: 400 });
-    }
+    const parsed = await parseBody(req, RegularizePut);
+    if (!parsed.ok) return parsed.error;
+    const { id, action } = parsed.data;
+    const approvalNote = parsed.data.approvalNote ?? null;
 
     const reg = await prisma.attendanceRegularization.findUnique({
       where: { id },
@@ -346,6 +362,18 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
     }
     const updated = await prisma.attendanceRegularization.findUnique({ where: { id } });
+
+    // Audit trail — captures who decided, when, before/after status, and IP.
+    await writeAuditLog({
+      req,
+      actorId: myId,
+      actorEmail: callerUser?.email ?? null,
+      action: `regularize.${action}`,
+      entityType: "AttendanceRegularization",
+      entityId: id,
+      before: { status: reg.status },
+      after:  { status: nextStatus, approvalNote },
+    });
 
     // Apply approved punch correction only on FINAL approval.
     //
