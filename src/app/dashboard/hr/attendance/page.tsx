@@ -657,22 +657,60 @@ export default function AttendancePage() {
     return `${y}-${m}-${dd}`;
   })();
   const recsWithToday = (() => {
-    // Only show the placeholder when the current view actually includes today:
-    // always in 30-day mode, or in month mode when viewing the current IST month.
-    const viewingIncludesToday = period === "30d" || month === istTodayIso.slice(0, 7);
-    if (!viewingIncludesToday) return records;
-    const hasToday = records.some((r: any) => String(r.date).slice(0, 10) === istTodayIso);
-    if (hasToday) return records;
-    const placeholder = {
-      id: `placeholder-${istTodayIso}`,
-      date: `${istTodayIso}T00:00:00.000Z`,
-      clockIn: null,
-      clockOut: null,
-      totalMinutes: 0,
-      status: "pending",
-      location: null,
-    };
-    return [placeholder, ...records];
+    // Build the list of every IST calendar day in the current view, then fill
+    // each day with the matching server record (if any) or a synthetic empty
+    // row. This way weekends, holidays, and absent days all appear in the log
+    // — the rendering layer already knows how to label W-OFF and Holiday rows.
+    const byDate = new Map<string, any>();
+    for (const r of records) {
+      const k = String(r.date).slice(0, 10);
+      byDate.set(k, r);
+    }
+
+    // View bounds — start / end IST calendar days, inclusive.
+    let start: Date, end: Date;
+    if (period === "30d") {
+      end = new Date(`${istTodayIso}T00:00:00Z`);
+      start = new Date(end.getTime());
+      start.setUTCDate(start.getUTCDate() - 29);
+    } else {
+      const [yy, mm] = month.split("-").map(Number);
+      start = new Date(Date.UTC(yy, mm - 1, 1));
+      end   = new Date(Date.UTC(yy, mm, 0)); // last day of month
+      // Cap month view at today — we don't show future dates.
+      const today = new Date(`${istTodayIso}T00:00:00Z`);
+      if (end.getTime() > today.getTime()) end = today;
+    }
+
+    const out: any[] = [];
+    for (let d = new Date(start.getTime()); d.getTime() <= end.getTime(); d.setUTCDate(d.getUTCDate() + 1)) {
+      const iso = d.toISOString().slice(0, 10);
+      const rec = byDate.get(iso);
+      if (rec) {
+        out.push(rec);
+      } else {
+        const dow = d.getUTCDay(); // 0 = Sun, 6 = Sat
+        const isWeekend = dow === 0 || dow === 6;
+        const isToday = iso === istTodayIso;
+        out.push({
+          id: `synthetic-${iso}`,
+          date: `${iso}T00:00:00.000Z`,
+          clockIn: null,
+          clockOut: null,
+          totalMinutes: 0,
+          // For today with no record yet → "pending" so the existing
+          // "Not clocked in yet" branch renders. Weekends → "weekly_off"
+          // (rendering looks at isWeekend, not status, but this keeps the
+          // status field meaningful for any future consumers). Other gaps →
+          // "absent" (no clock-in on a working day).
+          status: isToday ? "pending" : isWeekend ? "weekly_off" : "absent",
+          location: null,
+        });
+      }
+    }
+    // Newest first, matching the original ordering.
+    out.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return out;
   })();
 
   // Month period buttons (30 DAYS + last 6 months). Each month carries its
