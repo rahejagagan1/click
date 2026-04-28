@@ -40,6 +40,47 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const totalDays = parseFloat(application.totalDays.toString());
     const rangeLabel = fmtRange(new Date(application.fromDate), new Date(application.toDate), totalDays);
 
+    // ── EDIT (HR admin only) ─────────────────────────────────────────
+    // Lets HR admins fix mistakes after a leave is filed — change the
+    // dates, type, reason, or override the status. Balance/attendance
+    // sync only triggers when status crosses the approved boundary.
+    if (action === "edit") {
+      if (!isFinalApprover) return NextResponse.json({ error: "Only HR admin can edit leaves" }, { status: 403 });
+
+      const newFromRaw   = body?.fromDate;
+      const newToRaw     = body?.toDate;
+      const newReason    = typeof body?.reason === "string" ? body.reason : undefined;
+      const newTypeIdRaw = body?.leaveTypeId;
+      const newStatusRaw = typeof body?.status === "string" ? body.status : undefined;
+
+      const data: any = {};
+      if (newFromRaw)        data.fromDate    = new Date(newFromRaw);
+      if (newToRaw)          data.toDate      = new Date(newToRaw);
+      if (newReason !== undefined) data.reason = newReason;
+      if (Number.isInteger(newTypeIdRaw)) data.leaveTypeId = newTypeIdRaw;
+
+      // Recompute totalDays if either date changed.
+      if (data.fromDate || data.toDate) {
+        const f = data.fromDate ?? new Date(application.fromDate);
+        const t = data.toDate   ?? new Date(application.toDate);
+        let n = 0;
+        const cur = new Date(f);
+        while (cur <= t) {
+          if (cur.getDay() !== 0 && cur.getDay() !== 6) n++;
+          cur.setDate(cur.getDate() + 1);
+        }
+        data.totalDays = n;
+      }
+
+      const validStatuses = ["pending", "partially_approved", "approved", "rejected", "cancelled"];
+      if (newStatusRaw && validStatuses.includes(newStatusRaw)) {
+        data.status = newStatusRaw;
+      }
+
+      await prisma.leaveApplication.update({ where: { id: appId }, data });
+      return NextResponse.json({ success: true });
+    }
+
     // ── CANCEL ─────────────────────────────────────────────────────────────
     // Race-safe: only one cancel wins. The status filter inside updateMany is
     // the guard — if another request already cancelled/approved, count === 0.
@@ -213,4 +254,26 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     return NextResponse.json({ error: "This request is no longer actionable" }, { status: 400 });
   } catch (e) { return serverError(e, "PUT /api/hr/leaves/[id]"); }
+}
+
+/** Delete a leave application outright. HR-admin only. */
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { session, errorResponse } = await requireAuth();
+  if (errorResponse) return errorResponse;
+  try {
+    const self = session!.user as any;
+    const isFinalApprover =
+      self.orgLevel === "ceo" ||
+      self.isDeveloper ||
+      self.orgLevel === "hr_manager" ||
+      self.role === "admin";
+    if (!isFinalApprover) return NextResponse.json({ error: "Only HR admin can delete leaves" }, { status: 403 });
+
+    const { id: idParam } = await params;
+    const appId = Number(idParam);
+    if (!Number.isInteger(appId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+    await prisma.leaveApplication.delete({ where: { id: appId } });
+    return NextResponse.json({ success: true });
+  } catch (e) { return serverError(e, "DELETE /api/hr/leaves/[id]"); }
 }
