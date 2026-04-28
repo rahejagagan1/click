@@ -7,6 +7,8 @@ import Link from "next/link";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import {
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Send,
   BarChart2,
   Award,
@@ -283,9 +285,17 @@ function BannerArt() {
   );
 }
 
-function HolidayScene() {
+// ── Holiday banner themes ────────────────────────────────────────────────
+// Each scene paints a small SVG decoration along the bottom of the green
+// card. Combined with a per-theme background gradient, this gives every
+// holiday a recognizable visual identity. Picked from the holiday name via
+// `pickHolidayTheme` (case-insensitive word match) — falls back to the
+// rolling-hills default for anything unmatched.
+const SCENE_CLS = "pointer-events-none absolute inset-x-0 bottom-0 h-[62px] w-full";
+
+function HillsScene() {
   return (
-    <svg viewBox="0 0 340 88" className="pointer-events-none absolute inset-x-0 bottom-0 h-[62px] w-full">
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
       <g fill="rgba(43,94,34,0.35)">
         <rect x="0" y="76" width="340" height="12" />
         <path d="M0 76 C32 61 59 59 88 71 C112 49 143 47 173 69 C196 56 213 54 232 65 C257 43 287 42 340 76Z" />
@@ -300,6 +310,231 @@ function HolidayScene() {
       </g>
     </svg>
   );
+}
+
+function ChristmasScene() {
+  // Snowy ground + 3 fir trees + falling snowflakes.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <g fill="rgba(255,255,255,0.7)">
+        <circle cx="40"  cy="20" r="1.4" />
+        <circle cx="120" cy="14" r="1.2" />
+        <circle cx="220" cy="22" r="1.6" />
+        <circle cx="290" cy="12" r="1.2" />
+        <circle cx="160" cy="10" r="1.0" />
+      </g>
+      <path d="M0 78 C40 70 80 72 120 76 C170 70 220 72 260 78 C300 74 320 76 340 78 L340 88 L0 88 Z"
+            fill="rgba(255,255,255,0.45)" />
+      {[ {x: 60, h: 0}, {x: 170, h: 8}, {x: 280, h: 4} ].map((t) => (
+        <g key={t.x} fill="rgba(255,255,255,0.55)">
+          <polygon points={`${t.x},${40 - t.h} ${t.x - 11},${60 - t.h} ${t.x + 11},${60 - t.h}`} />
+          <polygon points={`${t.x},${52 - t.h} ${t.x - 13},${74 - t.h} ${t.x + 13},${74 - t.h}`} />
+          <rect x={t.x - 3} y={74 - t.h} width="6" height="6" fill="rgba(120,60,20,0.5)" />
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function DiwaliScene() {
+  // Glowing fireworks halos + a row of diyas (oil lamps).
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <g fill="rgba(255,225,140,0.30)">
+        <circle cx="60"  cy="20" r="9" />
+        <circle cx="170" cy="14" r="7" />
+        <circle cx="280" cy="22" r="10" />
+      </g>
+      <rect x="0" y="74" width="340" height="14" fill="rgba(50,15,40,0.35)" />
+      {[50, 120, 190, 260].map((cx) => (
+        <g key={cx}>
+          <ellipse cx={cx} cy="74" rx="11" ry="4" fill="rgba(60,20,20,0.6)" />
+          <ellipse cx={cx} cy="68" rx="3"  ry="6" fill="rgba(255,210,90,0.95)" />
+          <ellipse cx={cx} cy="65" rx="1.4" ry="2.5" fill="rgba(255,255,255,0.7)" />
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function EidScene() {
+  // Mosque silhouette with a central dome, two minarets, and a crescent moon.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <g>
+        <circle cx="290" cy="22" r="10"  fill="rgba(255,255,255,0.85)" />
+        <circle cx="294" cy="20" r="8.5" fill="rgba(45,108,37,1)" />
+      </g>
+      <g fill="rgba(20,60,30,0.45)">
+        <rect x="0" y="78" width="340" height="10" />
+        <rect x="60"  y="44" width="4" height="34" />
+        <circle cx="62"  cy="42" r="3" />
+        <rect x="276" y="44" width="4" height="34" />
+        <circle cx="278" cy="42" r="3" />
+        <rect x="100" y="58" width="140" height="20" />
+        <path d="M120 58 Q170 28 220 58 Z" />
+        <rect x="166" y="22" width="2" height="10" />
+        <circle cx="167" cy="22" r="2" />
+      </g>
+    </svg>
+  );
+}
+
+function HoliScene() {
+  // Multi-colored powder splashes scattered across the card.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <circle cx="30"  cy="30" r="14" fill="rgba(255,200,80,0.55)" />
+      <circle cx="80"  cy="20" r="10" fill="rgba(255,100,180,0.55)" />
+      <circle cx="160" cy="34" r="16" fill="rgba(80,200,255,0.5)" />
+      <circle cx="240" cy="22" r="11" fill="rgba(180,80,255,0.55)" />
+      <circle cx="300" cy="32" r="13" fill="rgba(80,255,150,0.55)" />
+      <circle cx="200" cy="50" r="9"  fill="rgba(255,180,80,0.55)" />
+      <circle cx="50"  cy="60" r="8"  fill="rgba(255,100,180,0.55)" />
+      <circle cx="320" cy="60" r="10" fill="rgba(80,200,255,0.5)" />
+      <rect x="0" y="78" width="340" height="10" fill="rgba(120,40,80,0.35)" />
+    </svg>
+  );
+}
+
+function TricolorScene() {
+  // Indian flag silhouette: pole + saffron/white/green stripes + Ashoka chakra.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <rect x="170" y="20" width="2"  height="58" fill="rgba(80,80,80,0.55)" />
+      <rect x="172" y="22" width="60" height="10" fill="rgba(255,153,51,0.85)" />
+      <rect x="172" y="32" width="60" height="10" fill="rgba(255,255,255,0.92)" />
+      <rect x="172" y="42" width="60" height="10" fill="rgba(19,136,8,0.85)" />
+      <circle cx="202" cy="37" r="3.4" fill="none" stroke="rgba(0,0,128,0.7)" strokeWidth="0.9" />
+      <rect x="0" y="78" width="340" height="10" fill="rgba(60,60,60,0.35)" />
+    </svg>
+  );
+}
+
+function NewYearScene() {
+  // City skyline at night with three firework bursts in the sky.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      {[
+        { x: 60,  c: "rgba(255,200,80,0.75)" },
+        { x: 170, c: "rgba(255,100,180,0.75)" },
+        { x: 280, c: "rgba(80,200,255,0.75)" },
+      ].map((b) => (
+        <g key={b.x} stroke={b.c} strokeWidth="1" strokeLinecap="round">
+          <line x1={b.x}     y1="14" x2={b.x}     y2="34" />
+          <line x1={b.x - 10} y1="24" x2={b.x + 10} y2="24" />
+          <line x1={b.x - 8}  y1="16" x2={b.x + 8}  y2="32" />
+          <line x1={b.x + 8}  y1="16" x2={b.x - 8}  y2="32" />
+        </g>
+      ))}
+      <g fill="rgba(0,0,30,0.4)">
+        <rect x="0"   y="62" width="340" height="26" />
+        <rect x="40"  y="48" width="20"  height="20" />
+        <rect x="100" y="42" width="24"  height="26" />
+        <rect x="150" y="50" width="20"  height="18" />
+        <rect x="200" y="44" width="22"  height="24" />
+        <rect x="260" y="46" width="20"  height="22" />
+      </g>
+    </svg>
+  );
+}
+
+function KrishnaScene() {
+  // Hanging matki (pot) with a flute and a peacock-feather hint.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <line x1="170" y1="0" x2="170" y2="40" stroke="rgba(255,255,255,0.4)" strokeWidth="0.8" />
+      <g>
+        <ellipse cx="170" cy="52" rx="20" ry="14" fill="rgba(255,200,40,0.55)" />
+        <rect x="160"  y="40" width="20" height="6" fill="rgba(255,180,40,0.55)" />
+        <ellipse cx="170" cy="40" rx="10" ry="2.5" fill="rgba(60,30,10,0.5)" />
+      </g>
+      <g stroke="rgba(255,255,255,0.55)" strokeWidth="1.2" fill="none">
+        <path d="M156 60 Q160 70 156 80" />
+        <path d="M180 60 Q184 70 184 80" />
+        <path d="M170 64 Q172 74 172 84" />
+      </g>
+      <g fill="rgba(80,180,200,0.55)">
+        <ellipse cx="40" cy="40" rx="3" ry="9" />
+        <ellipse cx="40" cy="38" rx="1.5" ry="3" fill="rgba(255,200,40,0.85)" />
+      </g>
+      <rect x="0" y="78" width="340" height="10" fill="rgba(0,30,80,0.45)" />
+    </svg>
+  );
+}
+
+function FestiveScene() {
+  // Generic Hindu-festive scene: sun rays + a row of marigold-style dots.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <g stroke="rgba(255,230,150,0.45)" strokeWidth="1" strokeLinecap="round">
+        {[0, 30, 60, 90, 120, 150, 180].map((deg) => {
+          const rad = (deg * Math.PI) / 180;
+          const x1 = 170, y1 = 78;
+          const x2 = 170 + Math.cos(Math.PI + rad) * 32;
+          const y2 = 78  + Math.sin(Math.PI + rad) * 32;
+          return <line key={deg} x1={x1} y1={y1} x2={x2} y2={y2} />;
+        })}
+      </g>
+      <circle cx="170" cy="78" r="14" fill="rgba(255,200,80,0.55)" />
+      <g fill="rgba(255,150,80,0.6)">
+        {[20, 60, 100, 220, 260, 300, 320].map((cx) => (
+          <circle key={cx} cx={cx} cy="80" r="4" />
+        ))}
+      </g>
+      <rect x="0" y="84" width="340" height="4" fill="rgba(120,40,30,0.35)" />
+    </svg>
+  );
+}
+
+function GoodFridayScene() {
+  // Restrained scene with a small cross silhouette + faded sky line.
+  return (
+    <svg viewBox="0 0 340 88" className={SCENE_CLS}>
+      <rect x="167" y="32" width="6"  height="46" fill="rgba(255,255,255,0.5)" />
+      <rect x="155" y="44" width="30" height="6"  fill="rgba(255,255,255,0.5)" />
+      <line x1="0" y1="14" x2="340" y2="14" stroke="rgba(255,255,255,0.18)" strokeWidth="0.6" />
+      <rect x="0" y="78" width="340" height="10" fill="rgba(40,30,60,0.4)" />
+    </svg>
+  );
+}
+
+type HolidayTheme = {
+  bg: string;
+  border: string;
+  scene: React.ReactNode;
+  badge?: string; // optional override for badge background
+};
+
+const HOLIDAY_THEMES: Record<string, HolidayTheme> = {
+  christmas:   { bg: "linear-gradient(180deg, #d4453a 0%, #6f1818 100%)", border: "#9b2222", scene: <ChristmasScene />,   badge: "#0a8a3a" },
+  diwali:      { bg: "linear-gradient(180deg, #f29a35 0%, #5a1a55 100%)", border: "#a04060", scene: <DiwaliScene />,      badge: "#ffb84d" },
+  eid:         { bg: "linear-gradient(180deg, #6cb454 0%, #2d6c25 100%)", border: "#cce2bf", scene: <EidScene />,         badge: "#0e6a2a" },
+  holi:        { bg: "linear-gradient(180deg, #ff6f9c 0%, #5a2078 100%)", border: "#a04080", scene: <HoliScene />,        badge: "#7a1f6e" },
+  tricolor:    { bg: "linear-gradient(180deg, #ff9933 0%, #138808 100%)", border: "#cc6622", scene: <TricolorScene />,    badge: "#000080" },
+  newyear:     { bg: "linear-gradient(180deg, #1e2a78 0%, #050828 100%)", border: "#1e2a78", scene: <NewYearScene />,     badge: "#ffb84d" },
+  krishna:     { bg: "linear-gradient(180deg, #1e63b8 0%, #08234a 100%)", border: "#1e4ea0", scene: <KrishnaScene />,     badge: "#ffb84d" },
+  festive:     { bg: "linear-gradient(180deg, #e87a3a 0%, #8a2a16 100%)", border: "#aa4422", scene: <FestiveScene />,     badge: "#a82c12" },
+  goodfriday:  { bg: "linear-gradient(180deg, #5b4783 0%, #1c1233 100%)", border: "#3b2c5e", scene: <GoodFridayScene />,  badge: "#3b2c5e" },
+  default:     { bg: "linear-gradient(180deg, #83c863 0%, #5da83e 100%)", border: "#cce2bf", scene: <HillsScene />,                            },
+};
+
+// Pick a theme based on the holiday name. Word-boundary matches keep us
+// from confusing "Holi" with the literal word "holiday" or matching
+// "Eid" inside something unrelated.
+function pickHolidayTheme(name: string | null | undefined): HolidayTheme {
+  const n = (name || "").toLowerCase();
+  const has = (...words: string[]) => words.some((w) => new RegExp(`(^|[^a-z])${w}([^a-z]|$)`, "i").test(n));
+  if (has("christmas", "xmas")) return HOLIDAY_THEMES.christmas;
+  if (has("diwali", "deepavali", "govardhan", "bhai dooj")) return HOLIDAY_THEMES.diwali;
+  if (has("eid", "bakrid", "ramadan", "ramzan", "muharram")) return HOLIDAY_THEMES.eid;
+  if (has("holi") && !has("holiday")) return HOLIDAY_THEMES.holi;
+  if (has("independence day", "republic day", "gandhi jayanti", "ambedkar", "labour day")) return HOLIDAY_THEMES.tricolor;
+  if (has("new year")) return HOLIDAY_THEMES.newyear;
+  if (has("janmashtami", "krishna", "ram navami")) return HOLIDAY_THEMES.krishna;
+  if (has("good friday", "easter")) return HOLIDAY_THEMES.goodfriday;
+  if (has("ganesh", "dussehra", "shivratri", "raksha bandhan", "onam", "pongal", "sankranti", "mahavir", "buddha", "guru nanak")) return HOLIDAY_THEMES.festive;
+  return HOLIDAY_THEMES.default;
 }
 
 function QuickLinksCard() {
@@ -643,6 +878,44 @@ export default function HRHomePage() {
         .filter((u) => (u.name || "").toLowerCase().includes(praiseSearch.toLowerCase()))
         .slice(0, 8)
     : [];
+  // Index into the upcoming-holidays list for the green Holidays card. The
+  // arrows below cycle through this; resets if the list shrinks.
+  const [holidayIdx, setHolidayIdx] = useState(0);
+
+  // Browser geolocation permission state. Attendance needs location, so we
+  // check this up-front and show a banner + disable the clock-in button when
+  // permission has been permanently blocked. "prompt" is fine — clicking the
+  // button will trigger the browser's native ask.
+  type LocPerm = "granted" | "denied" | "prompt" | "unsupported" | "checking";
+  const [locPerm, setLocPerm] = useState<LocPerm>("checking");
+  // Shows a "Getting location…" label on the clock-in button so users know
+  // the browser is busy asking the OS for coordinates (first-time GPS/Wi-Fi
+  // lookup on Windows can take 10–15s).
+  const [clockingIn, setClockingIn] = useState(false);
+
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.permissions?.query) {
+      setLocPerm("unsupported");
+      return;
+    }
+    let status: PermissionStatus | null = null;
+    const check = () => {
+      navigator.permissions.query({ name: "geolocation" as PermissionName })
+        .then((s) => {
+          if (status) status.onchange = null;
+          status = s;
+          setLocPerm(s.state as LocPerm);
+          s.onchange = () => setLocPerm(s.state as LocPerm);
+        })
+        .catch(() => setLocPerm("unsupported"));
+    };
+    check();
+    window.addEventListener("focus", check);
+    return () => {
+      window.removeEventListener("focus", check);
+      if (status) status.onchange = null;
+    };
+  }, []);
 
   useEffect(() => {
     const tick = () => {
@@ -680,9 +953,17 @@ export default function HRHomePage() {
   const allHolidays: { id: number; name: string; date: string; type: string }[] = Array.isArray(holidaysData)
     ? holidaysData.map((h: any) => ({ id: h.id, name: h.name, date: String(h.date).slice(0, 10), type: h.type || "public" }))
     : [];
-  const todaysHoliday = allHolidays.find((h) => h.date === istTodayStr) || null;
-  const upcoming      = allHolidays.filter((h) => h.date >= istTodayStr);
-  const holiday       = upcoming[0] ?? null;
+  // Upcoming holidays (today + future), sorted ascending by date so the arrow
+  // navigation walks the calendar in order. `upcoming[0]` is today's holiday
+  // when one exists (filter is `>= today`).
+  const upcoming = allHolidays
+    .filter((h) => h.date >= istTodayStr)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  // Keep the index inside bounds when the list size changes (data refresh,
+  // year rollover, etc.).
+  useEffect(() => {
+    if (holidayIdx >= upcoming.length && upcoming.length > 0) setHolidayIdx(0);
+  }, [upcoming.length, holidayIdx]);
   const todayRec = myData?.todayRecord;
   const todayLoc = parseAttLoc(todayRec?.location);
   // Pull the caller's profile so we can read the department — used to label
@@ -699,29 +980,48 @@ export default function HRHomePage() {
   const { data: announcements = [] } = useSWR("/api/hr/announcements", fetcher);
 
   const clockIn = async () => {
-    const geo = await captureClockInGeo();
-    if (!geo.ok) {
-      alert(`Can't clock in — ${geo.message}`);
-      return;
+    // Location is mandatory. Always attempt a fresh geolocation read — the
+    // cached `locPerm` state can lag (Chrome doesn't always fire `onchange`
+    // when permission is toggled from the address-bar popup), so the real
+    // source of truth is whether coordinates come back.
+    setClockingIn(true);
+    try {
+      const geo = await captureClockInGeo();
+      if (!geo.ok) {
+        alert(`Can't clock in — ${geo.message}`);
+        return;
+      }
+      const res = await fetch("/api/hr/attendance/clock-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat: geo.lat, lng: geo.lng, address: geo.address }),
+      });
+      const d = await res.json();
+      if (!res.ok) { alert(d.error); return; }
+      mutate(`/api/hr/attendance?month=${monthKey}`);
+    } finally {
+      setClockingIn(false);
     }
-    const res = await fetch("/api/hr/attendance/clock-in", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lat: geo.lat, lng: geo.lng, address: geo.address }),
-    });
-    if (!res.ok) {
-      try { const d = await res.json(); alert(d.error || "Clock-in failed"); } catch { alert("Clock-in failed"); }
-      return;
-    }
+  };
+  const clockOut = async () => {
+    const res = await fetch("/api/hr/attendance/clock-out", { method: "POST" });
+    const d = await res.json();
+    if (!res.ok) return alert(d.error);
     mutate(`/api/hr/attendance?month=${monthKey}`);
   };
-  const clockOut = async () => { await fetch("/api/hr/attendance/clock-out", { method: "POST" }); mutate(`/api/hr/attendance?month=${monthKey}`); };
   const onLeave  = (boardData?.board || []).filter((u: any) => u.status === "on_leave");
   // Split clocked-in employees by their actual location mode (from Attendance.location JSON).
   const clockedIn = (boardData?.board || []).filter((u: any) => u.status === "present" || u.status === "late");
   const remote    = clockedIn.filter((u: any) => parseAttLoc(u.location).mode === "remote");
   const balances = (balanceData as any[]).filter(b => b.leaveType).slice(0, 3);
-  const activeHoliday = todaysHoliday || holiday;
+  // `upcoming` already includes today (filter is `>= today`), so indexing
+  // into it covers both "today's holiday" and the future ones the arrows
+  // page through.
+  const activeHoliday = upcoming[holidayIdx] ?? null;
+  const canPrevHoliday = holidayIdx > 0;
+  const canNextHoliday = holidayIdx < upcoming.length - 1;
+  // Per-holiday visual theme (background gradient + bottom decoration).
+  const holidayTheme = pickHolidayTheme(activeHoliday?.name);
 
   const submitPost = async () => {
     let content: string;
@@ -817,7 +1117,7 @@ export default function HRHomePage() {
             </p>
 
             <div
-              className="relative overflow-hidden rounded-[2px] px-[12px] py-[11px] shadow-[0_1px_2px_rgba(15,23,42,0.08)]"
+              className="relative overflow-hidden rounded-[2px] px-[14px] py-[11px] shadow-[0_1px_2px_rgba(15,23,42,0.08)]"
               style={{ background: "#9b8aca", color: "#ffffff" }}
             >
               <div className="mb-1 flex items-center justify-between">
@@ -849,6 +1149,18 @@ export default function HRHomePage() {
                   {(todayLoc.mode ? todayLoc.mode : isRemoteMode ? "remote" : "office").toUpperCase()}
                 </span>
               </div>
+
+              {/* Location permission warning — attendance requires location. */}
+              {!todayRec?.clockIn && locPerm === "denied" && (
+                <div className="mb-2 rounded-[3px] border border-red-300 bg-red-50 px-2 py-1.5 text-[10.5px] leading-snug text-red-700">
+                  <strong>Location access blocked.</strong> Enable location in your browser settings to clock in.
+                </div>
+              )}
+              {!todayRec?.clockIn && locPerm === "unsupported" && (
+                <div className="mb-2 rounded-[3px] border border-amber-300 bg-amber-50 px-2 py-1.5 text-[10.5px] leading-snug text-amber-700">
+                  <strong>Location unavailable.</strong> Your browser can't share location. Clock-in needs location.
+                </div>
+              )}
 
               {/* Clock display + action buttons on the same row, vertically
                   centered. The clock keeps its inner purple box; buttons sit
@@ -898,15 +1210,16 @@ export default function HRHomePage() {
                   {!todayRec?.clockIn ? (
                     <button
                       onClick={clockIn}
-                      className="h-[24px] rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95"
+                      disabled={clockingIn}
+                      className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-70 disabled:cursor-wait"
                       style={{ background: isRemoteMode ? "#008CFF" : "#ff6a63" }}
                     >
-                      {isRemoteMode ? "Remote Clock-in" : "Clock-in"}
+                      {clockingIn ? "Getting location…" : isRemoteMode ? "Remote Clock-in" : "Clock-in"}
                     </button>
                   ) : !todayRec?.clockOut ? (
                     <button
                       onClick={clockOut}
-                      className="h-[24px] rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95"
+                      className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95"
                       style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a63" }}
                     >
                       {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
@@ -936,9 +1249,38 @@ export default function HRHomePage() {
               </div>
             </div>
 
-            <div className="relative min-h-[108px] overflow-hidden rounded-[3px] border border-[#cce2bf] px-4 py-3.5 text-white shadow-[0_1px_2px_rgba(15,23,42,0.08)]" style={{ background: "linear-gradient(180deg, #83c863 0%, #5da83e 100%)" }}>
-              <HolidayScene />
-              <div className="relative z-10">
+            <div
+              className="relative min-h-[108px] overflow-hidden rounded-[3px] border px-4 py-3.5 text-white shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition-colors"
+              style={{ background: holidayTheme.bg, borderColor: holidayTheme.border }}
+            >
+              {holidayTheme.scene}
+
+              {/* Prev/next arrows — only render when there's more than one
+                  holiday to page through. */}
+              {upcoming.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setHolidayIdx((i) => Math.max(0, i - 1))}
+                    disabled={!canPrevHoliday}
+                    aria-label="Previous holiday"
+                    className="absolute left-1 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-black/15 text-white transition hover:bg-black/30 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHolidayIdx((i) => Math.min(upcoming.length - 1, i + 1))}
+                    disabled={!canNextHoliday}
+                    aria-label="Next holiday"
+                    className="absolute right-1 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-black/15 text-white transition hover:bg-black/30 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </>
+              )}
+
+              <div className={`relative z-10 ${upcoming.length > 1 ? "px-7" : ""}`}>
                 <div className="mb-2 flex items-start justify-between">
                   <span
                     className="text-[9.5px] font-bold uppercase tracking-[0.14em]"
@@ -958,7 +1300,8 @@ export default function HRHomePage() {
                 {activeHoliday ? (
                   <>
                     <p
-                      className="max-w-[220px] text-[16px] font-semibold leading-snug"
+                      className="max-w-full truncate text-[16px] font-semibold leading-snug"
+                      title={activeHoliday.name}
                       style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
                     >
                       {activeHoliday.name}
@@ -977,7 +1320,7 @@ export default function HRHomePage() {
                     <span
                       className="mt-2 inline-block rounded-[3px] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em]"
                       style={{
-                        background: HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#008CFF",
+                        background: holidayTheme.badge ?? HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#008CFF",
                         color: "#ffffff",
                         WebkitTextFillColor: "#ffffff",
                       }}
