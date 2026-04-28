@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
-import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign } from "lucide-react";
+import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench } from "lucide-react";
 
 // Consistent Keka-style icon: thin outline, fixed size / stroke.
 const icon = (Cmp: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>) => (
@@ -31,6 +31,7 @@ const NAV_ITEMS = [
     { label: "Scores",    href: "/dashboard/scores",   icon: icon(Star),                                        managersOnly: true           },
     { label: "YouTube",   href: "/dashboard/youtube",  icon: icon(PlayCircle),     youtubeDashboardAccess: true                              },
     { label: "Feedback",  href: "/dashboard/feedback", icon: icon(MessageCircle)                                                             },
+    { label: "Tools",     href: "/dashboard/tools",    icon: icon(Wrench)                                                                    },
     { label: "Admin",     href: "/admin",              icon: icon(Settings),       adminOnly: true                                           },
 ];
 
