@@ -5,7 +5,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, MoreVertical, CheckCircle2, XCircle, Coffee, PieChart } from "lucide-react";
+import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, MoreVertical, CheckCircle2, XCircle, Coffee } from "lucide-react";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
 
@@ -21,7 +21,7 @@ const FORM_POLICY: Record<LeaveRequestKind, string | undefined> = {
   wfh:        "As per the policy assigned only Monday, Tuesday, Wednesday, Thursday, Friday, Saturday will be considered for WFH. Clock in is necessary on WFH days to avoid being marked absent.",
   on_duty:    "On-duty time counts as working hours. Log the purpose clearly — your manager will review before approval.",
   half_day:   "Half day leave covers either the first (9:00 AM – 2:00 PM) or second half (2:00 PM – 6:00 PM) of the day.",
-  leave:      "Leave is deducted from your balance once approved. Check your remaining balance before applying.",
+  leave:      undefined,
   regularize: "Use this to fix missed punches or incorrect clock-in/out. Attach a clear reason so approval is quick.",
 };
 
@@ -983,7 +983,7 @@ export default function AttendancePage() {
                   { label: "Work From Home",    Icon: Home,       onClick: () => openForm("wfh")       },
                   { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
                   { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
-                  { label: "Half Day",          Icon: PieChart,   onClick: () => openForm("half_day")  },
+                  { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
                 ].map(({ label, Icon, onClick }) => (
                   <button key={label} onClick={onClick}
                     className="flex items-center gap-1.5 text-[12px] font-medium text-[#008CFF] hover:underline w-fit">
