@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Home as HomeIcon,
   Send,
   BarChart2,
   Award,
@@ -84,6 +85,37 @@ function Av({ name, url, size = 40 }: { name: string; url?: string | null; size?
       className={`rounded-full flex items-center justify-center text-white font-semibold ring-2 ${C.ring} shrink-0`}>
       {initials}
     </div>
+  );
+}
+
+// Small avatar overlay for the "On Leave Today" tile. Matches the WFH home
+// badge's dimensions (14×14, 2px white ring) so the two badges sit at the
+// same offset and look consistent across the panel.
+//   full         → solid blue circle (full-day leave)
+//   first_half   → left half blue   (first-half leave)
+//   second_half  → right half blue  (second-half leave)
+function LeaveBadge({ kind }: { kind: "full" | "first_half" | "second_half" }) {
+  const BLUE = "#008CFF";
+  return (
+    <span
+      aria-label={
+        kind === "full" ? "On full-day leave" :
+        kind === "first_half" ? "On first-half leave" :
+        "On second-half leave"
+      }
+      title={
+        kind === "full" ? "On full-day leave" :
+        kind === "first_half" ? "On first-half leave" :
+        "On second-half leave"
+      }
+      className="absolute -top-0.5 -right-0.5 inline-flex h-[14px] w-[14px] items-center justify-center rounded-full border-2 border-white bg-white shadow-sm overflow-hidden"
+    >
+      <svg viewBox="0 0 10 10" className="w-full h-full">
+        {kind === "full"        && <circle cx="5" cy="5" r="5" fill={BLUE} />}
+        {kind === "first_half"  && <path d="M 5 0 A 5 5 0 0 0 5 10 Z" fill={BLUE} />}
+        {kind === "second_half" && <path d="M 5 0 A 5 5 0 0 1 5 10 Z" fill={BLUE} />}
+      </svg>
+    </span>
   );
 }
 
@@ -1040,10 +1072,24 @@ export default function HRHomePage() {
     if (!res.ok) return alert(d.error);
     mutate(`/api/hr/attendance?month=${monthKey}`);
   };
-  const onLeave  = (boardData?.board || []).filter((u: any) => u.status === "on_leave");
+  // On Leave Today — anyone whose attendance record is `on_leave` today, OR
+  // who has an applied leave (pending / partially_approved / approved) that
+  // covers today. Approval isn't required to appear here — the moment a
+  // colleague applies, they show up so others know they intend to be away.
+  const onLeave = (boardData?.board || []).filter((u: any) =>
+    u.status === "on_leave" || u.leaveToday === true
+  );
   // Split clocked-in employees by their actual location mode (from Attendance.location JSON).
   const clockedIn = (boardData?.board || []).filter((u: any) => u.status === "present" || u.status === "late");
-  const remote    = clockedIn.filter((u: any) => parseAttLoc(u.location).mode === "remote");
+  // Working Remotely — clocked-in remote users PLUS anyone with an applied
+  // (non-rejected) WFH for today. Same rationale as `onLeave`: the list shows
+  // intent, not just proven clock-ins.
+  const remoteClockedIn = clockedIn.filter((u: any) => parseAttLoc(u.location).mode === "remote");
+  const remoteIds = new Set<number>(remoteClockedIn.map((u: any) => u.id));
+  const remote = [
+    ...remoteClockedIn,
+    ...((boardData?.board || []) as any[]).filter((u: any) => u.wfhToday === true && !remoteIds.has(u.id)),
+  ];
   const balances = (balanceData as any[]).filter(b => b.leaveType).slice(0, 3);
   // `upcoming` already includes today (filter is `>= today`), so indexing
   // into it covers both "today's holiday" and the future ones the arrows
@@ -1432,7 +1478,10 @@ export default function HRHomePage() {
                 <div className="flex flex-wrap gap-3">
                   {onLeave.slice(0, 4).map((u: any) => (
                     <div key={u.id} className="flex flex-col items-center gap-1">
-                      <Av name={u.name} url={u.profilePictureUrl} size={36} />
+                      <span className="relative inline-flex">
+                        <Av name={u.name} url={u.profilePictureUrl} size={36} />
+                        <LeaveBadge kind={u.leaveKind ?? "full"} />
+                      </span>
                       <span className={`w-11 truncate text-center text-[9.5px] ${C.t3}`}>{u.name.split(" ")[0]}</span>
                     </div>
                   ))}
@@ -1448,7 +1497,17 @@ export default function HRHomePage() {
                 <div className="flex flex-wrap gap-3">
                   {remote.slice(0, 4).map((u: any) => (
                     <div key={u.id} className="flex flex-col items-center gap-1">
-                      <Av name={u.name} url={u.profilePictureUrl} size={36} />
+                      <span className="relative inline-flex">
+                        <Av name={u.name} url={u.profilePictureUrl} size={36} />
+                        {/* Home-icon badge — marks this avatar as a Work-From-Home user. */}
+                        <span
+                          aria-label="Working from home"
+                          title="Working from home"
+                          className="absolute -top-0.5 -right-0.5 flex h-[14px] w-[14px] items-center justify-center rounded-full bg-[#008CFF] ring-2 ring-white shadow-sm"
+                        >
+                          <HomeIcon size={10} strokeWidth={2.5} color="#ffffff" />
+                        </span>
+                      </span>
                       <span className={`w-11 truncate text-center text-[9.5px] ${C.t3}`}>{u.name.split(" ")[0]}</span>
                     </div>
                   ))}
