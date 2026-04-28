@@ -180,7 +180,7 @@ function rowInfo(type: string, it: any): { href: string; title: string; subtitle
   switch (type) {
     case "employees":
       return {
-        href: `/dashboard/hr/admin/people/${it.id}`,
+        href: `/dashboard/hr/people/${it.id}`,
         title: it.name,
         subtitle: [it.email, it.teamCapsule].filter(Boolean).join(" · "),
         tag: it.orgLevel && it.orgLevel !== "member" ? String(it.orgLevel).replace("_", " ") : undefined,
