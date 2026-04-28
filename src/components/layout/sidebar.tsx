@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useState, useEffect, useRef, useCallback, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -36,6 +36,7 @@ const NAV_ITEMS = [
 
 export default function Sidebar() {
     const pathname = usePathname();
+    const router   = useRouter();
     const { data: session } = useSession();
     const user = session?.user as any;
 
@@ -250,22 +251,23 @@ export default function Sidebar() {
                         && !pathname.startsWith("/dashboard/hr/people")
                         && !pathname.startsWith("/dashboard/hr/org")
                         && !pathname.startsWith("/dashboard/hr/engage")
-                        && !pathname.startsWith("/dashboard/hr/analytics")
+                        && !pathname.startsWith("/dashboard/hr/home")
                         && !pathname.startsWith("/dashboard/hr/admin")
                         && !pathname.startsWith("/dashboard/hr/assets")
                         && pathname !== "/admin";
-                    const homeActive = pathname === "/dashboard/hr/analytics" || pathname.startsWith("/dashboard/hr/analytics/");
+                    const homeActive = pathname === "/dashboard/hr/home" || pathname.startsWith("/dashboard/hr/home/");
                     const E = "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]";
                     const A = "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]";
                     return (
                         <>
-                            <Link href="/dashboard/hr/analytics"
+                            <Link href="/dashboard/hr/home"
                                 className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", homeActive ? A : E)}>
                                 <Home size={15} strokeWidth={1.75} className={homeActive ? "text-[#0f6ecd]" : ""} />
                                 Home
                             </Link>
                             <div ref={hrMeTrigger} {...meHandlers}
-                                className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isMeActive || hrMeOpen ? A : E)}>
+                                onDoubleClick={() => { setHrMeOpen(false); router.push("/dashboard/hr/attendance"); }}
+                                className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer select-none", isMeActive || hrMeOpen ? A : E)}>
                                 <User size={15} strokeWidth={1.75} className={isMeActive || hrMeOpen ? "text-[#0f6ecd]" : ""} />
                                 Me
                             </div>
@@ -576,7 +578,7 @@ export default function Sidebar() {
                     const meHandlers   = makeHrHandlers(setHrMeOpen,   setHrMeY,   hrMeTrigger,   hrMeTimer);
                     const teamHandlers = makeHrHandlers(setHrTeamOpen, setHrTeamY, hrTeamTrigger, hrTeamTimer);
 
-                    const isMeActive    = isHRPath && !pathname.startsWith("/dashboard/hr/my-team") && !pathname.startsWith("/dashboard/hr/inbox") && !pathname.startsWith("/dashboard/hr/people") && !pathname.startsWith("/dashboard/hr/org") && !pathname.startsWith("/dashboard/hr/engage") && !pathname.startsWith("/dashboard/hr/analytics") && !pathname.startsWith("/dashboard/hr/admin") && !pathname.startsWith("/dashboard/hr/assets") && pathname !== "/admin";
+                    const isMeActive    = isHRPath && !pathname.startsWith("/dashboard/hr/my-team") && !pathname.startsWith("/dashboard/hr/inbox") && !pathname.startsWith("/dashboard/hr/people") && !pathname.startsWith("/dashboard/hr/org") && !pathname.startsWith("/dashboard/hr/engage") && !pathname.startsWith("/dashboard/hr/home") && !pathname.startsWith("/dashboard/hr/admin") && !pathname.startsWith("/dashboard/hr/assets") && pathname !== "/admin";
                     const isTeamActive  = pathname.startsWith("/dashboard/hr/my-team") || pathname.startsWith("/dashboard/hr/inbox");
                     const isAdminActive = pathname.startsWith("/dashboard/hr/admin") || pathname.startsWith("/dashboard/hr/assets");
 

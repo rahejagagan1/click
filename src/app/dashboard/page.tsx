@@ -22,7 +22,7 @@ export default function DashboardPage() {
         // them to the HR home (Keka-style analytics) which works for every
         // role — instead of YouTube which used to be the dumping ground.
         if (!isCeo) {
-            router.replace("/dashboard/hr/analytics");
+            router.replace("/dashboard/hr/home");
         }
     }, [status, isCeo]);
 
