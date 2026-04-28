@@ -5,7 +5,7 @@ import Link from "next/link";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Check, X, MoreHorizontal } from "lucide-react";
+import { Check, X } from "lucide-react";
 import FilterDropdown from "@/components/hr/FilterDropdown";
 import {
   deriveEntity,
@@ -35,13 +35,149 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "shift_weekly_off",   label: "Shift & Weekly off"},
 ];
 
+// Compact "Applied · L1 · L2" timeline shown under the leave-type cell.
+// Uses the data already returned by /api/hr/approvals?tab=leave — appliedAt,
+// approver/approvedAt for L1, finalApprover/finalApprovedAt for L2.
+function fmtDt(d: any): string {
+  if (!d) return "";
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return "";
+  return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    + ", "
+    + dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+}
+
+// Per-stage approver cell. Shows the outcome of a stage (Approved /
+// Rejected / Awaiting / —) and, for the actively-awaiting stage that the
+// current user can decide on, inline approve/reject buttons.
+//
+//   L1: row.approver / row.approvedAt / row.approvalNote
+//   L2: row.finalApprover / row.finalApprovedAt / row.finalApprovalNote
+//
+// Status → cell state mapping:
+//   pending             → L1 = Awaiting,  L2 = —
+//   partially_approved  → L1 = Approved,  L2 = Awaiting
+//   approved            → L1 = Approved,  L2 = Approved
+//   rejected (no L2 ts) → L1 = Rejected,  L2 = —
+//   rejected (L2 ts)    → L1 = Approved,  L2 = Rejected
+//
+// Action visibility:
+//   L1 buttons → status==="pending" AND user is row's L1 approver
+//                (manager / HR-admin / CEO / developer — the API only
+//                returns rows the viewer is allowed to action).
+//   L2 buttons → status==="partially_approved" AND user is final approver
+//                (HR-admin / CEO / developer).
+function ApprovalCell({
+  stage, row, canAct, onApprove, onReject, actioning,
+}: {
+  stage: "L1" | "L2";
+  row: any;
+  canAct: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+  actioning: boolean;
+}) {
+  const status: string = row.status;
+  const l2Ts = row.finalApprovedAt || null;
+
+  let outcome: "approved" | "rejected" | "awaiting" | "na" = "na";
+  let actor: { name?: string } | null = null;
+  let ts: any = null;
+  let note: string | null = null;
+
+  if (stage === "L1") {
+    actor = row.approver || null;
+    ts    = row.approvedAt || null;
+    note  = row.approvalNote || null;
+    if (status === "pending")                                     outcome = "awaiting";
+    else if (status === "rejected" && !l2Ts)                      outcome = "rejected";
+    else                                                          outcome = "approved";
+  } else {
+    actor = row.finalApprover || null;
+    ts    = l2Ts;
+    note  = row.finalApprovalNote || row.approvalNote || null;
+    if (status === "pending")                                     outcome = "na";
+    else if (status === "rejected" && !l2Ts)                      outcome = "na";
+    else if (status === "partially_approved")                     outcome = "awaiting";
+    else if (status === "approved")                               outcome = "approved";
+    else if (status === "rejected" && l2Ts)                       outcome = "rejected";
+  }
+
+  if (outcome === "na") {
+    return <span className="text-[12px] text-slate-300">—</span>;
+  }
+
+  const tone =
+    outcome === "approved" ? "text-emerald-600 dark:text-emerald-300"
+    : outcome === "rejected" ? "text-rose-600 dark:text-rose-300"
+    : "text-amber-600 dark:text-amber-300";
+  const dotBg =
+    outcome === "approved" ? "bg-emerald-500"
+    : outcome === "rejected" ? "bg-rose-500"
+    : "bg-amber-500";
+  const label =
+    outcome === "approved" ? "Approved"
+    : outcome === "rejected" ? "Rejected"
+    : "Awaiting";
+
+  return (
+    <div className="min-w-[160px]">
+      <div className="flex items-center gap-1.5">
+        <span className={`w-1.5 h-1.5 rounded-full ${dotBg}`} />
+        <span className={`text-[12px] font-semibold ${tone}`}>{label}</span>
+      </div>
+      {outcome === "awaiting" ? (
+        canAct ? (
+          <div className="flex items-center gap-1.5 mt-1.5">
+            <button
+              type="button"
+              onClick={onApprove}
+              disabled={actioning}
+              title={`Approve at ${stage}`}
+              className="w-7 h-7 rounded-full flex items-center justify-center bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-100 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <Check size={13} strokeWidth={2.5} />
+            </button>
+            <button
+              type="button"
+              onClick={onReject}
+              disabled={actioning}
+              title={`Reject at ${stage}`}
+              className="w-7 h-7 rounded-full flex items-center justify-center bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-300 hover:bg-rose-100 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <X size={13} strokeWidth={2.5} />
+            </button>
+          </div>
+        ) : null
+      ) : (
+        <>
+          <p className="text-[11.5px] text-slate-700 dark:text-slate-200 mt-0.5 truncate" title={actor?.name || ""}>
+            {actor?.name || "—"}
+          </p>
+          <p className="text-[10.5px] text-slate-400">{fmtDt(ts) || "—"}</p>
+          {note && outcome === "rejected" ? (
+            <p className="text-[10.5px] text-rose-500/80 mt-0.5 truncate max-w-[180px]" title={note}>
+              {note}
+            </p>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
+  // Two-stage approval flow:
+  //   pending             → L1 (manager) hasn't acted yet  → "Pending L1"
+  //   partially_approved  → L1 approved, L2 (HR/CEO) hasn't acted → "Pending L2"
+  //   approved            → both stages cleared
+  //   rejected/cancelled  → terminal
   const map: Record<string, { bg: string; text: string; label: string }> = {
-    pending:             { bg: "bg-amber-100 dark:bg-amber-500/15",  text: "text-amber-700 dark:text-amber-300",  label: "Pending"            },
-    partially_approved:  { bg: "bg-[#008CFF]/10 dark:bg-[#008CFF]/15", text: "text-[#008CFF]",                   label: "Partially Approved" },
-    approved:            { bg: "bg-emerald-100 dark:bg-emerald-500/15", text: "text-emerald-700 dark:text-emerald-300", label: "Approved"         },
-    rejected:            { bg: "bg-rose-100 dark:bg-rose-500/15",     text: "text-rose-700 dark:text-rose-300",    label: "Rejected"           },
-    cancelled:           { bg: "bg-slate-100 dark:bg-white/[0.05]",   text: "text-slate-500",                      label: "Cancelled"          },
+    pending:             { bg: "bg-amber-100 dark:bg-amber-500/15",   text: "text-amber-700 dark:text-amber-300",     label: "Pending L1"  },
+    partially_approved:  { bg: "bg-[#008CFF]/10 dark:bg-[#008CFF]/15", text: "text-[#008CFF]",                          label: "Pending L2"  },
+    approved:            { bg: "bg-emerald-100 dark:bg-emerald-500/15", text: "text-emerald-700 dark:text-emerald-300", label: "Approved"    },
+    rejected:            { bg: "bg-rose-100 dark:bg-rose-500/15",     text: "text-rose-700 dark:text-rose-300",        label: "Rejected"    },
+    cancelled:           { bg: "bg-slate-100 dark:bg-white/[0.05]",   text: "text-slate-500",                          label: "Cancelled"   },
   };
   const m = map[status] || map.pending;
   return (
@@ -120,8 +256,14 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
       deptOpts:  departmentOptions(users),
       locOpts:   locationOptions(users),
       statusOpts: Array.from(statusSet).sort().map((v) => ({
+        // Match the StatusBadge wording so the filter shows "Pending L1" /
+        // "Pending L2" instead of confusing raw enum values.
+        // (legacy `partially_approved` → "Pending L2"; `pending` → "Pending L1".)
+        // Falls through to title-case for terminal statuses.
         value: v,
-        label: v === "partially_approved" ? "Partially Approved" : v.charAt(0).toUpperCase() + v.slice(1),
+        label: v === "partially_approved" ? "Pending L2"
+              : v === "pending"            ? "Pending L1"
+              : v.charAt(0).toUpperCase() + v.slice(1),
       })),
     };
   }, [rows]);
@@ -468,7 +610,7 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                           onChange={toggleAllVisible}
                           className="w-3.5 h-3.5 rounded border-slate-300 accent-[#008CFF]" />
                       </th>
-                      {["EMPLOYEE","EMPLOYEE NUMBER","DEPARTMENT","LOCATION","BUSINESS UNIT","LEGAL ENTITY","LEAVE DATES","LEAVE TYPE","REQUEST STATUS","ACTIONS"].map((h) => (
+                      {["EMPLOYEE","EMPLOYEE NUMBER","DEPARTMENT","LOCATION","BUSINESS UNIT","LEGAL ENTITY","LEAVE DATES","LEAVE TYPE","L1 APPROVAL","L2 APPROVAL","REQUEST STATUS"].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -523,35 +665,31 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                           </td>
                           <td className="px-4 py-3">
                             <p className="text-[12.5px] text-slate-800 dark:text-white">{r.leaveType?.name || "Leave"}</p>
-                            <p className="text-[11px] text-slate-400">Requested on {new Date(r.appliedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
+                            <p className="text-[10.5px] text-slate-400 mt-0.5">
+                              <span className="font-semibold text-slate-500">Applied</span> · {fmtDt(r.appliedAt)}
+                            </p>
+                          </td>
+                          <td className="px-4 py-3 align-top">
+                            <ApprovalCell
+                              stage="L1"
+                              row={r}
+                              canAct={r.status === "pending" && actionable}
+                              onApprove={() => actOne(r.id, "approve")}
+                              onReject={() => actOne(r.id, "reject")}
+                              actioning={actioning}
+                            />
+                          </td>
+                          <td className="px-4 py-3 align-top">
+                            <ApprovalCell
+                              stage="L2"
+                              row={r}
+                              canAct={r.status === "partially_approved" && isFinalApprover}
+                              onApprove={() => actOne(r.id, "approve")}
+                              onReject={() => actOne(r.id, "reject")}
+                              actioning={actioning}
+                            />
                           </td>
                           <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                onClick={() => actOne(r.id, "approve")}
-                                disabled={!actionable || actioning}
-                                title={actionable ? "Approve" : "You can't act on this request"}
-                                className="w-7 h-7 rounded-full flex items-center justify-center bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                              >
-                                <Check size={13} strokeWidth={2.5} />
-                              </button>
-                              <button
-                                onClick={() => actOne(r.id, "reject")}
-                                disabled={!actionable || actioning}
-                                title={actionable ? "Reject" : "You can't act on this request"}
-                                className="w-7 h-7 rounded-full flex items-center justify-center bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-300 hover:bg-rose-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                              >
-                                <X size={13} strokeWidth={2.5} />
-                              </button>
-                              <button
-                                className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 dark:hover:bg-white/[0.05]"
-                                title="Details"
-                              >
-                                <MoreHorizontal size={14} strokeWidth={2} />
-                              </button>
-                            </div>
-                          </td>
                         </tr>
                       );
                     })}
