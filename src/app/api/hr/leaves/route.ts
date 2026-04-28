@@ -31,9 +31,15 @@ export async function GET(req: NextRequest) {
     const view = searchParams.get("view") || "my";
 
     let where: any = {};
-    if (view === "team") {
+    if (view === "all") {
+      // HR-admin only — full org-wide view used by the admin Leaves panel.
+      if (!isAdmin) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      // No userId filter — admin sees everyone.
+    } else if (view === "team") {
       if (isAdmin) {
-        // admin sees all
+        // admin sees all teams
       } else {
         const team = await prisma.user.findMany({ where: { managerId: myId }, select: { id: true } });
         where.userId = { in: team.map((u) => u.id) };
@@ -47,10 +53,12 @@ export async function GET(req: NextRequest) {
     const applications = await prisma.leaveApplication.findMany({
       where, include: {
         leaveType: true,
-        user: { select: { id: true, name: true, profilePictureUrl: true } },
+        user: { select: { id: true, name: true, email: true, profilePictureUrl: true } },
         approver: { select: { id: true, name: true } },
       },
-      orderBy: { appliedAt: "desc" }, take: 100,
+      // Admin view loads the full history; per-user view stays paginated at 100.
+      orderBy: { appliedAt: "desc" },
+      take: view === "all" ? 500 : 100,
     });
     return NextResponse.json(applications);
   } catch (e) { return serverError(e, "GET /api/hr/leaves"); }
