@@ -90,8 +90,14 @@ export async function GET(req: NextRequest) {
     }
 
     if (tab === "regularize") {
+      // Regularization is HR-admin-only — managers don't see this queue at
+      // all (they can't approve, so showing them empty pending rows is just
+      // noise). Final approvers see everything.
+      if (!isFinalApprover) {
+        return NextResponse.json(serializeBigInt({ items: [], count: 0 }));
+      }
       const rows = await prisma.attendanceRegularization.findMany({
-        where: { ...statusFilter(["pending"]), ...teamWhere },
+        where: { ...statusFilter(["pending", "partially_approved"]) },
         include: includeUser,
         orderBy: { createdAt: "desc" },
         take: 300,
@@ -101,15 +107,17 @@ export async function GET(req: NextRequest) {
 
     if (tab === "wfh") {
       // "WFH / OD" tab combines both request types — they're workflow-identical.
+      // Both flow through L1 (manager) → L2 (HR/CEO/Dev), so include
+      // partially_approved so final approvers see stage-2 items.
       const [wfhRows, odRows] = await Promise.all([
         prisma.wFHRequest.findMany({
-          where: { ...statusFilter(["pending"]), ...teamWhere },
+          where: { ...statusFilter(["pending", "partially_approved"]), ...teamWhere },
           include: includeUser,
           orderBy: { createdAt: "desc" },
           take: 300,
         }),
         prisma.onDutyRequest.findMany({
-          where: { ...statusFilter(["pending"]), ...teamWhere },
+          where: { ...statusFilter(["pending", "partially_approved"]), ...teamWhere },
           include: includeUser,
           orderBy: { createdAt: "desc" },
           take: 300,
@@ -123,8 +131,9 @@ export async function GET(req: NextRequest) {
     }
 
     if (tab === "comp_off") {
+      // Comp-off also runs the L1 → L2 flow now — include partially_approved.
       const rows = await prisma.compOffRequest.findMany({
-        where: { ...statusFilter(["pending"]), ...teamWhere },
+        where: { ...statusFilter(["pending", "partially_approved"]), ...teamWhere },
         include: includeUser,
         orderBy: { createdAt: "desc" },
         take: 300,

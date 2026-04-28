@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { Bell, BellOff, CheckCheck, Activity, Home, Briefcase, ShieldCheck, Coffee, Trash2 } from "lucide-react";
+import { Bell, BellOff, Activity, Home, Briefcase, ShieldCheck, Coffee, Trash2, MoreHorizontal } from "lucide-react";
 import Link from "next/link";
 
 // ── Notification sound ──────────────────────────────────────────────────────
@@ -40,6 +40,20 @@ function playNotificationSound() {
   } catch { /* autoplay blocked or no audio support — silently ignore */ }
 }
 
+// Notification bodies use a `\nNote: ` separator to delimit the
+// approver's free-text comment from the templated intro line. Splitting
+// here lets the panel surface the note as its own styled block, and
+// powers the "Notes" filter tab.
+function splitNote(body: string | null | undefined): { intro: string; note: string | null } {
+  if (!body) return { intro: "", note: null };
+  const idx = body.indexOf("\nNote: ");
+  if (idx === -1) return { intro: body, note: null };
+  return {
+    intro: body.slice(0, idx),
+    note:  body.slice(idx + "\nNote: ".length).trim(),
+  };
+}
+
 function timeAgo(iso: string): string {
   const t  = new Date(iso).getTime();
   const s  = Math.max(1, Math.round((Date.now() - t) / 1000));
@@ -67,13 +81,89 @@ const TYPE_META: Record<string, { tint: string; Icon: React.ComponentType<{ size
 };
 const metaFor = (type: string) => TYPE_META[type] || TYPE_META._default;
 
+// Overflow menu for the rarely-used notification controls (sound toggle,
+// delete-all-read). Keeps the panel header clean — only "Mark all read"
+// stays as a primary action up top.
+function NotifMenu({
+  soundOn, onToggleSound, onDeleteRead, readCount,
+}: {
+  soundOn: boolean;
+  onToggleSound: () => void;
+  onDeleteRead: () => void;
+  readCount: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="More options"
+        className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
+          open
+            ? "bg-slate-100 text-slate-700 dark:bg-white/[0.08] dark:text-white"
+            : "text-slate-500 hover:text-slate-800 hover:bg-slate-100 dark:hover:bg-white/[0.05]"
+        }`}
+      >
+        <MoreHorizontal size={15} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-9 w-48 bg-white dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg shadow-lg overflow-hidden z-10 py-1">
+          <button
+            type="button"
+            onClick={() => { onToggleSound(); setOpen(false); }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04]"
+          >
+            {soundOn ? <BellOff size={13} /> : <Bell size={13} />}
+            {soundOn ? "Mute sound" : "Unmute sound"}
+          </button>
+          <button
+            type="button"
+            onClick={() => { if (readCount > 0) { onDeleteRead(); setOpen(false); } }}
+            disabled={readCount === 0}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 text-[12.5px] transition-colors ${
+              readCount === 0
+                ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
+                : "text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 cursor-pointer"
+            }`}
+          >
+            <Trash2 size={13} />
+            Delete read
+            {readCount > 0 && <span className="ml-auto text-[10.5px] text-slate-400">{readCount}</span>}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function NotificationBell() {
   const [open, setOpen] = useState(false);
+  const [tab,  setTab]  = useState<"all" | "unread" | "notes">("all");
   const panelRef = useRef<HTMLDivElement>(null);
   const btnRef   = useRef<HTMLButtonElement>(null);
-  const { data } = useSWR("/api/hr/notifications?limit=10", fetcher, { refreshInterval: 30_000 });
+  const { data } = useSWR("/api/hr/notifications?limit=20", fetcher, { refreshInterval: 30_000 });
   const items = (data?.items as any[]) || [];
   const unread = data?.unreadCount ?? 0;
+
+  const noteCount = items.filter((n: any) => splitNote(n.body).note).length;
+  const filtered = items.filter((n: any) => {
+    if (tab === "unread") return !n.isRead;
+    if (tab === "notes")  return !!splitNote(n.body).note;
+    return true;
+  });
 
   // Sound preference — persisted in localStorage, default ON.
   const [soundOn, setSoundOn] = useState<boolean>(true);
@@ -180,65 +270,86 @@ export default function NotificationBell() {
           className="fixed w-[380px] max-w-[calc(100vw-16px)] max-h-[520px] bg-white dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-xl shadow-2xl flex flex-col overflow-hidden"
           style={{ zIndex: 9999, top, right }}
         >
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-white/[0.06] gap-3">
-            <span className="text-[14px] font-semibold text-slate-900 dark:text-white shrink-0">Notifications</span>
-            <div className="flex items-center gap-3 text-[12px] font-medium">
-              <button
-                type="button"
-                onClick={() => { toggleSound(); if (!soundOn) playNotificationSound(); }}
-                title={soundOn ? "Mute notification sound" : "Unmute notification sound"}
-                aria-label={soundOn ? "Mute notification sound" : "Unmute notification sound"}
-                className={`flex items-center gap-1 transition-colors ${
-                  soundOn ? "text-slate-500 hover:text-[#008CFF]" : "text-slate-400 hover:text-slate-600"
-                }`}
-              >
-                {soundOn ? <Bell size={13} /> : <BellOff size={13} />}
-                {soundOn ? "Sound on" : "Muted"}
-              </button>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-white/[0.06] gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[15px] font-semibold text-slate-900 dark:text-white">Notifications</span>
+              {unread > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold bg-[#008CFF] text-white">
+                  {unread > 99 ? "99+" : unread}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={markAllRead}
                 disabled={unread === 0}
                 aria-disabled={unread === 0}
-                className={`flex items-center gap-1 transition-colors ${
+                className={`text-[12px] font-semibold px-2.5 h-7 rounded-md transition-colors ${
                   unread === 0
                     ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
-                    : "text-[#008CFF] hover:underline cursor-pointer"
+                    : "text-[#008CFF] hover:bg-[#008CFF]/10 dark:hover:bg-[#008CFF]/15 cursor-pointer"
                 }`}
               >
-                <CheckCheck size={13} /> Mark all as read
+                Mark all read
               </button>
-              {(() => {
-                const readCount = items.filter((n: any) => n.isRead).length;
-                const disabled = readCount === 0;
-                return (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (disabled) return;
-                      if (!confirm(`Delete ${readCount} read notification${readCount === 1 ? "" : "s"}?`)) return;
-                      deleteAllRead();
-                    }}
-                    disabled={disabled}
-                    aria-disabled={disabled}
-                    title={disabled ? "No read notifications to delete" : `Delete ${readCount} read notification${readCount === 1 ? "" : "s"}`}
-                    className={`flex items-center gap-1 transition-colors ${
-                      disabled
-                        ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
-                        : "text-rose-500 hover:underline cursor-pointer"
-                    }`}
-                  >
-                    <Trash2 size={13} /> Delete read
-                  </button>
-                );
-              })()}
+              <NotifMenu
+                soundOn={soundOn}
+                onToggleSound={() => { toggleSound(); if (!soundOn) playNotificationSound(); }}
+                onDeleteRead={() => {
+                  const readCount = items.filter((n: any) => n.isRead).length;
+                  if (readCount === 0) return;
+                  if (!confirm(`Delete ${readCount} read notification${readCount === 1 ? "" : "s"}?`)) return;
+                  deleteAllRead();
+                }}
+                readCount={items.filter((n: any) => n.isRead).length}
+              />
             </div>
           </div>
+          {/* Filter tabs — All / Unread / Notes (the last surfaces approver
+              comments attached to leave/regularization decisions). */}
+          <div className="flex items-center gap-1 px-3 pt-2 pb-1 border-b border-slate-200 dark:border-white/[0.06]">
+            {[
+              { key: "all",    label: "All",    count: items.length },
+              { key: "unread", label: "Unread", count: unread       },
+              { key: "notes",  label: "Notes",  count: noteCount    },
+            ].map((t) => {
+              const active = tab === t.key;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key as typeof tab)}
+                  className={`flex items-center gap-1.5 px-2.5 h-7 rounded-md text-[12px] font-semibold transition-colors ${
+                    active
+                      ? "bg-[#008CFF]/10 text-[#008CFF]"
+                      : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.04]"
+                  }`}
+                >
+                  {t.label}
+                  {t.count > 0 && (
+                    <span className={`text-[10px] font-bold px-1.5 rounded-full ${
+                      active
+                        ? "bg-[#008CFF] text-white"
+                        : "bg-slate-200 dark:bg-white/[0.08] text-slate-600 dark:text-slate-300"
+                    }`}>
+                      {t.count > 99 ? "99+" : t.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
           <div className="overflow-y-auto flex-1">
-            {items.length === 0 ? (
-              <p className="text-[13px] text-slate-400 dark:text-slate-400 text-center py-14">No notifications yet</p>
-            ) : items.map((n: any) => {
+            {filtered.length === 0 ? (
+              <p className="text-[13px] text-slate-400 dark:text-slate-400 text-center py-14">
+                {tab === "notes"  ? "No notifications with notes yet" :
+                 tab === "unread" ? "You're all caught up"            :
+                                    "No notifications yet"}
+              </p>
+            ) : filtered.map((n: any) => {
               const { tint, Icon } = metaFor(n.type);
+              const { intro, note } = splitNote(n.body);
               const body = (
                 <div className={`relative flex items-start gap-3 px-4 py-3.5 border-b border-slate-100 dark:border-white/[0.04] transition-colors ${n.isRead ? "hover:bg-slate-50 dark:hover:bg-white/[0.02]" : "bg-[#008CFF]/[0.04] hover:bg-[#008CFF]/[0.08] dark:bg-[#4a9cff]/[0.06] dark:hover:bg-[#4a9cff]/[0.1]"}`}>
                   {!n.isRead && (
@@ -254,10 +365,18 @@ export default function NotificationBell() {
                     <p className={`text-[13px] leading-snug ${n.isRead ? "text-slate-500 dark:text-slate-400 font-medium" : "text-slate-900 dark:text-white font-semibold"}`}>
                       {n.title}
                     </p>
-                    {n.body && (
+                    {intro && (
                       <p className={`text-[11.5px] mt-0.5 leading-snug line-clamp-2 ${n.isRead ? "text-slate-400 dark:text-slate-500" : "text-slate-600 dark:text-slate-300"}`}>
-                        {n.body}
+                        {intro}
                       </p>
+                    )}
+                    {note && (
+                      <div className="mt-2 flex gap-2 rounded-md border-l-2 border-[#008CFF]/40 bg-slate-50 dark:bg-white/[0.04] pl-2.5 pr-2 py-1.5">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#008CFF] dark:text-[#4a9cff] mt-[1px]">Note</span>
+                        <p className="text-[11.5px] leading-snug text-slate-700 dark:text-slate-200 break-words flex-1">
+                          {note}
+                        </p>
+                      </div>
                     )}
                     <p className={`text-[11px] mt-1 ${n.isRead ? "text-slate-400 dark:text-slate-500" : "text-slate-500 dark:text-slate-400"}`}>
                       {timeAgo(n.createdAt)}

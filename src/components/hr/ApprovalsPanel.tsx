@@ -344,8 +344,14 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
           body:    JSON.stringify({ id, action, approvalNote: note || null }),
         });
       };
+    } else if (tab === "comp_off") {
+      doOne = (id) => fetch(`/api/hr/leaves/comp-off`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ id, action, approvalNote: note || null }),
+      });
     } else {
-      // Tabs without an approve endpoint yet (comp_off, half_day, etc.)
+      // Tabs without an approve endpoint yet (half_day, etc.)
       setActioning(false);
       return;
     }
@@ -454,7 +460,12 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/[0.06] bg-slate-50/60 dark:bg-white/[0.02]">
-                    {["EMPLOYEE", tab === "comp_off" ? "WORKED DATE" : "DATE", tab === "regularize" ? "REQUESTED IN / OUT" : "DETAILS", "REASON", "SUBMITTED", "STATUS", "APPROVAL NOTE", "ACTIONS"].map((h) => (
+                    {(tab === "regularize"
+                      // Regularization: single-stage HR-only — no L1/L2 split.
+                      ? ["EMPLOYEE", "DATE", "REQUESTED IN / OUT", "REASON", "STATUS", "APPROVAL NOTE", "ACTIONS"]
+                      // WFH / OD / Comp-off: two-stage L1 → L2.
+                      : ["EMPLOYEE", tab === "comp_off" ? "WORKED DATE" : "DATE", "DETAILS", "REASON", "L1 APPROVAL", "L2 APPROVAL", "REQUEST STATUS"]
+                    ).map((h) => (
                       <th key={h} className="px-4 py-3 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -477,6 +488,19 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                         ? `${r.creditDays ?? 1} day(s)`
                         : "—";
                     const reason = r.reason || r.purpose || "—";
+                    const isTwoStage = tab === "wfh" || tab === "comp_off";
+                    // ApprovalCell expects approvedAt / finalApprover / finalApprovedAt
+                    // shape used by leave rows. WFH / OD / Comp-off don't have those
+                    // schema fields, so we synthesise them from the row's
+                    // existing data — `updatedAt` is a fine proxy for the stage
+                    // timestamp because it changes on every status transition.
+                    const stageRow = {
+                      ...r,
+                      approvedAt:        r.approvedAt        ?? r.updatedAt,
+                      finalApprovedAt:   r.finalApprovedAt   ?? (r.status === "approved" || (r.status === "rejected" && r.approvedById) ? r.updatedAt : null),
+                      finalApprover:     r.finalApprover     ?? null,
+                      finalApprovalNote: r.finalApprovalNote ?? null,
+                    };
                     return (
                       <tr key={`${r._kind ?? tab}-${r.id}`} className="border-b border-slate-100 dark:border-white/[0.04] hover:bg-slate-50/60 dark:hover:bg-white/[0.015]">
                         <td className="px-4 py-3">
@@ -492,38 +516,71 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-[12.5px] text-slate-700 dark:text-slate-300 whitespace-nowrap">{fmt(dateObj)}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <p className="text-[12.5px] text-slate-700 dark:text-slate-300">{fmt(dateObj)}</p>
+                          <p className="text-[10.5px] text-slate-400 mt-0.5">
+                            <span className="font-semibold text-slate-500">Submitted</span> · {fmtDt(r.createdAt)}
+                          </p>
+                        </td>
                         <td className="px-4 py-3 text-[12.5px] text-slate-700 dark:text-slate-300 whitespace-nowrap">{details}</td>
                         <td className="px-4 py-3 text-[12.5px] text-slate-600 dark:text-slate-400 max-w-[260px] truncate" title={reason}>{reason}</td>
-                        <td className="px-4 py-3 text-[11px] text-slate-400 whitespace-nowrap">{fmt(new Date(r.createdAt))}</td>
-                        <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
-                        <td className="px-4 py-3 text-[12px] text-slate-600 dark:text-slate-400 max-w-[220px] truncate" title={r.approvalNote ?? ""}>
-                          {r.approvalNote || <span className="text-slate-300">—</span>}
-                        </td>
-                        <td className="px-4 py-3">
-                          {r.status === "pending" ? (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                onClick={() => actOne(r.id, "approve")}
-                                disabled={actioning}
-                                title="Approve"
-                                className="w-7 h-7 rounded-full flex items-center justify-center bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                              >
-                                <Check size={13} strokeWidth={2.5} />
-                              </button>
-                              <button
-                                onClick={() => actOne(r.id, "reject")}
-                                disabled={actioning}
-                                title="Reject"
-                                className="w-7 h-7 rounded-full flex items-center justify-center bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-300 hover:bg-rose-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                              >
-                                <X size={13} strokeWidth={2.5} />
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="text-[11px] text-slate-400">—</span>
-                          )}
-                        </td>
+
+                        {isTwoStage ? (
+                          <>
+                            <td className="px-4 py-3 align-top">
+                              <ApprovalCell
+                                stage="L1"
+                                row={stageRow}
+                                canAct={r.status === "pending" && canActOn(r)}
+                                onApprove={() => actOne(r.id, "approve")}
+                                onReject={() => actOne(r.id, "reject")}
+                                actioning={actioning}
+                              />
+                            </td>
+                            <td className="px-4 py-3 align-top">
+                              <ApprovalCell
+                                stage="L2"
+                                row={stageRow}
+                                canAct={r.status === "partially_approved" && isFinalApprover}
+                                onApprove={() => actOne(r.id, "approve")}
+                                onReject={() => actOne(r.id, "reject")}
+                                actioning={actioning}
+                              />
+                            </td>
+                            <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
+                            <td className="px-4 py-3 text-[12px] text-slate-600 dark:text-slate-400 max-w-[220px] truncate" title={r.approvalNote ?? ""}>
+                              {r.approvalNote || <span className="text-slate-300">—</span>}
+                            </td>
+                            <td className="px-4 py-3">
+                              {canActOn(r) ? (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => actOne(r.id, "approve")}
+                                    disabled={actioning}
+                                    title="Approve"
+                                    className="w-7 h-7 rounded-full flex items-center justify-center bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                                  >
+                                    <Check size={13} strokeWidth={2.5} />
+                                  </button>
+                                  <button
+                                    onClick={() => actOne(r.id, "reject")}
+                                    disabled={actioning}
+                                    title="Reject"
+                                    className="w-7 h-7 rounded-full flex items-center justify-center bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-300 hover:bg-rose-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                                  >
+                                    <X size={13} strokeWidth={2.5} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-[11px] text-slate-400">—</span>
+                              )}
+                            </td>
+                          </>
+                        )}
                       </tr>
                     );
                   })}

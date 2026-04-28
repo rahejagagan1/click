@@ -3,7 +3,7 @@ import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { parseBody } from "@/lib/validate";
-import { notifyApprovers, notifyUsers } from "@/lib/notifications";
+import { notifyUsers } from "@/lib/notifications";
 import { writeAuditLog } from "@/lib/audit-log";
 import { istTimeOnDate, istMonthRange, istTodayDateOnly, istDateOnlyFrom } from "@/lib/ist-date";
 
@@ -233,21 +233,36 @@ export async function POST(req: NextRequest) {
     const target = await prisma.user.findUnique({ where: { id: targetUserId }, select: { name: true } });
     const dateLabel = targetDateOnly.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
 
+    // Regularization is HR-admin-only — skip the direct manager and only
+    // notify CEO / HR managers / Developers (and any "Notify" extras the
+    // applicant tagged on the form).
+    const devEmails = (process.env.DEVELOPER_EMAILS || "")
+      .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+    const admins = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        OR: [
+          { orgLevel: { in: ["ceo", "hr_manager"] } },
+          { role: "admin" },
+          ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    const adminIds = admins.map((u) => u.id).filter((id) => id !== targetUserId);
+
     await Promise.all([
-      // L1 manager + extras get the approval request.
-      notifyApprovers({
+      notifyUsers({
         actorId:  isAdminGrant ? myId : targetUserId,
+        userIds:  [...adminIds, ...extras],
         type:     "regularization",
         entityId: reg.id,
         title:    isAdminGrant
-          ? `Regularization granted for ${target?.name || "an employee"} — needs L1 approval`
+          ? `Regularization granted for ${target?.name || "an employee"} — awaiting your approval`
           : `${target?.name || "An employee"} requested regularization`,
         body:     `Date: ${dateLabel} — ${String(reason).slice(0, 120)}`,
         linkUrl:  "/dashboard/hr/approvals?tab=regularize",
-        extraUserIds: extras,
       }),
-      // Target user gets a confirmation — they need to see the item even if
-      // an admin created it on their behalf.
       notifyUsers({
         actorId:  isAdminGrant ? myId : null,
         userIds:  [targetUserId],
@@ -257,8 +272,8 @@ export async function POST(req: NextRequest) {
           ? `HR granted you a regularization for ${dateLabel}`
           : `Regularization request submitted`,
         body:     isAdminGrant
-          ? `Your manager still needs to approve it. Reason on record: ${String(reason).slice(0, 120)}`
-          : `Your request for ${dateLabel} is awaiting approval.`,
+          ? `On record. Reason: ${String(reason).slice(0, 120)}`
+          : `Your request for ${dateLabel} is awaiting HR approval.`,
         linkUrl:  "/dashboard/hr/attendance",
       }),
     ]);
@@ -286,73 +301,42 @@ export async function PUT(req: NextRequest) {
     });
     if (!reg) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // Status guard: must be open (pending or partially_approved).
+    // Status guard: must be open (pending or partially_approved — partially
+    // is kept here only so any legacy rows from the old two-stage flow can
+    // still be finalised).
     if (reg.status !== "pending" && reg.status !== "partially_approved") {
       return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
     }
 
-    // Resolve the user's manager chain once — used for both stages.
-    const l1Id = reg.user?.managerId ?? null;
-    const l1 = l1Id ? await prisma.user.findUnique({ where: { id: l1Id }, select: { id: true, managerId: true } }) : null;
-    const l2Id = l1?.managerId ?? null; // grand-manager (may be null)
-
-    // Permission model (hybrid):
-    //   Stage 1 (pending → partially_approved):
-    //     - L1 (direct manager) OR CEO / HR manager may act.
-    //     - CEO/HR fallback is needed when a user has no direct manager.
-    //   Stage 2 (partially_approved → approved):
-    //     - L2 (grand-manager, anywhere up the chain) OR CEO / HR manager may act.
-    //     - "Anywhere up the chain" = l2Id, or l2's manager, etc. For now we
-    //       accept l2 directly; CEO/HR covers the rest.
-    //   Reject is allowed at whichever stage the caller could approve.
-    const isL1 = l1Id !== null && l1Id === myId;
-    const isL2OrAbove = l2Id !== null && l2Id === myId; // TODO: extend to full ancestor chain if needed
-    const canActStage1 = isL1 || admin;
-    const canActStage2 = isL2OrAbove || admin;
-
-    const nextStatus = action === "reject"
-      ? "rejected"
-      : reg.status === "pending" ? "partially_approved" : "approved";
-
-    if (action === "approve") {
-      if (reg.status === "pending" && !canActStage1) {
-        return NextResponse.json({ error: "Forbidden — only the L1 manager or HR/CEO can approve stage 1." }, { status: 403 });
-      }
-      if (reg.status === "partially_approved" && !canActStage2) {
-        return NextResponse.json({ error: "Forbidden — only the L2 (grand-manager) or HR/CEO can give final approval." }, { status: 403 });
-      }
-    } else {
-      // Reject — anyone who could act at the current stage may reject.
-      if (reg.status === "pending" && !canActStage1) {
-        return NextResponse.json({ error: "Forbidden — only the L1 manager or HR/CEO can reject at stage 1." }, { status: 403 });
-      }
-      if (reg.status === "partially_approved" && !canActStage2) {
-        return NextResponse.json({ error: "Forbidden — only the L2 (grand-manager) or HR/CEO can reject at stage 2." }, { status: 403 });
-      }
+    // Regularization is HR-admin-only — no manager L1 stage. Only CEO /
+    // HR manager / Developer can decide. This is intentionally tighter
+    // than leave / WFH / OD / comp-off (which are L1→L2): regularizations
+    // edit attendance records directly, so we want a small set of trusted
+    // approvers.
+    if (!admin) {
+      return NextResponse.json(
+        { error: "Forbidden — only HR admin / CEO / Developer can decide regularizations." },
+        { status: 403 },
+      );
     }
 
-    // Race-safe transition: re-check the current status in the where clause.
-    const data: any = { status: nextStatus };
-    if (action === "approve" && reg.status === "pending") {
-      data.approvedById = myId;
-      data.approvedAt = new Date();
-      data.approvalNote = approvalNote;
-    } else if (action === "approve" && reg.status === "partially_approved") {
-      data.finalApprovedById = myId;
-      data.finalApprovedAt = new Date();
-      data.finalApprovalNote = approvalNote;
-    } else if (action === "reject") {
-      // Stamp whichever stage was current so the audit trail shows who killed it.
-      if (reg.status === "pending") {
-        data.approvedById = myId;
-        data.approvedAt = new Date();
-        data.approvalNote = approvalNote;
-      } else {
-        data.finalApprovedById = myId;
-        data.finalApprovedAt = new Date();
-        data.finalApprovalNote = approvalNote;
-      }
-    }
+    // Single-stage transition: pending|partially_approved → approved|rejected.
+    const nextStatus = action === "reject" ? "rejected" : "approved";
+
+    // Always stamp BOTH the L1 and L2 approver fields with the same admin
+    // user. The schema kept the two-pair shape from the old flow; setting
+    // both fields keeps existing UI components (which still render L1/L2)
+    // showing a consistent decision rather than a missing-stage gap.
+    const now = new Date();
+    const data: any = {
+      status:            nextStatus,
+      approvedById:      reg.approvedById ?? myId,
+      approvedAt:        reg.approvedAt   ?? now,
+      approvalNote:      reg.approvalNote ?? approvalNote,
+      finalApprovedById: myId,
+      finalApprovedAt:   now,
+      finalApprovalNote: approvalNote,
+    };
 
     const { count } = await prisma.attendanceRegularization.updateMany({
       where: { id, status: reg.status },
@@ -429,14 +413,9 @@ export async function PUT(req: NextRequest) {
 
     // Notify the submitter of the outcome so their bell stays accurate.
     const dateLabel = new Date(reg.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
-    let title: string;
-    if (action === "reject") {
-      title = `Your regularization for ${dateLabel} was rejected`;
-    } else if (nextStatus === "partially_approved") {
-      title = `Your regularization for ${dateLabel} passed stage 1 — awaiting final approval`;
-    } else {
-      title = `Your regularization for ${dateLabel} was approved`;
-    }
+    const title = action === "reject"
+      ? `Your regularization for ${dateLabel} was rejected`
+      : `Your regularization for ${dateLabel} was approved`;
     await notifyUsers({
       actorId:  myId,
       userIds:  [reg.userId],
@@ -446,18 +425,6 @@ export async function PUT(req: NextRequest) {
       body:     approvalNote ? String(approvalNote).slice(0, 160) : undefined,
       linkUrl:  "/dashboard/hr/attendance",
     });
-
-    // If the request moved to partially_approved, ping the stage-2 approvers.
-    if (action === "approve" && nextStatus === "partially_approved") {
-      await notifyApprovers({
-        actorId:  myId,
-        type:     "regularization",
-        entityId: reg.id,
-        title:    `Regularization awaiting your final approval`,
-        body:     `Date: ${dateLabel} — ${String(reg.reason).slice(0, 120)}`,
-        linkUrl:  "/dashboard/hr/approvals?tab=regularize",
-      });
-    }
 
     return NextResponse.json(updated);
   } catch (e) { return serverError(e, "PUT /api/hr/attendance/regularize"); }

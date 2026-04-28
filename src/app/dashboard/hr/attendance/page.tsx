@@ -5,7 +5,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, MoreVertical, CheckCircle2, XCircle, Coffee, PieChart } from "lucide-react";
+import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, MoreVertical, Coffee, PieChart } from "lucide-react";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
 
@@ -349,6 +349,17 @@ function WFHModal({ onClose }: { onClose: () => void }) {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
+  // WFH allowance is 2 per calendar month (resets each month, no carry-over).
+  // We re-fetch whenever `form.date` changes so the chip reflects the
+  // month the user is actually picking — picking a future month with 0
+  // usage shouldn't show the current month's count.
+  const monthKey = form.date.slice(0, 7);
+  const { data: balance } = useSWR<{ used: number; limit: number; remaining: number }>(
+    `/api/hr/attendance/wfh/balance?month=${monthKey}`,
+    fetcher,
+  );
+  const atCap = !!balance && balance.remaining <= 0;
+
   const submit = async () => {
     setErr("");
     if (!form.reason) return setErr("Reason is required");
@@ -369,6 +380,25 @@ function WFHModal({ onClose }: { onClose: () => void }) {
         </div>
         <div className="px-6 py-5 space-y-4">
           {err && <p className="text-[12px] text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
+          {balance && (
+            <div className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-[12px] ${
+              atCap
+                ? "border-rose-200 bg-rose-50 dark:border-rose-500/20 dark:bg-rose-500/10"
+                : "border-slate-200 bg-slate-50 dark:border-white/[0.06] dark:bg-white/[0.03]"
+            }`}>
+              <div>
+                <span className={`font-semibold ${atCap ? "text-rose-700 dark:text-rose-300" : "text-slate-700 dark:text-slate-200"}`}>
+                  {balance.remaining} of {balance.limit} WFH left
+                </span>
+                <span className="ml-1 text-slate-500 dark:text-slate-400">
+                  this month
+                </span>
+              </div>
+              <span className="text-[10.5px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                {balance.used}/{balance.limit} used
+              </span>
+            </div>
+          )}
           <div>
             <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>
             <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
@@ -383,9 +413,10 @@ function WFHModal({ onClose }: { onClose: () => void }) {
         </div>
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-white/[0.06]">
           <button onClick={onClose} className="h-8 px-4 text-[13px] text-slate-500">Cancel</button>
-          <button onClick={submit} disabled={saving}
-            className="h-8 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50">
-            {saving ? "Submitting..." : "Submit"}
+          <button onClick={submit} disabled={saving || atCap}
+            title={atCap ? "WFH limit reached for the selected month" : undefined}
+            className="h-8 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+            {saving ? "Submitting..." : atCap ? "Limit reached" : "Submit"}
           </button>
         </div>
       </div>
@@ -1091,9 +1122,9 @@ export default function AttendancePage() {
             <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-visible">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-slate-200 dark:border-white/[0.06]">
-                    {["DATE","ATTENDANCE VISUAL","EFFECTIVE HOURS","GROSS HOURS","LOG","ACTIONS"].map(h => (
-                      <th key={h} className="px-5 py-3 text-left text-[10px] uppercase tracking-widest text-[#008CFF] dark:text-[#00BCD4] font-semibold">{h}</th>
+                  <tr className="border-b border-slate-200 dark:border-white/[0.06] bg-slate-50/60 dark:bg-white/[0.02]">
+                    {["DATE","TIMELINE","EFFECTIVE","GROSS","STATUS",""].map((h) => (
+                      <th key={h || "actions"} className="px-5 py-3 text-left text-[10.5px] uppercase tracking-[0.14em] font-bold text-slate-500 dark:text-slate-400">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1306,21 +1337,29 @@ export default function AttendancePage() {
 
                         {/* LOG: 9h threshold \u2192 green tick when met, red cross otherwise (once clocked in). */}
                         <td className="px-5 py-3">
-                          {missedClockOut ? (
-                            <XCircle size={20} strokeWidth={2} className="text-amber-500" aria-label="Missed clock-out" />
-                          ) : hasClock ? (
-                            met9h ? (
-                              <CheckCircle2 size={20} strokeWidth={2} className="text-emerald-500" aria-label="9h shift completed" />
-                            ) : (
-                              <XCircle size={20} strokeWidth={2} className="text-red-500" aria-label="Less than 9h" />
-                            )
-                          ) : rec.status === "absent" ? (
-                            <XCircle size={20} strokeWidth={2} className="text-orange-400" aria-label="Absent" />
-                          ) : isTodayRow ? (
-                            <Clock3 size={18} strokeWidth={2} className="text-[#008CFF]" aria-label="Today pending" />
-                          ) : (isHoliday || isWeekend) ? (
-                            <span className="text-slate-400 text-lg">···</span>
-                          ) : null}
+                          {(() => {
+                            // Single-source-of-truth status pill — replaces the
+                            // older icon-only LOG cell. Each state maps to a
+                            // single colour family so the column stays readable
+                            // even on long logs.
+                            type Pill = { label: string; dot: string; text: string; bg: string };
+                            let p: Pill;
+                            if (hasPendingAny)                p = { label: "Pending",    dot: "bg-[#008CFF]",   text: "text-[#0070cc] dark:text-[#4a9cff]",   bg: "bg-[#008CFF]/10"                  };
+                            else if (missedClockOut)          p = { label: "Missed",     dot: "bg-amber-500",   text: "text-amber-700 dark:text-amber-300",   bg: "bg-amber-50 dark:bg-amber-500/10" };
+                            else if (onLeave)                 p = { label: "On Leave",   dot: "bg-violet-500",  text: "text-violet-700 dark:text-violet-300", bg: "bg-violet-50 dark:bg-violet-500/10" };
+                            else if (isHoliday)               p = { label: "Holiday",    dot: "bg-amber-500",   text: "text-amber-700 dark:text-amber-300",   bg: "bg-amber-50 dark:bg-amber-500/10" };
+                            else if (isWeekend)               p = { label: "Weekly Off", dot: "bg-slate-400",   text: "text-slate-600 dark:text-slate-300",   bg: "bg-slate-100 dark:bg-white/[0.04]" };
+                            else if (isTodayRow && !hasClock) p = { label: "Awaiting",   dot: "bg-[#008CFF]",   text: "text-[#0070cc] dark:text-[#4a9cff]",   bg: "bg-[#008CFF]/10"                  };
+                            else if (hasClock && met9h)       p = { label: "Present",    dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-300", bg: "bg-emerald-50 dark:bg-emerald-500/10" };
+                            else if (hasClock)                p = { label: "Partial",    dot: "bg-orange-500",  text: "text-orange-700 dark:text-orange-300", bg: "bg-orange-50 dark:bg-orange-500/10" };
+                            else                              p = { label: "Absent",     dot: "bg-rose-500",    text: "text-rose-700 dark:text-rose-300",     bg: "bg-rose-50 dark:bg-rose-500/10"   };
+                            return (
+                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${p.bg} ${p.text}`}>
+                                <span className={`h-1.5 w-1.5 rounded-full ${p.dot}`} />
+                                {p.label}
+                              </span>
+                            );
+                          })()}
                         </td>
 
                         {/* ACTIONS: kebab menu \u2192 Regularize */}
