@@ -411,10 +411,10 @@ export default function OnboardEmployeePage() {
                 <Select v={form.nationality} set={v => set("nationality", v)} opts={["India", "USA", "UK", "Other"]} />
               </Field>
               <Field label="Number Series">
-                <Select v={form.numberSeries} set={v => set("numberSeries", v)} opts={["NB Media series", "Contractor series"]} />
+                <Select v={form.numberSeries} set={v => set("numberSeries", v)} opts={["NB Media series"]} />
               </Field>
-              <Field label="Employee Number" hint="Auto-generated if empty">
-                <Input v={form.employeeNumber} set={v => set("employeeNumber", v)} placeholder="Leave empty to auto-generate" />
+              <Field label="Employee Number" hint="Auto-generated if empty (e.g. HRM47)">
+                <Input v={form.employeeNumber} set={v => set("employeeNumber", v)} placeholder="e.g. HRM47" />
               </Field>
             </Grid>
 
