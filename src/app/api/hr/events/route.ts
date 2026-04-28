@@ -19,8 +19,8 @@ export async function GET() {
     const today    = istTodayDateOnly();              // UTC-midnight on IST "today"
     const todayKey = mmdd(today);
     const thisYear = today.getUTCFullYear();
-    // Window for "upcoming": next 14 calendar days (inclusive of today).
-    const WINDOW_DAYS = 14;
+    // Window for "upcoming": next 10 calendar days (inclusive of today).
+    const WINDOW_DAYS = 10;
 
     // Current week (Mon → Sun) for anniversaries.
     const dayOfWeek = (today.getUTCDay() + 6) % 7;    // 0 = Mon
