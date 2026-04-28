@@ -46,6 +46,12 @@ jobs:
   prisma-validate:
     name: Prisma schema sanity
     runs-on: ubuntu-latest
+    # `prisma validate` reads the datasource block which references
+    # env vars (DATABASE_URL etc.) — supply dummy values so the schema
+    # check itself passes. We're not running migrations here.
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      SHADOW_DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_shadow
     steps:
       - uses: actions/checkout@v4
         with:
