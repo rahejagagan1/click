@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { usePathname } from "next/navigation";
 import Sidebar from "./sidebar";
 import Header from "./header";
@@ -24,7 +25,13 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
 
     return (
         <div className="flex min-h-screen bg-[#f4f7fb]">
-            <Sidebar />
+            {/* Suspense boundary — Sidebar uses useSearchParams() for the
+                nested My-Pay flyout active state. Without this wrapper, any
+                statically-prerendered page (/cases, /_not-found, etc.) bails
+                during build with the missing-suspense CSR error. */}
+            <Suspense fallback={null}>
+                <Sidebar />
+            </Suspense>
             <main className="ml-[92px] flex min-h-screen flex-1 flex-col bg-[#f4f7fb]">
                 <Header />
                 <div className={contentCls}>
