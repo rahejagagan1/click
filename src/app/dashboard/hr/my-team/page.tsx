@@ -15,7 +15,7 @@ const C = {
 };
 
 const TOP_TABS = [
-  { key: "home",    label: "HOME",    href: "/dashboard/hr/analytics"  },
+  { key: "home",    label: "HOME",    href: "/dashboard/hr/home"  },
   { key: "myteam",  label: "MY TEAM", href: "/dashboard/hr/my-team"    },
 ];
 
