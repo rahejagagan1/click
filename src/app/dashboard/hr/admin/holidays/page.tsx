@@ -80,7 +80,7 @@ export default function HolidaysAdminPage() {
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="text-center">
           <p className="text-[14px] text-slate-600 font-medium">You don't have permission to manage holidays.</p>
-          <Link href="/dashboard/hr/analytics" className="text-[12px] text-[#008CFF] hover:underline mt-2 inline-block">
+          <Link href="/dashboard/hr/home" className="text-[12px] text-[#008CFF] hover:underline mt-2 inline-block">
             Back to HR Home
           </Link>
         </div>
