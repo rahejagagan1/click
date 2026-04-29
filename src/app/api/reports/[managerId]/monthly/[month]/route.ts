@@ -152,6 +152,8 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
                 videosPublishedActualOverridden: (report as any).videosPublishedActualOverridden ?? false,
                 editorNotes:         report.editorNotes,
                 writerNotes:         report.writerNotes,
+                editorExtraCases:    (report as any).editorExtraCases ?? null,
+                writerExtraCases:    (report as any).writerExtraCases ?? null,
                 // Section 3
                 shortfallSummary:    report.shortfallSummary,
                 // Section 4
@@ -333,6 +335,8 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
             videosPublishedActualOverridden,
             editorNotes:         fields.editorNotes         ?? null,
             writerNotes:         fields.writerNotes         ?? null,
+            editorExtraCases:    fields.editorExtraCases    ?? null,
+            writerExtraCases:    fields.writerExtraCases    ?? null,
             // Section 3: Shortfall Analysis
             shortfallSummary:    fields.shortfallSummary    ?? null,
             // Section 4: Team Recognition

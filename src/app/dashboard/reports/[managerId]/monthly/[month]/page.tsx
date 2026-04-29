@@ -117,6 +117,66 @@ function EditableCell({
     );
 }
 
+/**
+ * Manager-only "Add case" affordance for Section 3 contributor rows.
+ * Renders a "+ Add case" button that flips into an inline input on click.
+ * Submitting the input adds an extra case via `onAdd`.
+ */
+function AddExtraCase({ onAdd }: { onAdd: (name: string) => void }) {
+    const [open, setOpen] = React.useState(false);
+    const [value, setValue] = React.useState("");
+    const inputRef = React.useRef<HTMLInputElement>(null);
+
+    React.useEffect(() => {
+        if (open) inputRef.current?.focus();
+    }, [open]);
+
+    const submit = () => {
+        const trimmed = value.trim();
+        if (trimmed) onAdd(trimmed);
+        setValue("");
+        setOpen(false);
+    };
+
+    if (!open) {
+        return (
+            <button
+                type="button"
+                onClick={() => setOpen(true)}
+                className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 transition-colors"
+            >
+                <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-amber-500 leading-none">+</span>
+                Add case
+            </button>
+        );
+    }
+
+    return (
+        <div className="mt-1 flex items-center gap-1.5">
+            <input
+                ref={inputRef}
+                type="text"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); submit(); }
+                    else if (e.key === "Escape") { setValue(""); setOpen(false); }
+                }}
+                onBlur={submit}
+                placeholder="Case name"
+                className="flex-1 min-w-0 bg-transparent border-0 border-b border-dashed border-amber-400/60 px-1 py-0.5 text-xs text-amber-700 dark:text-amber-300 placeholder:text-amber-400/60 placeholder:italic focus:outline-none focus:border-amber-500"
+            />
+            <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); submit(); }}
+                className="text-[11px] font-medium text-amber-600 hover:text-amber-700"
+            >
+                Add
+            </button>
+        </div>
+    );
+}
+
 /** Editable Rich Text Field using ReactQuill */
 function RichTextField({
     value,
@@ -424,12 +484,39 @@ export default function MonthlyReportPage() {
     const [videosPublishedActualOverridden, setVideosPublishedActualOverridden] = useState(false);
     const [editorNotes, setEditorNotes] = useState<Record<number, string>>({});
     const [writerNotes, setWriterNotes] = useState<Record<number, string>>({});
+    type ExtraCase = { id: string; name: string };
+    const [editorExtraCases, setEditorExtraCases] = useState<Record<number, ExtraCase[]>>({});
+    const [writerExtraCases, setWriterExtraCases] = useState<Record<number, ExtraCase[]>>({});
     const handleEditorNoteChange = (userId: number, value: string) => {
         setEditorNotes(prev => ({ ...prev, [userId]: value }));
     };
 
     const handleWriterNoteChange = (userId: number, value: string) => {
         setWriterNotes(prev => ({ ...prev, [userId]: value }));
+    };
+
+    const newCaseId = () => `mx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const addExtraCase = (
+        setter: React.Dispatch<React.SetStateAction<Record<number, ExtraCase[]>>>,
+        userId: number,
+        name: string,
+    ) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        setter(prev => ({
+            ...prev,
+            [userId]: [...(prev[userId] || []), { id: newCaseId(), name: trimmed }],
+        }));
+    };
+    const removeExtraCase = (
+        setter: React.Dispatch<React.SetStateAction<Record<number, ExtraCase[]>>>,
+        userId: number,
+        caseId: string,
+    ) => {
+        setter(prev => ({
+            ...prev,
+            [userId]: (prev[userId] || []).filter(c => c.id !== caseId),
+        }));
     };
     const [teamRecognition, setTeamRecognition] = useState("");
     const [keyLearnings, setKeyLearnings] = useState(["", "", ""]);
@@ -563,6 +650,8 @@ export default function MonthlyReportPage() {
                     if (saved?.shortfallSummary)   setShortfallSummary(saved.shortfallSummary);
                     if (saved?.editorNotes)        setEditorNotes(saved.editorNotes);
                     if (saved?.writerNotes)        setWriterNotes(saved.writerNotes);
+                    if (saved?.editorExtraCases)   setEditorExtraCases(saved.editorExtraCases);
+                    if (saved?.writerExtraCases)   setWriterExtraCases(saved.writerExtraCases);
                     if (saved?.teamRecognition)    setTeamRecognition(saved.teamRecognition);
                     if (saved?.keyLearning1 || saved?.keyLearning2 || saved?.keyLearning3) {
                         setKeyLearnings([saved.keyLearning1 || "", saved.keyLearning2 || "", saved.keyLearning3 || ""]);
@@ -801,6 +890,8 @@ export default function MonthlyReportPage() {
                     videosPublishedActualOverridden,
                     editorNotes,
                     writerNotes,
+                    editorExtraCases,
+                    writerExtraCases,
                     teamRecognition,
                     keyLearning1: keyLearnings[0],
                     keyLearning2: keyLearnings[1],
@@ -2148,29 +2239,65 @@ export default function MonthlyReportPage() {
                                     ) : editors.length === 0 ? (
                                         <tr><td colSpan={4} className="py-4 text-center text-sm text-slate-500">No editors found</td></tr>
                                     ) : (
-                                        editors.map((editor: any) => (
+                                        editors.map((editor: any) => {
+                                            const auto = editorStats[editor.id] ?? 0;
+                                            const extras = editorExtraCases[editor.id] ?? [];
+                                            const autoCases = editorCases[editor.id] ?? [];
+                                            const total = auto + extras.length;
+                                            return (
                                             <tr key={editor.id} className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
                                                 <td className="py-2 px-3 w-1/5 align-top">
                                                     <ClickUpField value={editor.name} />
                                                 </td>
                                                 <td className="py-2 px-3 w-[12%] align-top">
-                                                    <ClickUpField value={
-                                                        contributorData
-                                                            ? String(editorStats[editor.id] ?? 0)
-                                                            : "…"
-                                                    } />
+                                                    {!contributorData ? (
+                                                        <ClickUpField value="…" />
+                                                    ) : extras.length === 0 ? (
+                                                        <ClickUpField value={String(auto)} />
+                                                    ) : (
+                                                        <span className="text-slate-700 dark:text-slate-300 tabular-nums">
+                                                            {auto}
+                                                            <span className="mx-1 text-slate-400">+</span>
+                                                            <span className="font-semibold text-amber-600 dark:text-amber-400">{extras.length}</span>
+                                                            <span className="mx-1 text-slate-400">=</span>
+                                                            <span className="font-semibold">{total}</span>
+                                                        </span>
+                                                    )}
                                                 </td>
                                                 <td className="py-2 px-3 w-1/3 align-top">
                                                     {!contributorData ? (
                                                         <span className="text-xs text-slate-400">…</span>
-                                                    ) : (editorCases[editor.id]?.length ?? 0) === 0 ? (
-                                                        <span className="text-xs text-slate-400">—</span>
                                                     ) : (
-                                                        <ul className="text-xs text-slate-600 dark:text-slate-300 list-disc pl-4 space-y-0.5">
-                                                            {editorCases[editor.id].map((c) => (
-                                                                <li key={c.id} className="break-words">{c.name}</li>
-                                                            ))}
-                                                        </ul>
+                                                        <>
+                                                            {autoCases.length === 0 && extras.length === 0 ? (
+                                                                <span className="text-xs text-slate-400">—</span>
+                                                            ) : (
+                                                                <ul className="text-xs text-slate-600 dark:text-slate-300 list-disc pl-4 space-y-0.5">
+                                                                    {autoCases.map((c) => (
+                                                                        <li key={c.id} className="break-words">{c.name}</li>
+                                                                    ))}
+                                                                    {extras.map((c) => (
+                                                                        <li key={c.id} className="break-words text-amber-600 dark:text-amber-400">
+                                                                            {c.name}
+                                                                            {!viewOnly && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => removeExtraCase(setEditorExtraCases, editor.id, c.id)}
+                                                                                    className="ml-1.5 text-amber-500/70 hover:text-red-500 transition-colors"
+                                                                                    title="Remove"
+                                                                                    aria-label="Remove case"
+                                                                                >
+                                                                                    ×
+                                                                                </button>
+                                                                            )}
+                                                                        </li>
+                                                                    ))}
+                                                                </ul>
+                                                            )}
+                                                            {!viewOnly && (
+                                                                <AddExtraCase onAdd={(name) => addExtraCase(setEditorExtraCases, editor.id, name)} />
+                                                            )}
+                                                        </>
                                                     )}
                                                 </td>
                                                 <td className="py-2 px-3 align-top">
@@ -2179,7 +2306,8 @@ export default function MonthlyReportPage() {
                                                     </div>
                                                 </td>
                                             </tr>
-                                        ))
+                                            );
+                                        })
                                     )}
                                 </tbody>
                             </table>
@@ -2207,29 +2335,65 @@ export default function MonthlyReportPage() {
                                     ) : writers.length === 0 ? (
                                         <tr><td colSpan={4} className="py-4 text-center text-sm text-slate-500">No writers found</td></tr>
                                     ) : (
-                                        writers.map((writer: any) => (
+                                        writers.map((writer: any) => {
+                                            const auto = writerStats[writer.id] ?? 0;
+                                            const extras = writerExtraCases[writer.id] ?? [];
+                                            const autoCases = writerCases[writer.id] ?? [];
+                                            const total = auto + extras.length;
+                                            return (
                                             <tr key={writer.id} className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
                                                 <td className="py-2 px-3 w-1/5 align-top">
                                                     <ClickUpField value={writer.name} />
                                                 </td>
                                                 <td className="py-2 px-3 w-[12%] align-top">
-                                                    <ClickUpField value={
-                                                        contributorData
-                                                            ? String(writerStats[writer.id] ?? 0)
-                                                            : "…"
-                                                    } />
+                                                    {!contributorData ? (
+                                                        <ClickUpField value="…" />
+                                                    ) : extras.length === 0 ? (
+                                                        <ClickUpField value={String(auto)} />
+                                                    ) : (
+                                                        <span className="text-slate-700 dark:text-slate-300 tabular-nums">
+                                                            {auto}
+                                                            <span className="mx-1 text-slate-400">+</span>
+                                                            <span className="font-semibold text-amber-600 dark:text-amber-400">{extras.length}</span>
+                                                            <span className="mx-1 text-slate-400">=</span>
+                                                            <span className="font-semibold">{total}</span>
+                                                        </span>
+                                                    )}
                                                 </td>
                                                 <td className="py-2 px-3 w-1/3 align-top">
                                                     {!contributorData ? (
                                                         <span className="text-xs text-slate-400">…</span>
-                                                    ) : (writerCases[writer.id]?.length ?? 0) === 0 ? (
-                                                        <span className="text-xs text-slate-400">—</span>
                                                     ) : (
-                                                        <ul className="text-xs text-slate-600 dark:text-slate-300 list-disc pl-4 space-y-0.5">
-                                                            {writerCases[writer.id].map((c) => (
-                                                                <li key={c.id} className="break-words">{c.name}</li>
-                                                            ))}
-                                                        </ul>
+                                                        <>
+                                                            {autoCases.length === 0 && extras.length === 0 ? (
+                                                                <span className="text-xs text-slate-400">—</span>
+                                                            ) : (
+                                                                <ul className="text-xs text-slate-600 dark:text-slate-300 list-disc pl-4 space-y-0.5">
+                                                                    {autoCases.map((c) => (
+                                                                        <li key={c.id} className="break-words">{c.name}</li>
+                                                                    ))}
+                                                                    {extras.map((c) => (
+                                                                        <li key={c.id} className="break-words text-amber-600 dark:text-amber-400">
+                                                                            {c.name}
+                                                                            {!viewOnly && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => removeExtraCase(setWriterExtraCases, writer.id, c.id)}
+                                                                                    className="ml-1.5 text-amber-500/70 hover:text-red-500 transition-colors"
+                                                                                    title="Remove"
+                                                                                    aria-label="Remove case"
+                                                                                >
+                                                                                    ×
+                                                                                </button>
+                                                                            )}
+                                                                        </li>
+                                                                    ))}
+                                                                </ul>
+                                                            )}
+                                                            {!viewOnly && (
+                                                                <AddExtraCase onAdd={(name) => addExtraCase(setWriterExtraCases, writer.id, name)} />
+                                                            )}
+                                                        </>
                                                     )}
                                                 </td>
                                                 <td className="py-2 px-3 align-top">
@@ -2238,7 +2402,8 @@ export default function MonthlyReportPage() {
                                                     </div>
                                                 </td>
                                             </tr>
-                                        ))
+                                            );
+                                        })
                                     )}
                                 </tbody>
                             </table>

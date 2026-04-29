@@ -152,6 +152,31 @@ export default function Sidebar() {
     const [reportY, setReportY] = useState(0);
     const reportTriggerRef = useRef<HTMLDivElement | null>(null);
 
+    // Helper: pick a flyout Y based on where the trigger sits in the viewport.
+    //   Trigger in top third    → anchor top-of-flyout to top-of-trigger (drops down)
+    //   Trigger in middle third → vertically centre flyout with trigger
+    //   Trigger in bottom third → anchor bottom-of-flyout to bottom-of-trigger (grows up)
+    // Then clamp into the viewport with a 16px safety margin.
+    // We pick the position ONCE on hover-open and never again, so the cursor
+    // never gets pulled away from the option the user is aiming at.
+    const computeFlyoutY = useCallback((trigger: HTMLDivElement | null, estimatedHeight: number) => {
+        if (!trigger || typeof window === "undefined") return 16;
+        const rect = trigger.getBoundingClientRect();
+        const vh = window.innerHeight;
+        const margin = 16;
+        const h = Math.min(estimatedHeight, vh - margin * 2);
+        const triggerCenter = (rect.top + rect.bottom) / 2;
+        let y: number;
+        if (triggerCenter < vh / 3) {
+            y = rect.top;                      // top — drop down from trigger
+        } else if (triggerCenter > (vh * 2) / 3) {
+            y = rect.bottom - h;               // bottom — grow up from trigger
+        } else {
+            y = triggerCenter - h / 2;         // middle — centre on trigger
+        }
+        return Math.max(margin, Math.min(y, vh - h - margin));
+    }, []);
+
     const DEPARTMENTS = [
         { label: "HR Dept.", slug: "hr" },
         { label: "Researcher Dept.", slug: "researcher" },
@@ -164,13 +189,11 @@ export default function Sidebar() {
 
     const handleDeptMouseEnter = () => {
         if (deptHoverTimeoutRef.current) clearTimeout(deptHoverTimeoutRef.current);
-        if (deptTriggerRef.current) {
-            const rect = deptTriggerRef.current.getBoundingClientRect();
-            const vh = typeof window !== "undefined" ? window.innerHeight : 800;
-            const estHeight = Math.min(400, vh - 32);
-            const maxTop = vh - estHeight - 16;
-            const y = Math.max(16, Math.min(rect.top, maxTop));
-            setDeptY(y);
+        // Skip Y recomputation when the menu is already open — otherwise the
+        // panel jumps under the cursor as the user moves from trigger to flyout.
+        if (!deptHovered) {
+            const estHeight = 30 + DEPARTMENTS.length * 36 + 16;
+            setDeptY(computeFlyoutY(deptTriggerRef.current, estHeight));
         }
         setDeptHovered(true);
     };
@@ -202,18 +225,14 @@ export default function Sidebar() {
 
     const handleReportMouseEnter = () => {
         if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-        if (reportTriggerRef.current) {
-            // Clamp Y so the flyout fits the viewport. If the trigger is near
-            // the bottom, shift the panel up so its full height stays visible
-            // without the user needing to scroll the sidebar / the flyout.
-            const rect = reportTriggerRef.current.getBoundingClientRect();
-            const vh = typeof window !== "undefined" ? window.innerHeight : 800;
-            // Rough estimate — capped at viewport minus top/bottom padding.
-            const estHeight = Math.min(520, vh - 32);
-            const preferred = rect.top;
-            const maxTop = vh - estHeight - 16;
-            const y = Math.max(16, Math.min(preferred, maxTop));
-            setReportY(y);
+        // Only compute Y the first time the menu opens. While the menu is
+        // already open and the user moves their cursor onto the flyout
+        // panel, this same handler fires from the panel's onMouseEnter — we
+        // must NOT recompute Y there or the menu jumps under the cursor.
+        if (!reportHovered) {
+            const rowCount = managersLoaded ? Math.max(managers.length, 1) : 8;
+            const estHeight = 30 + rowCount * 36 + 16;
+            setReportY(computeFlyoutY(reportTriggerRef.current, estHeight));
         }
         setReportHovered(true);
     };
@@ -476,7 +495,7 @@ export default function Sidebar() {
                         {/* Flyout submenu — admins only, portalled to escape overflow clip */}
                         {reportHovered && typeof document !== "undefined" && createPortal(
                             <div
-                                style={{ position: "fixed", left: 108, top: reportY, zIndex: 9999, maxHeight: "calc(100vh - 32px)" }}
+                                style={{ position: "fixed", left: 108, top: reportY, zIndex: 9999, maxHeight: `calc(100vh - ${reportY}px - 16px)` }}
                                 className="w-52 overflow-y-auto rounded-xl border border-[#cfd8e3] bg-[#eef2f6] py-2 shadow-xl shadow-slate-300/30 scrollbar-thin animate-in fade-in slide-in-from-left-2 duration-200"
                                 onMouseEnter={handleReportMouseEnter}
                                 onMouseLeave={handleReportMouseLeave}
@@ -561,7 +580,7 @@ export default function Sidebar() {
                             {/* Flyout submenu */}
                             {deptHovered && typeof document !== "undefined" && createPortal(
                                 <div
-                                    style={{ position: "fixed", left: 108, top: deptY, zIndex: 9999, maxHeight: "calc(100vh - 32px)" }}
+                                    style={{ position: "fixed", left: 108, top: deptY, zIndex: 9999, maxHeight: `calc(100vh - ${deptY}px - 16px)` }}
                                     className="w-52 overflow-y-auto rounded-xl border border-[#cfd8e3] bg-[#eef2f6] py-2 shadow-xl shadow-slate-300/30 scrollbar-thin animate-in fade-in slide-in-from-left-2 duration-200"
                                     onMouseEnter={handleDeptMouseEnter}
                                     onMouseLeave={handleDeptMouseLeave}
