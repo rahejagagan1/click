@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 import Link from "next/link";
 import { fetcher } from "@/lib/swr";
@@ -372,10 +372,17 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
     setActioning(false);
   };
 
+  // When the user picks Reject (single-row or bulk) we open a modal that
+  // collects the reason. `pending` holds the ids to reject + a friendly
+  // label so the modal can preview what's about to happen.
+  const [rejectPending, setRejectPending] = useState<{ ids: number[]; label: string } | null>(null);
+
   const actOne = (id: number, action: "approve" | "reject") => {
-    const note = action === "reject" ? (prompt("Reason for rejection?") || "") : undefined;
-    if (action === "reject" && !note) return;
-    actOnIds([id], action, note);
+    if (action === "reject") {
+      setRejectPending({ ids: [id], label: "this request" });
+      return;
+    }
+    actOnIds([id], action);
   };
 
   // When embedded in the HR Dashboard, drop the full-screen wash + the
@@ -635,10 +642,12 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                 </button>
                 <button
                   onClick={() => {
-                    const note = prompt("Reason for rejection?") || "";
-                    if (!note) return;
                     const acts = filtered.filter((r) => picked.has(r.id) && canActOn(r)).map((r) => r.id);
-                    actOnIds(acts, "reject", note);
+                    if (acts.length === 0) return;
+                    setRejectPending({
+                      ids: acts,
+                      label: acts.length === 1 ? "this request" : `${acts.length} requests`,
+                    });
                   }}
                   disabled={picked.size === 0 || actioning}
                   className="h-9 px-4 rounded-lg text-[12px] font-semibold border border-slate-200 dark:border-white/[0.1] text-slate-600 dark:text-slate-300 hover:border-rose-400 hover:text-rose-600 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
@@ -757,10 +766,118 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
           </>
         )}
       </div>
+
+      {/* Rejection-reason modal — replaces the browser prompt() so the
+          experience matches the rest of the dashboard. */}
+      {rejectPending && (
+        <RejectReasonModal
+          label={rejectPending.label}
+          onCancel={() => setRejectPending(null)}
+          onConfirm={(note) => {
+            const ids = rejectPending.ids;
+            setRejectPending(null);
+            actOnIds(ids, "reject", note);
+          }}
+        />
+      )}
     </>
   );
 
   return embedded ? body : (
     <div className="min-h-screen bg-[#f4f7f8] dark:bg-[#011627]">{body}</div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RejectReasonModal — collects a reason before firing the reject action.
+// Submit is disabled until the reason has at least 3 non-whitespace chars,
+// keeps Esc / outside-click behaviour predictable, and auto-focuses the
+// textarea on open so HR can start typing immediately.
+// ─────────────────────────────────────────────────────────────────────────────
+function RejectReasonModal({
+  label, onCancel, onConfirm,
+}: {
+  label: string;
+  onCancel: () => void;
+  onConfirm: (note: string) => void;
+}) {
+  const [note, setNote] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { textareaRef.current?.focus(); }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && note.trim().length >= 3) {
+        onConfirm(note.trim());
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [note, onCancel, onConfirm]);
+
+  const tooShort = note.trim().length < 3;
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.08] shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3 px-6 py-4 border-b border-slate-200 dark:border-white/[0.06]">
+          <div className="mt-0.5 h-9 w-9 rounded-full bg-rose-50 dark:bg-rose-500/10 flex items-center justify-center text-rose-600 dark:text-rose-400 shrink-0">
+            <X size={18} strokeWidth={2.5} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[15px] font-semibold text-slate-800 dark:text-white">
+              Reject {label}
+            </h3>
+            <p className="mt-0.5 text-[12.5px] text-slate-500 dark:text-slate-400">
+              Share a short reason so the requester knows what to fix. They'll see this
+              note in their notification email.
+            </p>
+          </div>
+        </div>
+
+        <div className="px-6 py-5">
+          <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+            Reason for rejection
+          </label>
+          <textarea
+            ref={textareaRef}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g. Coverage already arranged for this date — please pick another."
+            rows={4}
+            className="w-full resize-none rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3 py-2.5 text-[13px] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100 dark:focus:ring-rose-500/10"
+            maxLength={500}
+          />
+          <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-400">
+            <span>{tooShort ? "At least 3 characters." : "Looks good."}</span>
+            <span>{note.length}/500</span>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-200 dark:border-white/[0.06] bg-slate-50/60 dark:bg-white/[0.02]">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="h-9 px-4 rounded-lg text-[13px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.04]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onConfirm(note.trim())}
+            disabled={tooShort}
+            className="h-9 px-4 rounded-lg text-[13px] font-semibold bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+          >
+            <X size={14} strokeWidth={2.5} /> Confirm Rejection
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

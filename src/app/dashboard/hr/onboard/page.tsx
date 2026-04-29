@@ -381,7 +381,10 @@ export default function OnboardEmployeePage() {
           noticePeriodDays: Number(form.noticePeriodDays) || 30,
         },
         shiftId: form.shiftId ? Number(form.shiftId) : undefined,
-        leaveBalances: leaveTypes.map((lt: any) => ({ leaveTypeId: lt.id, totalDays: lt.daysPerYear })),
+        // New hires start at zero across the board. Sick Leave accrues
+        // 1 day / month from then on (handled by the leave-accrual helper);
+        // other types stay at 0 unless HR adjusts them in the matrix.
+        leaveBalances: leaveTypes.map((lt: any) => ({ leaveTypeId: lt.id, totalDays: 0 })),
         // ── Compensation: persist to SalaryStructure ──
         // For interns we send only the monthly basic; the API derives ctc =
         // basic × 12 and zeroes out HRA / PF / etc. For regular employees

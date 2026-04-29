@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
+import { accrueLeavesForEveryone } from "@/lib/leave-accrual";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,10 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const year = Number(searchParams.get("year") || new Date().getFullYear());
+
+    // Idempotent monthly accrual — guarantees the matrix reflects this
+    // month's +1 Sick Leave for everyone before we read.
+    try { await accrueLeavesForEveryone(); } catch (e) { /* swallow */ }
 
     const [users, leaveTypes, balances] = await Promise.all([
       prisma.user.findMany({
