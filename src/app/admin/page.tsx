@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useSession } from "next-auth/react";
+import { ChevronRight } from "lucide-react";
 import OrgTree from "@/components/admin/org-tree";
 import UserAvatar from "@/components/ui/user-avatar";
 import {
@@ -577,8 +578,12 @@ export default function AdminPage() {
                                             const selectedCount = allListIds.filter(id => selectedLists.has(id)).length;
                                             return (
                                                 <button onClick={() => toggleSpace(space.id)}
-                                                    className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-white/[0.02] transition-colors text-left">
-                                                    <span className="text-slate-500 text-xs w-3">{expandedSpaces.has(space.id) ? "▼" : "▶"}</span>
+                                                    className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-white/[0.02] transition-colors text-left group">
+                                                    <ChevronRight
+                                                        size={14}
+                                                        strokeWidth={2.5}
+                                                        className={`shrink-0 text-slate-400 transition-transform duration-150 group-hover:text-slate-200 ${expandedSpaces.has(space.id) ? "rotate-90 text-slate-200" : ""}`}
+                                                    />
                                                     <div className={`w-2 h-2 rounded-full flex-shrink-0 ${selectedCount > 0 ? "bg-emerald-500" : "bg-violet-500"}`} />
                                                     <span className="text-white font-medium text-sm flex-1">{space.name}</span>
                                                     {selectedCount > 0 && (
