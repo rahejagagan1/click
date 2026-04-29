@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
+import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -1235,13 +1236,13 @@ function FeedPostCard({ post }: { post: any }) {
 
 // "Other ▾" dropdown next to the Clock-in button on the Quick Access tile.
 // Surfaces the most common non-clock-in actions: Work From Home, On Duty,
-// and Apply Leave. Each option deep-links to the attendance page with
-// `?apply=<kind>` so the matching apply form opens automatically.
+// and Apply Leave. Selecting an item invokes `onSelect(kind)` so the host
+// page can open the apply modal in-place — no navigation away from home.
 //
 // The menu portals to document.body and uses fixed positioning so the
 // parent card's `overflow-hidden` doesn't clip it (the Quick Access tile
 // has rounded corners + clipping that would otherwise crop the popover).
-function OtherActionsMenu() {
+function OtherActionsMenu({ onSelect }: { onSelect: (kind: LeaveRequestKind) => void }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos]   = useState<{ top: number; right: number } | null>(null);
   const btnRef   = useRef<HTMLButtonElement>(null);
@@ -1275,10 +1276,10 @@ function OtherActionsMenu() {
     setOpen((v) => !v);
   };
 
-  const items = [
-    { label: "Work From Home", Icon: HomeIcon,  href: "/dashboard/hr/attendance?apply=wfh"     },
-    { label: "On Duty",        Icon: Briefcase, href: "/dashboard/hr/attendance?apply=on_duty" },
-    { label: "Apply Leave",    Icon: Coffee,    href: "/dashboard/hr/attendance?apply=leave"   },
+  const items: { label: string; Icon: typeof HomeIcon; kind: LeaveRequestKind }[] = [
+    { label: "Work From Home", Icon: HomeIcon,  kind: "wfh"     },
+    { label: "On Duty",        Icon: Briefcase, kind: "on_duty" },
+    { label: "Apply Leave",    Icon: Coffee,    kind: "leave"   },
   ];
 
   return (
@@ -1298,16 +1299,16 @@ function OtherActionsMenu() {
           className="fixed z-[9999] w-[200px] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)] dark:border-white/[0.08] dark:bg-[#0a1526]"
           style={{ top: pos.top, right: pos.right }}
         >
-          {items.map(({ label, Icon, href }) => (
-            <Link
+          {items.map(({ label, Icon, kind }) => (
+            <button
               key={label}
-              href={href}
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-2.5 px-3.5 py-2.5 text-[12.5px] font-medium text-slate-700 transition-colors hover:bg-[#008CFF]/[0.08] hover:text-[#008CFF] dark:text-slate-200 dark:hover:bg-[#008CFF]/[0.12] dark:hover:text-[#4a9cff]"
+              type="button"
+              onClick={() => { setOpen(false); onSelect(kind); }}
+              className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[12.5px] font-medium text-slate-700 transition-colors hover:bg-[#008CFF]/[0.08] hover:text-[#008CFF] dark:text-slate-200 dark:hover:bg-[#008CFF]/[0.12] dark:hover:text-[#4a9cff]"
             >
               <Icon size={15} strokeWidth={2} className="shrink-0 text-[#008CFF] dark:text-[#4a9cff]" />
               {label}
-            </Link>
+            </button>
           ))}
         </div>,
         document.body,
@@ -1571,6 +1572,29 @@ export default function HRHomePage() {
   // Index into the upcoming-holidays list for the green Holidays card. The
   // arrows below cycle through this; resets if the list shrinks.
   const [holidayIdx, setHolidayIdx] = useState(0);
+
+  // "Other ▾" quick-action modal — opened in-place from the dropdown so the
+  // user stays on /dashboard/hr/home instead of being routed to the
+  // attendance page.
+  const [otherForm, setOtherForm] = useState<LeaveRequestKind | null>(null);
+  const { data: leaveTypesData = [] } = useSWR(`/api/hr/admin/leave-types`, fetcher);
+  const otherLeaveTypes: { id: number; name: string }[] = Array.isArray(leaveTypesData)
+    ? leaveTypesData.map((t: any) => ({ id: t.id, name: t.name }))
+    : [];
+  const otherTitle: Record<LeaveRequestKind, string> = {
+    wfh:        "Request Work From Home",
+    on_duty:    "Apply for On Duty",
+    half_day:   "Apply for Half Day",
+    leave:      "Request Leave",
+    regularize: "Request Regularization",
+  };
+  const otherPolicy: Record<LeaveRequestKind, string | undefined> = {
+    wfh:        "As per the policy, only Mon–Sat are considered for WFH. Clock in is necessary on WFH days to avoid being marked absent.",
+    on_duty:    "On-duty time counts as working hours. Log the purpose clearly — your manager will review before approval.",
+    half_day:   "Half day leave covers either the first (9:00 AM – 2:00 PM) or second half (2:00 PM – 6:00 PM) of the day.",
+    leave:      undefined,
+    regularize: "Use this to fix missed punches or incorrect clock-in/out. Attach a clear reason so approval is quick.",
+  };
 
   // Browser geolocation permission state. Attendance needs location, so we
   // check this up-front and show a banner + disable the clock-in button when
@@ -1931,7 +1955,7 @@ export default function HRHomePage() {
                       Done
                     </span>
                   )}
-                  <OtherActionsMenu />
+                  <OtherActionsMenu onSelect={(kind) => setOtherForm(kind)} />
                 </div>
               </div>
             </div>
@@ -2688,6 +2712,19 @@ export default function HRHomePage() {
           </div>
         </div>
       </div>
+
+      {/* Quick-action modal opened from the "Other ▾" menu — kept here so
+          submitting WFH / On-Duty / Leave doesn't pull the user away
+          from /dashboard/hr/home. */}
+      {otherForm && (
+        <LeaveRequestForm
+          kind={otherForm}
+          title={otherTitle[otherForm]}
+          policyText={otherPolicy[otherForm]}
+          leaveTypes={otherLeaveTypes}
+          onClose={() => setOtherForm(null)}
+        />
+      )}
     </div>
   );
 }
