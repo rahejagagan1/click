@@ -4,6 +4,7 @@ import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import { useRouter } from "next/navigation";
 import { User as UserIcon, Briefcase, Settings as SettingsIcon, IndianRupee, Check, X } from "lucide-react";
+import { DatePicker } from "@/components/ui/date-picker";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LocalStorage key for the draft. Bump the suffix if the Form shape changes
@@ -33,6 +34,36 @@ const C = {
   t2:      "text-slate-600 dark:text-slate-300",
   t3:      "text-slate-400 dark:text-slate-500",
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Canonical roster of job titles HR can pick from. Deduped + alphabetised.
+// Fixes obvious typos (Acqusition → Acquisition; "Brand Face and strategist"
+// case) and keeps "AI" as a distinct role separate from the intern variant.
+// ─────────────────────────────────────────────────────────────────────────────
+const JOB_TITLES = [
+  "AI",
+  "Artificial Intelligence Intern",
+  "Associate Script Writer",
+  "Associate Video Editor",
+  "Brand Face and Strategist",
+  "Content Quality Assurance Specialist",
+  "Content Researcher",
+  "Content Strategist",
+  "Content Team Lead",
+  "Executive Assistant",
+  "Graphic Designer",
+  "HR Manager",
+  "Head - Quality Assurance",
+  "IT Security Intern",
+  "Script Quality Assurance Specialist",
+  "Script Writer",
+  "Sr. Content Researcher",
+  "Sr. Graphic Designer & Content Strategist",
+  "Sr. Script Writer",
+  "Sr. Video Editor",
+  "Talent Acquisition Specialist",
+  "Video Editor",
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Form state shape — one place, flat, easy to scan.
@@ -71,7 +102,6 @@ type Form = {
   internshipEndDate: string;
 
   // Step 3 — Work
-  inviteToClickup:  boolean;
   inviteToLogin:    boolean;
   enableOnboarding: boolean;
   leavePlan:        string;
@@ -82,14 +112,14 @@ type Form = {
   attendanceNumber: string;
   timeTrackingPolicy: string;
   penalizationPolicy: string;
-  overtimePolicy:   string;
-  expensePolicy:    string;
   orgLevel:         string;
   role:             string;
 
   // Step 4 — Compensation (fields visible, not persisted to DB)
-  payGroup:     string;
-  annualSalary: string;
+  salaryType:    string;   // "Regular Employee" | "Intern" — gates which fields show
+  payGroup:      string;
+  annualSalary:  string;
+  basicPay:      string;   // Intern-only stipend / monthly basic
   bonusIncluded: boolean;
   pfEligible:    boolean;
   salaryStructure: string;
@@ -104,17 +134,19 @@ const EMPTY: Form = {
   joiningDate: new Date().toISOString().slice(0, 10),
   jobTitle: "", secondaryJobTitle: "", timeType: "Full Time",
   legalEntity: "NB Media Productions", businessUnit: "", department: "",
-  location: "Mohali", workerType: "Permanent",
+  location: "Mohali", workerType: "Regular Employee",
   reportingManagerId: "", dottedLineManagerId: "",
-  probationPolicy: "Regular Employees (3 Months)", noticePeriodDays: "30",
+  probationPolicy: "Regular Employees", noticePeriodDays: "30",
   jobLocation: "Mohali", internshipEndDate: "",
-  inviteToClickup: true, inviteToLogin: true, enableOnboarding: true,
+  inviteToLogin: true, enableOnboarding: true,
   leavePlan: "Regular Leave Plan", holidayList: "Default Holiday List",
   attendanceTracking: true, shiftId: "", weeklyOff: "Standard Weekly Off",
   attendanceNumber: "", timeTrackingPolicy: "On-Site Capture",
-  penalizationPolicy: "Default", overtimePolicy: "",
-  expensePolicy: "Default", orgLevel: "member", role: "member",
+  penalizationPolicy: "Default",
+  orgLevel: "member", role: "member",
+  salaryType: "Regular Employee",
   payGroup: "NB Media", annualSalary: "",
+  basicPay: "",
   bonusIncluded: false, pfEligible: false,
   salaryStructure: "Range Based", taxRegime: "New Regime (Section 115BAC)",
 };
@@ -144,6 +176,109 @@ export default function OnboardEmployeePage() {
     const dn = [form.firstName, form.middleName, form.lastName].filter(Boolean).join(" ").trim();
     if (dn !== form.displayName) setForm(f => ({ ...f, displayName: dn }));
   }, [form.firstName, form.middleName, form.lastName, displayTouched]);
+
+  // Auto-fill the Attendance Number with the employee-number prefix (e.g.
+  // "HRM" for HRM47). HR can still override it manually — once they type,
+  // we stop overwriting.
+  const [attendanceTouched, setAttendanceTouched] = useState(false);
+
+  // ── Existing-user lookup by Work Email ────────────────────────────
+  // Type a name or email — the dropdown suggests matching User rows so
+  // HR can link to a Google-OAuth user instead of duplicating them.
+  // Picking auto-fills first / last / display name.
+  type LookupBanner =
+    | { kind: "idle" }
+    | { kind: "loading" }
+    | { kind: "match-fresh"; name: string }
+    | { kind: "match-onboarded"; name: string; employeeId: string }
+    | { kind: "none" };
+  const [lookup, setLookup] = useState<LookupBanner>({ kind: "idle" });
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Pull the active EmployeeNumberSeries so the form can show the
+  // next-allocatable employee number as a hint ("Next: HRM47").
+  const { data: numberSeries } = useSWR<any[]>("/api/hr/number-series", fetcher);
+  const activeSeries = (Array.isArray(numberSeries) ? numberSeries : []).find((s: any) => s.isActive) ?? (Array.isArray(numberSeries) ? numberSeries[0] : null);
+  const nextEmployeeId = activeSeries
+    ? `${activeSeries.prefix}${activeSeries.nextNumber}`
+    : "";
+  // Prefix from whichever ID is in play: a manually-typed employeeNumber
+  // wins (lets HR pick a different series mid-form), otherwise fall back
+  // to the active series. Strip trailing digits to get just "HRM" out of
+  // "HRM47" or whatever HR typed.
+  const employeeIdPrefix = ((form.employeeNumber || nextEmployeeId).match(/^[A-Za-z]+/)?.[0]) ?? "";
+  useEffect(() => {
+    if (attendanceTouched) return;
+    if (employeeIdPrefix && employeeIdPrefix !== form.attendanceNumber) {
+      setForm(f => ({ ...f, attendanceNumber: employeeIdPrefix }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeIdPrefix, attendanceTouched]);
+
+  useEffect(() => {
+    const q = form.workEmail.trim().toLowerCase();
+    if (q.length < 2) {
+      setSuggestions([]);
+      setLookup({ kind: "idle" });
+      return;
+    }
+    let cancelled = false;
+    setLookup({ kind: "loading" });
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/hr/employees?search=${encodeURIComponent(q)}`);
+        if (!res.ok) {
+          if (!cancelled) { setSuggestions([]); setLookup({ kind: "none" }); }
+          return;
+        }
+        if (cancelled) return;
+        const rows: any[] = await res.json();
+        setSuggestions(rows.slice(0, 6));
+        const exact = rows.find((u) => String(u.email ?? "").toLowerCase() === q);
+        if (!exact) { setLookup({ kind: "none" }); return; }
+        const fullName = String(exact.name ?? "").trim();
+        if (exact.employeeProfile) {
+          setLookup({
+            kind: "match-onboarded",
+            name: fullName,
+            employeeId: exact.employeeProfile.employeeId ?? "—",
+          });
+          return;
+        }
+        const firstSpace = fullName.indexOf(" ");
+        const fName = firstSpace === -1 ? fullName : fullName.slice(0, firstSpace);
+        const lName = firstSpace === -1 ? ""       : fullName.slice(firstSpace + 1);
+        setForm((f) => ({
+          ...f,
+          firstName:   f.firstName  || fName,
+          lastName:    f.lastName   || lName,
+          displayName: displayTouched ? f.displayName : (fullName || f.displayName),
+        }));
+        setLookup({ kind: "match-fresh", name: fullName });
+      } catch {
+        if (!cancelled) setLookup({ kind: "idle" });
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [form.workEmail, displayTouched]);
+
+  const pickSuggestion = (u: any) => {
+    const email = String(u.email ?? "").toLowerCase();
+    const fullName = String(u.name ?? "").trim();
+    const firstSpace = fullName.indexOf(" ");
+    const fName = firstSpace === -1 ? fullName : fullName.slice(0, firstSpace);
+    const lName = firstSpace === -1 ? ""       : fullName.slice(firstSpace + 1);
+    setForm((f) => ({
+      ...f,
+      workEmail:   email,
+      firstName:   fName || f.firstName,
+      lastName:    lName || f.lastName,
+      displayName: displayTouched ? f.displayName : (fullName || f.displayName),
+    }));
+    setSuggestions([]);
+    setShowSuggestions(false);
+  };
 
   // ── Draft autosave ──────────────────────────────────────────────────
   // Persists the entire wizard state to localStorage so users can reload
@@ -228,14 +363,16 @@ export default function OnboardEmployeePage() {
         role:  form.role,
         orgLevel: form.orgLevel,
         managerId: form.reportingManagerId ? Number(form.reportingManagerId) : undefined,
-        inviteToClickup: form.inviteToClickup,
+        inviteToLogin:    form.inviteToLogin,
+        enableOnboarding: form.enableOnboarding,
         profile: {
           employeeId: form.employeeNumber || undefined,
           designation: form.jobTitle || undefined,
           department:  form.department || undefined,
-          employmentType: form.workerType === "Intern" ? "intern"
-                         : form.workerType === "Contract" ? "contract"
-                         : form.timeType   === "Part Time" ? "parttime" : "fulltime",
+          employmentType:
+            form.workerType === "Intern"     ? "intern"
+            : form.timeType === "Part Time"  ? "parttime"
+            : "fulltime",
           workLocation: form.location?.toLowerCase().includes("remote") ? "remote" : "office",
           joiningDate:  form.joiningDate || undefined,
           phone:        form.mobileNumber ? `${form.mobileCountry} ${form.mobileNumber}` : undefined,
@@ -245,6 +382,26 @@ export default function OnboardEmployeePage() {
         },
         shiftId: form.shiftId ? Number(form.shiftId) : undefined,
         leaveBalances: leaveTypes.map((lt: any) => ({ leaveTypeId: lt.id, totalDays: lt.daysPerYear })),
+        // ── Compensation: persist to SalaryStructure ──
+        // For interns we send only the monthly basic; the API derives ctc =
+        // basic × 12 and zeroes out HRA / PF / etc. For regular employees
+        // we send the annual CTC and the API runs the full breakup.
+        compensation: form.salaryType === "Intern"
+          ? {
+              salaryType:      "intern",
+              monthlyBasic:    Number(form.basicPay) || 0,
+              effectiveFrom:   form.joiningDate || undefined,
+            }
+          : {
+              salaryType:      "regular",
+              payGroup:        form.payGroup,
+              annualCtc:       Number(form.annualSalary) || 0,
+              bonusIncluded:   form.bonusIncluded,
+              pfEligible:      form.pfEligible,
+              taxRegime:       form.taxRegime,
+              structureType:   form.salaryStructure,
+              effectiveFrom:   form.joiningDate || undefined,
+            },
       };
 
       const res  = await fetch("/api/users", {
@@ -256,8 +413,8 @@ export default function OnboardEmployeePage() {
       if (!res.ok) throw new Error(data.error || "Failed to onboard");
 
       setSuccess(
-        data.clickupInviteNote
-          ? `${data.name} onboarded. ${data.clickupInviteNote}`
+        data.isUpdate
+          ? `${data.name}'s existing account was linked and onboarding details saved.`
           : `${data.name} onboarded successfully.`
       );
       // Wipe the draft so the next visit starts clean.
@@ -405,7 +562,7 @@ export default function OnboardEmployeePage() {
                 <Select v={form.gender} set={v => set("gender", v)} opts={["male", "female", "other"]} />
               </Field>
               <Field label="Date of Birth" required>
-                <Input type="date" v={form.dateOfBirth} set={v => set("dateOfBirth", v)} />
+                <DatePicker value={form.dateOfBirth} onChange={(v) => set("dateOfBirth", v)} />
               </Field>
               <Field label="Nationality">
                 <Select v={form.nationality} set={v => set("nationality", v)} opts={["India", "USA", "UK", "Other"]} />
@@ -413,15 +570,79 @@ export default function OnboardEmployeePage() {
               <Field label="Number Series">
                 <Select v={form.numberSeries} set={v => set("numberSeries", v)} opts={["NB Media series"]} />
               </Field>
-              <Field label="Employee Number" hint="Auto-generated if empty (e.g. HRM47)">
-                <Input v={form.employeeNumber} set={v => set("employeeNumber", v)} placeholder="e.g. HRM47" />
+              <Field
+                label="Employee Number"
+                hint={
+                  nextEmployeeId
+                    ? `Auto-generates as ${nextEmployeeId} if left empty`
+                    : "Auto-generated if empty (e.g. HRM47)"
+                }
+              >
+                <Input
+                  v={form.employeeNumber}
+                  set={(v) => set("employeeNumber", v)}
+                  placeholder={nextEmployeeId || "e.g. HRM47"}
+                />
               </Field>
             </Grid>
 
             <SectionTitle>Contact Details</SectionTitle>
             <Grid>
               <Field label="Work Email" required>
-                <Input type="email" v={form.workEmail} set={v => set("workEmail", v)} placeholder="Write work email" />
+                <div className="relative">
+                  <Input
+                    type="email"
+                    v={form.workEmail}
+                    set={(v) => { set("workEmail", v); setShowSuggestions(true); }}
+                    placeholder="Type a name or email…"
+                  />
+                  {showSuggestions && suggestions.length > 0 && (
+                    <ul className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-white/[0.08] dark:bg-[#0a1526]">
+                      {suggestions.map((u: any) => {
+                        const initials = String(u.name ?? "?")
+                          .split(" ").map((p: string) => p[0]).join("").slice(0, 2).toUpperCase();
+                        const onboarded = !!u.employeeProfile;
+                        return (
+                          <li key={u.id}>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => { e.preventDefault(); pickSuggestion(u); }}
+                              className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[#008CFF]/[0.06]"
+                            >
+                              {u.profilePictureUrl ? (
+                                <img src={u.profilePictureUrl} alt="" className="h-7 w-7 rounded-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#008CFF] text-[10px] font-bold text-white">{initials}</span>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-[12.5px] font-semibold text-slate-800 dark:text-white">{u.name || u.email}</p>
+                                <p className="truncate text-[11px] text-slate-500">{u.email}</p>
+                              </div>
+                              {onboarded && (
+                                <span className="shrink-0 rounded-full bg-amber-50 px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wider text-amber-700 ring-1 ring-inset ring-amber-100">Onboarded</span>
+                              )}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+                {lookup.kind === "loading" && suggestions.length === 0 && (
+                  <p className="mt-1.5 text-[11px] text-slate-400">Searching…</p>
+                )}
+                {lookup.kind === "match-fresh" && (
+                  <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-100">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    Linking to existing user · <strong>{lookup.name}</strong>
+                  </p>
+                )}
+                {lookup.kind === "match-onboarded" && (
+                  <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-100">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                    Already onboarded as <strong>{lookup.employeeId}</strong> ({lookup.name})
+                  </p>
+                )}
               </Field>
               <Field label="Mobile Number">
                 <div className="flex gap-2">
@@ -439,13 +660,21 @@ export default function OnboardEmployeePage() {
           <StepCard title="Employment Details">
             <Grid>
               <Field label="Joining Date" required>
-                <Input type="date" v={form.joiningDate} set={v => set("joiningDate", v)} />
+                <DatePicker value={form.joiningDate} onChange={v => set("joiningDate", v)} futureYears={2} />
               </Field>
               <Field label="Job Title" required>
-                <Input v={form.jobTitle} set={v => set("jobTitle", v)} placeholder="Write job title" />
+                <Select
+                  v={form.jobTitle}
+                  set={v => set("jobTitle", v)}
+                  opts={[{ value: "", label: "Select job title" }, ...JOB_TITLES]}
+                />
               </Field>
               <Field label="Secondary Job Title">
-                <Input v={form.secondaryJobTitle} set={v => set("secondaryJobTitle", v)} />
+                <Select
+                  v={form.secondaryJobTitle}
+                  set={v => set("secondaryJobTitle", v)}
+                  opts={[{ value: "", label: "— None —" }, ...JOB_TITLES]}
+                />
               </Field>
               <Field label="Time Type" required>
                 <Select v={form.timeType} set={v => set("timeType", v)} opts={["Full Time", "Part Time"]} />
@@ -467,7 +696,7 @@ export default function OnboardEmployeePage() {
                 <Select v={form.location} set={v => set("location", v)} opts={["Mohali", "Remote", "Hybrid"]} />
               </Field>
               <Field label="Worker Type" required>
-                <Select v={form.workerType} set={v => set("workerType", v)} opts={["Permanent", "Contract", "Intern"]} />
+                <Select v={form.workerType} set={v => set("workerType", v)} opts={["Regular Employee", "Intern"]} />
               </Field>
               <Field label="Reporting Manager" required>
                 <Select
@@ -489,7 +718,7 @@ export default function OnboardEmployeePage() {
             <Grid>
               <Field label="Probation Policy" required>
                 <Select v={form.probationPolicy} set={v => set("probationPolicy", v)} opts={[
-                  "Interns (3 Months)", "Interns (6 Months)", "Regular Employees (3 Months)", "Regular Employees (6 Months)",
+                  "Interns (3 Months)", "Interns (6 Months)", "Interns (12 Months)", "Regular Employees",
                 ]} />
               </Field>
               <Field label="Notice Period (days)" required>
@@ -500,7 +729,7 @@ export default function OnboardEmployeePage() {
               </Field>
               {form.workerType === "Intern" && (
                 <Field label="Internship End Date">
-                  <Input type="date" v={form.internshipEndDate} set={v => set("internshipEndDate", v)} />
+                  <DatePicker value={form.internshipEndDate} onChange={v => set("internshipEndDate", v)} futureYears={2} />
                 </Field>
               )}
             </Grid>
@@ -511,22 +740,16 @@ export default function OnboardEmployeePage() {
           <StepCard title="Onboarding Settings">
             <div className="space-y-3">
               <Toggle
-                checked={form.inviteToClickup}
-                onChange={v => set("inviteToClickup", v)}
-                label="Invite to ClickUp"
-                hint="Sends a ClickUp workspace invitation email to this address. The returned ClickUp user ID will be linked to this employee automatically."
-              />
-              <Toggle
                 checked={form.inviteToLogin}
                 onChange={v => set("inviteToLogin", v)}
                 label="Invite employee to login"
-                hint="Employee will receive an email to set their password on this dashboard."
+                hint="Sends a welcome email with a link to sign in via Google using this work email — no password is set, the dashboard is Google-OAuth only."
               />
               <Toggle
                 checked={form.enableOnboarding}
                 onChange={v => set("enableOnboarding", v)}
                 label="Enable onboarding flow"
-                hint="Walks the employee through document uploads, profile setup, etc. on first login."
+                hint="On their first sign-in we'll redirect them to a short wizard to confirm contact details (mobile, address, emergency contact) before they see the dashboard."
               />
             </div>
 
@@ -577,23 +800,17 @@ export default function OnboardEmployeePage() {
                 <Select v={form.weeklyOff} set={v => set("weeklyOff", v)} opts={["Standard Weekly Off", "Saturday Off Alt"]} />
               </Field>
               <Field label="Attendance Number">
-                <Input v={form.attendanceNumber} set={v => set("attendanceNumber", v)} />
+                <Input
+                  v={form.attendanceNumber}
+                  set={v => { setAttendanceTouched(true); set("attendanceNumber", v); }}
+                  placeholder={employeeIdPrefix || "Auto-fills from employee number"}
+                />
               </Field>
               <Field label="Time Tracking Policy">
                 <Select v={form.timeTrackingPolicy} set={v => set("timeTrackingPolicy", v)} opts={["On-Site Capture", "Remote Capture", "Hybrid"]} />
               </Field>
               <Field label="Penalization Policy">
                 <Select v={form.penalizationPolicy} set={v => set("penalizationPolicy", v)} opts={["Default", "Strict", "Lenient"]} />
-              </Field>
-              <Field label="Overtime">
-                <Input v={form.overtimePolicy} set={v => set("overtimePolicy", v)} placeholder="None" />
-              </Field>
-            </Grid>
-
-            <SectionTitle>Expense Settings</SectionTitle>
-            <Grid cols={1}>
-              <Field label="Expense Policy">
-                <Select v={form.expensePolicy} set={v => set("expensePolicy", v)} opts={["Default", "Senior", "No Reimbursement"]} />
               </Field>
             </Grid>
           </StepCard>
@@ -603,76 +820,121 @@ export default function OnboardEmployeePage() {
           <div className="grid grid-cols-1 md:grid-cols-[1fr_360px] gap-6">
             <StepCard title="Compensation">
               <Grid>
-                <Field label="Pay Group">
-                  <Select v={form.payGroup} set={v => set("payGroup", v)} opts={["NB Media", "Contractor"]} />
-                </Field>
-                <Field label="Annual Salary (INR)">
-                  <Input type="number" v={form.annualSalary} set={v => set("annualSalary", v)} placeholder="Enter annual salary" />
+                <Field label="Salary Type" required>
+                  <Select v={form.salaryType} set={v => set("salaryType", v)} opts={["Regular Employee", "Intern"]} />
                 </Field>
               </Grid>
 
-              <SectionTitle>Bonus Details</SectionTitle>
-              <label className={`flex items-center gap-2 text-[12.5px] ${C.t2}`}>
-                <input type="checkbox" checked={form.bonusIncluded} onChange={e => set("bonusIncluded", e.target.checked)} />
-                Bonus included in annual salary of INR {Number(form.annualSalary || 0).toLocaleString("en-IN")}
-              </label>
-              <button className="h-8 px-3 text-[12px] font-semibold text-[#008CFF] border border-[#008CFF]/40 rounded-lg hover:bg-[#008CFF]/5 w-fit">+ Add Bonus</button>
+              {form.salaryType === "Intern" ? (
+                // Interns are paid a flat basic / stipend — no PF, bonus, tax
+                // regime, structure, etc. Keep the surface area tiny on
+                // purpose so HR doesn't accidentally fill in fields that
+                // don't apply to a stipend.
+                <Grid>
+                  <Field label="Basic Pay (INR / month)" required>
+                    <Input type="number" v={form.basicPay} set={v => set("basicPay", v)} placeholder="Enter monthly stipend" />
+                  </Field>
+                </Grid>
+              ) : (
+                <>
+                  <Grid>
+                    <Field label="Pay Group">
+                      <Select v={form.payGroup} set={v => set("payGroup", v)} opts={["NB Media", "Contractor"]} />
+                    </Field>
+                    <Field label="Annual Salary (INR)">
+                      <Input type="number" v={form.annualSalary} set={v => set("annualSalary", v)} placeholder="Enter annual salary" />
+                    </Field>
+                  </Grid>
 
-              <SectionTitle>Payroll Settings</SectionTitle>
-              <label className={`flex items-center gap-2 text-[12.5px] ${C.t2}`}>
-                <input type="checkbox" checked={form.pfEligible} onChange={e => set("pfEligible", e.target.checked)} />
-                Provident fund (PF) eligible
-              </label>
-              <div className="px-3 py-2 bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-lg text-[11.5px]">
-                ESI is not applicable for the selected Pay Group
-              </div>
+                  <SectionTitle>Bonus Details</SectionTitle>
+                  <label className={`flex items-center gap-2 text-[12.5px] ${C.t2}`}>
+                    <input type="checkbox" checked={form.bonusIncluded} onChange={e => set("bonusIncluded", e.target.checked)} />
+                    Bonus included in annual salary of INR {Number(form.annualSalary || 0).toLocaleString("en-IN")}
+                  </label>
+                  <button className="h-8 px-3 text-[12px] font-semibold text-[#008CFF] border border-[#008CFF]/40 rounded-lg hover:bg-[#008CFF]/5 w-fit">+ Add Bonus</button>
 
-              <Grid>
-                <Field label="Salary Structure Type">
-                  <Select v={form.salaryStructure} set={v => set("salaryStructure", v)} opts={["Range Based", "Fixed"]} />
-                </Field>
-                <Field label="Tax Regime">
-                  <Select v={form.taxRegime} set={v => set("taxRegime", v)} opts={["New Regime (Section 115BAC)", "Old Regime"]} />
-                </Field>
-              </Grid>
+                  <SectionTitle>Payroll Settings</SectionTitle>
+                  <label className={`flex items-center gap-2 text-[12.5px] ${C.t2}`}>
+                    <input type="checkbox" checked={form.pfEligible} onChange={e => set("pfEligible", e.target.checked)} />
+                    Provident fund (PF) eligible
+                  </label>
+                  <div className="px-3 py-2 bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-lg text-[11.5px]">
+                    ESI is not applicable for the selected Pay Group
+                  </div>
+
+                  <Grid>
+                    <Field label="Salary Structure Type">
+                      <Select v={form.salaryStructure} set={v => set("salaryStructure", v)} opts={["Range Based", "Fixed"]} />
+                    </Field>
+                    <Field label="Tax Regime">
+                      <Select v={form.taxRegime} set={v => set("taxRegime", v)} opts={["New Regime (Section 115BAC)", "Old Regime"]} />
+                    </Field>
+                  </Grid>
+                </>
+              )}
               <p className={`text-[10.5px] ${C.t3} italic`}>
-                Compensation fields are collected for reference only; your DB has no payroll tables yet.
+                Saved to the employee's salary structure on submit.
               </p>
             </StepCard>
 
             {/* Salary Breakup preview */}
             <div className={`${C.card} rounded-2xl p-5 h-fit`}>
-              <p className={`text-[14px] font-semibold ${C.t1}`}>Salary Breakup</p>
-              <p className={`text-[10.5px] ${C.t3} uppercase tracking-widest mt-3`}>Salary Effective From</p>
+              <p className={`text-[14px] font-semibold ${C.t1}`}>
+                {form.salaryType === "Intern" ? "Stipend Summary" : "Salary Breakup"}
+              </p>
+              <p className={`text-[10.5px] ${C.t3} uppercase tracking-widest mt-3`}>Effective From</p>
               <p className={`text-[13px] ${C.t1} mt-0.5`}>{new Date(form.joiningDate || Date.now()).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
 
-              {/* Column headers — monthly first, annual second (matches the
-                  policy table in the Keka screenshots). */}
-              <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mt-5 pb-1 border-b border-slate-200 dark:border-white/[0.06]">
-                <span className={C.t3}>Component</span>
-                <span className={C.t3}>Monthly / Annually</span>
-              </div>
-              <div className="mt-2 space-y-2">
-                {salaryBreakup(Number(form.annualSalary) || 0, form.pfEligible).map(([label, monthly, annual]) => (
-                  <div key={label} className="flex items-center justify-between text-[12px]">
-                    <span className={C.t2}>{label}</span>
+              {form.salaryType === "Intern" ? (
+                <div className="mt-5 pt-3 border-t border-slate-200 dark:border-white/[0.06]">
+                  <div className="flex items-center justify-between text-[12.5px] font-semibold">
+                    <span className={C.t1}>Basic Pay</span>
                     <span className={`${C.t1} font-mono`}>
-                      {monthly.toLocaleString("en-IN")} / {annual.toLocaleString("en-IN")}
+                      {Number(form.basicPay || 0).toLocaleString("en-IN")} / mo
                     </span>
                   </div>
-                ))}
-                <div className="pt-2 mt-2 border-t border-slate-200 dark:border-white/[0.08] flex items-center justify-between text-[12.5px] font-semibold">
-                  <span className={C.t1}>CTC</span>
-                  <span className={`${C.t1} font-mono`}>
-                    {Math.round(Number(form.annualSalary || 0) / 12).toLocaleString("en-IN")} / {Number(form.annualSalary || 0).toLocaleString("en-IN")}
-                  </span>
+                  <div className="mt-2 flex items-center justify-between text-[11.5px]">
+                    <span className={C.t2}>Annualised</span>
+                    <span className={`${C.t2} font-mono`}>
+                      {(Number(form.basicPay || 0) * 12).toLocaleString("en-IN")} / yr
+                    </span>
+                  </div>
+                  <p className={`text-[10.5px] ${C.t3} mt-3 leading-relaxed`}>
+                    Interns are paid a flat monthly stipend — no PF, ESI,
+                    bonuses, or tax-regime selection.
+                  </p>
                 </div>
-              </div>
-              <p className={`text-[10.5px] ${C.t3} mt-3 leading-relaxed`}>
-                {form.pfEligible
-                  ? "PF is 12% of Basic, capped at ₹1,800/month (₹15,000 basic ceiling)."
-                  : "PF is disabled — enable the toggle above to include it."}
-              </p>
+              ) : (
+                <>
+                  {/* Column headers — monthly first, annual second (matches the
+                      policy table in the Keka screenshots). */}
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest mt-5 pb-1 border-b border-slate-200 dark:border-white/[0.06]">
+                    <span className={C.t3}>Component</span>
+                    <span className={C.t3}>Monthly / Annually</span>
+                  </div>
+                  <div className="mt-2 space-y-2">
+                    {salaryBreakup(Number(form.annualSalary) || 0, form.pfEligible).map(([label, monthly, annual]) => (
+                      <div key={label} className="flex items-center justify-between text-[12px]">
+                        <span className={C.t2}>{label}</span>
+                        <span className={`${C.t1} font-mono`}>
+                          {monthly.toLocaleString("en-IN")} / {annual.toLocaleString("en-IN")}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="pt-2 mt-2 border-t border-slate-200 dark:border-white/[0.08] flex items-center justify-between text-[12.5px] font-semibold">
+                      <span className={C.t1}>CTC</span>
+                      <span className={`${C.t1} font-mono`}>
+                        {Math.round(Number(form.annualSalary || 0) / 12).toLocaleString("en-IN")} / {Number(form.annualSalary || 0).toLocaleString("en-IN")}
+                      </span>
+                    </div>
+                  </div>
+                  <p className={`text-[10.5px] ${C.t3} mt-3 leading-relaxed`}>
+                    {form.pfEligible
+                      ? "PF is 12% of Basic, capped at ₹1,800/month (₹15,000 basic ceiling)."
+                      : "PF is disabled — enable the toggle above to include it."}
+                  </p>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -716,6 +978,7 @@ function Input({ v, set, type = "text", placeholder }: {
 }) {
   return <input type={type} value={v} onChange={e => set(e.target.value)} placeholder={placeholder} className={C.input} />;
 }
+
 function Select({ v, set, opts }: { v: string; set: (v: string) => void; opts: (string | { value: string; label: string })[] }) {
   return (
     <select value={v} onChange={e => set(e.target.value)} className={C.input}>
