@@ -1317,6 +1317,131 @@ function OtherActionsMenu({ onSelect }: { onSelect: (kind: LeaveRequestKind) => 
   );
 }
 
+// Modal: full year list of holidays with year-paging chevrons. Triggered
+// from the holiday card's "View All" link so users can browse the
+// calendar without leaving /dashboard/hr/home.
+function HolidaysModal({ initialYear, onClose }: { initialYear: number; onClose: () => void }) {
+  const [year, setYear] = useState(initialYear);
+  const { data: holidaysData = [] } = useSWR(`/api/hr/admin/holidays?year=${year}`, fetcher);
+  const list: { id: number; name: string; date: string; type: string }[] = Array.isArray(holidaysData)
+    ? holidaysData.map((h: any) => ({ id: h.id, name: h.name, date: String(h.date).slice(0, 10), type: h.type || "public" }))
+    : [];
+  const sorted = [...list].sort((a, b) => a.date.localeCompare(b.date));
+
+  // Soft pastel tiles that match the rest of the dashboard's white card
+  // surfaces — uses the same hue family the leave-balance rings and
+  // ApprovalsPanel pills draw from.
+  const PALETTE = [
+    { bg: "bg-sky-50 ring-sky-100",        digit: "text-sky-700",        month: "text-sky-600"     },
+    { bg: "bg-rose-50 ring-rose-100",      digit: "text-rose-700",       month: "text-rose-600"    },
+    { bg: "bg-amber-50 ring-amber-100",    digit: "text-amber-700",      month: "text-amber-600"   },
+    { bg: "bg-violet-50 ring-violet-100",  digit: "text-violet-700",     month: "text-violet-600"  },
+    { bg: "bg-emerald-50 ring-emerald-100",digit: "text-emerald-700",    month: "text-emerald-600" },
+    { bg: "bg-orange-50 ring-orange-100",  digit: "text-orange-700",     month: "text-orange-600"  },
+    { bg: "bg-pink-50 ring-pink-100",      digit: "text-pink-700",       month: "text-pink-600"    },
+    { bg: "bg-cyan-50 ring-cyan-100",      digit: "text-cyan-700",       month: "text-cyan-600"    },
+    { bg: "bg-yellow-50 ring-yellow-100",  digit: "text-yellow-700",     month: "text-yellow-600"  },
+    { bg: "bg-fuchsia-50 ring-fuchsia-100",digit: "text-fuchsia-700",    month: "text-fuchsia-600" },
+    { bg: "bg-teal-50 ring-teal-100",      digit: "text-teal-700",       month: "text-teal-600"    },
+    { bg: "bg-indigo-50 ring-indigo-100",  digit: "text-indigo-700",     month: "text-indigo-600"  },
+  ];
+  const tintFor = (idx: number) => PALETTE[idx % PALETTE.length];
+
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onEsc);
+    return () => document.removeEventListener("keydown", onEsc);
+  }, [onClose]);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-[0_24px_64px_-16px_rgba(15,23,42,0.25)] ring-1 ring-slate-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50/60 px-5 py-4">
+          <div className="flex items-center gap-3">
+            <h2 className="text-[15px] font-semibold text-[#1b2b3c]">Holidays</h2>
+            <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1">
+              <button
+                type="button"
+                onClick={() => setYear((y) => y - 1)}
+                aria-label="Previous year"
+                className="flex h-5 w-5 items-center justify-center rounded text-slate-500 transition hover:bg-slate-100 hover:text-[#008CFF]"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <span className="min-w-[36px] text-center text-[13px] font-semibold tabular-nums text-[#1b2b3c]">{year}</span>
+              <button
+                type="button"
+                onClick={() => setYear((y) => y + 1)}
+                aria-label="Next year"
+                className="flex h-5 w-5 items-center justify-center rounded text-slate-500 transition hover:bg-slate-100 hover:text-[#008CFF]"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-[#1b2b3c]"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {sorted.length === 0 ? (
+            <p className="py-16 text-center text-[13px] text-[#6e8499]">
+              No holidays on file for {year}.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-x-6 gap-y-1 md:grid-cols-2">
+              {sorted.map((h, i) => {
+                const d = new Date(h.date);
+                const day     = d.toLocaleDateString("en-IN", { day: "2-digit", timeZone: "UTC" });
+                const month   = d.toLocaleDateString("en-IN", { month: "short", timeZone: "UTC" }).toUpperCase();
+                const weekday = d.toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" });
+                const isOptional = h.type === "optional";
+                const t = tintFor(i);
+                return (
+                  <div key={h.id} className="flex items-start gap-3 rounded-lg py-2.5 px-1 transition-colors hover:bg-slate-50">
+                    <div className={`flex h-[60px] w-[60px] flex-shrink-0 flex-col items-center justify-center rounded-lg ring-1 ring-inset ${t.bg} ${t.month.replace("text-", "ring-").replace("-600", "-100")}`}>
+                      <span className={`text-[9.5px] font-bold uppercase tracking-[0.14em] leading-none ${t.month}`}>{month}</span>
+                      <span className={`mt-1 text-[20px] font-bold leading-none ${t.digit}`}>{day}</span>
+                    </div>
+                    <div className="min-w-0 flex-1 pt-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-[13.5px] font-semibold text-[#1b2b3c] leading-snug">{h.name}</p>
+                        {isOptional && (
+                          <span className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#415a73]">
+                            Floater Leave
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-[11.5px] text-[#6e8499]">{weekday}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 export default function HRHomePage() {
   const { data: session } = useSession();
@@ -1572,6 +1697,7 @@ export default function HRHomePage() {
   // Index into the upcoming-holidays list for the green Holidays card. The
   // arrows below cycle through this; resets if the list shrinks.
   const [holidayIdx, setHolidayIdx] = useState(0);
+  const [showHolidaysModal, setShowHolidaysModal] = useState(false);
 
   // "Other ▾" quick-action modal — opened in-place from the dropdown so the
   // user stays on /dashboard/hr/home instead of being routed to the
@@ -2032,13 +2158,14 @@ export default function HRHomePage() {
                 >
                   Holidays
                 </span>
-                <Link
-                  href={isAdmin ? "/dashboard/hr/admin/holidays" : "/dashboard/hr/leaves"}
+                <button
+                  type="button"
+                  onClick={() => setShowHolidaysModal(true)}
                   className="text-[11px] font-medium underline-offset-2 transition hover:underline"
                   style={{ color: "rgba(255,255,255,0.92)", WebkitTextFillColor: "rgba(255,255,255,0.92)" }}
                 >
                   View All
-                </Link>
+                </button>
               </div>
 
               {activeHoliday ? (
@@ -2723,6 +2850,12 @@ export default function HRHomePage() {
           policyText={otherPolicy[otherForm]}
           leaveTypes={otherLeaveTypes}
           onClose={() => setOtherForm(null)}
+        />
+      )}
+      {showHolidaysModal && (
+        <HolidaysModal
+          initialYear={thisYear}
+          onClose={() => setShowHolidaysModal(false)}
         />
       )}
     </div>
