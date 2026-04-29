@@ -90,10 +90,13 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     hr_my_team:true, hr_admin:true, hr_people:true,
     reports:true, departments:true, violations:true,
   },
+  // special_access is the senior-admin role — same visibility as CEO
+  // (minus the literal /dashboard CEO-only landing). Sidebar's isAdmin
+  // includes them, so the gating layer agrees with these defaults.
   special_access: {
-    // Like Palak — not an admin, not a manager. Gets a tiny bump (violations)
-    // via canSeeViolationLog, nothing else beyond the basic 4 tabs.
-    violations: true,
+    cases:true, company:true, scores:true,
+    hr_my_team:true, hr_admin:true, hr_people:true,
+    reports:true, departments:true, violations:true,
   },
   hod: {
     hr_my_team: true, scores: true, reports: true,

@@ -43,8 +43,18 @@ export default function Sidebar() {
     const { data: session } = useSession();
     const user = session?.user as any;
 
-    const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper;
+    // `special_access` and `role === "admin"` both qualify as admin —
+    // per the auth.ts session callback comment "Full visibility but NOT
+    // CEO". Include both so they see Cases / Company / Admin / HR
+    // Dashboard / Reports / Scores like ceo + developers do.
+    const isAdmin =
+      user?.orgLevel === "ceo" ||
+      user?.isDeveloper === true ||
+      user?.orgLevel === "special_access" ||
+      user?.role === "admin";
     const isHRAdmin = isAdmin || user?.orgLevel === "hr_manager";
+    // CEO-only items stay restricted to the actual CEO + developers — `Dashboard`
+    // for instance is the org-wide CEO console, not appropriate for special_access.
     const isCeo = user?.orgLevel === "ceo" || user?.isDeveloper === true;
     const canSeeReports = isAdmin || user?.orgLevel === "manager" || user?.orgLevel === "hod";
     const canSeeViolationLog = isAdmin || user?.orgLevel === "special_access" || user?.role === "hr_manager";

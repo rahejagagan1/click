@@ -5,6 +5,7 @@ import { fetcher } from "@/lib/swr";
 import { useRouter } from "next/navigation";
 import { User as UserIcon, Briefcase, Settings as SettingsIcon, IndianRupee, Check, X } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
+import { JOB_TITLES } from "@/lib/job-titles";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LocalStorage key for the draft. Bump the suffix if the Form shape changes
@@ -34,36 +35,6 @@ const C = {
   t2:      "text-slate-600 dark:text-slate-300",
   t3:      "text-slate-400 dark:text-slate-500",
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Canonical roster of job titles HR can pick from. Deduped + alphabetised.
-// Fixes obvious typos (Acqusition → Acquisition; "Brand Face and strategist"
-// case) and keeps "AI" as a distinct role separate from the intern variant.
-// ─────────────────────────────────────────────────────────────────────────────
-const JOB_TITLES = [
-  "AI",
-  "Artificial Intelligence Intern",
-  "Associate Script Writer",
-  "Associate Video Editor",
-  "Brand Face and Strategist",
-  "Content Quality Assurance Specialist",
-  "Content Researcher",
-  "Content Strategist",
-  "Content Team Lead",
-  "Executive Assistant",
-  "Graphic Designer",
-  "HR Manager",
-  "Head - Quality Assurance",
-  "IT Security Intern",
-  "Script Quality Assurance Specialist",
-  "Script Writer",
-  "Sr. Content Researcher",
-  "Sr. Graphic Designer & Content Strategist",
-  "Sr. Script Writer",
-  "Sr. Video Editor",
-  "Talent Acquisition Specialist",
-  "Video Editor",
-];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Form state shape — one place, flat, easy to scan.

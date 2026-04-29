@@ -3,7 +3,7 @@ import { sendEmail, emailsForUserIds } from "@/lib/email/sender";
 import {
   leaveRequestEmail, wfhRequestEmail, onDutyRequestEmail,
   regularizationRequestEmail, compOffRequestEmail, decisionEmail,
-  feedbackEmail, reportSubmittedEmail,
+  feedbackEmail, reportSubmittedEmail, jobApplicationEmail,
   type EmailContent,
 } from "@/lib/email/templates";
 
@@ -14,7 +14,8 @@ export type NotificationType =
   | "leave"
   | "comp_off"
   | "feedback"
-  | "report";
+  | "report"
+  | "job_application";
 
 /**
  * Map a notification's type + title/body into an EmailContent. Returns
@@ -42,6 +43,20 @@ function buildEmailFor(
     const cat = /category:\s*([^\n]+)/i.exec(body || "")?.[1]?.trim() || "anything_else";
     const msg = (body || "").replace(/^category:[^\n]*\n+/i, "").trim();
     return feedbackEmail({ category: cat, message: msg });
+  }
+
+  // ── New job application (sent to hiring stakeholders) ───────────
+  // Body has kv lines we parse out — keeps the template clean and the
+  // dispatcher robust to ordering / missing fields.
+  if (type === "job_application") {
+    const kv = (k: string) => new RegExp(`${k}:\\s*([^\\n]+)`, "i").exec(body || "")?.[1]?.trim() || "";
+    return jobApplicationEmail({
+      name:  kv("name")  || "A candidate",
+      email: kv("email") || "",
+      phone: kv("phone"),
+      role:  kv("role")  || title.replace(/^New job application — /, ""),
+      link:  kv("link")  || "/dashboard/hr/hiring",
+    });
   }
 
   // ── Report submitted (weekly / monthly) ──────────────────────────

@@ -128,6 +128,8 @@ model User {
   tabPermissions         UserTabPermission[] @relation("UserTabPermsOwner")
   tabPermissionsUpdated  UserTabPermission[] @relation("UserTabPermsUpdater")
   auditLogs              AuditLog[]          @relation("AuditLogActor")
+  employeeExit           EmployeeExit?       @relation("ExitUser")
+  exitsInitiated         EmployeeExit[]      @relation("ExitInitiator")
 
   @@index([managerId])
 }
@@ -1578,4 +1580,115 @@ model AuditLog {
   @@index([action])
   @@index([entityType, entityId])
   @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════════════════
+// HR MODULE — Employee exits / offboarding
+// ═══════════════════════════════════════════════════════
+
+/// One row per employee who has left (or is leaving) the company.
+/// Linked 1:1 with the User row — flipping User.isActive to false is
+/// the canonical "they're gone" signal; this row stores the *why* /
+/// *when* / clearance state.
+model EmployeeExit {
+  id              Int       @id @default(autoincrement())
+  userId          Int       @unique
+  user            User      @relation("ExitUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// resignation | termination | contract_end | retirement | other
+  exitType        String    @default("resignation")
+  resignationDate DateTime  @db.Date
+  lastWorkingDay  DateTime  @db.Date
+  noticePeriodDays Int      @default(30)
+
+  reason          String?   @db.Text
+  notes           String?   @db.Text
+
+  /// notice_period | cleared | offboarded
+  status          String    @default("notice_period")
+
+  // Clearance checklist — ticked off as HR processes the exit.
+  assetsReturned      Boolean @default(false)
+  documentsHandled    Boolean @default(false)
+  finalSettlementDone Boolean @default(false)
+  exitInterviewDone   Boolean @default(false)
+
+  initiatedById   Int?
+  initiatedBy     User?     @relation("ExitInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status])
+  @@index([lastWorkingDay])
+}
+
+// ═══════════════════════════════════════════════════════
+// HR MODULE — Hiring (job openings + public applications)
+// ═══════════════════════════════════════════════════════
+
+/// A role HR is currently or previously hiring for. Only `isOpen=true`
+/// titles appear in the public application form's job dropdown.
+model JobOpening {
+  id          Int      @id @default(autoincrement())
+  title       String   @unique
+  department  String?
+  location    String?
+  description String?  @db.Text
+  isOpen      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  applications JobApplication[]
+
+  @@index([isOpen])
+}
+
+/// One row per submission from the public job-application form.
+model JobApplication {
+  id              Int        @id @default(autoincrement())
+  jobOpeningId    Int
+  jobOpening      JobOpening @relation(fields: [jobOpeningId], references: [id], onDelete: Restrict)
+
+  fullName        String
+  email           String
+  phone           String?
+  coverLetter     String?    @db.Text
+  linkedinUrl     String?
+  portfolioUrl    String?
+  experienceYears Int?
+  currentCompany  String?
+  noticePeriod    String?
+
+  resumeFileName  String?
+  /// Public URL the resume is served from (e.g. /uploads/resumes/<uuid>.pdf).
+  resumeUrl       String?
+
+  /// HR-side workflow state: new | reviewed | shortlisted | interviewing | rejected | hired
+  status          String     @default("new")
+  hrNotes         String?    @db.Text
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([jobOpeningId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// Per-field visibility/required toggles for the public application form.
+/// Seeded once with the canonical field set; HR can flip visibility/required
+/// from the Hiring → Form Settings tab. Name / email / job opening / resume
+/// are conceptually mandatory; they're seeded with isRequired=true and
+/// isVisible=true and HR shouldn't disable them.
+model JobApplicationFormField {
+  id          Int     @id @default(autoincrement())
+  fieldKey    String  @unique     // "phone" | "coverLetter" | "linkedinUrl" | …
+  label       String
+  fieldType   String              // "text" | "tel" | "email" | "textarea" | "url" | "number"
+  isVisible   Boolean @default(true)
+  isRequired  Boolean @default(false)
+  sortOrder   Int     @default(0)
+  isMandatory Boolean @default(false)  // System-locked — HR can't hide these (name/email/etc.)
+  updatedAt   DateTime @updatedAt
 }
