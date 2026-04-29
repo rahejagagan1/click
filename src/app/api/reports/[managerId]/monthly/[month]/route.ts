@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
+import { notifyUsers } from "@/lib/notifications";
 import { getQualifiedCasesForRole } from "@/lib/ratings/data-resolver";
 import { getManagerReportFormat } from "@/lib/reports/manager-report-format";
 import { getMonthlyReportWindow } from "@/lib/reports/monthly-window";
@@ -371,6 +372,50 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
             create: { managerId, month, year, ...payload },
             update: payload,
         });
+
+        // Notify CEO / HR / admins / developers / special-access only
+        // when the report is LOCKED. Same pattern as the weekly route.
+        if (shouldLock) {
+            try {
+                const devEmails = (process.env.DEVELOPER_EMAILS || "")
+                    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+                const [manager, recipients] = await Promise.all([
+                    prisma.user.findUnique({ where: { id: managerId }, select: { name: true } }),
+                    prisma.user.findMany({
+                        where: {
+                            isActive: true,
+                            OR: [
+                                { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
+                                { role: "admin" },
+                                ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+                            ],
+                        },
+                        select: { id: true },
+                    }),
+                ]);
+                const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-IN", {
+                    month: "long", year: "numeric",
+                });
+                const link        = `/dashboard/reports/${managerId}/monthly/${month}?year=${year}`;
+                const managerName = manager?.name || "A manager";
+                await notifyUsers({
+                    actorId:  managerId,
+                    userIds:  recipients.map((u) => u.id),
+                    type:     "report",
+                    entityId: report.id,
+                    title:    `${managerName} submitted monthly report — ${monthLabel}`,
+                    body:     [
+                        `kind: monthly`,
+                        `period: ${monthLabel}`,
+                        `manager: ${managerName}`,
+                        `link: ${link}`,
+                    ].join("\n"),
+                    linkUrl:  link,
+                });
+            } catch (e) {
+                console.warn("[reports/monthly] notify failed:", e);
+            }
+        }
 
         return NextResponse.json({ success: true, reportId: report.id, locked: shouldLock, isDraft });
     } catch (error) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
+import { notifyUsers } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -129,6 +130,55 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
             create: { managerId, week, month, year, ...payload },
             update: payload,
         });
+
+        // Notify CEO / HR / admins / developers / special-access only
+        // when the report is being LOCKED (final submission). Drafts
+        // don't trigger a fan-out so we don't spam reviewers on every
+        // autosave.
+        if (shouldLock) {
+            try {
+                const [manager, devEmails, recipients] = await Promise.all([
+                    prisma.user.findUnique({ where: { id: managerId }, select: { name: true } }),
+                    Promise.resolve(
+                        (process.env.DEVELOPER_EMAILS || "")
+                            .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean),
+                    ),
+                    prisma.user.findMany({
+                        where: {
+                            isActive: true,
+                            OR: [
+                                { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
+                                { role: "admin" },
+                                { email: { in: (process.env.DEVELOPER_EMAILS || "")
+                                    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean) } },
+                            ],
+                        },
+                        select: { id: true },
+                    }),
+                ]);
+                const periodLabel = `Week ${week}, ${month}/${year}`;
+                const link        = `/dashboard/reports/${managerId}/weekly/${week}?month=${month}&year=${year}`;
+                const managerName = manager?.name || "A manager";
+                await notifyUsers({
+                    actorId:  managerId,
+                    userIds:  recipients.map((u) => u.id),
+                    type:     "report",
+                    entityId: report.id,
+                    title:    `${managerName} submitted weekly report — ${periodLabel}`,
+                    body:     [
+                        `kind: weekly`,
+                        `period: ${periodLabel}`,
+                        `manager: ${managerName}`,
+                        `link: ${link}`,
+                    ].join("\n"),
+                    linkUrl:  link,
+                });
+                // Suppress unused-var lint for devEmails — kept for clarity.
+                void devEmails;
+            } catch (e) {
+                console.warn("[reports/weekly] notify failed:", e);
+            }
+        }
 
         return NextResponse.json({ success: true, reportId: report.id, locked: shouldLock, isDraft });
     } catch (error) {

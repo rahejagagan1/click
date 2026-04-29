@@ -1,15 +1,34 @@
 "use client";
 
-import { Suspense } from "react";
-import { usePathname } from "next/navigation";
+import { Suspense, useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import Sidebar from "./sidebar";
 import Header from "./header";
 
 export default function LayoutShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
+    const router = useRouter();
+    const { data: session } = useSession();
     const isLoginPage = pathname === "/login";
+    const isOnboardingPage = pathname === "/onboarding";
+
+    // First-login wizard gate. If HR set onboardingPending on this user,
+    // every navigation outside /login or /onboarding bounces to /onboarding
+    // until they finish it.
+    useEffect(() => {
+        const pending = (session?.user as any)?.onboardingPending === true;
+        if (pending && !isOnboardingPage && !isLoginPage) {
+            router.replace("/onboarding");
+        }
+    }, [session, pathname, isOnboardingPage, isLoginPage, router]);
 
     if (isLoginPage) {
+        return <>{children}</>;
+    }
+
+    if (isOnboardingPage) {
+        // Onboarding is a full-bleed page — no sidebar / header chrome.
         return <>{children}</>;
     }
 

@@ -4,6 +4,7 @@ import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { X, Info, Search, Check, ChevronDown } from "lucide-react";
 import { createPortal } from "react-dom";
+import { DatePicker } from "@/components/ui/date-picker";
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 export type LeaveRequestKind = "wfh" | "on_duty" | "half_day" | "leave" | "regularize";
@@ -404,34 +405,37 @@ export default function LeaveRequestForm({
 
           {/* Date range card */}
           <div className="rounded-lg border border-slate-200 dark:border-white/[0.08] p-3">
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <div>
-                <p className="text-[10.5px] uppercase tracking-widest font-semibold text-slate-500 dark:text-slate-400">From</p>
-                <input
-                  type="date"
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-[10.5px] uppercase tracking-widest font-semibold text-slate-500 dark:text-slate-400">From</p>
+                  <span className="px-2 py-0.5 rounded-md bg-[#008CFF]/10 text-[#008CFF] dark:bg-[#4a9cff]/15 dark:text-[#4a9cff] text-[11px] font-semibold tabular-nums">
+                    {days} day{days === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <DatePicker
                   value={fromDate}
-                  onChange={(e) => {
-                    setFromDate(e.target.value);
-                    // Half-day must stay on a single date; keep To pinned to From.
-                    if (isHalfLeave) setToDate(e.target.value);
-                    else if (!toDate || new Date(e.target.value) > new Date(toDate)) setToDate(e.target.value);
+                  onChange={(v) => {
+                    setFromDate(v);
+                    if (isHalfLeave) setToDate(v);
+                    else if (v && (!toDate || new Date(v) > new Date(toDate))) setToDate(v);
                   }}
-                  className="mt-1 w-full bg-transparent text-[13px] font-semibold text-slate-900 dark:text-white focus:outline-none"
+                  futureYears={2}
                 />
               </div>
-              <div className="px-3 py-1.5 rounded-md bg-[#008CFF]/10 text-[#008CFF] dark:bg-[#4a9cff]/15 dark:text-[#4a9cff] text-[12px] font-semibold tabular-nums text-center whitespace-nowrap">
-                {days} day{days === 1 ? "" : "s"}
-              </div>
-              <div className="text-right">
-                <p className="text-[10.5px] uppercase tracking-widest font-semibold text-slate-500 dark:text-slate-400">To</p>
-                <input
-                  type="date"
-                  value={isHalfLeave ? fromDate : toDate}
-                  min={fromDate}
-                  disabled={isHalfLeave}
-                  onChange={(e) => setToDate(e.target.value)}
-                  className="mt-1 w-full bg-transparent text-[13px] font-semibold text-slate-900 dark:text-white text-right focus:outline-none disabled:text-slate-400 disabled:cursor-not-allowed"
-                />
+              <div>
+                <p className="text-[10.5px] uppercase tracking-widest font-semibold text-slate-500 dark:text-slate-400 mb-1.5">To</p>
+                {isHalfLeave ? (
+                  <p className="text-[12.5px] text-slate-500 italic">
+                    Same as From (half-day request).
+                  </p>
+                ) : (
+                  <DatePicker
+                    value={toDate}
+                    onChange={setToDate}
+                    futureYears={2}
+                  />
+                )}
               </div>
             </div>
           </div>

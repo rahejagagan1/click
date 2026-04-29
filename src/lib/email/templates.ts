@@ -275,6 +275,107 @@ export function attendanceReminderEmail(args: {
   return { subject, html: SHELL(subject, body), text };
 }
 
+export function reportSubmittedEmail(args: {
+  kind: "weekly" | "monthly";
+  periodLabel: string;
+  managerName: string;
+  link: string;
+}): EmailContent {
+  const subject = `${args.managerName} submitted ${args.kind} report — ${args.periodLabel}`;
+  const html = SHELL(subject, `
+    <p style="margin:0 0 8px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">
+      ${args.kind === "weekly" ? "Weekly" : "Monthly"} Report
+    </p>
+    <p style="margin:0;font-size:14px;color:#1f2937;line-height:1.6">
+      <strong>${escape(args.managerName)}</strong> just locked their ${args.kind} report for <strong>${escape(args.periodLabel)}</strong>.
+    </p>
+    <p style="margin:12px 0 0;font-size:13px;color:#475569;line-height:1.55">
+      Open it from the dashboard to review the writer / editor / researcher metrics, key learnings, and risks.
+    </p>
+    ${ctaButton("Open report", args.link)}
+  `);
+  const text = [
+    subject,
+    "",
+    `${args.managerName} just locked their ${args.kind} report for ${args.periodLabel}.`,
+    "",
+    `Open: ${args.link}`,
+  ].join("\n");
+  return { subject, html, text };
+}
+
+export function feedbackEmail(args: {
+  category: string;
+  message: string;
+}): EmailContent {
+  const prettyCategory = args.category
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+  const subject = `New anonymous feedback — ${prettyCategory}`;
+  const link = `${appUrl()}/dashboard/feedback_inbox`;
+  const html = SHELL(subject, `
+    <p style="margin:0 0 8px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">
+      ${escape(prettyCategory)} · Anonymous
+    </p>
+    <div style="font-size:14px;color:#1f2937;line-height:1.65;white-space:pre-wrap">${escape(args.message)}</div>
+    <p style="margin:16px 0 0;font-size:11.5px;color:#64748b">
+      The submitter is anonymous — feedback is not attributed to a user account.
+    </p>
+    ${ctaButton("Open inbox", link)}
+  `);
+  const text = [
+    `${subject}`,
+    "",
+    args.message,
+    "",
+    `(Anonymous — submitter not disclosed.)`,
+    "",
+    `Open: ${link}`,
+  ].join("\n");
+  return { subject, html, text };
+}
+
+export function welcomeLoginEmail(args: {
+  name: string;
+  email: string;
+  needsOnboarding: boolean;
+}): EmailContent {
+  const subject = `Welcome to NB Media — your dashboard is ready`;
+  const link = `${appUrl()}/login`;
+  const onboardingNote = args.needsOnboarding
+    ? `<p style="margin:0 0 12px;font-size:13.5px;color:#1f2937;line-height:1.6">
+         When you sign in for the first time we'll walk you through a short
+         onboarding step — confirming your contact details so HR has everything on file.
+       </p>`
+    : "";
+  const html = SHELL("Welcome to NB Media", `
+    <p style="margin:0 0 12px;font-size:14.5px;color:#1f2937">Hi ${escape(args.name)},</p>
+    <p style="margin:0 0 12px;font-size:13.5px;color:#1f2937;line-height:1.6">
+      Your account on the NB Media dashboard has been set up. You can sign in
+      using your Google account at <strong>${escape(args.email)}</strong> — no
+      password needed.
+    </p>
+    ${onboardingNote}
+    ${ctaButton("Sign in to the dashboard", link)}
+    <p style="margin:18px 0 0;font-size:11.5px;color:#64748b">
+      If your Google account uses a different address, ask HR to update your
+      record before signing in.
+    </p>
+  `);
+  const text = [
+    `Hi ${args.name},`,
+    "",
+    `Your NB Media dashboard account is ready. Sign in with your Google account at ${args.email}.`,
+    args.needsOnboarding
+      ? "On first sign-in we'll walk you through a short onboarding step."
+      : "",
+    "",
+    `Sign in: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html, text };
+}
+
 export function announcementEmail(args: {
   title: string;
   body: string;
