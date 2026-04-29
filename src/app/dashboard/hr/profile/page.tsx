@@ -6,12 +6,101 @@ import { useSession } from "next-auth/react";
 import { Loader2, Pencil, X, ChevronDown } from "lucide-react";
 
 const F = "w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]";
+
+// Three-dropdown DOB picker — Day / Month / Year. Holds its own state
+// for partial selections so each dropdown remembers your pick before
+// all three are filled. Emits YYYY-MM-DD only once all three are set
+// (drop-in compatible with <input type="date">). Day count adjusts to
+// the chosen month/year (handles leap Februarys); years run today →
+// 1900 so the most likely values land at the top of the list.
+function DateOfBirthPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const today = new Date();
+  const thisYear = today.getFullYear();
+
+  // Parse incoming "YYYY-MM-DD" once for the initial state. After that
+  // the component owns its own day/month/year so partial selections
+  // don't get reset by parent re-renders.
+  const parseValue = (v: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || "");
+    return m ? { y: m[1], m: m[2], d: m[3] } : { y: "", m: "", d: "" };
+  };
+  const initial = parseValue(value);
+  const [yy, setYy] = useState(initial.y);
+  const [mm, setMm] = useState(initial.m);
+  const [dd, setDd] = useState(initial.d);
+
+  // Re-sync from `value` whenever the parent changes it externally
+  // (e.g. modal opened with a fresh value). We only adopt the parent's
+  // value when it differs from what we currently have rebuilt — that
+  // prevents our own emits from clobbering partial state.
+  useEffect(() => {
+    const here = yy && mm && dd ? `${yy}-${mm}-${dd}` : "";
+    if (value === here) return;
+    const next = parseValue(value);
+    setYy(next.y);
+    setMm(next.m);
+    setDd(next.d);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  // Whenever yy/mm/dd change, emit either a complete date or "".
+  useEffect(() => {
+    if (yy && mm && dd) {
+      // Clamp the day if it falls outside the chosen month/year (e.g.
+      // user picked Feb 31 then switched year to a non-leap year).
+      const last = new Date(parseInt(yy, 10), parseInt(mm, 10), 0).getDate();
+      const safe = parseInt(dd, 10) > last ? String(last).padStart(2, "0") : dd;
+      const next = `${yy}-${mm}-${safe}`;
+      if (safe !== dd) setDd(safe); // self-correct without emitting twice
+      if (next !== value) onChange(next);
+    } else if (value) {
+      onChange("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yy, mm, dd]);
+
+  const months = [
+    { v: "01", n: "January"   }, { v: "02", n: "February" }, { v: "03", n: "March"     },
+    { v: "04", n: "April"     }, { v: "05", n: "May"      }, { v: "06", n: "June"      },
+    { v: "07", n: "July"      }, { v: "08", n: "August"   }, { v: "09", n: "September" },
+    { v: "10", n: "October"   }, { v: "11", n: "November" }, { v: "12", n: "December"  },
+  ];
+  const years = Array.from({ length: thisYear - 1900 + 1 }, (_, i) => String(thisYear - i));
+
+  // Days depend on chosen month/year. Defaults to 31 if month not set.
+  const daysInMonth = (() => {
+    if (!mm) return 31;
+    const monthNum = parseInt(mm, 10);
+    const yearNum  = parseInt(yy || String(thisYear), 10);
+    return new Date(yearNum, monthNum, 0).getDate();
+  })();
+  const days = Array.from({ length: daysInMonth }, (_, i) => String(i + 1).padStart(2, "0"));
+
+  const selectCls = "h-9 px-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF] cursor-pointer";
+
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      <select value={dd} onChange={(e) => setDd(e.target.value)} className={selectCls} aria-label="Day">
+        <option value="">Day</option>
+        {days.map((d) => <option key={d} value={d}>{d}</option>)}
+      </select>
+      <select value={mm} onChange={(e) => setMm(e.target.value)} className={selectCls} aria-label="Month">
+        <option value="">Month</option>
+        {months.map((m) => <option key={m.v} value={m.v}>{m.n}</option>)}
+      </select>
+      <select value={yy} onChange={(e) => setYy(e.target.value)} className={selectCls} aria-label="Year">
+        <option value="">Year</option>
+        {years.map((y) => <option key={y} value={y}>{y}</option>)}
+      </select>
+    </div>
+  );
+}
 const PROFILE_TABS = ["ABOUT", "PROFILE", "JOB", "DOCUMENTS", "ASSETS"] as const;
 type ProfileTab = typeof PROFILE_TABS[number];
 
 function EditModal({ title, fields, values, onSave, onClose }: {
   title: string;
-  fields: { key: string; label: string; type?: string; options?: string[] }[];
+  fields: { key: string; label: string; type?: string; options?: string[]; min?: string; max?: string; fullWidth?: boolean; readOnly?: boolean }[];
   values: Record<string, string>;
   onSave: (v: Record<string, string>) => Promise<void>;
   onClose: () => void;
@@ -28,22 +117,47 @@ function EditModal({ title, fields, values, onSave, onClose }: {
         </div>
         <div className="px-6 py-5 grid grid-cols-2 gap-4">
           {fields.map(f => (
-            <div key={f.key}>
+            <div key={f.key} className={f.fullWidth || f.type === "dob" ? "col-span-2" : ""}>
               <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">{f.label}</label>
-              {f.options ? (
+              {f.type === "dob" ? (
+                <DateOfBirthPicker value={form[f.key] ?? ""} onChange={(v) => set(f.key, v)} />
+              ) : f.options ? (
                 <select value={form[f.key] ?? ""} onChange={e => set(f.key, e.target.value)} className={F}>
                   <option value="">Select…</option>
                   {f.options.map(o => <option key={o} value={o}>{o}</option>)}
                 </select>
               ) : (
-                <input type={f.type ?? "text"} value={form[f.key] ?? ""} onChange={e => set(f.key, e.target.value)} className={F} />
+                <input
+                  type={f.type ?? "text"}
+                  value={form[f.key] ?? ""}
+                  onChange={e => set(f.key, e.target.value)}
+                  min={f.min}
+                  max={f.max}
+                  readOnly={f.readOnly}
+                  onClick={(e) => { if (f.type === "date" && !f.readOnly) (e.currentTarget as HTMLInputElement).showPicker?.(); }}
+                  onFocus={(e) => { if (f.type === "date" && !f.readOnly) (e.currentTarget as HTMLInputElement).showPicker?.(); }}
+                  className={`${F} ${f.readOnly ? "bg-slate-50 dark:bg-white/[0.02] text-slate-500 cursor-not-allowed" : ""}`}
+                />
               )}
             </div>
           ))}
         </div>
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-white/[0.06]">
           <button onClick={onClose} className="h-9 px-4 text-[13px] text-slate-500 hover:text-slate-800 dark:text-white">Cancel</button>
-          <button onClick={async () => { setSaving(true); await onSave(form); setSaving(false); onClose(); }}
+          <button onClick={async () => {
+              setSaving(true);
+              // Strip read-only / underscore-prefixed display-only fields
+              // (e.g. `_workEmail`) so they aren't sent to the API.
+              const ro = new Set(fields.filter((f) => f.readOnly).map((f) => f.key));
+              const cleaned: Record<string, string> = {};
+              for (const k of Object.keys(form)) {
+                if (k.startsWith("_") || ro.has(k)) continue;
+                cleaned[k] = form[k];
+              }
+              await onSave(cleaned);
+              setSaving(false);
+              onClose();
+            }}
             disabled={saving} className="h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50">
             {saving ? "Saving…" : "Update"}
           </button>
@@ -57,6 +171,23 @@ export default function ProfilePage() {
   const { data: session } = useSession();
   const { data: profile, isLoading } = useSWR("/api/hr/profile", fetcher);
   const [tab, setTab] = useState<ProfileTab>("ABOUT");
+
+  // Persist whether the user has ever opened the PROFILE tab so the red
+  // "incomplete profile" dot can be cleared once acknowledged. Lives in
+  // localStorage (per-browser; not synced across devices) — that's the
+  // right scope for a "you've seen this" indicator.
+  const PROFILE_SEEN_KEY = "nbm:profile-tab-seen";
+  const [profileSeen, setProfileSeen] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.localStorage.getItem(PROFILE_SEEN_KEY) === "1") setProfileSeen(true);
+  }, []);
+  // Mark as seen the moment the user actually opens the PROFILE tab.
+  useEffect(() => {
+    if (tab !== "PROFILE" || profileSeen) return;
+    setProfileSeen(true);
+    try { window.localStorage.setItem(PROFILE_SEEN_KEY, "1"); } catch {}
+  }, [tab, profileSeen]);
   const [editModal, setEditModal] = useState<null | "primary" | "contact" | "address" | "emergency" | "photo">(null);
   const [bioAbout, setBioAbout] = useState("");
   const [bioLove, setBioLove]   = useState("");
@@ -71,18 +202,36 @@ export default function ProfilePage() {
     address: "", city: "", state: "",
     profilePictureUrl: "",
     personalEmail: "", workPhone: "",
+    // Onboarding-set fields — read-only on the profile but surfaced
+    // here so the UI can show them right away without a separate fetch.
+    employeeId: "", firstName: "", middleName: "", lastName: "",
+    designation: "", department: "", workLocation: "", employmentType: "",
+    joiningDate: "", workCountry: "", nationality: "",
   });
 
   useEffect(() => {
     if (profile) {
       const p = profile.employeeProfile ?? {};
+      // Dates come back as ISO strings or Date — coerce to YYYY-MM-DD.
+      const dateISO = (v: any): string => {
+        if (!v) return "";
+        const s = typeof v === "string" ? v : new Date(v).toISOString();
+        return s.slice(0, 10);
+      };
       setForm({
-        phone: p.phone ?? "", dateOfBirth: p.dateOfBirth?.slice(0, 10) ?? "",
+        phone: p.phone ?? "", workPhone: p.workPhone ?? "", personalEmail: p.personalEmail ?? "",
+        dateOfBirth: dateISO(p.dateOfBirth),
         gender: p.gender ?? "", bloodGroup: p.bloodGroup ?? "", maritalStatus: p.maritalStatus ?? "",
         emergencyContact: p.emergencyContact ?? "", emergencyPhone: p.emergencyPhone ?? "",
         address: p.address ?? "", city: p.city ?? "", state: p.state ?? "",
         profilePictureUrl: profile.profilePictureUrl ?? "",
-        personalEmail: p.personalEmail ?? "", workPhone: p.workPhone ?? "",
+        // Onboarding-set fields straight from the EmployeeProfile row.
+        employeeId: p.employeeId ?? "",
+        firstName: p.firstName ?? "", middleName: p.middleName ?? "", lastName: p.lastName ?? "",
+        designation: p.designation ?? "", department: p.department ?? "",
+        workLocation: p.workLocation ?? "", employmentType: p.employmentType ?? "",
+        joiningDate: dateISO(p.joiningDate),
+        workCountry: p.workCountry ?? "", nationality: p.nationality ?? "",
       });
     }
   }, [profile]);
@@ -90,11 +239,35 @@ export default function ProfilePage() {
   const save = async (patch: Record<string, string>) => {
     const merged = { ...form, ...patch };
     setForm(merged);
-    await fetch("/api/hr/profile", {
+    // Combine firstName + lastName into displayName for the backend.
+    // User.name (the org-wide display name) is the only thing the API
+    // stores — first/last are just the editing surface.
+    const payload: Record<string, unknown> = { ...merged };
+    if (patch.firstName !== undefined || patch.lastName !== undefined) {
+      const first = (patch.firstName ?? "").trim();
+      const last  = (patch.lastName ?? "").trim();
+      const combined = [first, last].filter(Boolean).join(" ");
+      if (combined) payload.displayName = combined;
+    }
+    const res = await fetch("/api/hr/profile", {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(merged),
+      body: JSON.stringify(payload),
     });
-    mutate("/api/hr/profile");
+    if (!res.ok) {
+      // Read the body twice — first as text (always works), then try JSON.
+      // Empty objects in the dev console mean the body wasn't JSON.
+      const text = await res.text().catch(() => "");
+      let err: any = {};
+      try { err = JSON.parse(text); } catch { /* leave err empty */ }
+      // eslint-disable-next-line no-console
+      console.error("[profile] save failed", res.status, res.statusText, "body:", text);
+      alert(`Couldn't save profile (HTTP ${res.status}): ${err.error || text.slice(0, 200) || res.statusText}`);
+      return;
+    }
+    // Force-refetch the profile so the FIRST/LAST NAME view picks up the
+    // new User.name immediately. Pass `undefined` data + revalidate so SWR
+    // hits the network instead of just clearing the cache.
+    await mutate("/api/hr/profile", undefined, { revalidate: true });
   };
 
   const completeness = (() => {
@@ -161,7 +334,7 @@ export default function ProfilePage() {
                   tab === t ? "border-[#008CFF] text-[#008CFF]" : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white"
                 }`}>
                 {t}
-                {t === "PROFILE" && completeness < 100 && (
+                {t === "PROFILE" && completeness < 100 && !profileSeen && (
                   <span className="w-2 h-2 rounded-full bg-red-500" />
                 )}
               </button>
@@ -286,10 +459,8 @@ export default function ProfilePage() {
               </div>
               <div className="px-5 py-4 grid grid-cols-3 gap-x-8 gap-y-4">
                 {[
-                  { label: "FIRST NAME",     value: profile?.name?.split(" ")[0] },
-                  { label: "MIDDLE NAME",    value: "—" },
+                  { label: "FIRST NAME",     value: profile?.name?.split(" ")[0] || "—" },
                   { label: "LAST NAME",      value: profile?.name?.split(" ").slice(1).join(" ") || "—" },
-                  { label: "DISPLAY NAME",   value: profile?.name },
                   { label: "GENDER",         value: form.gender || "—" },
                   { label: "DOB",            value: form.dateOfBirth || "—" },
                   { label: "MARITAL STATUS", value: form.maritalStatus || "—" },
@@ -315,8 +486,6 @@ export default function ProfilePage() {
                   { label: "PERSONAL EMAIL",  value: form.personalEmail || "—" },
                   { label: "MOBILE PHONE",    value: form.phone || "—" },
                   { label: "WORK PHONE",      value: form.workPhone || "—" },
-                  { label: "EMERGENCY CONTACT", value: form.emergencyContact || "—" },
-                  { label: "EMERGENCY PHONE",   value: form.emergencyPhone || "—" },
                 ].map(f => (
                   <div key={f.label}>
                     <p className="text-[10px] text-slate-400 uppercase tracking-wider">{f.label}</p>
@@ -464,28 +633,49 @@ export default function ProfilePage() {
       </div>
 
       {/* ── Edit Modals ── */}
-      {editModal === "primary" && (
+      {editModal === "primary" && (() => {
+        // Split the user's display name (User.name) into first + last for
+        // editing. The save handler recombines them into User.name.
+        const fullName = (user?.name ?? "").trim();
+        const firstSpace = fullName.indexOf(" ");
+        const initialFirst = firstSpace === -1 ? fullName : fullName.slice(0, firstSpace);
+        const initialLast  = firstSpace === -1 ? ""       : fullName.slice(firstSpace + 1);
+        return (
         <EditModal title="Primary Details" onClose={() => setEditModal(null)}
           fields={[
+            { key: "firstName", label: "First Name" },
+            { key: "lastName",  label: "Last Name"  },
             { key: "gender", label: "Gender", options: ["Male","Female","Other","Prefer not to say"] },
-            { key: "dateOfBirth", label: "Date of Birth", type: "date" },
+            { key: "dateOfBirth", label: "Date of Birth", type: "dob" },
             { key: "bloodGroup", label: "Blood Group", options: ["A+","A-","B+","B-","O+","O-","AB+","AB-"] },
             { key: "maritalStatus", label: "Marital Status", options: ["Single","Married","Divorced","Widowed"] },
           ]}
-          values={{ gender: form.gender, dateOfBirth: form.dateOfBirth, bloodGroup: form.bloodGroup, maritalStatus: form.maritalStatus }}
+          values={{
+            firstName: initialFirst,
+            lastName:  initialLast,
+            gender: form.gender,
+            dateOfBirth: form.dateOfBirth,
+            bloodGroup: form.bloodGroup,
+            maritalStatus: form.maritalStatus,
+          }}
           onSave={save}
         />
-      )}
+        );
+      })()}
       {editModal === "contact" && (
         <EditModal title="Contact Details" onClose={() => setEditModal(null)}
           fields={[
-            { key: "phone",         label: "Mobile Phone" },
-            { key: "workPhone",     label: "Work Phone" },
-            { key: "personalEmail", label: "Personal Email" },
-            { key: "emergencyContact", label: "Emergency Contact" },
-            { key: "emergencyPhone",   label: "Emergency Phone" },
+            { key: "_workEmail",    label: "Work Email", readOnly: true, fullWidth: true },
+            { key: "phone",         label: "Mobile Phone", type: "tel" },
+            { key: "workPhone",     label: "Work Phone",   type: "tel" },
+            { key: "personalEmail", label: "Personal Email", type: "email", fullWidth: true },
           ]}
-          values={{ phone: form.phone, workPhone: form.workPhone, personalEmail: form.personalEmail, emergencyContact: form.emergencyContact, emergencyPhone: form.emergencyPhone }}
+          values={{
+            _workEmail:    profile?.email ?? "",
+            phone:         form.phone,
+            workPhone:     form.workPhone,
+            personalEmail: form.personalEmail,
+          }}
           onSave={save}
         />
       )}

@@ -1867,10 +1867,17 @@ export default function HRHomePage() {
     ...remoteClockedIn,
     ...((boardData?.board || []) as any[]).filter((u: any) => u.wfhToday === true && !remoteIds.has(u.id)),
   ];
-  // Every active leave type the user has a balance row for. The
-  // self-healing /api/hr/leaves/balance endpoint guarantees one row
-  // per active type, so this always reflects the full catalogue.
-  const balances = (balanceData as any[]).filter(b => b.leaveType);
+  // Show only leave types the user actually has a quota or in-flight
+  // activity for — drop fully-zero rows (no quota AND nothing used or
+  // pending) so the card doesn't render six "0 days" tiles for every
+  // catalogue entry the user was auto-seeded with.
+  const balances = (balanceData as any[]).filter((b) => {
+    if (!b.leaveType) return false;
+    const total = parseFloat(b.totalDays   ?? "0");
+    const used  = parseFloat(b.usedDays    ?? "0");
+    const pend  = parseFloat(b.pendingDays ?? "0");
+    return total > 0 || used > 0 || pend > 0;
+  });
   // `upcoming` already includes today (filter is `>= today`), so indexing
   // into it covers both "today's holiday" and the future ones the arrows
   // page through.
@@ -2314,10 +2321,11 @@ export default function HRHomePage() {
               </div>
               {balances.length > 0 ? (
                 <>
-                  {/* Doughnut grid — cohesive cool-tone palette
-                      (blue/teal/indigo family) so the rings feel
-                      professional rather than rainbow. */}
-                  <div className="grid grid-cols-2 gap-3">
+                  {/* Naked-ring grid — no per-ring tile / border so the
+                      doughnuts read as the data itself instead of a
+                      framed widget. Cool-tone palette (blue → violet)
+                      keeps the row cohesive. */}
+                  <div className="grid grid-cols-2 gap-y-4 gap-x-3">
                     {balances.map((b: any, i: number) => {
                       const total = parseFloat(b.totalDays ?? "0");
                       const used  = parseFloat(b.usedDays ?? "0");
@@ -2333,7 +2341,7 @@ export default function HRHomePage() {
                       ];
                       const color = PROFESSIONAL_COLORS[i % PROFESSIONAL_COLORS.length];
                       return (
-                        <div key={b.id} className="flex flex-col items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-2.5 transition-colors hover:border-[#008CFF]/30 dark:border-white/[0.06] dark:bg-white/[0.02]">
+                        <div key={b.id} className="flex flex-col items-center gap-1.5">
                           <BalanceRing avail={avail} total={total > 0 ? total : 1} color={color} />
                           <p className={`max-w-full truncate text-center text-[10px] font-bold uppercase tracking-[0.08em] ${C.t3}`}>
                             {b.leaveType?.name}
