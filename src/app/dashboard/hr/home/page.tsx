@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
@@ -10,6 +11,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Home as HomeIcon,
+  Briefcase,
+  Coffee,
   Send,
   BarChart2,
   Award,
@@ -1230,6 +1233,89 @@ function FeedPostCard({ post }: { post: any }) {
   );
 }
 
+// "Other ▾" dropdown next to the Clock-in button on the Quick Access tile.
+// Surfaces the most common non-clock-in actions: Work From Home, On Duty,
+// and Apply Leave. Each option deep-links to the attendance page with
+// `?apply=<kind>` so the matching apply form opens automatically.
+//
+// The menu portals to document.body and uses fixed positioning so the
+// parent card's `overflow-hidden` doesn't clip it (the Quick Access tile
+// has rounded corners + clipping that would otherwise crop the popover).
+function OtherActionsMenu() {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos]   = useState<{ top: number; right: number } | null>(null);
+  const btnRef   = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (panelRef.current?.contains(t)) return;
+      if (btnRef.current?.contains(t))   return;
+      setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("click", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("click", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  const toggle = () => {
+    if (!open) {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (r) {
+        const vw = typeof window !== "undefined" ? window.innerWidth : 0;
+        setPos({ top: r.bottom + 6, right: Math.max(8, vw - r.right) });
+      }
+    }
+    setOpen((v) => !v);
+  };
+
+  const items = [
+    { label: "Work From Home", Icon: HomeIcon,  href: "/dashboard/hr/attendance?apply=wfh"     },
+    { label: "On Duty",        Icon: Briefcase, href: "/dashboard/hr/attendance?apply=on_duty" },
+    { label: "Apply Leave",    Icon: Coffee,    href: "/dashboard/hr/attendance?apply=leave"   },
+  ];
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={(e) => { e.stopPropagation(); toggle(); }}
+        className="flex h-[24px] items-center gap-1 rounded-[3px] bg-white px-2.5 text-[11px] font-medium text-[#4d5864] transition hover:bg-[#f4f6f8]"
+        aria-expanded={open}
+      >
+        Other <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && pos && typeof document !== "undefined" && createPortal(
+        <div
+          ref={panelRef}
+          className="fixed z-[9999] w-[200px] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)] dark:border-white/[0.08] dark:bg-[#0a1526]"
+          style={{ top: pos.top, right: pos.right }}
+        >
+          {items.map(({ label, Icon, href }) => (
+            <Link
+              key={label}
+              href={href}
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2.5 px-3.5 py-2.5 text-[12.5px] font-medium text-slate-700 transition-colors hover:bg-[#008CFF]/[0.08] hover:text-[#008CFF] dark:text-slate-200 dark:hover:bg-[#008CFF]/[0.12] dark:hover:text-[#4a9cff]"
+            >
+              <Icon size={15} strokeWidth={2} className="shrink-0 text-[#008CFF] dark:text-[#4a9cff]" />
+              {label}
+            </Link>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 export default function HRHomePage() {
   const { data: session } = useSession();
@@ -1845,9 +1931,7 @@ export default function HRHomePage() {
                       Done
                     </span>
                   )}
-                  <button className="flex h-[24px] items-center gap-1 rounded-[3px] bg-white px-2.5 text-[11px] font-medium text-[#4d5864] transition hover:bg-[#f4f6f8]">
-                    Other <ChevronDown className="h-3 w-3" />
-                  </button>
+                  <OtherActionsMenu />
                 </div>
               </div>
             </div>
