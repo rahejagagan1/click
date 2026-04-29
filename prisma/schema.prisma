@@ -978,6 +978,10 @@ model LeaveBalance {
   totalDays       Decimal   @default(0)  @db.Decimal(5, 1)
   usedDays        Decimal   @default(0)  @db.Decimal(5, 1)
   pendingDays     Decimal   @default(0)  @db.Decimal(5, 1)
+  /// Last YYYY-MM in which monthly accrual ran for this row. Used to
+  /// keep Sick Leave's "+1 day per month" idempotent — re-runs in the
+  /// same month are no-ops.
+  lastAccrualMonth String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
