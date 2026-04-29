@@ -1,0 +1,5 @@
+# Uploaded candidate resumes — git-ignored to keep PII out of the repo.
+# The .gitkeep file above ensures the directory itself is tracked.
+*
+!.gitignore
+!.gitkeep

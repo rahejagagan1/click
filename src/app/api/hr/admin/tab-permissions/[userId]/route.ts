@@ -61,9 +61,15 @@ export async function GET(
       .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
     const targetIsDeveloper = devEmails.includes(target.email.toLowerCase());
 
+    // Whether the *viewer* is a developer — they can override the
+    // protected lock and edit anyone's permissions, including CEO and
+    // other developers. The UI uses this to keep toggles enabled.
+    const actorIsDeveloper = (session!.user as any)?.isDeveloper === true;
+
     return NextResponse.json({
       user: { ...target, isDeveloper: targetIsDeveloper },
       protected: hasProtectedRole({ ...target, isDeveloper: targetIsDeveloper }),
+      actorIsDeveloper,
       permissions,
       wasNew: seeded,
     });
@@ -109,7 +115,18 @@ export async function PUT(
     const devEmails = (process.env.DEVELOPER_EMAILS || "")
       .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
     const targetIsDeveloper = devEmails.includes(target.email.toLowerCase());
-    if (hasProtectedRole({ ...target, isDeveloper: targetIsDeveloper })) {
+
+    // Developers (the actor, not the target) are the ultimate override —
+    // they can flip toggles on anyone, including CEO / special_access /
+    // other developers. The "protected" lock exists to stop HR-admins
+    // from accidentally locking the CEO out, but a developer doing it
+    // deliberately is a debugging / power-user action we permit.
+    const actorIsDeveloper = (session!.user as any)?.isDeveloper === true;
+
+    if (
+      !actorIsDeveloper &&
+      hasProtectedRole({ ...target, isDeveloper: targetIsDeveloper })
+    ) {
       // Silent success — protected users always have everything.
       const permissions = await tabPermissionsForUser(targetId);
       return NextResponse.json({ permissions, protected: true });
@@ -119,7 +136,13 @@ export async function PUT(
     // client not yet knowing about the UserTabPermission model.
     await savePermissions(targetId, incoming, actorId ?? null);
     const permissions = await tabPermissionsForUser(targetId);
-    return NextResponse.json({ permissions, protected: false });
+    return NextResponse.json({
+      permissions,
+      // Surface "protected" honestly (so the UI shows the lock note for
+      // non-devs) but still report `false` to the developer who just
+      // saved it — they unlocked it for this write.
+      protected: !actorIsDeveloper && hasProtectedRole({ ...target, isDeveloper: targetIsDeveloper }),
+    });
   } catch (e) {
     return serverError(e, "PUT /api/hr/admin/tab-permissions/[userId]");
   }

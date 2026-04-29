@@ -336,6 +336,106 @@ export function feedbackEmail(args: {
   return { subject, html, text };
 }
 
+// ── Offboarding ─────────────────────────────────────────────────────────
+// Two flavours from the same data:
+//   employeeFarewellEmail: warm goodbye sent to the leaver themselves.
+//   exitNotificationEmail: heads-up sent to CEO / HR / manager / admins.
+export function employeeFarewellEmail(args: {
+  name: string;
+  lastWorkingDay: string | Date;
+}): EmailContent {
+  const subject = `Wishing you the best — your last day at NB Media`;
+  const html = SHELL("Wishing you the best", `
+    <p style="margin:0 0 12px;font-size:14.5px;color:#1f2937">Hi ${escape(args.name)},</p>
+    <p style="margin:0 0 12px;font-size:13.5px;color:#1f2937;line-height:1.6">
+      Thanks for everything you've contributed at NB Media. Your last working
+      day on record is <strong>${fmtDate(args.lastWorkingDay)}</strong>.
+    </p>
+    <p style="margin:0 0 12px;font-size:13.5px;color:#1f2937;line-height:1.6">
+      HR will be in touch shortly to coordinate handover, asset return, and
+      final settlement. If anything's unclear, just reply to this email.
+    </p>
+    <p style="margin:18px 0 0;font-size:13.5px;color:#1f2937">— The NB Media team</p>
+  `);
+  const text = [
+    `Hi ${args.name},`,
+    "",
+    `Thanks for everything you've contributed at NB Media. Your last working day on record is ${fmtDate(args.lastWorkingDay)}.`,
+    "",
+    `HR will be in touch shortly to coordinate handover, asset return, and final settlement.`,
+    "",
+    `— The NB Media team`,
+  ].join("\n");
+  return { subject, html, text };
+}
+
+export function exitNotificationEmail(args: {
+  name: string;
+  email: string;
+  exitType: string;
+  lastWorkingDay: string | Date;
+  reason?: string | null;
+}): EmailContent {
+  const subject = `Exit recorded — ${args.name}`;
+  const link = `${appUrl()}/dashboard/hr/offboard`;
+  const html = SHELL(subject, `
+    <p style="margin:0 0 12px;font-size:14.5px;color:#1f2937">
+      An employee exit has been recorded.
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%">
+      ${detailRow("Name",            escape(args.name))}
+      ${detailRow("Email",           escape(args.email))}
+      ${detailRow("Type",            escape(args.exitType.replace(/_/g, " ")))}
+      ${detailRow("Last Working Day", fmtDate(args.lastWorkingDay))}
+      ${args.reason ? detailRow("Reason", escape(args.reason)) : ""}
+    </table>
+    ${ctaButton("Open Offboarding", link)}
+  `);
+  const text = [
+    `Exit recorded for ${args.name} (${args.email})`,
+    "",
+    `Type: ${args.exitType.replace(/_/g, " ")}`,
+    `Last working day: ${fmtDate(args.lastWorkingDay)}`,
+    args.reason ? `Reason: ${args.reason}` : "",
+    "",
+    `Open: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html, text };
+}
+
+export function jobApplicationEmail(args: {
+  name: string;
+  email: string;
+  phone: string;
+  role: string;
+  link: string;
+}): EmailContent {
+  const subject = `New application — ${args.role}`;
+  const fullLink = args.link.startsWith("http") ? args.link : `${appUrl()}${args.link}`;
+  const html = SHELL(subject, `
+    <p style="margin:0 0 12px;font-size:14.5px;color:#1f2937">
+      A new candidate just applied through the careers form.
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%">
+      ${detailRow("Role",  escape(args.role))}
+      ${detailRow("Name",  escape(args.name))}
+      ${detailRow("Email", escape(args.email))}
+      ${args.phone ? detailRow("Phone", escape(args.phone)) : ""}
+    </table>
+    ${ctaButton("Open Hiring inbox", fullLink)}
+  `);
+  const text = [
+    `New application for ${args.role}`,
+    "",
+    `Name:  ${args.name}`,
+    `Email: ${args.email}`,
+    args.phone ? `Phone: ${args.phone}` : "",
+    "",
+    `Open: ${fullLink}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html, text };
+}
+
 export function welcomeLoginEmail(args: {
   name: string;
   email: string;
