@@ -296,13 +296,24 @@ export default function LeaveRequestForm({
   const [dayKind, setDayKind] = useState<"full" | "first_half" | "second_half">("full");
   const isHalfLeave = kind === "leave" && dayKind !== "full";
 
+  // Working-day preview: walk from→to and count weekdays only. Mirrors the
+  // server-side `countWorkingDays()` (which also subtracts holidays); the
+  // server is still the source of truth for the actual leave deduction,
+  // this is just an immediate preview for the user.
   const days = useMemo(() => {
     if (!fromDate || !toDate) return 0;
-    // Half-day leave is always a single date and counts as 0.5.
     if (isHalfLeave) return 0.5;
-    const a = new Date(fromDate), b = new Date(toDate);
+    const a = new Date(`${fromDate}T00:00:00Z`);
+    const b = new Date(`${toDate}T00:00:00Z`);
     if (isNaN(a.getTime()) || isNaN(b.getTime()) || a > b) return 0;
-    return Math.round((b.getTime() - a.getTime()) / 86_400_000) + 1;
+    let count = 0;
+    const cur = new Date(a.getTime());
+    while (cur.getTime() <= b.getTime()) {
+      const dow = cur.getUTCDay(); // 0 = Sun, 6 = Sat
+      if (dow !== 0 && dow !== 6) count++;
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    return count;
   }, [fromDate, toDate, isHalfLeave]);
 
   const submit = async () => {
