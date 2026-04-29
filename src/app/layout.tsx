@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/components/layout/auth-provider";
+import { RealtimeProvider } from "@/components/providers/realtime-provider";
 import LayoutShell from "@/components/layout/layout-shell";
 import NextTopLoader from "nextjs-toploader";
 
@@ -23,6 +24,7 @@ export default function RootLayout({
       <head>
         {/* Force light mode — strip any legacy `dark` class before the app hydrates. */}
         <script
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html: `try{document.documentElement.classList.remove('dark');localStorage.removeItem('theme');}catch(e){}`,
           }}
@@ -31,7 +33,9 @@ export default function RootLayout({
       <body className="font-sans antialiased min-h-screen" suppressHydrationWarning>
         <NextTopLoader color="#8b5cf6" height={3} showSpinner={false} />
         <AuthProvider>
-          <LayoutShell>{children}</LayoutShell>
+          <RealtimeProvider>
+            <LayoutShell>{children}</LayoutShell>
+          </RealtimeProvider>
         </AuthProvider>
       </body>
     </html>
