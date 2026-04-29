@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, MoreVertical, Coffee } from "lucide-react";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
@@ -513,6 +514,28 @@ export default function AttendancePage() {
   // New unified form (WFH / On-Duty / Half Day / Leave / Regularize-via-form).
   const [formState, setFormState] = useState<{ kind: LeaveRequestKind; prefillDate?: string } | null>(null);
   const openForm = (kind: LeaveRequestKind, prefillDate?: string) => setFormState({ kind, prefillDate });
+
+  // Deep-link support: `?apply=wfh|on_duty|leave|half_day|regularize` opens
+  // the matching apply form on first paint. Used by the Home page's
+  // "Other" menu so users land directly on the form they want.
+  //
+  // We strip the query string with `window.history.replaceState` rather
+  // than `router.replace` — the latter dispatches a Next.js router action
+  // and in Next 16 that fires "Router action dispatched before initialization"
+  // when called from a layout-level effect. The native History API is
+  // a no-op for routing and just rewrites the URL bar.
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const v = searchParams?.get("apply");
+    const valid: LeaveRequestKind[] = ["wfh", "on_duty", "leave", "half_day", "regularize"];
+    if (v && (valid as string[]).includes(v)) {
+      openForm(v as LeaveRequestKind);
+      if (typeof window !== "undefined") {
+        window.history.replaceState(null, "", "/dashboard/hr/attendance");
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [regView, setRegView] = useState<"my" | "team">("my");
 
   // Browser geolocation permission state. Attendance needs location, so we
