@@ -1867,7 +1867,10 @@ export default function HRHomePage() {
     ...remoteClockedIn,
     ...((boardData?.board || []) as any[]).filter((u: any) => u.wfhToday === true && !remoteIds.has(u.id)),
   ];
-  const balances = (balanceData as any[]).filter(b => b.leaveType).slice(0, 3);
+  // Every active leave type the user has a balance row for. The
+  // self-healing /api/hr/leaves/balance endpoint guarantees one row
+  // per active type, so this always reflects the full catalogue.
+  const balances = (balanceData as any[]).filter(b => b.leaveType);
   // `upcoming` already includes today (filter is `>= today`), so indexing
   // into it covers both "today's holiday" and the future ones the arrows
   // page through.
@@ -2303,31 +2306,46 @@ export default function HRHomePage() {
             </div>
 
             <div className={`${C.card} p-3.5`}>
-              <p className={`mb-3 text-[13px] font-semibold ${C.t1}`}>Leave Balances</p>
+              <div className="mb-3 flex items-center justify-between">
+                <p className={`text-[13px] font-semibold ${C.t1}`}>Leave Balances</p>
+                <Link href="/dashboard/hr/leaves" className="text-[11px] font-medium text-[#008CFF] hover:underline">
+                  View all
+                </Link>
+              </div>
               {balances.length > 0 ? (
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex gap-4">
-                    {balances.slice(0, 2).map((b: any, i: number) => {
-                      const avail = Math.max(0, (b.totalDays || 0) - (b.usedDays || 0));
+                <>
+                  {/* Doughnut grid — cohesive cool-tone palette
+                      (blue/teal/indigo family) so the rings feel
+                      professional rather than rainbow. */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {balances.map((b: any, i: number) => {
+                      const total = parseFloat(b.totalDays ?? "0");
+                      const used  = parseFloat(b.usedDays ?? "0");
+                      const pend  = parseFloat(b.pendingDays ?? "0");
+                      const avail = Math.max(0, total - used - pend);
+                      const PROFESSIONAL_COLORS = [
+                        "#008CFF", // brand blue
+                        "#0ea5e9", // sky-500
+                        "#06b6d4", // cyan-500
+                        "#14b8a6", // teal-500
+                        "#6366f1", // indigo-500
+                        "#8b5cf6", // violet-500
+                      ];
+                      const color = PROFESSIONAL_COLORS[i % PROFESSIONAL_COLORS.length];
                       return (
-                        <div key={b.id} className="flex flex-col items-center gap-1">
-                          <BalanceRing avail={avail} total={b.totalDays || 1} color={["#64c8ec", "#90d6f1"][i % 2]} />
-                          <p className={`max-w-[88px] text-center text-[9px] font-medium uppercase leading-tight ${C.t3}`}>
+                        <div key={b.id} className="flex flex-col items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-2.5 transition-colors hover:border-[#008CFF]/30 dark:border-white/[0.06] dark:bg-white/[0.02]">
+                          <BalanceRing avail={avail} total={total > 0 ? total : 1} color={color} />
+                          <p className={`max-w-full truncate text-center text-[10px] font-bold uppercase tracking-[0.08em] ${C.t3}`}>
                             {b.leaveType?.name}
                           </p>
                         </div>
                       );
                     })}
                   </div>
-                  <div className="flex shrink-0 flex-col gap-2">
-                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline">
-                      Request Leave
-                    </Link>
-                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline">
-                      View All Balances
-                    </Link>
-                  </div>
-                </div>
+                  <Link href="/dashboard/hr/leaves" className="mt-3 inline-flex text-[12px] font-medium text-[#008CFF] hover:underline">
+                    Request leave →
+                  </Link>
+                </>
               ) : (
                 <div>
                   <p className={`text-[11.5px] ${C.t3}`}>No leave balances configured</p>

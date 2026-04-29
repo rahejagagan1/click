@@ -202,25 +202,63 @@ export default function LeavesPage() {
             </div>
           </div>
 
-          {/* ── Leave Balances (Keka exact: 4 cards per row with doughnut) ── */}
+          {/* ── Leave Balances ── ring grid with a cohesive cool-tone
+              palette (brand-blue family) so the page reads professional
+              rather than rainbow. */}
           <div>
             <h3 className="text-[15px] font-semibold text-slate-800 dark:text-white mb-3">Leave Balances</h3>
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
               {balances.map((lb: any, i: number) => {
-                const total = parseFloat(lb.totalDays), used = parseFloat(lb.usedDays), pend = parseFloat(lb.pendingDays), avail = total - used - pend;
+                const total = parseFloat(lb.totalDays);
+                const used  = parseFloat(lb.usedDays);
+                const pend  = parseFloat(lb.pendingDays);
+                const avail = Math.max(0, total - used - pend);
+                const fmt   = (n: number) => Number.isInteger(n) ? String(n) : n.toFixed(1);
+                // Calm cool-tone palette — all hues sit in the blue-teal-
+                // indigo range so adjacent cards distinguish without clashing.
+                const PROFESSIONAL_COLORS = [
+                  "#008CFF", // brand blue
+                  "#0ea5e9", // sky-500
+                  "#06b6d4", // cyan-500
+                  "#14b8a6", // teal-500
+                  "#6366f1", // indigo-500
+                  "#8b5cf6", // violet-500
+                ];
+                const color = PROFESSIONAL_COLORS[i % PROFESSIONAL_COLORS.length];
+                const empty = total === 0;
                 return (
-                  <div key={lb.id} className="bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.06] rounded-xl p-5 flex flex-col">
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-[13px] font-semibold text-slate-800 dark:text-white">{lb.leaveType.name}</h4>
-                      <span className="text-[12px] text-[#008CFF] cursor-pointer hover:underline">View details</span>
+                  <div
+                    key={lb.id}
+                    className="flex flex-col rounded-xl border border-[#e3e9f1] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-[#008CFF]/30 dark:border-white/[0.06] dark:bg-[#0a1e3a]"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-500 truncate">{lb.leaveType.name}</h4>
+                      {pend > 0 && (
+                        <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wider text-amber-700 ring-1 ring-inset ring-amber-100">
+                          {fmt(pend)} pending
+                        </span>
+                      )}
                     </div>
-                    <div className="flex justify-center mb-4 flex-1">
-                      {total > 0 ? <DoughnutChart available={avail} total={total} color={balanceColors[i % balanceColors.length]} /> : <p className="text-[12px] text-slate-500 py-8 self-center">No data to display.</p>}
+                    <div className="flex justify-center mb-3 flex-1">
+                      {empty ? (
+                        <p className="text-[12px] text-slate-400 py-8 self-center">Not configured</p>
+                      ) : (
+                        <DoughnutChart available={avail} total={total} color={color} />
+                      )}
                     </div>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 pt-3 border-t border-white/[0.04]">
-                      <div><span className="text-[10px] text-slate-500 block uppercase tracking-wider">Available</span><span className="text-[13px] text-slate-800 dark:text-white font-medium">{avail} day{avail !== 1 ? "s" : ""}</span></div>
-                      <div><span className="text-[10px] text-slate-500 block uppercase tracking-wider">Consumed</span><span className="text-[13px] text-slate-800 dark:text-white font-medium">{used} day{used !== 1 ? "s" : ""}</span></div>
-                      <div className="col-span-2"><span className="text-[10px] text-slate-500 block uppercase tracking-wider">Annual Quota</span><span className="text-[13px] text-slate-800 dark:text-white font-medium">{total} day{total !== 1 ? "s" : ""}</span></div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-3 border-t border-slate-100 dark:border-white/[0.04]">
+                      <div>
+                        <span className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-400">Available</span>
+                        <span className="text-[13px] font-semibold text-slate-800 dark:text-white tabular-nums">{fmt(avail)}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-400">Used</span>
+                        <span className="text-[13px] font-semibold text-slate-800 dark:text-white tabular-nums">{fmt(used)}</span>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-400">Annual quota</span>
+                        <span className="text-[13px] font-semibold text-slate-800 dark:text-white tabular-nums">{fmt(total)}</span>
+                      </div>
                     </div>
                   </div>
                 );
@@ -345,9 +383,36 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const dayCount = isHalfLeave
-    ? (form.fromDate ? 0.5 : 0)
-    : (form.fromDate && form.toDate ? Math.max(0, Math.ceil((new Date(form.toDate).getTime() - new Date(form.fromDate).getTime()) / 86400000) + 1) : 0);
+  // Live leave balances so each leave-type option can advertise "X days
+  // available". Self-heal endpoint guarantees one row per active type.
+  const { data: balanceData = [] } = useSWR("/api/hr/leaves/balance", fetcher);
+  const balanceByTypeId: Map<number, number> = (() => {
+    const map = new Map<number, number>();
+    for (const b of Array.isArray(balanceData) ? balanceData : []) {
+      const total   = parseFloat(b.totalDays   ?? "0");
+      const used    = parseFloat(b.usedDays    ?? "0");
+      const pending = parseFloat(b.pendingDays ?? "0");
+      if (b.leaveTypeId) map.set(b.leaveTypeId, Math.max(0, total - used - pending));
+    }
+    return map;
+  })();
+
+  // Working-day count — skip Sat/Sun, mirrors server-side countWorkingDays.
+  const dayCount = (() => {
+    if (isHalfLeave) return form.fromDate ? 0.5 : 0;
+    if (!form.fromDate || !form.toDate) return 0;
+    const a = new Date(`${form.fromDate}T00:00:00Z`);
+    const b = new Date(`${form.toDate}T00:00:00Z`);
+    if (isNaN(a.getTime()) || isNaN(b.getTime()) || a > b) return 0;
+    let n = 0;
+    const cur = new Date(a.getTime());
+    while (cur.getTime() <= b.getTime()) {
+      const dow = cur.getUTCDay();
+      if (dow !== 0 && dow !== 6) n++;
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    return n;
+  })();
 
   const apply = async () => {
     setError("");
@@ -479,13 +544,42 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
           </div>
         </div>
 
-        {/* Leave Type */}
+        {/* Leave Type — radio-style cards so we can surface available balance
+            beside each option. A native <select> doesn't let us style two
+            columns of text per option, and that's the same behaviour the
+            other apply-form (LeaveRequestForm/LeaveTypePicker) gives. */}
         <div>
           <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Select type of leave you want to apply</label>
-          <select value={form.leaveTypeId} onChange={(e) => setForm((p) => ({ ...p, leaveTypeId: e.target.value }))} className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]/40">
-            <option value="">Select</option>
-            {leaveTypes.map((lt: any) => <option key={lt.id} value={lt.id}>{lt.name}</option>)}
-          </select>
+          <div className="space-y-1.5">
+            {leaveTypes.map((lt: any) => {
+              const avail = balanceByTypeId.get(lt.id);
+              const fmt = (n: number) => Number.isInteger(n) ? String(n) : n.toFixed(1);
+              const selected = String(form.leaveTypeId) === String(lt.id);
+              return (
+                <button
+                  key={lt.id}
+                  type="button"
+                  onClick={() => setForm((p) => ({ ...p, leaveTypeId: String(lt.id) }))}
+                  className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                    selected
+                      ? "border-[#008CFF] bg-[#008CFF]/[0.08] dark:border-[#4a9cff] dark:bg-[#4a9cff]/[0.1]"
+                      : "border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1e3a] hover:border-[#008CFF]/40"
+                  }`}
+                >
+                  <span className={`text-[13px] font-medium ${selected ? "text-[#008CFF] dark:text-[#4a9cff]" : "text-slate-800 dark:text-white"}`}>
+                    {lt.name}
+                  </span>
+                  <span className={`text-[11.5px] tabular-nums ${avail != null && avail > 0 ? "text-slate-600 dark:text-slate-300 font-medium" : "text-slate-400 dark:text-slate-500"}`}>
+                    {avail == null
+                      ? "Not Available"
+                      : avail > 0
+                        ? `${fmt(avail)} day${avail === 1 ? "" : "s"} available`
+                        : "Not Available"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Note */}
