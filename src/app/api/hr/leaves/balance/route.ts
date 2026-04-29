@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, requireAdmin, resolveUserId, serverError } from "@/lib/api-auth";
+import { accrueLeavesForUser, ymKey } from "@/lib/leave-accrual";
 
 export async function GET(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
@@ -15,9 +16,9 @@ export async function GET(req: NextRequest) {
     const year = parseInt(searchParams.get("year") || String(new Date().getFullYear()));
 
     // Self-heal: ensure the user has a LeaveBalance row for every active
-    // LeaveType in the requested year. Without this the apply-leave picker
-    // shows "Not Available" for any type the user has never been seeded
-    // for. Sick Leave is left at 0 — the monthly accrual job manages it.
+    // LeaveType in the requested year. Every type defaults to 0 days —
+    // Sick Leave fills via monthly accrual; everything else is HR-managed
+    // through the admin matrix.
     const types = await prisma.leaveType.findMany({
       where: { isActive: true }, select: { id: true, code: true, daysPerYear: true },
     });
@@ -27,18 +28,31 @@ export async function GET(req: NextRequest) {
     const existingTypeIds = new Set(existing.map((b) => b.leaveTypeId));
     const missing = types.filter((t) => !existingTypeIds.has(t.id));
     if (missing.length > 0) {
+      const currentYm = ymKey(new Date());
+      // Use createMany for typed columns, then patch lastAccrualMonth via raw
+      // SQL so we don't depend on a freshly-generated Prisma client.
       await prisma.leaveBalance.createMany({
         data: missing.map((t) => ({
           userId,
           leaveTypeId: t.id,
           year,
-          totalDays:   t.code === "SL" ? 0 : t.daysPerYear,
+          totalDays:   0,
           usedDays:    0,
           pendingDays: 0,
         })),
         skipDuplicates: true,
       });
+      await prisma.$executeRawUnsafe(
+        `UPDATE "LeaveBalance" SET "lastAccrualMonth" = $1
+           WHERE "userId" = $2 AND year = $3 AND "lastAccrualMonth" IS NULL`,
+        currentYm, userId, year,
+      );
     }
+
+    // Lazy monthly accrual: bumps Sick Leave by 1 day for every full month
+    // since the last accrual stamp. Idempotent — same-month re-reads do
+    // nothing.
+    try { await accrueLeavesForUser(userId); } catch (e) { /* swallow — read should still succeed */ }
 
     const balances = await prisma.leaveBalance.findMany({
       where: { userId, year }, include: { leaveType: true },
