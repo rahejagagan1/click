@@ -41,16 +41,32 @@ export default function Header({ title }: { title?: string }) {
         : "?";
 
     return (
-        <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between border-b border-[#0d5db8] bg-[#0f6ecd] px-6 shadow-[0_8px_24px_rgba(15,110,205,0.18)]">
-            <div className="relative z-10 min-w-0">
-                <p className="truncate text-[15px] font-semibold text-white/95">
-                    {title || "NB Media Productions Pvt. Ltd"}
-                </p>
-                {user?.email ? (
-                    <p className="mt-0.5 truncate text-[12px] text-white/75">
-                        {user.email}
-                    </p>
-                ) : null}
+        <header
+            className="sticky top-0 z-30 h-[68px] border-b border-[#cdd6e2] flex items-center justify-between px-6 shadow-[0_1px_3px_rgba(15,23,42,0.08)]"
+            style={{ background: "linear-gradient(180deg, #eceff3 0%, #e5eaf0 100%)" }}
+        >
+
+            <div className="relative z-10 flex items-center gap-3 min-w-0">
+                {user?.image ? (
+                    <img
+                        src={user.image}
+                        alt={user.name || "Profile"}
+                        className="w-9 h-9 rounded-full object-cover ring-1 ring-[#cfd9e4]"
+                        referrerPolicy="no-referrer"
+                    />
+                ) : (
+                    <div className="w-9 h-9 rounded-full bg-[#0f6ecd] flex items-center justify-center text-white text-xs font-semibold ring-1 ring-[#cfd9e4]">
+                        {initials}
+                    </div>
+                )}
+                <div className="leading-tight min-w-0">
+                    <h2 className="text-[15px] font-semibold text-[#1d2b38] truncate">
+                        {user?.name ? `Welcome ${user.name}!` : (title || "Welcome!")}
+                    </h2>
+                    {user?.email && (
+                        <p className="text-[11px] text-[#7a8da1] leading-none mt-1 truncate">{user.email}</p>
+                    )}
+                </div>
             </div>
 
             <div className="relative z-10 flex items-center gap-2.5">
@@ -65,25 +81,17 @@ export default function Header({ title }: { title?: string }) {
                     <button
                         ref={btnRef}
                         onClick={() => setShowMenu(!showMenu)}
-                        className="flex items-center justify-center rounded-full p-[1px] transition-all hover:brightness-110"
-                        style={{
-                            color: "#ffffff",
-                            background: "#4ba3ff",
-                            boxShadow: "0 0 0 1.5px rgba(255,255,255,0.85)",
-                        }}
+                        className="flex items-center gap-2 rounded-full hover:bg-[#dde4ec] transition-colors p-0.5"
                     >
                         {user?.image ? (
                             <img
                                 src={user.image}
                                 alt={user.name || "Profile"}
-                                className="h-[38px] w-[38px] rounded-full object-cover"
+                                className="w-8 h-8 rounded-full object-cover border border-[#cfd9e4]"
                                 referrerPolicy="no-referrer"
                             />
                         ) : (
-                            <div
-                                className="flex h-[38px] w-[38px] items-center justify-center rounded-full text-[13px] font-semibold"
-                                style={{ background: "#4ba3ff", color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
-                            >
+                            <div className="w-8 h-8 rounded-full bg-[#0f6ecd] flex items-center justify-center text-white text-[11px] font-medium">
                                 {initials}
                             </div>
                         )}
