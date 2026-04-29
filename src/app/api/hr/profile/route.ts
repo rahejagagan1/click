@@ -16,6 +16,7 @@ export async function GET() {
       where: { id: myId },
       select: {
         id: true, name: true, email: true, profilePictureUrl: true,
+        createdAt: true,
         employeeProfile: true,
       },
     });
