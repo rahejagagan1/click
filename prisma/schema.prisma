@@ -632,6 +632,11 @@ model MonthlyReport {
   videosPublishedActualOverridden Boolean @default(false)
   editorNotes         Json?   @db.JsonB  // { [editorId]: "note text" }
   writerNotes         Json?   @db.JsonB  // { [writerId]: "note text" }
+  // Manager-added cases that don't appear in the auto-detected list — used
+  // when work landed under the wrong owner or was completed offline.
+  // Shape: { [userId]: Array<{ id: string, name: string }> }
+  editorExtraCases    Json?   @db.JsonB
+  writerExtraCases    Json?   @db.JsonB
 
   // ── Section 3: Shortfall Analysis ──
   shortfallSummary  String?  @db.Text
