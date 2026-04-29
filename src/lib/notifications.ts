@@ -3,6 +3,7 @@ import { sendEmail, emailsForUserIds } from "@/lib/email/sender";
 import {
   leaveRequestEmail, wfhRequestEmail, onDutyRequestEmail,
   regularizationRequestEmail, compOffRequestEmail, decisionEmail,
+  feedbackEmail, reportSubmittedEmail,
   type EmailContent,
 } from "@/lib/email/templates";
 
@@ -11,7 +12,9 @@ export type NotificationType =
   | "wfh"
   | "on_duty"
   | "leave"
-  | "comp_off";
+  | "comp_off"
+  | "feedback"
+  | "report";
 
 /**
  * Map a notification's type + title/body into an EmailContent. Returns
@@ -32,6 +35,32 @@ function buildEmailFor(
   title: string,
   body?: string
 ): EmailContent | null {
+  // ── Anonymous feedback (sent to CEO / HR / admins / devs) ─────────
+  // The submitter is never disclosed. Title carries the category, body
+  // carries the verbatim message.
+  if (type === "feedback") {
+    const cat = /category:\s*([^\n]+)/i.exec(body || "")?.[1]?.trim() || "anything_else";
+    const msg = (body || "").replace(/^category:[^\n]*\n+/i, "").trim();
+    return feedbackEmail({ category: cat, message: msg });
+  }
+
+  // ── Report submitted (weekly / monthly) ──────────────────────────
+  // Title carries the manager + period, body carries kv lines we
+  // unpack with simple regexes (kept robust to ordering).
+  if (type === "report") {
+    const kind   = /kind:\s*(weekly|monthly)/i.exec(body || "")?.[1]?.toLowerCase() === "monthly"
+                   ? "monthly" : "weekly";
+    const period = /period:\s*([^\n]+)/i.exec(body || "")?.[1]?.trim()  || "";
+    const manager= /manager:\s*([^\n]+)/i.exec(body || "")?.[1]?.trim() || "A manager";
+    const link   = /link:\s*([^\n]+)/i.exec(body || "")?.[1]?.trim()    || "";
+    return reportSubmittedEmail({
+      kind: kind as "weekly" | "monthly",
+      periodLabel: period,
+      managerName: manager,
+      link,
+    });
+  }
+
   // ── Decision emails (sent to the submitter) ────────────────────────
   // Format: "Your <type> was approved" or "Your <type> request was rejected"
   const decisionMatch = /^Your\s+(.+?)\s+was\s+(approved|rejected|partially approved)/i.exec(title);

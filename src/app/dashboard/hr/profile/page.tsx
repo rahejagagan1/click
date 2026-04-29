@@ -4,97 +4,10 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { Loader2, Pencil, X, ChevronDown } from "lucide-react";
+import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 
 const F = "w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]";
 
-// Three-dropdown DOB picker — Day / Month / Year. Holds its own state
-// for partial selections so each dropdown remembers your pick before
-// all three are filled. Emits YYYY-MM-DD only once all three are set
-// (drop-in compatible with <input type="date">). Day count adjusts to
-// the chosen month/year (handles leap Februarys); years run today →
-// 1900 so the most likely values land at the top of the list.
-function DateOfBirthPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const today = new Date();
-  const thisYear = today.getFullYear();
-
-  // Parse incoming "YYYY-MM-DD" once for the initial state. After that
-  // the component owns its own day/month/year so partial selections
-  // don't get reset by parent re-renders.
-  const parseValue = (v: string) => {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || "");
-    return m ? { y: m[1], m: m[2], d: m[3] } : { y: "", m: "", d: "" };
-  };
-  const initial = parseValue(value);
-  const [yy, setYy] = useState(initial.y);
-  const [mm, setMm] = useState(initial.m);
-  const [dd, setDd] = useState(initial.d);
-
-  // Re-sync from `value` whenever the parent changes it externally
-  // (e.g. modal opened with a fresh value). We only adopt the parent's
-  // value when it differs from what we currently have rebuilt — that
-  // prevents our own emits from clobbering partial state.
-  useEffect(() => {
-    const here = yy && mm && dd ? `${yy}-${mm}-${dd}` : "";
-    if (value === here) return;
-    const next = parseValue(value);
-    setYy(next.y);
-    setMm(next.m);
-    setDd(next.d);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  // Whenever yy/mm/dd change, emit either a complete date or "".
-  useEffect(() => {
-    if (yy && mm && dd) {
-      // Clamp the day if it falls outside the chosen month/year (e.g.
-      // user picked Feb 31 then switched year to a non-leap year).
-      const last = new Date(parseInt(yy, 10), parseInt(mm, 10), 0).getDate();
-      const safe = parseInt(dd, 10) > last ? String(last).padStart(2, "0") : dd;
-      const next = `${yy}-${mm}-${safe}`;
-      if (safe !== dd) setDd(safe); // self-correct without emitting twice
-      if (next !== value) onChange(next);
-    } else if (value) {
-      onChange("");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [yy, mm, dd]);
-
-  const months = [
-    { v: "01", n: "January"   }, { v: "02", n: "February" }, { v: "03", n: "March"     },
-    { v: "04", n: "April"     }, { v: "05", n: "May"      }, { v: "06", n: "June"      },
-    { v: "07", n: "July"      }, { v: "08", n: "August"   }, { v: "09", n: "September" },
-    { v: "10", n: "October"   }, { v: "11", n: "November" }, { v: "12", n: "December"  },
-  ];
-  const years = Array.from({ length: thisYear - 1900 + 1 }, (_, i) => String(thisYear - i));
-
-  // Days depend on chosen month/year. Defaults to 31 if month not set.
-  const daysInMonth = (() => {
-    if (!mm) return 31;
-    const monthNum = parseInt(mm, 10);
-    const yearNum  = parseInt(yy || String(thisYear), 10);
-    return new Date(yearNum, monthNum, 0).getDate();
-  })();
-  const days = Array.from({ length: daysInMonth }, (_, i) => String(i + 1).padStart(2, "0"));
-
-  const selectCls = "h-9 px-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF] cursor-pointer";
-
-  return (
-    <div className="grid grid-cols-3 gap-2">
-      <select value={dd} onChange={(e) => setDd(e.target.value)} className={selectCls} aria-label="Day">
-        <option value="">Day</option>
-        {days.map((d) => <option key={d} value={d}>{d}</option>)}
-      </select>
-      <select value={mm} onChange={(e) => setMm(e.target.value)} className={selectCls} aria-label="Month">
-        <option value="">Month</option>
-        {months.map((m) => <option key={m.v} value={m.v}>{m.n}</option>)}
-      </select>
-      <select value={yy} onChange={(e) => setYy(e.target.value)} className={selectCls} aria-label="Year">
-        <option value="">Year</option>
-        {years.map((y) => <option key={y} value={y}>{y}</option>)}
-      </select>
-    </div>
-  );
-}
 const PROFILE_TABS = ["ABOUT", "PROFILE", "JOB", "DOCUMENTS", "ASSETS"] as const;
 type ProfileTab = typeof PROFILE_TABS[number];
 
@@ -120,7 +33,7 @@ function EditModal({ title, fields, values, onSave, onClose }: {
             <div key={f.key} className={f.fullWidth || f.type === "dob" ? "col-span-2" : ""}>
               <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">{f.label}</label>
               {f.type === "dob" ? (
-                <DateOfBirthPicker value={form[f.key] ?? ""} onChange={(v) => set(f.key, v)} />
+                <SharedDatePicker value={form[f.key] ?? ""} onChange={(v) => set(f.key, v)} />
               ) : f.options ? (
                 <select value={form[f.key] ?? ""} onChange={e => set(f.key, e.target.value)} className={F}>
                   <option value="">Select…</option>
