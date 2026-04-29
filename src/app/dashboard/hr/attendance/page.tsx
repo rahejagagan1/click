@@ -609,6 +609,16 @@ export default function AttendancePage() {
   const { data: leaveTypesData = [] } = useSWR(`/api/hr/admin/leave-types`, fetcher);
   // Rolling team-stats comparison: me vs everyone sharing my `teamCapsule`.
   const { data: teamStats } = useSWR(`/api/hr/attendance/team-stats?period=week`, fetcher);
+  // My profile — used to clamp the attendance log to the day my account
+  // was first created so we don't render "Absent" rows for days before I
+  // started using the app. `createdAt` is always populated (set to now()
+  // on the first sign-in), so no fallback is needed.
+  const { data: profileData } = useSWR(`/api/hr/profile`, fetcher);
+  const appStartIso: string | null = (() => {
+    const c = (profileData as any)?.createdAt;
+    if (!c) return null;
+    return String(c).slice(0, 10); // YYYY-MM-DD (UTC component is fine — User.createdAt is a timestamp)
+  })();
   const leaveTypes: { id: number; name: string }[] = Array.isArray(leaveTypesData)
     ? leaveTypesData.map((t: any) => ({ id: t.id, name: t.name }))
     : [];
@@ -743,6 +753,15 @@ export default function AttendancePage() {
       // Cap month view at today — we don't show future dates.
       const today = new Date(`${istTodayIso}T00:00:00Z`);
       if (end.getTime() > today.getTime()) end = today;
+    }
+
+    // Clamp the start to the day my account was created so we don't
+    // render "Absent" rows for days before I started using the app.
+    // If my account was created mid-period, the log starts at that day.
+    // If `appStartIso` is past `end`, the loop yields no rows.
+    if (appStartIso) {
+      const appStart = new Date(`${appStartIso}T00:00:00Z`);
+      if (appStart.getTime() > start.getTime()) start = appStart;
     }
 
     const out: any[] = [];
