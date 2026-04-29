@@ -12,18 +12,22 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
     const { data: session } = useSession();
     const isLoginPage = pathname === "/login";
     const isOnboardingPage = pathname === "/onboarding";
+    // Public careers / job-application routes — no sidebar / no header.
+    // These are meant to be embedded on the marketing site and shouldn't
+    // expose any dashboard chrome.
+    const isPublicJobsPage = pathname.startsWith("/jobs");
 
     // First-login wizard gate. If HR set onboardingPending on this user,
     // every navigation outside /login or /onboarding bounces to /onboarding
     // until they finish it.
     useEffect(() => {
         const pending = (session?.user as any)?.onboardingPending === true;
-        if (pending && !isOnboardingPage && !isLoginPage) {
+        if (pending && !isOnboardingPage && !isLoginPage && !isPublicJobsPage) {
             router.replace("/onboarding");
         }
-    }, [session, pathname, isOnboardingPage, isLoginPage, router]);
+    }, [session, pathname, isOnboardingPage, isLoginPage, isPublicJobsPage, router]);
 
-    if (isLoginPage) {
+    if (isLoginPage || isPublicJobsPage) {
         return <>{children}</>;
     }
 

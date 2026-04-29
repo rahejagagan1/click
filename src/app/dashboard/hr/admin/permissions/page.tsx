@@ -14,6 +14,10 @@ type UserRow = {
 type DetailResponse = {
   user: UserRow & { isDeveloper?: boolean };
   protected: boolean;
+  /// True when the *viewer* is a developer (DEVELOPER_EMAILS env). Devs
+  /// can override the protected lock and edit any user's permissions —
+  /// they're the ultimate power-users.
+  actorIsDeveloper?: boolean;
   permissions: Record<TabKey, boolean>;
   wasNew: boolean;
 };
@@ -158,6 +162,11 @@ function UserDetail({ userId }: { userId: number }) {
 
   return (
     <div className="p-6 max-w-3xl">
+      {/* Developers (the *viewer*) get an override — toggles stay
+          editable for everyone, including CEO / special-access / other
+          devs. Treat the lock as gone for them.
+      */}
+      {(() => null)()}
       {/* User header */}
       <div className="flex items-center gap-4 mb-6">
         {data.user.profilePictureUrl ? (
@@ -174,6 +183,7 @@ function UserDetail({ userId }: { userId: number }) {
             {data.protected && (
               <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
                 <Shield size={11} /> Protected role
+                {data.actorIsDeveloper ? " · dev override" : ""}
               </span>
             )}
           </div>
@@ -186,14 +196,14 @@ function UserDetail({ userId }: { userId: number }) {
 
         <button
           onClick={save}
-          disabled={!dirty || saving || data.protected}
+          disabled={!dirty || saving || (data.protected && !data.actorIsDeveloper)}
           className="flex items-center gap-1.5 h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[12.5px] font-semibold transition-colors"
         >
           {saved ? <><Check size={13} /> Saved</> : <><Save size={13} /> {saving ? "Saving…" : "Save Changes"}</>}
         </button>
       </div>
 
-      {data.protected && (
+      {data.protected && !data.actorIsDeveloper && (
         <div className="mb-5 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-[12px] text-amber-900 flex items-start gap-2">
           <Shield size={14} className="shrink-0 mt-0.5" />
           <div>
@@ -204,10 +214,21 @@ function UserDetail({ userId }: { userId: number }) {
         </div>
       )}
 
+      {data.protected && data.actorIsDeveloper && (
+        <div className="mb-5 px-4 py-3 bg-violet-50 border border-violet-200 rounded-lg text-[12px] text-violet-900 flex items-start gap-2">
+          <Shield size={14} className="shrink-0 mt-0.5" />
+          <div>
+            <strong>Developer override active.</strong> This is normally a Protected role, but as a
+            developer you can edit these toggles. Use carefully — locking out the CEO or other devs
+            is unusual and will affect their access immediately.
+          </div>
+        </div>
+      )}
+
       {/* Role-default banner — tells the admin what this user's role
           normally gets, and offers a one-click reset so overrides can
           be undone easily. */}
-      {!data.protected && (
+      {(!data.protected || data.actorIsDeveloper) && (
         <div className="mb-5 flex items-center justify-between px-4 py-2.5 bg-[#008CFF]/[0.06] border border-[#008CFF]/20 rounded-lg text-[12px] text-slate-700">
           <div>
             <strong className="text-[#0070cc]">Role default:</strong>{" "}
@@ -228,9 +249,9 @@ function UserDetail({ userId }: { userId: number }) {
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         {TAB_CATALOG.map((tab, i) => {
           const on = draft[tab.key] ?? false;
-          const disabled = data.protected || saving;
+          const disabled = (data.protected && !data.actorIsDeveloper) || saving;
           const roleDefault = roleDefaults[tab.key];
-          const overridden  = !data.protected && on !== roleDefault;
+          const overridden  = (!data.protected || data.actorIsDeveloper) && on !== roleDefault;
           return (
             <div
               key={tab.key}
