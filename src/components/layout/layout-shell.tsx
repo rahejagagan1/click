@@ -21,7 +21,11 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
     // against the sidebar, looking unprofessional.
     const FULL_BLEED = ["/dashboard/hr", "/dashboard/reports"];
     const isFullBleed = FULL_BLEED.some((p) => pathname.startsWith(p));
-    const contentCls  = isFullBleed ? "flex-1" : "flex-1 p-6 lg:p-7";
+    // Full-bleed routes still get a small left gutter on the content
+    // area itself (below the header) so page content doesn't render
+    // flush against the sidebar — but the header sits flush, letting
+    // the sidebar's NB Media logo visually connect to the welcome banner.
+    const contentCls  = isFullBleed ? "flex-1 pl-3 lg:pl-4" : "flex-1 p-6 lg:p-7";
 
     return (
         <div className="flex min-h-screen bg-[#f4f7fb]">
@@ -32,6 +36,8 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
             <Suspense fallback={null}>
                 <Sidebar />
             </Suspense>
+            {/* `ml-[92px]` = exact sidebar width — the header butts up
+                cleanly against the brand block so they read as one strip. */}
             <main className="ml-[92px] flex min-h-screen flex-1 flex-col bg-[#f4f7fb]">
                 <Header />
                 <div className={contentCls}>
