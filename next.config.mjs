@@ -4,10 +4,21 @@ const nextConfig = {
     experimental: {
         optimizePackageImports: ["recharts", "lru-cache"],
     },
+    // Hosts allowed to hit Next.js dev resources (e.g. /_next/webpack-hmr).
+    // The dev server blocks cross-origin requests to dev-only routes by
+    // default — safe locally but breaks when the dev server is fronted by
+    // a public domain like the VPS deployment. Only kicks in for
+    // `next dev`; production `next start` ignores this entirely.
+    allowedDevOrigins: [
+        "board.nbmedia.co.in",
+        "69.62.79.231",        // raw VPS IP — when accessed directly without going through Caddy
+    ],
     // Reduce powered-by header for security
     poweredByHeader: false,
     // Enable compression
     compress: true,
+    // Hide the on-screen Next.js dev indicators (build activity, route info).
+    devIndicators: false,
     // ── Build-time check escape hatches ────────────────────────────────
     // CI gates type correctness via the dedicated job in
     // .github/workflows/ci.yml. Disabling tsc here lets `next build`
