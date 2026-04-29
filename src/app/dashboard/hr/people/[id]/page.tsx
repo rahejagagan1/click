@@ -9,8 +9,9 @@ import { getUserRoleLabel } from "@/lib/user-role-options";
 import { parseAttLoc, type AttLoc } from "@/lib/attendance-location";
 import {
   Mail, Phone, MapPin, Briefcase, Calendar, Building2, IdCard, FileText, Laptop,
-  Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus,
+  Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
 } from "lucide-react";
+import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 
 const TABS = ["About", "Profile", "Job", "Attendance", "Documents", "Assets"] as const;
 type Tab = typeof TABS[number];
@@ -67,6 +68,10 @@ export default function EmployeeDetailPage() {
   const { data: session } = useSession();
   const me = session?.user as any;
   const isHRAdmin = me?.orgLevel === "ceo" || me?.isDeveloper === true || me?.orgLevel === "hr_manager";
+  // Same gate the PUT endpoint enforces — anyone in this set can edit other
+  // employees' profiles via the people detail page.
+  const canEdit = isHRAdmin || me?.role === "admin";
+  const [editSection, setEditSection] = useState<null | "primary" | "contact" | "address" | "identity">(null);
 
   if (isLoading) {
     return (
@@ -300,22 +305,80 @@ export default function EmployeeDetailPage() {
             )}
 
             {activeTab === "Profile" && (
-              <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
-                <h3 className="mb-4 text-[15px] font-semibold text-slate-800">Personal Details</h3>
-                <div className="grid grid-cols-2 gap-x-8 gap-y-5">
-                  <Compact label="Full Name"         value={user.name} />
-                  <Compact label="Email"             value={user.email} />
-                  <Compact label="Employee ID"       value={p.employeeId} />
-                  <Compact label="Phone"             value={p.phone} />
-                  <Compact label="Date of Birth"     value={fmtDate(p.dateOfBirth)} />
-                  <Compact label="Gender"            value={p.gender} capitalize />
-                  <Compact label="Blood Group"       value={p.bloodGroup} />
-                  <Compact label="Emergency Contact" value={p.emergencyContact} />
-                  <div className="col-span-2">
-                    <Compact label="Address" value={p.address} />
+              <div className="space-y-5">
+                {/* ── Primary Details ── */}
+                <DetailCard title="Primary Details" onEdit={canEdit ? () => setEditSection("primary") : undefined}>
+                  <Grid3>
+                    <KV label="First Name"            value={p.firstName ?? user.name?.split(" ")[0]} />
+                    <KV label="Middle Name"           value={p.middleName} />
+                    <KV label="Last Name"             value={p.lastName ?? user.name?.split(" ").slice(1).join(" ")} />
+                    <KV label="Display Name"          value={user.name} />
+                    <KV label="Date of Birth"         value={fmtDate(p.dateOfBirth)} />
+                    <KV label="Gender"                value={p.gender} capitalize />
+                    <KV label="Blood Group"           value={p.bloodGroup} />
+                    <KV label="Marital Status"        value={p.maritalStatus} capitalize />
+                    <KV label="Nationality"           value={p.nationality} />
+                  </Grid3>
+                </DetailCard>
+
+                {/* ── Contact Details ── */}
+                <DetailCard title="Contact Details" onEdit={canEdit ? () => setEditSection("contact") : undefined}>
+                  <Grid3>
+                    <KV label="Work Email"     value={user.email} />
+                    <KV label="Personal Email" value={p.personalEmail} />
+                    <KV label="Mobile Number"  value={p.phone} />
+                    <KV label="Work Number"    value={p.workPhone} />
+                    <KV label="Emergency Contact" value={p.emergencyContact} />
+                    <KV label="Emergency Phone"   value={p.emergencyPhone} />
+                  </Grid3>
+                </DetailCard>
+
+                {/* ── Addresses ── */}
+                <DetailCard title="Addresses" onEdit={canEdit ? () => setEditSection("address") : undefined}>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.1em] text-slate-400 font-semibold mb-1.5">Current Address</p>
+                      <p className="text-[13px] text-slate-800 leading-relaxed">
+                        {p.address || "—"}
+                      </p>
+                      {(p.city || p.state) && (
+                        <p className="text-[12.5px] text-slate-600 mt-1">
+                          {[p.city, p.state, p.nationality].filter(Boolean).join(", ")}
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.1em] text-slate-400 font-semibold mb-1.5">Permanent Address</p>
+                      <p className="text-[13px] text-slate-800 leading-relaxed">
+                        {p.address || "—"}
+                      </p>
+                      {(p.city || p.state) && (
+                        <p className="text-[12.5px] text-slate-600 mt-1">
+                          {[p.city, p.state, p.nationality].filter(Boolean).join(", ")}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </section>
+                </DetailCard>
+
+                {/* ── Identity Information (PAN / Aadhaar) ── */}
+                {(p.panNumber || p.aadhaarNumber || p.parentName || canEdit) && (
+                  <DetailCard
+                    title="Identity Information"
+                    onEdit={canEdit ? () => setEditSection("identity") : undefined}
+                  >
+                    <Grid3>
+                      <KV label="PAN Number"     value={maskPan(p.panNumber)} />
+                      <KV label="Aadhaar Number" value={maskAadhaar(p.aadhaarNumber)} />
+                      <KV label="Parent's Name"  value={p.parentName} />
+                    </Grid3>
+                    <p className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-slate-400">
+                      <ShieldCheck size={12} />
+                      Sensitive data — visible only to HR / CEO / admins.
+                    </p>
+                  </DetailCard>
+                )}
+              </div>
             )}
 
             {activeTab === "Job" && (
@@ -341,29 +404,7 @@ export default function EmployeeDetailPage() {
             )}
 
             {activeTab === "Documents" && (
-              <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
-                <h3 className="mb-4 text-[15px] font-semibold text-slate-800">Employee Documents</h3>
-                {user.documents?.length > 0 ? (
-                  <div className="space-y-2">
-                    {user.documents.map((doc: any) => (
-                      <div key={doc.id} className="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#008CFF]/10 text-[#008CFF]">
-                          <FileText size={16} />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-semibold text-slate-800">{doc.name}</p>
-                          <p className="truncate text-[11px] text-slate-500">{doc.category || "Document"} · {fmtDate(doc.createdAt)}</p>
-                        </div>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                          doc.verificationStatus === "verified"
-                            ? "bg-emerald-50 text-emerald-600"
-                            : "bg-amber-50 text-amber-600"
-                        }`}>{doc.verificationStatus || "pending"}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : <EmptyState icon={FileText} label="No documents uploaded yet" />}
-              </section>
+              <DocumentsPanel profile={p} documents={user.documents || []} />
             )}
 
             {activeTab === "Assets" && (
@@ -444,6 +485,16 @@ export default function EmployeeDetailPage() {
           </aside>
         </div>
       </div>
+
+      {/* Edit modal — only mounted while a section is being edited. */}
+      {editSection && (
+        <ProfileEditModal
+          section={editSection}
+          userId={userId}
+          user={user}
+          onClose={() => setEditSection(null)}
+        />
+      )}
     </div>
   );
 }
@@ -463,6 +514,386 @@ function EmptyState({ icon: Icon, label }: { icon: any; label: string }) {
     <div className="text-center py-12 border border-dashed border-slate-200 rounded-lg">
       <Icon size={28} className="mx-auto text-slate-300 mb-2" strokeWidth={1.5} />
       <p className="text-[13px] text-slate-500">{label}</p>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Profile / Documents — Keka-style detail building blocks
+// ─────────────────────────────────────────────────────────────────────────────
+
+function DetailCard({ title, onEdit, children }: { title: string; onEdit?: () => void; children: React.ReactNode }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-hidden">
+      <div className="flex items-center justify-between px-6 py-3.5 border-b border-slate-100">
+        <h3 className="text-[14px] font-semibold text-slate-800">{title}</h3>
+        {onEdit && (
+          <button
+            type="button"
+            onClick={onEdit}
+            className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#008CFF] hover:underline"
+          >
+            <Pencil size={12} /> Edit
+          </button>
+        )}
+      </div>
+      <div className="px-6 py-5">{children}</div>
+    </section>
+  );
+}
+
+function Grid3({ children }: { children: React.ReactNode }) {
+  return <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-5">{children}</div>;
+}
+
+function KV({ label, value, capitalize = false }: { label: string; value?: string | null; capitalize?: boolean }) {
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">{label}</p>
+      <p className={`mt-1 text-[13px] text-slate-800 ${capitalize ? "capitalize" : ""}`}>{value || "—"}</p>
+    </div>
+  );
+}
+
+// Mask helpers — show only the trailing 4 chars/digits.
+function maskAadhaar(v?: string | null): string | null {
+  if (!v) return null;
+  const digits = v.replace(/\D/g, "");
+  if (digits.length < 4) return v;
+  return `XXXX-XXXX-${digits.slice(-4)}`;
+}
+function maskPan(v?: string | null): string | null {
+  if (!v) return null;
+  const t = v.toUpperCase();
+  if (t.length < 4) return t;
+  return `XXXXXX${t.slice(-4)}`;
+}
+
+// Folder labels match the categories used in /api/hr/profile uploads.
+const DOC_FOLDERS: { key: string; label: string; cats: string[] }[] = [
+  { key: "identity",    label: "Identity Docs",          cats: ["id_proof", "aadhar", "pan_card"] },
+  { key: "letters",     label: "Employee Letters",       cats: ["offer_letter", "experience_letter", "contract"] },
+  { key: "previous",    label: "Previous Experience",    cats: ["experience_letter", "payslip"] },
+  { key: "other",       label: "Other",                  cats: ["other"] },
+];
+
+function DocumentsPanel({ profile, documents }: { profile: any; documents: any[] }) {
+  const [folder, setFolder] = useState<string>("identity");
+  const active = DOC_FOLDERS.find((f) => f.key === folder)!;
+  const filesInFolder = documents.filter((d) => active.cats.includes((d.category || "").toLowerCase()));
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-hidden">
+      <div className="px-6 py-4 border-b border-slate-100">
+        <h3 className="text-[14px] font-semibold text-slate-800">Employee Documents</h3>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-[220px_1fr]">
+        {/* Folder sidebar */}
+        <div className="border-b md:border-b-0 md:border-r border-slate-100 py-2 bg-slate-50/40">
+          <p className="px-4 py-1.5 text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Folders</p>
+          {DOC_FOLDERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setFolder(f.key)}
+              className={`w-full text-left px-4 py-2.5 text-[13px] flex items-center gap-2 transition-colors ${
+                folder === f.key
+                  ? "bg-[#008CFF]/10 text-[#008CFF] font-semibold"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              <FileText size={14} className="shrink-0" />
+              {f.label}
+            </button>
+          ))}
+        </div>
+        {/* Folder body */}
+        <div className="p-6 space-y-5">
+          {folder === "identity" && (
+            <>
+              {/* Aadhaar Card panel — built from EmployeeProfile fields */}
+              {(profile.aadhaarNumber || profile.aadhaarEnrollment) && (
+                <IdDocCard
+                  flag="🇮🇳"
+                  title="Aadhaar Card"
+                  status={profile.aadhaarNumber ? "verified" : "pending"}
+                  rows={[
+                    ["Aadhaar Number",     maskAadhaar(profile.aadhaarNumber) || "—"],
+                    ["Enrollment Number",  profile.aadhaarEnrollment || "Not Available"],
+                    ["Date of Birth",      fmtDate(profile.dateOfBirth)],
+                    ["Name",               [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "—"],
+                    ["Address",            (profile.address || "—").slice(0, 28) + ((profile.address || "").length > 28 ? "…" : "")],
+                    ["Gender",             profile.gender ? profile.gender[0].toUpperCase() + profile.gender.slice(1) : "—"],
+                  ]}
+                />
+              )}
+              {/* PAN Card panel */}
+              {(profile.panNumber || profile.parentName) && (
+                <IdDocCard
+                  flag="🇮🇳"
+                  title="Pan Card"
+                  status={profile.panNumber ? "verified" : "pending"}
+                  rows={[
+                    ["Permanent Account Number", maskPan(profile.panNumber) || "—"],
+                    ["Name",                     [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "—"],
+                    ["Date of Birth",            fmtDate(profile.dateOfBirth)],
+                    ["Parent's Name",            profile.parentName || "—"],
+                  ]}
+                />
+              )}
+              {!profile.aadhaarNumber && !profile.panNumber && filesInFolder.length === 0 && (
+                <EmptyState icon={IdCard} label="No identity documents on file" />
+              )}
+            </>
+          )}
+
+          {/* File list — appears in every folder for files that match the folder's categories */}
+          {filesInFolder.length > 0 && (
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">
+                Uploaded files
+              </p>
+              <div className="space-y-2">
+                {filesInFolder.map((doc: any) => (
+                  <a
+                    key={doc.id}
+                    href={doc.fileUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 hover:border-[#008CFF]/40 hover:bg-[#008CFF]/[0.02] transition-colors"
+                  >
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#008CFF]/10 text-[#008CFF]">
+                      <FileText size={16} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-semibold text-slate-800">{doc.fileName || doc.name}</p>
+                      <p className="truncate text-[11px] text-slate-500">
+                        {(doc.category || "Document").replace(/_/g, " ")} · {fmtDate(doc.createdAt)}
+                      </p>
+                    </div>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                      doc.isVerified
+                        ? "bg-emerald-50 text-emerald-600"
+                        : "bg-amber-50 text-amber-600"
+                    }`}>
+                      {doc.isVerified ? "Verified" : "Pending"}
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Folder-empty fallback for non-identity folders */}
+          {folder !== "identity" && filesInFolder.length === 0 && (
+            <EmptyState icon={FileText} label={`No documents in ${active.label}`} />
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// Single edit modal that swaps its field set based on the section being
+// edited. PUTs to /api/hr/people/:id, then revalidates the SWR cache so
+// the page reflects the change without a full reload.
+function ProfileEditModal({
+  section, userId, user, onClose,
+}: {
+  section: "primary" | "contact" | "address" | "identity";
+  userId: number;
+  user: any;
+  onClose: () => void;
+}) {
+  const p = user.profile || {};
+  const dateISO = (v: any) =>
+    v ? (typeof v === "string" ? v.slice(0, 10) : new Date(v).toISOString().slice(0, 10)) : "";
+  const initial: Record<string, string> = {
+    displayName: user.name ?? "",
+    firstName:   p.firstName ?? "",
+    middleName:  p.middleName ?? "",
+    lastName:    p.lastName ?? "",
+    dateOfBirth: dateISO(p.dateOfBirth),
+    gender:      p.gender ?? "",
+    bloodGroup:  p.bloodGroup ?? "",
+    maritalStatus: p.maritalStatus ?? "",
+    personalEmail: p.personalEmail ?? "",
+    phone:       p.phone ?? "",
+    workPhone:   p.workPhone ?? "",
+    emergencyContact: p.emergencyContact ?? "",
+    emergencyPhone:   p.emergencyPhone ?? "",
+    address:     p.address ?? "",
+    city:        p.city ?? "",
+    state:       p.state ?? "",
+    panNumber:   "",  // Plaintext field — empty by default; HR can re-enter to update.
+    aadhaarNumber: "",
+    aadhaarEnrollment: "",
+    parentName:  p.parentName ?? "",
+  };
+  const [form, setForm] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState("");
+  const set = (k: keyof typeof initial, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const SECTIONS: Record<typeof section, { title: string; fields: Array<{ key: keyof typeof initial; label: string; type?: string; options?: string[]; fullWidth?: boolean }> }> = {
+    primary: {
+      title: "Primary Details",
+      fields: [
+        { key: "firstName",  label: "First Name" },
+        { key: "middleName", label: "Middle Name" },
+        { key: "lastName",   label: "Last Name" },
+        { key: "dateOfBirth", label: "Date of Birth", type: "dob" },
+        { key: "gender",      label: "Gender",        options: ["Male", "Female", "Other", "Prefer not to say"] },
+        { key: "bloodGroup",  label: "Blood Group",   options: ["A+","A-","B+","B-","O+","O-","AB+","AB-"] },
+        { key: "maritalStatus", label: "Marital Status", options: ["Single","Married","Divorced","Widowed"] },
+      ],
+    },
+    contact: {
+      title: "Contact Details",
+      fields: [
+        { key: "personalEmail",    label: "Personal Email", type: "email", fullWidth: true },
+        { key: "phone",            label: "Mobile Number",  type: "tel" },
+        { key: "workPhone",        label: "Work Number",    type: "tel" },
+        { key: "emergencyContact", label: "Emergency Contact" },
+        { key: "emergencyPhone",   label: "Emergency Phone", type: "tel" },
+      ],
+    },
+    address: {
+      title: "Addresses",
+      fields: [
+        { key: "address", label: "Street Address", fullWidth: true },
+        { key: "city",    label: "City" },
+        { key: "state",   label: "State" },
+      ],
+    },
+    identity: {
+      title: "Identity Information",
+      fields: [
+        { key: "panNumber",         label: "PAN Number" },
+        { key: "aadhaarNumber",     label: "Aadhaar Number" },
+        { key: "aadhaarEnrollment", label: "Aadhaar Enrollment" },
+        { key: "parentName",        label: "Parent's Name" },
+      ],
+    },
+  };
+  const cfg = SECTIONS[section];
+
+  const onSave = async () => {
+    setSaving(true);
+    setError("");
+    // Only send the fields relevant to the active section. Empty strings
+    // for identity are skipped so HR doesn't accidentally wipe a stored
+    // PAN by opening the modal and saving with the field blank.
+    const patch: Record<string, unknown> = {};
+    for (const f of cfg.fields) {
+      const v = form[f.key];
+      if (section === "identity" && (!v || v.trim().length === 0)) continue;
+      patch[f.key] = v;
+    }
+    if (section === "primary") {
+      const fullName = [form.firstName, form.middleName, form.lastName]
+        .filter(Boolean).join(" ").trim();
+      if (fullName) patch.displayName = fullName;
+    }
+    try {
+      const res = await fetch(`/api/hr/people/${userId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `Save failed (HTTP ${res.status})`);
+      await mutate(`/api/hr/people/${userId}`);
+      onClose();
+    } catch (e: any) {
+      setError(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl border border-slate-200">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+          <h3 className="text-[15px] font-semibold text-slate-800">{cfg.title}</h3>
+          <button onClick={onClose}>
+            <X size={18} className="text-slate-400 hover:text-slate-700" />
+          </button>
+        </div>
+        <div className="px-6 py-5 grid grid-cols-2 gap-4">
+          {cfg.fields.map((f) => (
+            <div key={f.key as string} className={f.fullWidth || f.type === "dob" ? "col-span-2" : ""}>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">{f.label}</label>
+              {f.type === "dob" ? (
+                <SharedDatePicker value={form[f.key] ?? ""} onChange={(v) => set(f.key, v)} />
+              ) : f.options ? (
+                <select
+                  value={form[f.key] ?? ""}
+                  onChange={(e) => set(f.key, e.target.value)}
+                  className="w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]"
+                >
+                  <option value="">Select…</option>
+                  {f.options.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              ) : (
+                <input
+                  type={f.type ?? "text"}
+                  value={form[f.key] ?? ""}
+                  onChange={(e) => set(f.key, e.target.value)}
+                  className="w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]"
+                />
+              )}
+            </div>
+          ))}
+        </div>
+        {error && <p className="px-6 pb-2 text-[12px] text-red-600">{error}</p>}
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200">
+          <button onClick={onClose} className="h-9 px-4 text-[13px] text-slate-500 hover:text-slate-800">Cancel</button>
+          <button
+            onClick={onSave}
+            disabled={saving}
+            className="h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save changes"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IdDocCard({
+  flag, title, status, rows,
+}: {
+  flag: string;
+  title: string;
+  status: "verified" | "pending";
+  rows: [string, string][];
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 bg-slate-50 border-b border-slate-200">
+        <div className="flex items-center gap-2">
+          <span className="text-[16px]">{flag}</span>
+          <span className="text-[13px] font-semibold text-slate-800">{title}</span>
+          <span className={`ml-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+            status === "verified"
+              ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+              : "bg-amber-50  text-amber-700  ring-1 ring-amber-200"
+          }`}>
+            {status}
+          </span>
+        </div>
+      </div>
+      <div className="px-5 py-4 grid grid-cols-2 gap-x-8 gap-y-4">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">{label}</p>
+            <p className="mt-1 text-[13px] text-slate-800">{value || "—"}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
