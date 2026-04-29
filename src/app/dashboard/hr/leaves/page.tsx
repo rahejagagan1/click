@@ -41,7 +41,18 @@ export default function LeavesPage() {
   const [showCompOff, setShowCompOff] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<number | null>(null);
 
-  const { data: balances = [] } = useSWR("/api/hr/leaves/balance", fetcher);
+  const { data: balancesRaw = [] } = useSWR("/api/hr/leaves/balance", fetcher);
+  // Drop fully-zero rows (no quota AND nothing used or pending) so the
+  // grid only renders types the user actually has a balance for. The
+  // self-healing balance endpoint creates one row per active type, but
+  // we don't want to show a "0 days / 0 days" tile for every entry.
+  const balances = (balancesRaw as any[]).filter((b) => {
+    if (!b.leaveType) return false;
+    const total = parseFloat(b.totalDays   ?? "0");
+    const used  = parseFloat(b.usedDays    ?? "0");
+    const pend  = parseFloat(b.pendingDays ?? "0");
+    return total > 0 || used > 0 || pend > 0;
+  });
   const { data: applications = [] } = useSWR(`/api/hr/leaves?view=${view}`, fetcher);
   const { data: leaveTypes = [] } = useSWR("/api/hr/leaves/types", fetcher);
 
@@ -202,20 +213,19 @@ export default function LeavesPage() {
             </div>
           </div>
 
-          {/* ── Leave Balances ── ring grid with a cohesive cool-tone
-              palette (brand-blue family) so the page reads professional
-              rather than rainbow. */}
+          {/* ── Leave Balances ── naked ring grid: no per-ring card,
+              just the doughnut + label so the rings read as the data
+              itself rather than a framed widget. Cool-tone palette
+              (blue → violet) keeps the row cohesive. */}
           <div>
-            <h3 className="text-[15px] font-semibold text-slate-800 dark:text-white mb-3">Leave Balances</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <h3 className="text-[15px] font-semibold text-slate-800 dark:text-white mb-4">Leave Balances</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-y-6 gap-x-4">
               {balances.map((lb: any, i: number) => {
                 const total = parseFloat(lb.totalDays);
                 const used  = parseFloat(lb.usedDays);
                 const pend  = parseFloat(lb.pendingDays);
                 const avail = Math.max(0, total - used - pend);
                 const fmt   = (n: number) => Number.isInteger(n) ? String(n) : n.toFixed(1);
-                // Calm cool-tone palette — all hues sit in the blue-teal-
-                // indigo range so adjacent cards distinguish without clashing.
                 const PROFESSIONAL_COLORS = [
                   "#008CFF", // brand blue
                   "#0ea5e9", // sky-500
@@ -227,39 +237,22 @@ export default function LeavesPage() {
                 const color = PROFESSIONAL_COLORS[i % PROFESSIONAL_COLORS.length];
                 const empty = total === 0;
                 return (
-                  <div
-                    key={lb.id}
-                    className="flex flex-col rounded-xl border border-[#e3e9f1] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-[#008CFF]/30 dark:border-white/[0.06] dark:bg-[#0a1e3a]"
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <h4 className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-500 truncate">{lb.leaveType.name}</h4>
-                      {pend > 0 && (
-                        <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wider text-amber-700 ring-1 ring-inset ring-amber-100">
-                          {fmt(pend)} pending
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex justify-center mb-3 flex-1">
-                      {empty ? (
-                        <p className="text-[12px] text-slate-400 py-8 self-center">Not configured</p>
-                      ) : (
-                        <DoughnutChart available={avail} total={total} color={color} />
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-3 border-t border-slate-100 dark:border-white/[0.04]">
-                      <div>
-                        <span className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-400">Available</span>
-                        <span className="text-[13px] font-semibold text-slate-800 dark:text-white tabular-nums">{fmt(avail)}</span>
+                  <div key={lb.id} className="flex flex-col items-center gap-2">
+                    {empty ? (
+                      <div className="flex h-[128px] w-[128px] items-center justify-center text-[11px] text-slate-400">
+                        Not configured
                       </div>
-                      <div>
-                        <span className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-400">Used</span>
-                        <span className="text-[13px] font-semibold text-slate-800 dark:text-white tabular-nums">{fmt(used)}</span>
-                      </div>
-                      <div className="col-span-2">
-                        <span className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-400">Annual quota</span>
-                        <span className="text-[13px] font-semibold text-slate-800 dark:text-white tabular-nums">{fmt(total)}</span>
-                      </div>
-                    </div>
+                    ) : (
+                      <DoughnutChart available={avail} total={total} color={color} />
+                    )}
+                    <p className="max-w-full truncate text-center text-[10.5px] font-bold uppercase tracking-[0.08em] text-slate-500">
+                      {lb.leaveType.name}
+                    </p>
+                    {pend > 0 && (
+                      <span className="text-[10px] font-semibold text-amber-600">
+                        {fmt(pend)} pending
+                      </span>
+                    )}
                   </div>
                 );
               })}

@@ -65,7 +65,14 @@ export async function POST(req: NextRequest) {
     const from = new Date(fromDate), to = new Date(toDate);
     if (from > to) return NextResponse.json({ error: "Invalid date range" }, { status: 400 });
 
-    const totalDays = await countWorkingDays(from, to);
+    // Half-day requests carry a marker in the reason field — the apply form
+    // adds `[Half Day]`, `[First Half]`, or `[Second Half]` so the API
+    // doesn't need a separate column. When present, the request only ever
+    // covers a single calendar date and counts as 0.5 days.
+    const isHalfDay = /^\s*\[(Half Day|First Half|Second Half)\]/i.test(String(reason ?? ""));
+    let totalDays = isHalfDay
+      ? 0.5
+      : await countWorkingDays(from, to);
     if (totalDays === 0) return NextResponse.json({ error: "Selected dates are all weekends/holidays" }, { status: 400 });
 
     const year = from.getFullYear();
