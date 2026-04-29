@@ -128,12 +128,23 @@ export const authOptions: NextAuthOptions = {
                             profilePictureUrl: true,
                         },
                     });
+                    // Onboarding flag — fetched via raw SQL so this still works
+                    // when the typed Prisma client is stale (column is recent).
+                    let onboardingPending = false;
+                    try {
+                        const rows = await prisma.$queryRawUnsafe<{ onboardingPending: boolean }[]>(
+                            `SELECT "onboardingPending" FROM "User" WHERE email = $1 LIMIT 1`,
+                            session.user.email,
+                        );
+                        onboardingPending = !!rows?.[0]?.onboardingPending;
+                    } catch { /* column may not exist yet — treat as false */ }
                     if (dbUser) {
                         (session.user as any).dbId = dbUser.id;
                         (session.user as any).role = dbUser.role;
                         (session.user as any).orgLevel = dbUser.orgLevel;
                         (session.user as any).teamCapsule = dbUser.teamCapsule;
                         (session.user as any).dbName = dbUser.name;
+                        (session.user as any).onboardingPending = onboardingPending;
                         (session.user as any).clickupUserId = dbUser.clickupUserId != null
                             ? dbUser.clickupUserId.toString()
                             : null;

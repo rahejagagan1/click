@@ -52,6 +52,10 @@ model User {
   monthlyDeliveryTargetCases Int?
   isActive          Boolean    @default(true)
   reportAccess      Boolean    @default(false)
+  /// True when the user must walk through the first-login wizard
+  /// (/onboarding) before reaching the dashboard. Set by HR at creation
+  /// when "Enable onboarding flow" is toggled on.
+  onboardingPending Boolean    @default(false)
   profilePictureUrl String?
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
@@ -1287,6 +1291,15 @@ model TravelRequest {
 model SalaryStructure {
   id            Int      @id @default(autoincrement())
   userId        Int      @unique
+  /// "regular" for full-time / contract / permanent payroll, "intern" for
+  /// flat-stipend interns (only `basic` is meaningful in that case).
+  salaryType    String   @default("regular")
+  payGroup      String?
+  bonusIncluded Boolean  @default(false)
+  taxRegime     String?
+  /// "Range Based" or "Fixed" — mirrors the form selector.
+  structureType String?
+  pfEligible    Boolean  @default(false)
   ctc           Decimal  @db.Decimal(12, 2)
   basic         Decimal  @db.Decimal(12, 2)
   hra           Decimal  @db.Decimal(12, 2)
