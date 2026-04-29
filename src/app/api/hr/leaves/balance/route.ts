@@ -13,6 +13,33 @@ export async function GET(req: NextRequest) {
     const isAdmin = self.orgLevel === "ceo" || self.isDeveloper || self.orgLevel === "hr_manager";
     const userId = isAdmin ? parseInt(searchParams.get("userId") || String(myId)) : myId;
     const year = parseInt(searchParams.get("year") || String(new Date().getFullYear()));
+
+    // Self-heal: ensure the user has a LeaveBalance row for every active
+    // LeaveType in the requested year. Without this the apply-leave picker
+    // shows "Not Available" for any type the user has never been seeded
+    // for. Sick Leave is left at 0 — the monthly accrual job manages it.
+    const types = await prisma.leaveType.findMany({
+      where: { isActive: true }, select: { id: true, code: true, daysPerYear: true },
+    });
+    const existing = await prisma.leaveBalance.findMany({
+      where: { userId, year }, select: { leaveTypeId: true },
+    });
+    const existingTypeIds = new Set(existing.map((b) => b.leaveTypeId));
+    const missing = types.filter((t) => !existingTypeIds.has(t.id));
+    if (missing.length > 0) {
+      await prisma.leaveBalance.createMany({
+        data: missing.map((t) => ({
+          userId,
+          leaveTypeId: t.id,
+          year,
+          totalDays:   t.code === "SL" ? 0 : t.daysPerYear,
+          usedDays:    0,
+          pendingDays: 0,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
     const balances = await prisma.leaveBalance.findMany({
       where: { userId, year }, include: { leaveType: true },
     });
