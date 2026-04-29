@@ -6,7 +6,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, MoreVertical, Coffee } from "lucide-react";
+import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, MoreVertical, Coffee, AlertCircle, CheckCircle2, XCircle, Calendar, CalendarDays } from "lucide-react";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
 
@@ -1146,7 +1146,7 @@ export default function AttendancePage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/[0.06] bg-slate-50/60 dark:bg-white/[0.02]">
-                    {["DATE","TIMELINE","EFFECTIVE","GROSS","STATUS",""].map((h) => (
+                    {["DATE","TIMELINE","EFFECTIVE","GROSS","LOG",""].map((h) => (
                       <th key={h || "actions"} className="px-5 py-3 text-left text-[10.5px] uppercase tracking-[0.14em] font-bold text-slate-500 dark:text-slate-400">{h}</th>
                     ))}
                   </tr>
@@ -1359,27 +1359,50 @@ export default function AttendancePage() {
                         </td>
 
                         {/* LOG: 9h threshold \u2192 green tick when met, red cross otherwise (once clocked in). */}
+                        {/* LOG — icon-only with a hover tooltip describing the
+                            row state (e.g. "Present | Missing Swipe(s)" for a
+                            partial day, "On Leave · Sick Leave" when leave
+                            covers the date). Replaces the old status pill so
+                            the row stays compact. */}
                         <td className="px-5 py-3">
                           {(() => {
-                            // Single-source-of-truth status pill — replaces the
-                            // older icon-only LOG cell. Each state maps to a
-                            // single colour family so the column stays readable
-                            // even on long logs.
-                            type Pill = { label: string; dot: string; text: string; bg: string };
-                            let p: Pill;
-                            if (hasPendingAny)                p = { label: "Pending",    dot: "bg-[#008CFF]",   text: "text-[#0070cc] dark:text-[#4a9cff]",   bg: "bg-[#008CFF]/10"                  };
-                            else if (missedClockOut)          p = { label: "Missed",     dot: "bg-amber-500",   text: "text-amber-700 dark:text-amber-300",   bg: "bg-amber-50 dark:bg-amber-500/10" };
-                            else if (onLeave)                 p = { label: "On Leave",   dot: "bg-violet-500",  text: "text-violet-700 dark:text-violet-300", bg: "bg-violet-50 dark:bg-violet-500/10" };
-                            else if (isHoliday)               p = { label: "Holiday",    dot: "bg-amber-500",   text: "text-amber-700 dark:text-amber-300",   bg: "bg-amber-50 dark:bg-amber-500/10" };
-                            else if (isWeekend)               p = { label: "Weekly Off", dot: "bg-slate-400",   text: "text-slate-600 dark:text-slate-300",   bg: "bg-slate-100 dark:bg-white/[0.04]" };
-                            else if (isTodayRow && !hasClock) p = { label: "Awaiting",   dot: "bg-[#008CFF]",   text: "text-[#0070cc] dark:text-[#4a9cff]",   bg: "bg-[#008CFF]/10"                  };
-                            else if (hasClock && met9h)       p = { label: "Present",    dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-300", bg: "bg-emerald-50 dark:bg-emerald-500/10" };
-                            else if (hasClock)                p = { label: "Partial",    dot: "bg-orange-500",  text: "text-orange-700 dark:text-orange-300", bg: "bg-orange-50 dark:bg-orange-500/10" };
-                            else                              p = { label: "Absent",     dot: "bg-rose-500",    text: "text-rose-700 dark:text-rose-300",     bg: "bg-rose-50 dark:bg-rose-500/10"   };
+                            type Cell = { label: string; Icon: typeof CheckCircle2; tone: string };
+                            let c: Cell;
+                            if (hasPendingAny) {
+                              const which =
+                                pendingKind === "regularization" ? "Regularization Pending"
+                                : pendingKind === "leave"          ? "Leave Pending"
+                                : pendingKind === "WFH"            ? "WFH Pending"
+                                : pendingKind === "On-Duty"        ? "On-Duty Pending"
+                                : "Pending";
+                              c = { label: which, Icon: Clock3, tone: "text-[#008CFF]" };
+                            } else if (missedClockOut) {
+                              c = { label: "Missed clock-out", Icon: AlertCircle, tone: "text-amber-500" };
+                            } else if (onLeave) {
+                              c = { label: leaveLabel, Icon: Coffee, tone: "text-violet-500" };
+                            } else if (isHoliday) {
+                              c = { label: "Holiday", Icon: CalendarDays, tone: "text-amber-500" };
+                            } else if (isWeekend) {
+                              c = { label: "Weekly Off", Icon: Calendar, tone: "text-slate-400" };
+                            } else if (isTodayRow && !hasClock) {
+                              c = { label: "Awaiting clock-in", Icon: Clock3, tone: "text-[#008CFF]" };
+                            } else if (hasClock && met9h) {
+                              c = { label: "Present", Icon: CheckCircle2, tone: "text-emerald-500" };
+                            } else if (hasClock) {
+                              c = { label: "Present | Missing Swipe(s)", Icon: AlertCircle, tone: "text-orange-500" };
+                            } else {
+                              c = { label: "Absent", Icon: XCircle, tone: "text-rose-500" };
+                            }
+                            const Icon = c.Icon;
                             return (
-                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${p.bg} ${p.text}`}>
-                                <span className={`h-1.5 w-1.5 rounded-full ${p.dot}`} />
-                                {p.label}
+                              <span className="group relative inline-flex">
+                                <Icon size={20} strokeWidth={2} className={c.tone} />
+                                <span
+                                  role="tooltip"
+                                  className="pointer-events-none absolute right-full top-1/2 z-20 mr-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-white opacity-0 shadow-lg ring-1 ring-white/[0.06] transition-opacity duration-150 group-hover:opacity-100 dark:bg-slate-900"
+                                >
+                                  {c.label}
+                                </span>
                               </span>
                             );
                           })()}
