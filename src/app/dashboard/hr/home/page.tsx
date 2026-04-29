@@ -58,21 +58,54 @@ const C = {
 } as const;
 
 // ── Small ring for leave balance ───────────────────────────────────────────────
-function BalanceRing({ avail, total, color }: { avail: number; total: number; color: string }) {
+// Dark-surface variant of the balance ring — used in the navy Leave
+// Balances widget. Track is a low-opacity white so it reads on the
+// #001529 background; the inner number sits in pure white for contrast.
+function DarkBalanceRing({ avail, total, color, size = 70 }: { avail: number; total: number; color: string; size?: number }) {
   const pct = total > 0 ? Math.min((avail / total) * 100, 100) : 0;
-  const r = 30, circum = 2 * Math.PI * r;
+  const stroke = Math.max(4, Math.round(size * 0.085));
+  const r      = (size / 2) - stroke;
+  const circum = 2 * Math.PI * r;
+  const numFs  = size <= 56 ? 12 : 14;
+  const lblFs  = size <= 56 ? 8  : 9;
   return (
-    <div className="relative w-[70px] h-[70px]">
-      <svg viewBox="0 0 70 70" className="w-full h-full -rotate-90">
-        <circle cx="35" cy="35" r={r} fill="none" strokeWidth="6"
-          className="stroke-[#e8ecf0] dark:stroke-[rgba(255,255,255,0.07)]" />
-        <circle cx="35" cy="35" r={r} fill="none" stroke={color} strokeWidth="6"
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg viewBox={`0 0 ${size} ${size}`} className="w-full h-full -rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke}
+          stroke="rgba(255,255,255,0.08)" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
           strokeLinecap="round"
           strokeDasharray={circum} strokeDashoffset={circum * (1 - pct / 100)} />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
-        <span className="text-[14px] font-bold" style={{ color }}>{avail}</span>
-        <span className="text-[9px] mt-0.5 text-[#94a3b8] dark:text-[#4e5e72]">days</span>
+        <span className="font-bold text-white" style={{ fontSize: numFs }}>{avail}</span>
+        <span className="mt-0.5 text-slate-400" style={{ fontSize: lblFs }}>days</span>
+      </div>
+    </div>
+  );
+}
+
+function BalanceRing({ avail, total, color, size = 70 }: { avail: number; total: number; color: string; size?: number }) {
+  const pct = total > 0 ? Math.min((avail / total) * 100, 100) : 0;
+  // Stroke + radius scale with the wrapper so the ring stays proportional
+  // at any size we ask for (52, 70, 96, …).
+  const stroke = Math.max(4, Math.round(size * 0.085));
+  const r      = (size / 2) - stroke;
+  const circum = 2 * Math.PI * r;
+  const numFs  = size <= 56 ? 12 : 14;
+  const lblFs  = size <= 56 ? 8  : 9;
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg viewBox={`0 0 ${size} ${size}`} className="w-full h-full -rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke}
+          className="stroke-[#e8ecf0] dark:stroke-[rgba(255,255,255,0.07)]" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circum} strokeDashoffset={circum * (1 - pct / 100)} />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
+        <span className="font-bold" style={{ color, fontSize: numFs }}>{avail}</span>
+        <span className="mt-0.5 text-[#94a3b8] dark:text-[#4e5e72]" style={{ fontSize: lblFs }}>days</span>
       </div>
     </div>
   );
@@ -2312,56 +2345,62 @@ export default function HRHomePage() {
               )}
             </div>
 
-            <div className={`${C.card} p-3.5`}>
+            <div className={`${C.card} p-4`}>
               <div className="mb-3 flex items-center justify-between">
-                <p className={`text-[13px] font-semibold ${C.t1}`}>Leave Balances</p>
-                <Link href="/dashboard/hr/leaves" className="text-[11px] font-medium text-[#008CFF] hover:underline">
+                <div>
+                  <p className={`text-[13px] font-semibold ${C.t1}`}>Leave Balances</p>
+                  {balances.length > 0 && (
+                    <p className={`mt-0.5 text-[10.5px] uppercase tracking-[0.08em] ${C.t3}`}>
+                      Available across all types
+                    </p>
+                  )}
+                </div>
+                <Link href="/dashboard/hr/leaves" className="text-[11px] font-medium text-[#0891b2] hover:underline">
                   View all
                 </Link>
               </div>
               {balances.length > 0 ? (
                 <>
-                  {/* Naked-ring grid — no per-ring tile / border so the
-                      doughnuts read as the data itself instead of a
-                      framed widget. Cool-tone palette (blue → violet)
-                      keeps the row cohesive. */}
-                  <div className="grid grid-cols-2 gap-y-4 gap-x-3">
-                    {balances.map((b: any, i: number) => {
+                  <div className="grid grid-cols-2 gap-y-5 gap-x-3 place-items-center py-2">
+                    {balances.map((b: any) => {
                       const total = parseFloat(b.totalDays ?? "0");
                       const used  = parseFloat(b.usedDays ?? "0");
                       const pend  = parseFloat(b.pendingDays ?? "0");
                       const avail = Math.max(0, total - used - pend);
-                      const PROFESSIONAL_COLORS = [
-                        "#008CFF", // brand blue
-                        "#0ea5e9", // sky-500
-                        "#06b6d4", // cyan-500
-                        "#14b8a6", // teal-500
-                        "#6366f1", // indigo-500
-                        "#8b5cf6", // violet-500
-                      ];
-                      const color = PROFESSIONAL_COLORS[i % PROFESSIONAL_COLORS.length];
+                      // Cyan ring tone (cyan-500) — same family as the
+                      // reference screenshot but kept on the dashboard's
+                      // light surface so it stays in the existing theme.
+                      const color = "#06b6d4";
                       return (
-                        <div key={b.id} className="flex flex-col items-center gap-1.5">
-                          <BalanceRing avail={avail} total={total > 0 ? total : 1} color={color} />
-                          <p className={`max-w-full truncate text-center text-[10px] font-bold uppercase tracking-[0.08em] ${C.t3}`}>
+                        <div key={b.id} className="flex w-full flex-col items-center">
+                          <BalanceRing avail={avail} total={total > 0 ? total : 1} color={color} size={76} />
+                          <p className={`mt-2.5 max-w-full truncate text-center text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-700 dark:text-slate-200`}>
                             {b.leaveType?.name}
+                          </p>
+                          <p className={`mt-0.5 text-center text-[10.5px] tabular-nums text-slate-400 dark:text-slate-500`}>
+                            {avail} of {total > 0 ? total : "—"} {total === 1 ? "day" : "days"}
                           </p>
                         </div>
                       );
                     })}
                   </div>
-                  <Link href="/dashboard/hr/leaves" className="mt-3 inline-flex text-[12px] font-medium text-[#008CFF] hover:underline">
-                    Request leave →
-                  </Link>
+                  <div className={`mt-2 border-t ${C.div} pt-3`}>
+                    <Link
+                      href="/dashboard/hr/leaves"
+                      className="inline-flex w-full items-center justify-center rounded-md bg-[#06b6d4] px-3 py-2.5 text-[12.5px] font-bold !text-white shadow-[0_1px_2px_rgba(6,182,212,0.3)] transition-colors hover:bg-[#0891b2]"
+                    >
+                      Request Leave →
+                    </Link>
+                  </div>
                 </>
               ) : (
                 <div>
                   <p className={`text-[11.5px] ${C.t3}`}>No leave balances configured</p>
                   <div className="mt-3 flex flex-col gap-2">
-                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline">
+                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#0891b2] hover:underline">
                       Request Leave
                     </Link>
-                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#008CFF] hover:underline">
+                    <Link href="/dashboard/hr/leaves" className="text-[12px] font-medium text-[#0891b2] hover:underline">
                       View All Balances
                     </Link>
                   </div>
