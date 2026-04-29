@@ -80,7 +80,17 @@ export default function ScoreHubPage() {
     const { data: session, status } = useSession();
     const router = useRouter();
     const sessionUser = session?.user as any;
-    const canAccess = sessionUser?.orgLevel === "ceo" || sessionUser?.isDeveloper === true || sessionUser?.orgLevel === "manager" || sessionUser?.orgLevel === "hod";
+    // Mirrors `canSeeReports` from the sidebar so the page-level gate
+    // doesn't drop users the sidebar grants access to. Admin tier
+    // (ceo / developer / special_access / role=admin) gets in alongside
+    // managers + HoDs.
+    const canAccess =
+        sessionUser?.orgLevel === "ceo" ||
+        sessionUser?.isDeveloper === true ||
+        sessionUser?.orgLevel === "special_access" ||
+        sessionUser?.role === "admin" ||
+        sessionUser?.orgLevel === "manager" ||
+        sessionUser?.orgLevel === "hod";
 
     useEffect(() => {
         if (status === "loading") return;
