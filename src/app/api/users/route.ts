@@ -225,7 +225,12 @@ export async function POST(request: NextRequest) {
             }
 
             if (Array.isArray(leaveBalances) && leaveBalances.length > 0) {
-                const year = new Date().getFullYear();
+                const now = new Date();
+                const year = now.getFullYear();
+                // Stamp the joining month so the next monthly accrual job
+                // credits +1 Sick Leave at the start of next month — and
+                // doesn't retroactively credit months they weren't here for.
+                const currentYm = `${year}-${String(now.getMonth() + 1).padStart(2, "0")}`;
                 for (const lb of leaveBalances) {
                     if (!lb?.leaveTypeId) continue;
                     await tx.leaveBalance.upsert({
@@ -245,6 +250,13 @@ export async function POST(request: NextRequest) {
                         update: { totalDays: lb.totalDays ?? 0 },
                     });
                 }
+                // Patch lastAccrualMonth via raw SQL — stale typed clients
+                // won't know about this column yet.
+                await tx.$executeRawUnsafe(
+                    `UPDATE "LeaveBalance" SET "lastAccrualMonth" = $1
+                       WHERE "userId" = $2 AND year = $3 AND "lastAccrualMonth" IS NULL`,
+                    currentYm, created.id, year,
+                );
             }
 
             // ── Salary structure ─────────────────────────────────────────
