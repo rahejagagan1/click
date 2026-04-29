@@ -3,7 +3,8 @@ import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { inviteUserToClickup } from "@/lib/clickup/invite";
+import { sendEmail } from "@/lib/email/sender";
+import { welcomeLoginEmail } from "@/lib/email/templates";
 
 export const dynamic = 'force-dynamic';
 import { serializeBigInt } from "@/lib/utils";
@@ -62,10 +63,12 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const {
             name, email, role, orgLevel, clickupUserId, teamCapsule, managerId,
-            inviteToClickup,            // boolean: if true, invite via ClickUp API first
+            inviteToLogin,              // boolean: if true, email a welcome / sign-in link
+            enableOnboarding,           // boolean: if true, gate first login behind /onboarding
             profile,                    // optional EmployeeProfile payload
             shiftId,                    // optional UserShift assignment
             leaveBalances,              // optional: [{ leaveTypeId, totalDays }] for current year
+            compensation,               // optional SalaryStructure payload (regular | intern)
         } = body;
 
         if (!name || !email) {
@@ -81,47 +84,65 @@ export async function POST(request: NextRequest) {
             resolvedCapsule = resolved.value;
         }
 
-        // ── ClickUp invite (best-effort) ─────────────────────────────────
-        // If requested, invite the user to the ClickUp workspace by email
-        // and use the real id they hand back. If the caller also supplied
-        // an explicit clickupUserId, we prefer ClickUp's response since it's
-        // authoritative. Failures here abort the whole create — otherwise
-        // we'd leave a local row with no ClickUp backing.
-        let resolvedClickupId: bigint;
-        let clickupInviteNote: string | undefined;
-        if (inviteToClickup) {
-            try {
-                const invited = await inviteUserToClickup(email, {
-                    admin: role === "admin" || orgLevel === "ceo",
-                });
-                resolvedClickupId = invited.clickupUserId;
-                clickupInviteNote = `Invited to ClickUp as ${invited.username} (${invited.email})`;
-            } catch (e: any) {
-                return NextResponse.json(
-                    { error: `ClickUp invite failed: ${e?.message || "unknown"}` },
-                    { status: 502 }
-                );
-            }
-        } else {
-            resolvedClickupId = clickupUserId ? BigInt(clickupUserId) : BigInt(Date.now());
-        }
+        // ── ClickUp linking (manual flow) ────────────────────────────────
+        // Programmatic ClickUp invites require the Enterprise plan, which
+        // we're not on. HR invites people through ClickUp's UI; the nightly
+        // sync backfills the real ClickUp user-id when the email matches.
+        // Until then we use the caller-supplied id, or a synthetic Date.now()
+        // placeholder so the column (which is unique-but-nullable in schema)
+        // doesn't collide between simultaneous creates.
+        const resolvedClickupId: bigint = clickupUserId
+            ? BigInt(clickupUserId)
+            : BigInt(Date.now());
 
-        // ── Local create, wrapped so profile + shift + balances ride along ─
-        const user = await prisma.$transaction(async (tx) => {
-            const created = await tx.user.create({
-                data: {
-                    name,
-                    email,
-                    role: role || "member",
-                    orgLevel: orgLevel || "member",
-                    clickupUserId: resolvedClickupId,
-                    teamCapsule: resolvedCapsule,
-                    managerId: managerId || null,
-                },
+        // ── Local upsert, wrapped so profile + shift + balances ride along ─
+        // We deliberately upsert (not create-only) on email so HR can finish
+        // onboarding for someone who already signed in via Google OAuth and
+        // therefore already has a thin User row. The HR-supplied data wins
+        // wherever it's present, but we don't clobber an existing
+        // clickupUserId (the sync may have already linked them).
+        const { user, isUpdate } = await prisma.$transaction(async (tx) => {
+            const existing = await tx.user.findUnique({
+                where: { email },
+                select: { id: true, clickupUserId: true },
             });
 
+            const created = existing
+                ? await tx.user.update({
+                    where: { id: existing.id },
+                    data: {
+                        name,
+                        role: role || undefined,
+                        orgLevel: orgLevel || undefined,
+                        teamCapsule: resolvedCapsule,
+                        managerId: managerId || null,
+                        // Only set the synthetic id when nothing real is stored.
+                        ...(existing.clickupUserId ? {} : { clickupUserId: resolvedClickupId }),
+                    },
+                })
+                : await tx.user.create({
+                    data: {
+                        name,
+                        email,
+                        role: role || "member",
+                        orgLevel: orgLevel || "member",
+                        clickupUserId: resolvedClickupId,
+                        teamCapsule: resolvedCapsule,
+                        managerId: managerId || null,
+                    },
+                });
+
+            // Mark new hire for first-login wizard if HR opted in. Done via
+            // raw SQL so it works before `prisma generate` has picked up the
+            // new column on hot-reloaded dev clients.
+            if (enableOnboarding) {
+                await tx.$executeRawUnsafe(
+                    `UPDATE "User" SET "onboardingPending" = true WHERE id = $1`,
+                    created.id,
+                );
+            }
+
             if (profile && typeof profile === "object") {
-                const employeeId = profile.employeeId || `NB-${new Date().getFullYear()}-${String(created.id).padStart(4, "0")}`;
                 // Derive firstName / lastName from `name` if the caller didn't
                 // supply them — schema requires both.
                 const nameParts = String(name ?? "").trim().split(/\s+/).filter(Boolean);
@@ -139,36 +160,67 @@ export async function POST(request: NextRequest) {
                 if (!numberSeriesId) {
                     throw new Error("No active EmployeeNumberSeries — create one before adding employees.");
                 }
-                await tx.employeeProfile.create({
-                    data: {
-                        userId:           created.id,
-                        employeeId,
-                        firstName,
-                        lastName,
-                        nationality:      profile.nationality      ?? "Indian",
-                        numberSeriesId,
-                        designation:      profile.designation      ?? null,
-                        department:       profile.department       ?? null,
-                        employmentType:   profile.employmentType   ?? "fulltime",
-                        workLocation:     profile.workLocation     ?? "office",
-                        joiningDate:      profile.joiningDate      ? new Date(profile.joiningDate) : null,
-                        phone:            profile.phone            ?? null,
-                        dateOfBirth:      profile.dateOfBirth      ? new Date(profile.dateOfBirth) : null,
-                        gender:           profile.gender           ?? null,
-                        bloodGroup:       profile.bloodGroup       ?? null,
-                        emergencyContact: profile.emergencyContact ?? null,
-                        emergencyPhone:   profile.emergencyPhone   ?? null,
-                        address:          profile.address          ?? null,
-                        city:             profile.city             ?? null,
-                        state:            profile.state            ?? null,
-                        noticePeriodDays: Number.isFinite(profile.noticePeriodDays) ? profile.noticePeriodDays : 30,
-                    },
+                // Auto-allocate the employee ID from the chosen series when the
+                // caller didn't supply one. The atomic increment-and-return
+                // pattern serialises concurrent creates so two new hires can
+                // never collide on the same ID.
+                // Re-onboard guard: don't burn a series number if the user
+                // already has an EmployeeProfile.
+                const existingProfile = await tx.employeeProfile.findUnique({
+                    where: { userId: created.id },
+                    select: { employeeId: true },
+                });
+                let employeeId: string;
+                if (profile.employeeId) {
+                    employeeId = String(profile.employeeId).trim();
+                } else if (existingProfile?.employeeId) {
+                    employeeId = existingProfile.employeeId;
+                } else {
+                    const bumped = await tx.employeeNumberSeries.update({
+                        where: { id: numberSeriesId },
+                        data:  { nextNumber: { increment: 1 } },
+                        select: { prefix: true, nextNumber: true, isActive: true },
+                    });
+                    if (!bumped.isActive) {
+                        throw new Error("Selected number series is inactive");
+                    }
+                    const claimed = bumped.nextNumber - 1;
+                    employeeId = `${bumped.prefix}${claimed}`;
+                }
+                const profileData = {
+                    employeeId,
+                    firstName,
+                    lastName,
+                    nationality:      profile.nationality      ?? "Indian",
+                    numberSeriesId,
+                    designation:      profile.designation      ?? null,
+                    department:       profile.department       ?? null,
+                    employmentType:   profile.employmentType   ?? "fulltime",
+                    workLocation:     profile.workLocation     ?? "office",
+                    joiningDate:      profile.joiningDate      ? new Date(profile.joiningDate) : null,
+                    phone:            profile.phone            ?? null,
+                    dateOfBirth:      profile.dateOfBirth      ? new Date(profile.dateOfBirth) : null,
+                    gender:           profile.gender           ?? null,
+                    bloodGroup:       profile.bloodGroup       ?? null,
+                    emergencyContact: profile.emergencyContact ?? null,
+                    emergencyPhone:   profile.emergencyPhone   ?? null,
+                    address:          profile.address          ?? null,
+                    city:             profile.city             ?? null,
+                    state:            profile.state            ?? null,
+                    noticePeriodDays: Number.isFinite(profile.noticePeriodDays) ? profile.noticePeriodDays : 30,
+                };
+                await tx.employeeProfile.upsert({
+                    where:  { userId: created.id },
+                    create: { userId: created.id, ...profileData },
+                    update: profileData,
                 });
             }
 
             if (shiftId) {
-                await tx.userShift.create({
-                    data: { userId: created.id, shiftId: Number(shiftId) },
+                await tx.userShift.upsert({
+                    where:  { userId: created.id },
+                    create: { userId: created.id, shiftId: Number(shiftId) },
+                    update: { shiftId: Number(shiftId) },
                 });
             }
 
@@ -176,24 +228,114 @@ export async function POST(request: NextRequest) {
                 const year = new Date().getFullYear();
                 for (const lb of leaveBalances) {
                     if (!lb?.leaveTypeId) continue;
-                    await tx.leaveBalance.create({
-                        data: {
+                    await tx.leaveBalance.upsert({
+                        where: {
+                            userId_leaveTypeId_year: {
+                                userId:      created.id,
+                                leaveTypeId: Number(lb.leaveTypeId),
+                                year,
+                            },
+                        },
+                        create: {
                             userId:      created.id,
                             leaveTypeId: Number(lb.leaveTypeId),
                             year,
                             totalDays:   lb.totalDays ?? 0,
                         },
+                        update: { totalDays: lb.totalDays ?? 0 },
                     });
                 }
             }
 
-            return created;
+            // ── Salary structure ─────────────────────────────────────────
+            // Form sends one of two shapes:
+            //   intern  → { salaryType:"intern",  monthlyBasic, effectiveFrom }
+            //   regular → { salaryType:"regular", annualCtc, payGroup, ... }
+            // We compute breakup components here so they match what the
+            // wizard previewed on screen.
+            if (compensation && typeof compensation === "object") {
+                const effectiveFrom = compensation.effectiveFrom
+                    ? new Date(compensation.effectiveFrom)
+                    : new Date();
+                const isIntern = compensation.salaryType === "intern";
+                const monthly  = isIntern
+                    ? Number(compensation.monthlyBasic) || 0
+                    : (Number(compensation.annualCtc) || 0) / 12;
+                const ctc      = isIntern ? monthly * 12 : (Number(compensation.annualCtc) || 0);
+                // Interns get a flat stipend → only `basic` is meaningful.
+                const basic    = isIntern ? monthly : Math.round(monthly * 0.5);
+                const hra      = isIntern ? 0 : Math.round(monthly * 0.2);
+                const pfElig   = !isIntern && !!compensation.pfEligible;
+                const pfEmp    = pfElig ? Math.min(Math.round(basic * 0.12), 1800) : 0;
+                const da       = isIntern ? 0 : Math.round(monthly * 0.10);
+                const conv     = isIntern ? 0 : Math.round(monthly * 0.075);
+                const med      = isIntern ? 0 : 1250;
+                const consumed = basic + hra + da + conv + med + pfEmp;
+                const special  = isIntern ? 0 : Math.max(0, Math.round(monthly) - consumed);
+                // Typed fields first (those the generated Prisma client knows
+                // about). The 6 new columns we just added live in the DB but
+                // not in the cached client until `prisma generate` reruns —
+                // we patch them via raw SQL right after, so the dev server
+                // doesn't need a restart.
+                const typedData = {
+                    ctc,
+                    basic,
+                    hra,
+                    specialAllowance: special,
+                    pfEmployee:    pfEmp,
+                    pfEmployer:    pfEmp,
+                    esiEmployee:   0,
+                    esiEmployer:   0,
+                    tds:           0,
+                    professionalTax: 0,
+                    effectiveFrom,
+                };
+                await tx.salaryStructure.upsert({
+                    where:  { userId: created.id },
+                    create: { userId: created.id, ...typedData },
+                    update: typedData,
+                });
+                await tx.$executeRawUnsafe(
+                    `UPDATE "SalaryStructure"
+                       SET "salaryType"=$1, "payGroup"=$2, "bonusIncluded"=$3,
+                           "taxRegime"=$4, "structureType"=$5, "pfEligible"=$6
+                     WHERE "userId"=$7`,
+                    isIntern ? "intern" : "regular",
+                    compensation.payGroup ?? null,
+                    !!compensation.bonusIncluded,
+                    compensation.taxRegime ?? null,
+                    compensation.structureType ?? null,
+                    pfElig,
+                    created.id,
+                );
+            }
+
+            return { user: created, isUpdate: !!existing };
         });
 
-        return NextResponse.json({ ...serializeBigInt(user), clickupInviteNote });
+        // Welcome / sign-in email — fire-and-forget so a transient SMTP
+        // failure doesn't roll back the create.
+        if (inviteToLogin && email) {
+            void sendEmail({
+                to: email,
+                content: welcomeLoginEmail({
+                    name: name || email,
+                    email,
+                    needsOnboarding: !!enableOnboarding,
+                }),
+            });
+        }
+
+        return NextResponse.json({ ...serializeBigInt(user), isUpdate });
     } catch (error: any) {
+        // Email uniqueness is now handled by the upsert path; P2002 here is
+        // most likely a clickupUserId collision (synthetic placeholder
+        // matched another row's value). Fall back to a clearer message.
         if (error.code === "P2002") {
-            return NextResponse.json({ error: "User with this email or ClickUp ID already exists" }, { status: 409 });
+            return NextResponse.json(
+                { error: "Couldn't link this account — a unique field is already taken (likely ClickUp ID)." },
+                { status: 409 },
+            );
         }
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
