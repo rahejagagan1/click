@@ -928,6 +928,9 @@ export default function MonthlyReportPage() {
                 setIsSubmitted(true);
                 setIsDraftSaved(false);
                 setIsLocked(true);
+                // Send them back to the reports overview so they can see
+                // the locked month alongside the rest of the year.
+                router.replace(`/dashboard/reports/${managerId}`);
             }
         } catch (e: any) {
             setSubmitError(e.message);

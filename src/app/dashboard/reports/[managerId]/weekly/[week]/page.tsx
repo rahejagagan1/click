@@ -1121,6 +1121,11 @@ export default function WeeklyReportPage() {
                 setIsSubmitted(true);
                 setIsDraftSaved(false);
                 setIsLocked(true);
+                // Bounce the manager back to their reports overview so they
+                // can see the freshly-locked week alongside the rest of the
+                // year. Uses replace so Back doesn't return to the editable
+                // form (which is now read-only anyway).
+                router.replace(`/dashboard/reports/${managerId}`);
             }
         } catch (e: any) {
             setSubmitError(e.message);
