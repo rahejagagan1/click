@@ -830,9 +830,12 @@ model EmployeeProfile {
   workLocation      String    @default("office")    // office | remote | hybrid
   joiningDate       DateTime?
   phone             String?
+  workPhone         String?
+  personalEmail     String?
   dateOfBirth       DateTime?
   gender            String?
   bloodGroup        String?
+  maritalStatus     String?   // single | married | divorced | widowed
   emergencyContact  String?
   emergencyPhone    String?
   address           String?
