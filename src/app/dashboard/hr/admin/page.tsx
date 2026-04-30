@@ -45,14 +45,31 @@ export default function HRAdminPage() {
   const isAdmin = isHRAdmin(user);
   const isFullAdmin = isFullHRAdmin(user);
 
+  // Pull the viewer's effective tab permissions so the rail links honour
+  // explicit grants/revokes from the Permissions UI (not just role-based
+  // defaults). Lets an admin grant `hr_hiring: true` to a Coordinator
+  // and have them see the Hiring rail link without making them an admin.
+  const { data: perms } = useSWR<{ permissions: Record<string, boolean> }>(
+    "/api/hr/me/tab-permissions",
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 30_000 }
+  );
+  const tabAllowed = (key: string) => (perms?.permissions?.[key] ?? true);
+
   // Filter tabs + rail links based on tier. Full admin → everything.
   // hr_manager only → whitelist from src/lib/access.ts.
   const visibleTabs = isFullAdmin
     ? ADMIN_TABS
     : ADMIN_TABS.filter((t) => HR_MANAGER_ALLOWED_TABS.has(t.key));
-  const showOnboardRail   = isFullAdmin || HR_MANAGER_ALLOWED_RAIL_LINKS.has("onboard");
-  const showOffboardRail  = isFullAdmin || HR_MANAGER_ALLOWED_RAIL_LINKS.has("offboard");
-  const showHiringRail    = isFullAdmin || HR_MANAGER_ALLOWED_RAIL_LINKS.has("hiring");
+  // Rail links: full admins always see them; hr_manager-tier sees them
+  // when both the curated whitelist allows it AND their tab permission
+  // is on. Other roles see them only if Tab Permissions explicitly grants.
+  const showOnboardRail   = isFullAdmin
+    || (HR_MANAGER_ALLOWED_RAIL_LINKS.has("onboard")  && tabAllowed("hr_people"));
+  const showOffboardRail  = isFullAdmin
+    || (HR_MANAGER_ALLOWED_RAIL_LINKS.has("offboard") && tabAllowed("hr_offboard"));
+  const showHiringRail    = isFullAdmin
+    || (HR_MANAGER_ALLOWED_RAIL_LINKS.has("hiring")   && tabAllowed("hr_hiring"));
   const showTabPermsRail  = isFullAdmin; // policy config — admin-only
 
   const [tab, setTab] = useState("attendance-dashboard");
