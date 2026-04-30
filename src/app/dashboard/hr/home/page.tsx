@@ -7,6 +7,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
+import { isHRAdmin } from "@/lib/access";
 import {
   ChevronDown,
   ChevronLeft,
@@ -1479,7 +1480,7 @@ function HolidaysModal({ initialYear, onClose }: { initialYear: number; onClose:
 export default function HRHomePage() {
   const { data: session } = useSession();
   const user    = session?.user as any;
-  const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper || user?.orgLevel === "hr_manager";
+  const isAdmin = isHRAdmin(user);
 
   const monthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
 
