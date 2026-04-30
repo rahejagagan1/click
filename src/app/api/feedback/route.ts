@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
                     userIds:  recipientIds,
                     type:     "feedback",
                     entityId: created.id,
-                    title:    `New anonymous feedback — ${prettyCategory}`,
+                    title:    `New anonymous feedback received — ${prettyCategory}`,
                     body:     `category: ${category}\n${message.slice(0, 600)}`,
                     linkUrl:  "/dashboard/feedback_inbox",
                 });
