@@ -112,6 +112,8 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     hr_hiring: true, hr_offboard: true,
     // role='hr_manager' → canSeeViolationLog → violations visible.
     violations: true,
+    // HR Manager extras — visibility into team performance + org metrics.
+    cases: true, scores: true, reports: true, company: true, departments: true,
   },
   manager: {
     scores: true, reports: true,
