@@ -5,6 +5,7 @@ import { fetcher } from "@/lib/swr";
 import {
   TreePine, IndianRupee, Clock, CheckCircle2, Home, Briefcase, Gift,
   Search, Bell, Archive as ArchiveIcon, Inbox as InboxIcon, XCircle,
+  MessageSquare, Activity,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,6 +49,28 @@ function Av({ name, url, size = 36 }: { name: string; url?: string; size?: numbe
     <div className="rounded-full flex items-center justify-center font-bold text-white shrink-0"
       style={{ width: size, height: size, background: bg, fontSize: size * 0.33 }}>
       {initials}
+    </div>
+  );
+}
+
+// Icon-based avatar for system / actor-less notifications. Renders a
+// neutral coloured circle with a relevant icon — used when the source
+// of a notification is intentionally anonymous (e.g. unplugged
+// feedback) so we don't show a misleading "S"/"System" initial.
+function SystemAv({ type, size = 36 }: { type: string; size?: number }) {
+  // Type → { tint, Icon } mapping. Falls back to a generic Activity
+  // glyph for anything we haven't styled yet.
+  const META: Record<string, { tint: string; Icon: React.ComponentType<{ size?: number; className?: string }> }> = {
+    feedback:        { tint: "#7c3aed", Icon: MessageSquare },
+    job_application: { tint: "#0891b2", Icon: Briefcase     },
+  };
+  const { tint, Icon } = META[type] || { tint: "#64748b", Icon: Activity };
+  return (
+    <div
+      className="rounded-full flex items-center justify-center shrink-0"
+      style={{ width: size, height: size, background: `${tint}1a`, color: tint }}
+    >
+      <Icon size={Math.round(size * 0.45)} />
     </div>
   );
 }
@@ -518,7 +541,12 @@ function NotificationsPane({ data, isLoading }: { data: any; isLoading: boolean 
                 n.isRead ? "" : "bg-[#008CFF]/[0.04]"
               }`}
             >
-              <Av name={n.actor?.name || "System"} url={n.actor?.profilePictureUrl} size={36} />
+              {/* Actor-less notifications (e.g. anonymous feedback) get a
+                  type-themed icon avatar instead of the misleading "S"
+                  initial fallback. Real actors keep their photo/initial. */}
+              {n.actor
+                ? <Av name={n.actor.name} url={n.actor.profilePictureUrl} size={36} />
+                : <SystemAv type={n.type || ""} size={36} />}
               <div className="flex-1 min-w-0">
                 <p className={`text-[13px] ${C.t1} font-medium`}>{n.title}</p>
                 {n.body && <p className={`text-[12px] ${C.t2} mt-0.5`}>{n.body}</p>}
