@@ -676,7 +676,7 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                           onChange={toggleAllVisible}
                           className="w-3.5 h-3.5 rounded border-slate-300 accent-[#008CFF]" />
                       </th>
-                      {["EMPLOYEE","EMPLOYEE NUMBER","DEPARTMENT","LOCATION","BUSINESS UNIT","LEGAL ENTITY","LEAVE DATES","LEAVE TYPE","L1 APPROVAL","L2 APPROVAL","REQUEST STATUS"].map((h) => (
+                      {["EMPLOYEE","EMPLOYEE NUMBER","DEPARTMENT","LOCATION","BUSINESS UNIT","LEGAL ENTITY","LEAVE DATES","LEAVE TYPE","REASON","L1 APPROVAL","L2 APPROVAL","REQUEST STATUS"].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -734,6 +734,13 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                             <p className="text-[10.5px] text-slate-400 mt-0.5">
                               <span className="font-semibold text-slate-500">Applied</span> · {fmtDt(r.appliedAt)}
                             </p>
+                          </td>
+                          {/* Reason — what the employee wrote when applying.
+                              Truncate visually but keep the full text in a
+                              title attribute so HR can hover for the rest. */}
+                          <td className="px-4 py-3 text-[12.5px] text-slate-700 dark:text-slate-300 max-w-[260px] truncate"
+                              title={r.reason || ""}>
+                            {r.reason ? r.reason : <span className="text-slate-400">—</span>}
                           </td>
                           <td className="px-4 py-3 align-top">
                             <ApprovalCell
