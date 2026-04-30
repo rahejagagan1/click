@@ -21,7 +21,14 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;       // 5 MB
-const ALLOWED_EXTS   = new Set([".pdf", ".doc", ".docx"]);
+// Generous whitelist — match parse-resume so uploads never get rejected
+// for the candidate's choice of format. The file is stored verbatim;
+// auto-fill is best-effort.
+const ALLOWED_EXTS = new Set([
+  ".pdf", ".doc", ".docx",
+  ".rtf", ".odt", ".pages",
+  ".txt", ".md", ".html", ".htm",
+]);
 
 export async function POST(req: NextRequest) {
   try {
@@ -70,7 +77,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Resume must be 5 MB or smaller" }, { status: 400 });
       const ext = extname(resume.name).toLowerCase();
       if (!ALLOWED_EXTS.has(ext))
-        return NextResponse.json({ error: "Resume must be PDF, DOC, or DOCX" }, { status: 400 });
+        return NextResponse.json({ error: "Resume must be a PDF, Word, RTF, ODT, TXT, or HTML file" }, { status: 400 });
       const safeBase = resume.name
         .replace(/\.[^.]+$/, "")
         .replace(/[^A-Za-z0-9._-]+/g, "_")
@@ -84,17 +91,69 @@ export async function POST(req: NextRequest) {
       resumeUrl      = `/uploads/resumes/${stamped}`;
     }
 
+    // ── Extra "smart form" fields (added in the redesigned UI) ──────
+    // All optional / nullable in the DB, so a candidate using the
+    // legacy form (no extra fields) still submits successfully.
+    const firstName            = get("firstName");
+    const middleName           = get("middleName");
+    const lastName             = get("lastName");
+    const gender               = get("gender");
+    const dobRaw               = get("dateOfBirth");
+    const dateOfBirth          = dobRaw && /^\d{4}-\d{2}-\d{2}$/.test(dobRaw) ? new Date(dobRaw) : null;
+    const mobileCountryCode    = get("mobileCountryCode");
+    const expMonRaw            = get("experienceMonths");
+    const experienceMonths     = expMonRaw && /^\d+$/.test(expMonRaw) ? Math.min(11, Number(expMonRaw)) : null;
+    const numericOrNull = (v: string | null) => {
+      if (!v) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const intOrNull = (v: string | null) => {
+      if (!v) return null;
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : null;
+    };
+    const currentSalary           = numericOrNull(get("currentSalary"));
+    const currentSalaryCurrency   = get("currentSalaryCurrency");
+    const currentSalaryFreq       = get("currentSalaryFreq");
+    const expectedSalary          = numericOrNull(get("expectedSalary"));
+    const expectedSalaryCurrency  = get("expectedSalaryCurrency");
+    const expectedSalaryFreq      = get("expectedSalaryFreq");
+    const availableToJoinDays     = intOrNull(get("availableToJoinDays"));
+    const preferredLocation       = get("preferredLocation");
+    const currentLocationVal      = get("currentLocation");
+    const skills                  = get("skills");
+    const educationDetails        = get("educationDetails");
+    const experienceDetails       = get("experienceDetails");
+
     // ── Insert via raw SQL — typed client may not know JobApplication yet ──
     const inserted = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
       `INSERT INTO "JobApplication"
          ("jobOpeningId", "fullName", email, phone, "coverLetter",
           "linkedinUrl", "portfolioUrl", "experienceYears", "currentCompany",
-          "noticePeriod", "resumeFileName", "resumeUrl", status, "updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'new', now())
+          "noticePeriod", "resumeFileName", "resumeUrl",
+          "firstName", "middleName", "lastName", gender, "dateOfBirth",
+          "mobileCountryCode", "experienceMonths",
+          "currentSalary", "currentSalaryCurrency", "currentSalaryFreq",
+          "expectedSalary", "expectedSalaryCurrency", "expectedSalaryFreq",
+          "availableToJoinDays", "preferredLocation", "currentLocation",
+          skills, "educationDetails", "experienceDetails",
+          status, "updatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+               $13,$14,$15,$16,$17,$18,$19,
+               $20,$21,$22,$23,$24,$25,
+               $26,$27,$28,$29,$30,$31,
+               'new', now())
        RETURNING id`,
       jobOpeningId, fullName, email, phone, coverLetter,
       linkedinUrl, portfolioUrl, experienceYears, currentCompany,
       noticePeriod, resumeFileName, resumeUrl,
+      firstName, middleName, lastName, gender, dateOfBirth,
+      mobileCountryCode, experienceMonths,
+      currentSalary, currentSalaryCurrency, currentSalaryFreq,
+      expectedSalary, expectedSalaryCurrency, expectedSalaryFreq,
+      availableToJoinDays, preferredLocation, currentLocationVal,
+      skills, educationDetails, experienceDetails,
     );
     const applicationId = inserted[0]?.id;
 
