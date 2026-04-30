@@ -25,7 +25,7 @@ interface Manager {
 }
 
 const NAV_ITEMS = [
-    { label: "Dashboard", href: "/dashboard",         icon: icon(LayoutDashboard),                             ceoOnly: true                },
+    { label: "Dashboard", href: "/dashboard",         icon: icon(LayoutDashboard),                             developerOnly: true          },
     { label: "Cases",     href: "/cases",              icon: icon(FileText),       adminOnly: true                                           },
     { label: "Company",   href: "/dashboard/company",  icon: icon(Building2),      adminOnly: true                                           },
     { label: "Scores",    href: "/dashboard/scores",   icon: icon(Star),                                        managersOnly: true           },
@@ -83,7 +83,9 @@ export default function Sidebar() {
         // for admin tabs; an admin granting `cases: true` to that Member
         // now actually unlocks Cases.
         const keyMap: Record<string, string> = {
-            "Dashboard": "dashboard", "Cases": "cases", "Company": "company",
+            // "Dashboard" intentionally omitted — it is developer-only and
+            // must NOT be unlockable via the per-user Tab Permissions UI.
+            "Cases": "cases", "Company": "company",
             "Scores": "scores", "YouTube": "youtube", "Feedback": "feedback",
         };
         const k = keyMap[label];

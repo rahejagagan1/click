@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getCronJobsConfig, saveCronJobsConfig, type CronJobsConfig } from "@/lib/cron-jobs-config";
+import { getCronJobsConfig, saveCronJobsConfig } from "@/lib/cron-jobs-config";
+import { CRON_JOB_DEFINITIONS, CRON_JOB_IDS, type CronJobId } from "@/lib/cron-jobs-registry";
 import { serverError } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ function canManage(session: any): boolean {
     return u?.orgLevel === "ceo" || u?.isDeveloper === true;
 }
 
-/** GET — CEO / Developer: list cron job settings */
+/** GET — CEO / Developer: list every registered cron job with its current state */
 export async function GET() {
     try {
         const session = await getServerSession(authOptions);
@@ -25,17 +26,14 @@ export async function GET() {
         return NextResponse.json({
             internalSchedulerDisabled: internalDisabled,
             serverNote: internalDisabled
-                ? "Internal 60s poll is OFF (DISABLE_INTERNAL_CRON_SCHEDULER). Use POST /api/cron/youtube-dashboard-sync with CRON_SECRET on a timer, or unset that env on your Node host."
+                ? "Internal 60s poll is OFF (DISABLE_INTERNAL_CRON_SCHEDULER). Hit the per-job 'Run now' or wire an external cron to /api/cron/youtube-dashboard-sync."
                 : "Internal scheduler polls every 60 seconds while this Node process runs (next start). Auto jobs run when enabled below and the interval has passed.",
-            jobs: [
-                {
-                    id: "youtube_dashboard",
-                    name: "YouTube dashboard quarter sync",
-                    description:
-                        "YouTube Analytics + Data API: upserts YoutubeDashboardQuarterMetrics (quarter totals) and YoutubeDashboardChannelQuarterAnalysis (10-day view buckets + uploads) per channel (OAuth). Dashboard reads DB only.",
-                    ...config.youtube_dashboard,
-                },
-            ],
+            jobs: CRON_JOB_DEFINITIONS.map((def) => ({
+                id:          def.id,
+                name:        def.name,
+                description: def.description,
+                ...config[def.id],
+            })),
         });
     } catch (error) {
         console.error("[admin/cron-jobs GET]", error);
@@ -43,7 +41,9 @@ export async function GET() {
     }
 }
 
-/** PATCH — CEO / Developer: update job settings (enabled, intervalHours) */
+/** PATCH — CEO / Developer: update one or more job settings.
+ *  Accepts both legacy shape `{ youtube_dashboard: {…} }` and the
+ *  generic shape `{ jobId: "youtube_dashboard", patch: {…} }`. */
 export async function PATCH(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
@@ -51,28 +51,35 @@ export async function PATCH(request: NextRequest) {
             return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
-        const body = await request.json().catch(() => ({}));
-        const patch = body.youtube_dashboard as Partial<{ enabled: boolean; intervalHours: number }> | undefined;
-
+        const body = await request.json().catch(() => ({} as any));
         const current = await getCronJobsConfig();
-        const next: CronJobsConfig = {
-            youtube_dashboard: {
-                ...current.youtube_dashboard,
+
+        // Build a patch-by-id map regardless of which body shape was used.
+        const patchById: Partial<Record<CronJobId, Partial<{ enabled: boolean; intervalHours: number }>>> = {};
+        for (const id of CRON_JOB_IDS) {
+            if (body?.[id] && typeof body[id] === "object") patchById[id] = body[id];
+        }
+        if (typeof body?.jobId === "string" && CRON_JOB_IDS.includes(body.jobId)) {
+            patchById[body.jobId as CronJobId] = body.patch ?? body;
+        }
+
+        for (const [idRaw, patch] of Object.entries(patchById)) {
+            const id = idRaw as CronJobId;
+            const cur = current[id];
+            current[id] = {
+                ...cur,
                 ...(typeof patch?.enabled === "boolean" ? { enabled: patch.enabled } : {}),
                 ...(patch?.intervalHours != null
                     ? {
-                          intervalHours: Math.min(168, Math.max(1, Math.floor(Number(patch.intervalHours)) || 5)),
+                          intervalHours: Math.min(168, Math.max(1, Math.floor(Number(patch.intervalHours)) || cur.intervalHours)),
                       }
                     : {}),
-            },
-        };
-        await saveCronJobsConfig(next);
+            };
+        }
+        await saveCronJobsConfig(current);
 
         const fresh = await getCronJobsConfig();
-        return NextResponse.json({
-            ok: true,
-            youtube_dashboard: fresh.youtube_dashboard,
-        });
+        return NextResponse.json({ ok: true, jobs: fresh });
     } catch (error) {
         console.error("[admin/cron-jobs PATCH]", error);
         return serverError(error, "admin/cron-jobs PATCH");
