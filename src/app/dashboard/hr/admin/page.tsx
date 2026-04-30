@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import useSWR, { mutate } from "swr";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -10,6 +10,12 @@ import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
 import LeavesAdminPanel from "@/components/hr/LeavesAdminPanel";
+import {
+  isHRAdmin,
+  isFullHRAdmin,
+  HR_MANAGER_ALLOWED_TABS,
+  HR_MANAGER_ALLOWED_RAIL_LINKS,
+} from "@/lib/access";
 
 // Every HR-admin section is an inline state tab — no sub-routes.
 type AdminTabDef = {
@@ -33,9 +39,49 @@ const DAYS_LABEL = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 export default function HRAdminPage() {
   const { data: session } = useSession();
   const user = session?.user as any;
-  const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper || user?.orgLevel === "hr_manager";
+  // Includes ceo / developer / special_access / role=admin / hr_manager —
+  // all of whom should see the HR Dashboard. Full admins see every tab;
+  // hr_manager-only users see a curated subset.
+  const isAdmin = isHRAdmin(user);
+  const isFullAdmin = isFullHRAdmin(user);
+
+  // Pull the viewer's effective tab permissions so the rail links honour
+  // explicit grants/revokes from the Permissions UI (not just role-based
+  // defaults). Lets an admin grant `hr_hiring: true` to a Coordinator
+  // and have them see the Hiring rail link without making them an admin.
+  const { data: perms } = useSWR<{ permissions: Record<string, boolean> }>(
+    "/api/hr/me/tab-permissions",
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 30_000 }
+  );
+  const tabAllowed = (key: string) => (perms?.permissions?.[key] ?? true);
+
+  // Filter tabs + rail links based on tier. Full admin → everything.
+  // hr_manager only → whitelist from src/lib/access.ts.
+  const visibleTabs = isFullAdmin
+    ? ADMIN_TABS
+    : ADMIN_TABS.filter((t) => HR_MANAGER_ALLOWED_TABS.has(t.key));
+  // Rail links: full admins always see them; hr_manager-tier sees them
+  // when both the curated whitelist allows it AND their tab permission
+  // is on. Other roles see them only if Tab Permissions explicitly grants.
+  const showOnboardRail   = isFullAdmin
+    || (HR_MANAGER_ALLOWED_RAIL_LINKS.has("onboard")  && tabAllowed("hr_people"));
+  const showOffboardRail  = isFullAdmin
+    || (HR_MANAGER_ALLOWED_RAIL_LINKS.has("offboard") && tabAllowed("hr_offboard"));
+  const showHiringRail    = isFullAdmin
+    || (HR_MANAGER_ALLOWED_RAIL_LINKS.has("hiring")   && tabAllowed("hr_hiring"));
+  const showTabPermsRail  = isFullAdmin; // policy config — admin-only
 
   const [tab, setTab] = useState("attendance-dashboard");
+
+  // If an hr_manager somehow ends up on a tab their tier can't see
+  // (e.g. via a bookmarked URL or a stale state), snap them back to
+  // the default. Full admins have access to everything so this is a
+  // no-op for them.
+  useEffect(() => {
+    if (isFullAdmin) return;
+    if (!HR_MANAGER_ALLOWED_TABS.has(tab)) setTab("attendance-dashboard");
+  }, [isFullAdmin, tab]);
 
   const { data: leaveTypes = [] } = useSWR("/api/hr/admin/leave-types", fetcher);
   const { data: shifts = [] }     = useSWR("/api/hr/admin/shifts", fetcher);
@@ -149,7 +195,7 @@ export default function HRAdminPage() {
 
         {/* Sidebar tabs — every section is an in-page state tab. */}
         <div className="w-[240px] shrink-0 p-4 space-y-1 border-r border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/40">
-          {ADMIN_TABS.map((t) => {
+          {visibleTabs.map((t) => {
             const active = tab === t.key;
             const base = `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left ${
               active
@@ -173,48 +219,57 @@ export default function HRAdminPage() {
             );
           })}
 
-          {/* ── Rail links — full-page destinations, not inline tabs ── */}
+          {/* ── Rail links — full-page destinations, not inline tabs.
+                Each one is conditionally rendered based on tier. */}
           <div className="pt-2 mt-2 border-t border-slate-200 dark:border-white/[0.06]" />
-          <Link
-            href="/dashboard/hr/onboard"
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span className="flex-1">Onboard Employee</span>
-            <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </Link>
-          <Link
-            href="/dashboard/hr/admin/permissions"
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
-          >
-            <ShieldCheck className="w-4 h-4" />
-            <span className="flex-1">Tab Permissions</span>
-            <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </Link>
-          <Link
-            href="/dashboard/hr/hiring"
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
-          >
-            <Briefcase className="w-4 h-4" />
-            <span className="flex-1">Hiring</span>
-            <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </Link>
-          <Link
-            href="/dashboard/hr/offboard"
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
-          >
-            <UserMinus className="w-4 h-4" />
-            <span className="flex-1">Offboard Employee</span>
-            <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </Link>
+          {showOnboardRail && (
+            <Link
+              href="/dashboard/hr/onboard"
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span className="flex-1">Onboard Employee</span>
+              <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+          )}
+          {showTabPermsRail && (
+            <Link
+              href="/dashboard/hr/admin/permissions"
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span className="flex-1">Tab Permissions</span>
+              <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+          )}
+          {showHiringRail && (
+            <Link
+              href="/dashboard/hr/hiring"
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+            >
+              <Briefcase className="w-4 h-4" />
+              <span className="flex-1">Hiring</span>
+              <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+          )}
+          {showOffboardRail && (
+            <Link
+              href="/dashboard/hr/offboard"
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+            >
+              <UserMinus className="w-4 h-4" />
+              <span className="flex-1">Offboard Employee</span>
+              <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+          )}
         </div>
 
         {/* Content */}
