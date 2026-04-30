@@ -12,6 +12,7 @@ import {
   Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
+import { isHRAdmin as canViewAsHRAdmin } from "@/lib/access";
 
 const TABS = ["About", "Profile", "Job", "Attendance", "Documents", "Assets"] as const;
 type Tab = typeof TABS[number];
@@ -67,10 +68,11 @@ export default function EmployeeDetailPage() {
   const [teamQuery, setTeamQuery] = useState("");
   const { data: session } = useSession();
   const me = session?.user as any;
-  const isHRAdmin = me?.orgLevel === "ceo" || me?.isDeveloper === true || me?.orgLevel === "hr_manager";
   // Same gate the PUT endpoint enforces — anyone in this set can edit other
-  // employees' profiles via the people detail page.
-  const canEdit = isHRAdmin || me?.role === "admin";
+  // employees' profiles via the people detail page. Includes ceo / dev /
+  // special_access / role=admin / hr_manager.
+  const isHRAdmin = canViewAsHRAdmin(me);
+  const canEdit = isHRAdmin;
   const [editSection, setEditSection] = useState<null | "primary" | "contact" | "address" | "identity">(null);
 
   if (isLoading) {

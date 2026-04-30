@@ -4,6 +4,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import { isAdmin as isAdminUser } from "@/lib/access";
 
 const TOP_TABS = [
   { key: "home",       label: "HOME",       href: "/dashboard/hr/home"  },
@@ -24,7 +25,7 @@ const statusColors: Record<string, string> = {
 export default function TicketsPage() {
   const { data: session } = useSession();
   const user = session?.user as any;
-  const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper;
+  const isAdmin = isAdminUser(user);
   const [subTab, setSubTab] = useState<"my" | "following">("my");
   const [showNew, setShowNew] = useState(false);
   const [search, setSearch] = useState("");

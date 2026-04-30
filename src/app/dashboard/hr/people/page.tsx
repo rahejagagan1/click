@@ -18,6 +18,7 @@ import {
   roleOptions,
 } from "@/lib/hr-taxonomy";
 import { getUserRoleLabel } from "@/lib/user-role-options";
+import { isHRAdmin } from "@/lib/access";
 
 const ORG_TABS = [
   { key: "employees", label: "EMPLOYEES" },
@@ -28,7 +29,7 @@ const ORG_TABS = [
 export default function PeoplePage() {
   const { data: session } = useSession();
   const user = session?.user as any;
-  const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper;
+  const isAdmin = isHRAdmin(user);
   const [subTab, setSubTab] = useState<"directory" | "tree">("directory");
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
