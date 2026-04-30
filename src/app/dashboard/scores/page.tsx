@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import ManagerRatingForm from "@/components/scores/manager-rating-form";
 import UserAvatar from "@/components/ui/user-avatar";
+import { canSeeReports } from "@/lib/access";
 
 // Helper: get last month in "YYYY-MM" format
 function getLastMonth(): string {
@@ -80,17 +81,9 @@ export default function ScoreHubPage() {
     const { data: session, status } = useSession();
     const router = useRouter();
     const sessionUser = session?.user as any;
-    // Mirrors `canSeeReports` from the sidebar so the page-level gate
-    // doesn't drop users the sidebar grants access to. Admin tier
-    // (ceo / developer / special_access / role=admin) gets in alongside
-    // managers + HoDs.
-    const canAccess =
-        sessionUser?.orgLevel === "ceo" ||
-        sessionUser?.isDeveloper === true ||
-        sessionUser?.orgLevel === "special_access" ||
-        sessionUser?.role === "admin" ||
-        sessionUser?.orgLevel === "manager" ||
-        sessionUser?.orgLevel === "hod";
+    // Defer to the shared helper so the page-level gate stays in sync
+    // with the sidebar — admin tier + manager + hod + hr_manager.
+    const canAccess = canSeeReports(sessionUser);
 
     useEffect(() => {
         if (status === "loading") return;
