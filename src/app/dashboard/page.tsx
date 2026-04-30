@@ -14,25 +14,25 @@ export default function DashboardPage() {
     const { data: session, status } = useSession();
     const router = useRouter();
     const sessionUser = session?.user as any;
-    const isCeo = sessionUser?.orgLevel === "ceo" || sessionUser?.isDeveloper === true;
+    // Dashboard (cases analytics) is developer-only. Everyone else —
+    // including CEO and admins — gets redirected to the HR home which
+    // works for every role.
+    const canAccess = sessionUser?.isDeveloper === true;
 
     useEffect(() => {
         if (status === "loading") return;
-        // Non-CEO/developers don't have access to the cases dashboard. Send
-        // them to the HR home (Keka-style analytics) which works for every
-        // role — instead of YouTube which used to be the dumping ground.
-        if (!isCeo) {
+        if (!canAccess) {
             router.replace("/dashboard/hr/home");
         }
-    }, [status, isCeo]);
+    }, [status, canAccess]);
 
-    const { data, error, isLoading } = useSWR(isCeo ? "/api/dashboard/my" : null, fetcher, swrConfig);
+    const { data, error, isLoading } = useSWR(canAccess ? "/api/dashboard/my" : null, fetcher, swrConfig);
 
     if (status === "loading" || isLoading) {
         return <DashboardSkeleton cards={4} />;
     }
 
-    if (!isCeo) return null;
+    if (!canAccess) return null;
 
     if (error) {
         return (

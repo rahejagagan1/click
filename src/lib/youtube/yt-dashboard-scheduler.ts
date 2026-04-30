@@ -1,5 +1,6 @@
-import { getCronJobsConfig, saveCronJobsConfig, type CronJobsConfig } from "@/lib/cron-jobs-config";
-import { runYoutubeDashboardSync } from "./yt-dashboard-sync";
+import { getCronJobsConfig, saveCronJobsConfig } from "@/lib/cron-jobs-config";
+import { CRON_JOB_IDS, type CronJobId } from "@/lib/cron-jobs-registry";
+import { CRON_JOB_RUNNERS } from "@/lib/cron-jobs-runners";
 import { closeMissedClockOuts } from "@/lib/hr/close-missed-clockouts";
 import {
   sendMissedClockInReminders,
@@ -43,29 +44,37 @@ function istClock(): { day: string; hour: number; minute: number } {
 }
 
 /**
- * If auto-sync is enabled in DB and interval has elapsed, runs sync and updates lastAutoRunAt.
+ * Generic per-job auto-runner. Iterates through every registered cron
+ * job, runs the ones whose interval has elapsed, and stamps
+ * `lastAutoRunAt` on success. Errors in one job don't block others.
  */
-export async function maybeRunYoutubeDashboardAutoSync(): Promise<void> {
+export async function maybeRunDueCronJobs(): Promise<void> {
     const cfg = await getCronJobsConfig();
-    const job = cfg.youtube_dashboard;
-    if (!job.enabled) return;
-
-    const intervalMs = job.intervalHours * 60 * 60 * 1000;
-    const last = job.lastAutoRunAt ? new Date(job.lastAutoRunAt).getTime() : 0;
-    const due = last === 0 || Date.now() - last >= intervalMs;
-    if (!due) return;
-
-    await runYoutubeDashboardSync();
-
-    const next: CronJobsConfig = {
-        ...cfg,
-        youtube_dashboard: {
-            ...job,
-            lastAutoRunAt: new Date().toISOString(),
-        },
-    };
-    await saveCronJobsConfig(next);
+    let dirty = false;
+    for (const id of CRON_JOB_IDS) {
+        const job = cfg[id];
+        if (!job?.enabled) continue;
+        const intervalMs = job.intervalHours * 60 * 60 * 1000;
+        const last = job.lastAutoRunAt ? new Date(job.lastAutoRunAt).getTime() : 0;
+        const due = last === 0 || Date.now() - last >= intervalMs;
+        if (!due) continue;
+        try {
+            await CRON_JOB_RUNNERS[id]();
+            cfg[id] = { ...job, lastAutoRunAt: new Date().toISOString() };
+            dirty = true;
+            console.log(`[CronScheduler] auto-ran job=${id}`);
+        } catch (e) {
+            console.error(`[CronScheduler] job=${id} failed:`, e);
+        }
+    }
+    if (dirty) {
+        try { await saveCronJobsConfig(cfg); }
+        catch (e) { console.error("[CronScheduler] failed to persist last-run:", e); }
+    }
 }
+
+/// Back-compat alias — older imports referenced this name.
+export const maybeRunYoutubeDashboardAutoSync = maybeRunDueCronJobs;
 
 /**
  * Polls DB every 60s. Requires long-running Node (`next start`).
@@ -78,7 +87,7 @@ export function startInternalCronScheduler(): void {
     console.log("[CronScheduler] 60s poll started (YouTube dashboard + HR missed-clockout sweeper)");
 
     setInterval(() => {
-        maybeRunYoutubeDashboardAutoSync().catch((e) => console.error("[CronScheduler/yt]", e));
+        maybeRunDueCronJobs().catch((e) => console.error("[CronScheduler/jobs]", e));
 
         // HR: sweep stale clock-ins once an hour. Cheap single UPDATE; usually 0 rows.
         const now = Date.now();
