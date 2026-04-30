@@ -56,7 +56,10 @@ export default function Sidebar() {
     // CEO-only items stay restricted to the actual CEO + developers — `Dashboard`
     // for instance is the org-wide CEO console, not appropriate for special_access.
     const isCeo = user?.orgLevel === "ceo" || user?.isDeveloper === true;
-    const canSeeReports = isAdmin || user?.orgLevel === "manager" || user?.orgLevel === "hod";
+    const canSeeReports = isAdmin
+        || user?.orgLevel === "manager"
+        || user?.orgLevel === "hod"
+        || user?.orgLevel === "hr_manager";
     const canSeeViolationLog = isAdmin || user?.orgLevel === "special_access" || user?.role === "hr_manager";
     const showFeedbackSubmenu = canViewFeedbackInbox(user);
 

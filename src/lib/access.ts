@@ -34,14 +34,15 @@ export function isHRAdmin(user: ClientUser): boolean {
 }
 
 /**
- * "Can see reports / scores" tier — admin tier + managers + heads of
- * department. Mirrors `canSeeReports` in the sidebar.
+ * "Can see reports / scores" tier — admin tier + managers + HoDs + HR
+ * managers. Mirrors `canSeeReports` in the sidebar.
  */
 export function canSeeReports(user: ClientUser): boolean {
   return (
     isAdmin(user) ||
     user?.orgLevel === "manager" ||
-    user?.orgLevel === "hod"
+    user?.orgLevel === "hod" ||
+    user?.orgLevel === "hr_manager"
   );
 }
 
@@ -60,6 +61,7 @@ export const HR_MANAGER_ALLOWED_TABS = new Set<string>([
   "leaves",
   "holidays",
   "assets",
+  "departments",
 ]);
 
 export const HR_MANAGER_ALLOWED_RAIL_LINKS = new Set<string>([
