@@ -70,9 +70,16 @@ export const HR_MANAGER_ALLOWED_RAIL_LINKS = new Set<string>([
 
 /**
  * True when the viewer should see ALL HR Dashboard tabs (no whitelist).
- * Reserved for the top admin tier — hr_manager users get the curated
- * subset above instead.
+ *
+ * Includes:
+ *   • Top admin tier (developer / CEO / special_access / role=admin)
+ *   • role="hr_manager" — the actual HR Manager designation, distinct
+ *     from someone whose only HR claim is `orgLevel="hr_manager"`.
+ *
+ * "Normal HR" users (orgLevel="hr_manager" without role="hr_manager")
+ * still get the HR Dashboard via `isHRAdmin`, but only the curated
+ * tabs in HR_MANAGER_ALLOWED_TABS / HR_MANAGER_ALLOWED_RAIL_LINKS.
  */
 export function isFullHRAdmin(user: ClientUser): boolean {
-  return isAdmin(user);
+  return isAdmin(user) || user?.role === "hr_manager";
 }

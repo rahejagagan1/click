@@ -72,21 +72,31 @@ export default function Sidebar() {
     const tabAllowed = (key: string) => (perms?.permissions?.[key] ?? true);
 
     const visibleItems = NAV_ITEMS.filter((item) => {
-        if ((item as any).ceoOnly && !isCeo) return false;
-        if ((item as any).managersOnly && !canSeeReports) return false;
-        if ((item as any).adminOnly && !isAdmin) return false;
-        if ((item as any).developerOnly && user?.isDeveloper !== true) return false;
-        if ((item as any).youtubeDashboardAccess && !userCanAccessYoutubeDashboard(user)) return false;
-        // Per-user tab permission gates. Label-to-key mapping mirrors TAB_CATALOG.
-        // Note: "Admin" isn't gated via permissions — it's governed by
-        // orgLevel/isDeveloper only, same as before.
         const label = (item as any).label as string;
+        // Items that ARE in the Tab Permissions catalog let the per-user
+        // permission win — that's what makes the Permissions UI actually
+        // grant access. tabPermissionsForUser() already incorporates role
+        // defaults, so a Member with no explicit row still gets `false`
+        // for admin tabs; an admin granting `cases: true` to that Member
+        // now actually unlocks Cases.
         const keyMap: Record<string, string> = {
             "Dashboard": "dashboard", "Cases": "cases", "Company": "company",
             "Scores": "scores", "YouTube": "youtube", "Feedback": "feedback",
         };
         const k = keyMap[label];
-        if (k && !tabAllowed(k)) return false;
+        if (k) {
+            // YouTube has a separate per-user channel-access check that's
+            // distinct from Tab Permissions — keep it stacked on top.
+            if ((item as any).youtubeDashboardAccess && !userCanAccessYoutubeDashboard(user)) return false;
+            return tabAllowed(k);
+        }
+
+        // Items NOT in the catalog (Tools, Admin) — role gates decide,
+        // since there's no per-user toggle to defer to.
+        if ((item as any).ceoOnly && !isCeo) return false;
+        if ((item as any).managersOnly && !canSeeReports) return false;
+        if ((item as any).adminOnly && !isAdmin) return false;
+        if ((item as any).developerOnly && user?.isDeveloper !== true) return false;
         return true;
     });
 

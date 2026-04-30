@@ -19,6 +19,8 @@ export type TabKey =
   | "hr_my_team"
   | "hr_admin"
   | "hr_people"
+  | "hr_hiring"
+  | "hr_offboard"
   | "reports"
   | "departments"
   | "violations";
@@ -52,6 +54,8 @@ export const TAB_CATALOG: TabDef[] = [
   { key: "hr_my_team",  label: "My Team",       description: "Team overview + inbox (managers)",   pathPrefixes: ["/dashboard/hr/my-team","/dashboard/hr/inbox"], defaultForNewUser: false },
   { key: "hr_admin",    label: "HR Dashboard",  description: "HR-admin: approvals, shifts, etc.",  pathPrefixes: ["/dashboard/hr/admin","/dashboard/hr/assets"], defaultForNewUser: false },
   { key: "hr_people",   label: "People",        description: "Employee directory + onboard",       pathPrefixes: ["/dashboard/hr/people","/dashboard/hr/onboard"], defaultForNewUser: false },
+  { key: "hr_hiring",   label: "Hiring",        description: "Job openings + applications inbox",  pathPrefixes: ["/dashboard/hr/hiring"], defaultForNewUser: false },
+  { key: "hr_offboard", label: "Offboarding",   description: "Exit workflow + clearance tracking", pathPrefixes: ["/dashboard/hr/offboard"], defaultForNewUser: false },
   { key: "reports",     label: "Reports",       description: "Manager weekly / monthly reports",   pathPrefixes: ["/dashboard/reports"],                   defaultForNewUser: false },
   { key: "departments", label: "Departments",   description: "Department pages",                   pathPrefixes: ["/dashboard/department"],                defaultForNewUser: false },
   { key: "violations",  label: "Violation Log", description: "Attendance / policy violations",     pathPrefixes: ["/dashboard/violations"],                defaultForNewUser: false },
@@ -88,6 +92,7 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
   ceo: {
     dashboard:true, cases:true, company:true, scores:true,
     hr_my_team:true, hr_admin:true, hr_people:true,
+    hr_hiring:true, hr_offboard:true,
     reports:true, departments:true, violations:true,
   },
   // special_access is the senior-admin role — same visibility as CEO
@@ -96,6 +101,7 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
   special_access: {
     cases:true, company:true, scores:true,
     hr_my_team:true, hr_admin:true, hr_people:true,
+    hr_hiring:true, hr_offboard:true,
     reports:true, departments:true, violations:true,
   },
   hod: {
@@ -103,6 +109,7 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
   },
   hr_manager: {
     hr_my_team: true, hr_admin: true, hr_people: true,
+    hr_hiring: true, hr_offboard: true,
     // role='hr_manager' → canSeeViolationLog → violations visible.
     violations: true,
   },
