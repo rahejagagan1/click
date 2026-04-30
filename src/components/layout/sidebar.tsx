@@ -85,8 +85,10 @@ export default function Sidebar() {
         const keyMap: Record<string, string> = {
             // "Dashboard" intentionally omitted — it is developer-only and
             // must NOT be unlockable via the per-user Tab Permissions UI.
+            // "Admin" intentionally omitted — admin/CEO/dev only.
             "Cases": "cases", "Company": "company",
             "Scores": "scores", "YouTube": "youtube", "Feedback": "feedback",
+            "Tools": "tools",
         };
         const k = keyMap[label];
         if (k) {
@@ -339,17 +341,21 @@ export default function Sidebar() {
                     const A = "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]";
                     return (
                         <>
-                            <Link href="/dashboard/hr/home"
-                                className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", homeActive ? A : E)}>
-                                <Home size={15} strokeWidth={1.75} className={homeActive ? "text-[#0f6ecd]" : ""} />
-                                Home
-                            </Link>
-                            <div ref={hrMeTrigger} {...meHandlers}
-                                onDoubleClick={() => { setHrMeOpen(false); router.push("/dashboard/hr/attendance"); }}
-                                className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer select-none", isMeActive || hrMeOpen ? A : E)}>
-                                <User size={15} strokeWidth={1.75} className={isMeActive || hrMeOpen ? "text-[#0f6ecd]" : ""} />
-                                Me
-                            </div>
+                            {tabAllowed("hr_home") && (
+                                <Link href="/dashboard/hr/home"
+                                    className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", homeActive ? A : E)}>
+                                    <Home size={15} strokeWidth={1.75} className={homeActive ? "text-[#0f6ecd]" : ""} />
+                                    Home
+                                </Link>
+                            )}
+                            {tabAllowed("hr_me") && (
+                                <div ref={hrMeTrigger} {...meHandlers}
+                                    onDoubleClick={() => { setHrMeOpen(false); router.push("/dashboard/hr/attendance"); }}
+                                    className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer select-none", isMeActive || hrMeOpen ? A : E)}>
+                                    <User size={15} strokeWidth={1.75} className={isMeActive || hrMeOpen ? "text-[#0f6ecd]" : ""} />
+                                    Me
+                                </div>
+                            )}
                             {/* My Finances — pinned tile with a Summary / My Pay / Manage Tax flyout */}
                             {(() => {
                                 const financesHandlers = makeHrHandlers(setFinancesOpen, setFinancesY, financesTrigger, financesTimer);
@@ -468,7 +474,7 @@ export default function Sidebar() {
                 })}
 
                 {/* Report — visible to CEO, developers, managers, HODs only */}
-                {canSeeReports && (!isAdmin ? (
+                {canSeeReports && tabAllowed("reports") && (!isAdmin ? (
                     <Link
                         href={`/dashboard/reports/${user?.dbId}`}
                         className={cn(
@@ -565,8 +571,8 @@ export default function Sidebar() {
                     </div>
                 ))}
 
-                {/* Dept. — visible to admins, hover submenu with department names */}
-                {isAdmin && (() => {
+                {/* Dept. — visible to admins (AND tab-permission allows it) */}
+                {isAdmin && tabAllowed("departments") && (() => {
                     const isDeptActive = pathname.startsWith("/dashboard/departments");
                     return (
                         <div
@@ -637,8 +643,9 @@ export default function Sidebar() {
                     );
                 })()}
 
-                {/* System Violation Log — HR, Special Access, CEO, Developer only */}
-                {canSeeViolationLog && (() => {
+                {/* System Violation Log — HR, Special Access, CEO, Developer
+                    AND tab-permission allows it. */}
+                {canSeeViolationLog && tabAllowed("violations") && (() => {
                     const isActive = pathname.startsWith("/dashboard/violations");
                     return (
                         <Link
@@ -701,24 +708,26 @@ export default function Sidebar() {
                         <>
                             <p className="hidden text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mt-5 mb-2 px-1 text-center">HR & People</p>
 
-                            {/* MY TEAM trigger */}
-                            <div ref={hrTeamTrigger} {...teamHandlers}
-                                className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isTeamActive || hrTeamOpen ? A : E)}>
-                                <span className="relative inline-flex">
-                                    <Users size={15} strokeWidth={1.75} className={isTeamActive || hrTeamOpen ? "text-[#0f6ecd]" : ""} />
-                                    {inboxCount > 0 && (
-                                        <span className="absolute -top-1.5 -right-2.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-[#008CFF] px-[3px] text-[9px] font-bold leading-none text-white tabular-nums ring-2 ring-[#f7f9fc]">
-                                            {inboxCount > 99 ? "99+" : inboxCount}
-                                        </span>
-                                    )}
-                                </span>
-                                My Team
-                            </div>
+                            {/* MY TEAM trigger — gated by hr_my_team toggle */}
+                            {tabAllowed("hr_my_team") && (
+                                <div ref={hrTeamTrigger} {...teamHandlers}
+                                    className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isTeamActive || hrTeamOpen ? A : E)}>
+                                    <span className="relative inline-flex">
+                                        <Users size={15} strokeWidth={1.75} className={isTeamActive || hrTeamOpen ? "text-[#0f6ecd]" : ""} />
+                                        {inboxCount > 0 && (
+                                            <span className="absolute -top-1.5 -right-2.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-[#008CFF] px-[3px] text-[9px] font-bold leading-none text-white tabular-nums ring-2 ring-[#f7f9fc]">
+                                                {inboxCount > 99 ? "99+" : inboxCount}
+                                            </span>
+                                        )}
+                                    </span>
+                                    My Team
+                                </div>
+                            )}
 
                             {/* ORGANISATION */}
                             <div className="mx-3 mt-4 mb-1.5 border-t border-[#e4ebf2]" />
                             <p className="hidden text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1.5 px-1 text-center">Organisation</p>
-                            {[
+                            {tabAllowed("hr_people") && [
                                 { href: "/dashboard/hr/people", label: "People", Icon: Users },
                             ].map(({ href, label, Icon }) => {
                                 const active = pathname === href || pathname.startsWith(href + "/");
@@ -731,8 +740,9 @@ export default function Sidebar() {
                                 );
                             })}
 
-                            {/* HR DASHBOARD — direct link to the tabbed hub page */}
-                            {isHRAdmin && (
+                            {/* HR DASHBOARD — direct link to the tabbed hub
+                                page. Role gate AND tab toggle must both pass. */}
+                            {isHRAdmin && tabAllowed("hr_admin") && (
                                 <>
                                     <div className="mx-3 mt-4 mb-1.5 border-t border-[#e4ebf2]" />
                                     <Link href="/dashboard/hr/admin"
