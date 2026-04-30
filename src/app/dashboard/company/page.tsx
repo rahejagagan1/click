@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import useSWR from "swr";
+import { useSession } from "next-auth/react";
 import { fetcher, swrConfig } from "@/lib/swr";
 import SummaryCards from "@/components/dashboard/summary-cards";
 import Leaderboard from "@/components/dashboard/leaderboard";
@@ -15,6 +16,11 @@ export default function CompanyDashboardPage() {
         swrConfig
     );
     const [syncing, setSyncing] = useState(false);
+    // Sync Now is dev-only — only show the button to users flagged as
+    // developers via DEVELOPER_EMAILS in env. Everyone else just sees
+    // the dashboard without the button.
+    const { data: session } = useSession();
+    const isDeveloper = (session?.user as any)?.isDeveloper === true;
 
     const handleSync = async () => {
         setSyncing(true);
@@ -85,19 +91,21 @@ export default function CompanyDashboardPage() {
                     <h1 className="text-2xl font-bold text-white">Company Dashboard</h1>
                     <p className="text-sm text-slate-500 mt-1">Company-wide production analytics</p>
                 </div>
-                <button
-                    onClick={handleSync}
-                    disabled={syncing}
-                    className="px-4 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 rounded-xl text-sm font-medium text-white transition-all disabled:opacity-50 flex items-center gap-2"
-                >
-                    {syncing && (
-                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                    )}
-                    {syncing ? "Syncing..." : "Sync Now"}
-                </button>
+                {isDeveloper && (
+                    <button
+                        onClick={handleSync}
+                        disabled={syncing}
+                        className="px-4 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 rounded-xl text-sm font-medium text-white transition-all disabled:opacity-50 flex items-center gap-2"
+                    >
+                        {syncing && (
+                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                        )}
+                        {syncing ? "Syncing..." : "Sync Now"}
+                    </button>
+                )}
             </div>
 
             <SummaryCards cards={cards} />
