@@ -71,6 +71,8 @@ export async function GET() {
         rawStatus:    rec?.status ?? "absent",
         locationAddress: loc?.address ?? null,
         locationMode:    mode,
+        locationLat:     loc?.lat   ?? null,
+        locationLng:     loc?.lng   ?? null,
         status, // derived: on_leave | remote | office | absent
       };
     });
