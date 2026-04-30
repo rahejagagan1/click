@@ -12,9 +12,13 @@ export function hasProtectedRole(user: {
   role?: string | null;
   isDeveloper?: boolean | null;
 }): boolean {
+  // Top-tier admin roles — always see every tab, can never be restricted by
+  // a UserTabPermission row, and the Permissions UI renders their toggles
+  // as "Protected" so a regular admin can't lock them out.
   if (user.isDeveloper === true) return true;
   if (user.orgLevel === "ceo") return true;
   if (user.orgLevel === "special_access") return true;
+  if (user.role === "admin") return true;
   return false;
 }
 
@@ -77,8 +81,17 @@ export async function tabPermissionsForUser(userId: number): Promise<Record<TabK
   // by default, a new Member only gets the 4 basic tabs, etc.
   const out = defaultTabPermissions(user?.orgLevel);
 
-  // Developers override everything — they always see every tab.
-  if (isDeveloper) {
+  // Top-tier admin override — developers, CEO, special_access, and
+  // anyone with role="admin" always see every tab. Their UserTabPermission
+  // rows (if any) are ignored at runtime so they can never be partially
+  // locked out. Matches `hasProtectedRole`.
+  if (
+    hasProtectedRole({
+      orgLevel: user?.orgLevel,
+      role:     user?.role,
+      isDeveloper,
+    })
+  ) {
     for (const t of TAB_CATALOG) out[t.key] = true;
     return out;
   }
