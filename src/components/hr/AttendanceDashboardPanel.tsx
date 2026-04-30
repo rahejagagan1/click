@@ -5,7 +5,7 @@ import useSWR from "swr";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { fetcher } from "@/lib/swr";
-import { Users, CalendarOff, CheckCircle2, Home, Search, CircleUser, Clock, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
+import { Users, CalendarOff, CheckCircle2, Home, Search, CircleUser, Clock, ChevronLeft, ChevronRight, ChevronDown, MapPin } from "lucide-react";
 import FilterDropdown, { FilterOption } from "@/components/hr/FilterDropdown";
 
 type Row = {
@@ -16,6 +16,7 @@ type Row = {
   workLocation: string | null;
   clockIn: string | null; clockOut: string | null; totalMinutes: number;
   rawStatus: string; locationAddress: string | null; locationMode: string | null;
+  locationLat: number | null; locationLng: number | null;
   status: "office" | "remote" | "on_leave" | "absent";
 };
 
@@ -612,7 +613,7 @@ export default function AttendanceDashboardPanel() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/60">
-                  {["EMPLOYEE","EMP #","DEPARTMENT","TEAM CAPSULE","CLOCK IN","CLOCK OUT","DURATION","STATUS"].map((h) => (
+                  {["EMPLOYEE","EMP #","DEPARTMENT","TEAM CAPSULE","CLOCK IN","CLOCK OUT","DURATION","LOCATION","STATUS"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -638,6 +639,32 @@ export default function AttendanceDashboardPanel() {
                     <td className="px-4 py-3 text-[12.5px] text-slate-700 tabular-nums">{fmtTime(r.clockOut)}</td>
                     <td className="px-4 py-3 text-[12.5px] text-slate-700 tabular-nums">
                       {r.totalMinutes > 0 ? fmtMins(r.totalMinutes) : (r.clockIn ? <span className="inline-flex items-center gap-1 text-[#008CFF]"><Clock size={12} /> ongoing</span> : "—")}
+                    </td>
+                    {/* Where they clocked in from. Mode-coloured pin + truncated
+                        address with the full address as a tooltip; clicking
+                        opens Google Maps if we have GPS coords for the row. */}
+                    <td className="px-4 py-3 text-[12.5px] text-slate-700 max-w-[200px]">
+                      {r.clockIn && (r.locationAddress || r.locationLat != null) ? (
+                        r.locationLat != null && r.locationLng != null ? (
+                          <a
+                            href={`https://www.google.com/maps/search/?api=1&query=${r.locationLat},${r.locationLng}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={r.locationAddress || `${r.locationLat}, ${r.locationLng}`}
+                            className="inline-flex items-center gap-1.5 max-w-full truncate hover:text-[#008CFF] hover:underline"
+                          >
+                            <MapPin size={12} className={r.locationMode === "remote" ? "text-violet-500" : "text-emerald-500"} />
+                            <span className="truncate">{r.locationAddress || "View on map"}</span>
+                          </a>
+                        ) : (
+                          <span title={r.locationAddress ?? undefined} className="inline-flex items-center gap-1.5 max-w-full truncate">
+                            <MapPin size={12} className={r.locationMode === "remote" ? "text-violet-500" : "text-emerald-500"} />
+                            <span className="truncate">{r.locationAddress}</span>
+                          </span>
+                        )
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3"><StatusPill s={r.status} rawStatus={r.rawStatus} /></td>
                   </tr>
