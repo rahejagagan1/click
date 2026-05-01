@@ -64,7 +64,15 @@ const VIOLATION_TYPE_OPTIONS = [
 export default function ViolationsPage() {
     const { data: session } = useSession();
     const sessionUser = session?.user as any;
-    const canDelete = sessionUser?.orgLevel === "ceo" || sessionUser?.isDeveloper === true;
+    // Mirrors the DELETE gate in /api/violations: admin tier only
+    // (CEO / dev / special_access / role=admin). Was narrower before —
+    // role=admin and special_access users couldn't see the delete
+    // button even though they're admins.
+    const canDelete =
+        sessionUser?.orgLevel === "ceo" ||
+        sessionUser?.orgLevel === "special_access" ||
+        sessionUser?.role === "admin" ||
+        sessionUser?.isDeveloper === true;
 
     const [violations, setViolations] = useState<Violation[]>([]);
     const [summary, setSummary] = useState<Summary>({ total: 0, open: 0, inProgress: 0, closed: 0, highCritical: 0 });
@@ -459,7 +467,7 @@ export default function ViolationsPage() {
                                         </select>
                                     </div>
                                     <div>
-                                        <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Responsible Person</label>
+                                        <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Manager</label>
                                         <select value={editData.responsiblePersonId} onChange={e => setEditData(p => ({ ...p, responsiblePersonId: Number(e.target.value) }))}
                                             className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
                                             <option value={0}>Select...</option>
@@ -534,7 +542,7 @@ export default function ViolationsPage() {
                                         </div>
                                         {v.responsiblePerson && (
                                             <div className="mb-3">
-                                                <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Responsible Person</p>
+                                                <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Manager</p>
                                                 <div className="flex items-center gap-2">
                                                     <UserAvatar name={v.responsiblePerson.name} src={v.responsiblePerson.profilePictureUrl} size="sm" />
                                                     <span className="text-sm text-slate-700 dark:text-slate-300">{v.responsiblePerson.name}</span>
@@ -605,7 +613,7 @@ export default function ViolationsPage() {
                         </div>
                     </div>
 
-                    {/* Row: Violation Type + Responsible Person */}
+                    {/* Row: Violation Type + Manager */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Violation Type</label>
@@ -616,7 +624,7 @@ export default function ViolationsPage() {
                             </select>
                         </div>
                         <div>
-                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Responsible Person</label>
+                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Manager</label>
                             <select value={newViolation.responsiblePersonId} onChange={e => setNewViolation(p => ({ ...p, responsiblePersonId: Number(e.target.value) }))}
                                 className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
                                 <option value={0}>Select...</option>

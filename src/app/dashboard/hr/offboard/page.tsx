@@ -14,6 +14,7 @@ import { useMemo, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
+import { isHRAdmin } from "@/lib/access";
 import {
   UserMinus, Search, AlertCircle, CheckCircle2, X, Save,
 } from "lucide-react";
@@ -51,8 +52,8 @@ const fmtDate = (d: string | Date) =>
 export default function OffboardPage() {
   const { data: session } = useSession();
   const me = session?.user as any;
-  const canManage = me?.orgLevel === "ceo" || me?.isDeveloper === true ||
-                    me?.orgLevel === "hr_manager" || me?.role === "admin";
+  // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access.
+  const canManage = isHRAdmin(me);
 
   const [tab, setTab] = useState<"initiate" | "past">("initiate");
 
