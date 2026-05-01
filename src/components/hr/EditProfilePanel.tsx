@@ -161,20 +161,38 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
 
   // ── Section: Job & Work ───────────────────────────────────────────
   const [job, setJob] = useState({
-    designation:      p.designation ?? "",
-    department:       p.department ?? "",
-    businessUnit:     p.businessUnit ?? "NB Media",
-    employmentType:   p.employmentType ?? "fulltime",
-    workLocation:     p.workLocation ?? "office",
-    joiningDate:      dateISO(p.joiningDate),
-    noticePeriodDays: String(p.noticePeriodDays ?? "30"),
-    role:             user.role ?? "member",
-    orgLevel:         user.orgLevel ?? "member",
-    managerId:        user.manager?.id ? String(user.manager.id) : "",
-    inlineManagerId:  user.inlineManager?.id ? String(user.inlineManager.id) : "",
-    teamCapsule:      user.teamCapsule ?? "",
+    designation:        p.designation ?? "",
+    secondaryJobTitle:  p.secondaryJobTitle ?? "",
+    department:         p.department ?? "",
+    businessUnit:       p.businessUnit ?? "NB Media",
+    legalEntity:        p.legalEntity ?? "NB Media Productions",
+    employmentType:     p.employmentType ?? "fulltime",
+    workLocation:       p.workLocation ?? "office",
+    jobLocation:        p.jobLocation ?? "Mohali",
+    workCountry:        p.workCountry ?? "India",
+    nationality:        p.nationality ?? "India",
+    joiningDate:        dateISO(p.joiningDate),
+    internshipEndDate:  dateISO(p.internshipEndDate),
+    noticePeriodDays:   String(p.noticePeriodDays ?? "30"),
+    probationPolicy:    p.probationPolicy ?? "Regular Employees",
+    role:               user.role ?? "member",
+    orgLevel:           user.orgLevel ?? "member",
+    managerId:          user.manager?.id ? String(user.manager.id) : "",
+    inlineManagerId:    user.inlineManager?.id ? String(user.inlineManager.id) : "",
+    teamCapsule:        user.teamCapsule ?? "",
   });
   const jobHook = useSaveSection(userId);
+
+  // ── Section: Work Settings (step 3 of the onboarding wizard) ──────
+  const [work, setWork] = useState({
+    leavePlan:          p.leavePlan ?? "Regular Leave Plan",
+    holidayList:        p.holidayList ?? "Default Holiday List",
+    weeklyOff:          p.weeklyOff ?? "Standard Weekly Off",
+    attendanceNumber:   p.attendanceNumber ?? "",
+    timeTrackingPolicy: p.timeTrackingPolicy ?? "On-Site Capture",
+    penalizationPolicy: p.penalizationPolicy ?? "Default",
+  });
+  const workHook = useSaveSection(userId);
 
   // ── Section: Identity (sensitive — empty by default; HR re-enters) ─
   const [identity, setIdentity] = useState({
@@ -206,18 +224,33 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
       address: p.address ?? "", city: p.city ?? "", state: p.state ?? "",
     });
     setJob({
-      designation:      p.designation ?? "",
-      department:       p.department ?? "",
-      businessUnit:     p.businessUnit ?? "NB Media",
-      employmentType:   p.employmentType ?? "fulltime",
-      workLocation:     p.workLocation ?? "office",
-      joiningDate:      dateISO(p.joiningDate),
-      noticePeriodDays: String(p.noticePeriodDays ?? "30"),
-      role:             user.role ?? "member",
-      orgLevel:         user.orgLevel ?? "member",
-      managerId:        user.manager?.id ? String(user.manager.id) : "",
-      inlineManagerId:  user.inlineManager?.id ? String(user.inlineManager.id) : "",
-      teamCapsule:      user.teamCapsule ?? "",
+      designation:        p.designation ?? "",
+      secondaryJobTitle:  p.secondaryJobTitle ?? "",
+      department:         p.department ?? "",
+      businessUnit:       p.businessUnit ?? "NB Media",
+      legalEntity:        p.legalEntity ?? "NB Media Productions",
+      employmentType:     p.employmentType ?? "fulltime",
+      workLocation:       p.workLocation ?? "office",
+      jobLocation:        p.jobLocation ?? "Mohali",
+      workCountry:        p.workCountry ?? "India",
+      nationality:        p.nationality ?? "India",
+      joiningDate:        dateISO(p.joiningDate),
+      internshipEndDate:  dateISO(p.internshipEndDate),
+      noticePeriodDays:   String(p.noticePeriodDays ?? "30"),
+      probationPolicy:    p.probationPolicy ?? "Regular Employees",
+      role:               user.role ?? "member",
+      orgLevel:           user.orgLevel ?? "member",
+      managerId:          user.manager?.id ? String(user.manager.id) : "",
+      inlineManagerId:    user.inlineManager?.id ? String(user.inlineManager.id) : "",
+      teamCapsule:        user.teamCapsule ?? "",
+    });
+    setWork({
+      leavePlan:          p.leavePlan ?? "Regular Leave Plan",
+      holidayList:        p.holidayList ?? "Default Holiday List",
+      weeklyOff:          p.weeklyOff ?? "Standard Weekly Off",
+      attendanceNumber:   p.attendanceNumber ?? "",
+      timeTrackingPolicy: p.timeTrackingPolicy ?? "On-Site Capture",
+      penalizationPolicy: p.penalizationPolicy ?? "Default",
     });
     setIdentity((s) => ({ ...s, parentName: p.parentName ?? "" }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -378,18 +411,25 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
         error={jobHook.error}
         savedAt={jobHook.savedAt}
         onSave={() => jobHook.save({
-          designation:      job.designation.trim() || null,
-          department:       job.department.trim() || null,
-          businessUnit:     job.businessUnit.trim() || "NB Media",
-          employmentType:   job.employmentType,
-          workLocation:     job.workLocation,
-          joiningDate:      job.joiningDate || null,
-          noticePeriodDays: job.noticePeriodDays === "" ? null : Number(job.noticePeriodDays),
-          role:             job.role,
-          orgLevel:         job.orgLevel,
-          managerId:        job.managerId === "" ? null : Number(job.managerId),
-          inlineManagerId:  job.inlineManagerId === "" ? null : Number(job.inlineManagerId),
-          teamCapsule:      job.teamCapsule.trim() || null,
+          designation:        job.designation.trim() || null,
+          secondaryJobTitle:  job.secondaryJobTitle.trim() || null,
+          department:         job.department.trim() || null,
+          businessUnit:       job.businessUnit.trim() || "NB Media",
+          legalEntity:        job.legalEntity.trim() || null,
+          employmentType:     job.employmentType,
+          workLocation:       job.workLocation,
+          jobLocation:        job.jobLocation.trim() || null,
+          workCountry:        job.workCountry.trim() || "India",
+          nationality:        job.nationality.trim() || "India",
+          joiningDate:        job.joiningDate || null,
+          internshipEndDate:  job.internshipEndDate || null,
+          noticePeriodDays:   job.noticePeriodDays === "" ? null : Number(job.noticePeriodDays),
+          probationPolicy:    job.probationPolicy.trim() || null,
+          role:               job.role,
+          orgLevel:           job.orgLevel,
+          managerId:          job.managerId === "" ? null : Number(job.managerId),
+          inlineManagerId:    job.inlineManagerId === "" ? null : Number(job.inlineManagerId),
+          teamCapsule:        job.teamCapsule.trim() || null,
         })}
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -397,6 +437,11 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
             <label className={cls.label}>Designation</label>
             <input className={cls.field} value={job.designation}
               onChange={(e) => setJob({ ...job, designation: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>Secondary Job Title</label>
+            <input className={cls.field} value={job.secondaryJobTitle}
+              onChange={(e) => setJob({ ...job, secondaryJobTitle: e.target.value })} placeholder="Optional" />
           </div>
           <div>
             <label className={cls.label}>Department</label>
@@ -419,6 +464,16 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
             />
           </div>
           <div>
+            <label className={cls.label}>Legal Entity</label>
+            <CustomSelect
+              listKey="legalEntity"
+              defaults={["NB Media Productions"]}
+              value={job.legalEntity}
+              onChange={(v) => setJob({ ...job, legalEntity: v })}
+              placeholder="Select legal entity"
+            />
+          </div>
+          <div>
             <label className={cls.label}>Employment Type</label>
             <select className={cls.field} value={job.employmentType}
               onChange={(e) => setJob({ ...job, employmentType: e.target.value })}>
@@ -438,14 +493,58 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
             </select>
           </div>
           <div>
+            <label className={cls.label}>Job Location (City)</label>
+            <CustomSelect
+              listKey="jobLocation"
+              defaults={["Mohali", "Delhi", "Mumbai", "Remote"]}
+              value={job.jobLocation}
+              onChange={(v) => setJob({ ...job, jobLocation: v })}
+              placeholder="Select city"
+            />
+          </div>
+          <div>
+            <label className={cls.label}>Work Country</label>
+            <CustomSelect
+              listKey="workCountry"
+              defaults={["India", "USA", "UK", "UAE", "Singapore"]}
+              value={job.workCountry}
+              onChange={(v) => setJob({ ...job, workCountry: v })}
+            />
+          </div>
+          <div>
+            <label className={cls.label}>Nationality</label>
+            <CustomSelect
+              listKey="nationality"
+              defaults={["India", "USA", "UK", "Other"]}
+              value={job.nationality}
+              onChange={(v) => setJob({ ...job, nationality: v })}
+            />
+          </div>
+          <div>
             <label className={cls.label}>Joining Date</label>
             <input type="date" className={cls.field} value={job.joiningDate}
               onChange={(e) => setJob({ ...job, joiningDate: e.target.value })} />
           </div>
+          {job.employmentType === "intern" && (
+            <div>
+              <label className={cls.label}>Internship End Date</label>
+              <input type="date" className={cls.field} value={job.internshipEndDate}
+                onChange={(e) => setJob({ ...job, internshipEndDate: e.target.value })} />
+            </div>
+          )}
           <div>
             <label className={cls.label}>Notice Period (days)</label>
             <input type="number" min={0} className={cls.field} value={job.noticePeriodDays}
               onChange={(e) => setJob({ ...job, noticePeriodDays: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>Probation Policy</label>
+            <CustomSelect
+              listKey="probationPolicy"
+              defaults={["Interns (3 Months)", "Interns (6 Months)", "Interns (12 Months)", "Regular Employees"]}
+              value={job.probationPolicy}
+              onChange={(v) => setJob({ ...job, probationPolicy: v })}
+            />
           </div>
           <div>
             <label className={cls.label}>Role</label>
@@ -485,6 +584,78 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
             <label className={cls.label}>Team Capsule</label>
             <input className={cls.field} value={job.teamCapsule}
               onChange={(e) => setJob({ ...job, teamCapsule: e.target.value })} />
+          </div>
+        </div>
+      </Section>
+
+      {/* ── Work Settings (mirrors step 3 of the onboarding wizard) ── */}
+      <Section
+        title="Work Settings"
+        icon={Wallet}
+        accent="#0ea5e9"
+        saving={workHook.saving}
+        error={workHook.error}
+        savedAt={workHook.savedAt}
+        onSave={() => workHook.save({
+          leavePlan:          work.leavePlan.trim()          || null,
+          holidayList:        work.holidayList.trim()        || null,
+          weeklyOff:          work.weeklyOff.trim()          || null,
+          attendanceNumber:   work.attendanceNumber.trim()   || null,
+          timeTrackingPolicy: work.timeTrackingPolicy.trim() || null,
+          penalizationPolicy: work.penalizationPolicy.trim() || null,
+        })}
+      >
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className={cls.label}>Leave Plan</label>
+            <CustomSelect
+              listKey="leavePlan"
+              defaults={["Regular Leave Plan", "Regular Leave Plan_2026", "Intern Leave Plan", "None"]}
+              value={work.leavePlan}
+              onChange={(v) => setWork({ ...work, leavePlan: v })}
+            />
+          </div>
+          <div>
+            <label className={cls.label}>Holiday List</label>
+            <CustomSelect
+              listKey="holidayList"
+              defaults={["Default Holiday List", "India Public Holidays"]}
+              value={work.holidayList}
+              onChange={(v) => setWork({ ...work, holidayList: v })}
+            />
+          </div>
+          <div>
+            <label className={cls.label}>Weekly Off</label>
+            <CustomSelect
+              listKey="weeklyOff"
+              defaults={["Standard Weekly Off", "Saturday + Sunday", "Sunday Only", "Custom"]}
+              value={work.weeklyOff}
+              onChange={(v) => setWork({ ...work, weeklyOff: v })}
+            />
+          </div>
+          <div>
+            <label className={cls.label}>Attendance Number</label>
+            <input className={cls.field} value={work.attendanceNumber}
+              onChange={(e) => setWork({ ...work, attendanceNumber: e.target.value })}
+              placeholder="e.g. HRM-69" />
+          </div>
+          <div>
+            <label className={cls.label}>Time Tracking Policy</label>
+            <CustomSelect
+              listKey="timeTrackingPolicy"
+              defaults={["On-Site Capture", "Remote Capture", "Hybrid Capture", "None"]}
+              value={work.timeTrackingPolicy}
+              onChange={(v) => setWork({ ...work, timeTrackingPolicy: v })}
+            />
+          </div>
+          <div>
+            <label className={cls.label}>Penalization Policy</label>
+            <CustomSelect
+              listKey="penalizationPolicy"
+              defaults={["Default", "Strict", "Lenient", "None"]}
+              value={work.penalizationPolicy}
+              onChange={(v) => setWork({ ...work, penalizationPolicy: v })}
+            />
           </div>
         </div>
       </Section>
