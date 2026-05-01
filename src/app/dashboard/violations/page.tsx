@@ -111,7 +111,8 @@ export default function ViolationsPage() {
         setLoading(true);
         const params = new URLSearchParams();
         if (filterStatus) params.set("status", filterStatus);
-        if (filterSeverity) params.set("severity", filterSeverity);
+        // Severity filter is applied client-side now so the L0-L3 tab
+        // strip can show accurate per-tier counts without re-fetching.
         fetch(`/api/violations?${params}`)
             .then(r => r.json())
             .then(d => {
@@ -120,7 +121,7 @@ export default function ViolationsPage() {
             })
             .catch(() => { })
             .finally(() => setLoading(false));
-    }, [filterStatus, filterSeverity]);
+    }, [filterStatus]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -228,13 +229,31 @@ export default function ViolationsPage() {
         }
     };
 
-    const filteredViolations = filterMonth
+    // Two-stage filter: month is applied first (used everywhere
+    // including the per-tier counts on the tab strip), then severity
+    // narrows it down for the actual list. This way the tab counts
+    // reflect the month filter but ignore the active tier so HR can
+    // see "if I cleared this tab, how many would there be?".
+    const monthFilteredViolations = filterMonth
         ? violations.filter(v => {
             const d = v.violationDate ? new Date(v.violationDate) : new Date(v.createdAt);
             const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
             return ym === filterMonth;
         })
         : violations;
+    const filteredViolations = filterSeverity
+        ? monthFilteredViolations.filter(v => v.severity === filterSeverity)
+        : monthFilteredViolations;
+    // Per-tier counts shown on the tab badges. Computed off
+    // monthFilteredViolations so the strip always reflects the
+    // current month/status scope.
+    const tierCounts = {
+        all:      monthFilteredViolations.length,
+        low:      monthFilteredViolations.filter(v => v.severity === "low").length,
+        medium:   monthFilteredViolations.filter(v => v.severity === "medium").length,
+        high:     monthFilteredViolations.filter(v => v.severity === "high").length,
+        critical: monthFilteredViolations.filter(v => v.severity === "critical").length,
+    };
 
     const toggleStatusDropdown = (e: React.MouseEvent, id: number) => {
         e.stopPropagation();
@@ -310,14 +329,8 @@ export default function ViolationsPage() {
                     <option value="in_progress">In Progress</option>
                     <option value="closed">Closed</option>
                 </select>
-                <select value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)}
-                    className="h-9 px-2.5 text-[12.5px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-500/15">
-                    <option value="">All Severity</option>
-                    <option value="low">L0</option>
-                    <option value="medium">L1</option>
-                    <option value="high">L2</option>
-                    <option value="critical">L3</option>
-                </select>
+                {/* Severity filter is now driven by the L0–L3 tab strip
+                    above the records list — no dropdown duplicate. */}
                 <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
                     className="h-9 px-2.5 text-[12.5px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-500/15 cursor-pointer"
                     onClick={e => (e.target as HTMLInputElement).showPicker()} />
@@ -342,6 +355,52 @@ export default function ViolationsPage() {
                     <span className="ml-auto text-[11px] text-slate-400 tabular-nums">
                         {filteredViolations.length} {filteredViolations.length === 1 ? "entry" : "entries"}
                     </span>
+                </div>
+
+                {/* L0–L3 tab strip — replaces the old severity dropdown.
+                    Each tab shows the count for its tier in the current
+                    month/status scope; clicking it narrows the list.
+                    Tailwind class strings are spelled out per-tint so
+                    JIT picks them up (dynamic `bg-${tint}-100` would
+                    not be detected at build time). */}
+                <div className="flex items-center gap-1 border-b border-slate-100 dark:border-white/[0.05] px-3 py-2 overflow-x-auto">
+                    {([
+                        { key: "",         label: "All", count: tierCounts.all,
+                          activeCls: "bg-slate-100 text-slate-800 ring-1 ring-inset ring-slate-300 dark:bg-white/10 dark:text-slate-200" },
+                        { key: "low",      label: "L0",  count: tierCounts.low,
+                          activeCls: "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-300 dark:bg-slate-500/15 dark:text-slate-300" },
+                        { key: "medium",   label: "L1",  count: tierCounts.medium,
+                          activeCls: "bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-300 dark:bg-amber-500/15 dark:text-amber-300" },
+                        { key: "high",     label: "L2",  count: tierCounts.high,
+                          activeCls: "bg-orange-100 text-orange-700 ring-1 ring-inset ring-orange-300 dark:bg-orange-500/15 dark:text-orange-300" },
+                        { key: "critical", label: "L3",  count: tierCounts.critical,
+                          activeCls: "bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-300 dark:bg-rose-500/15 dark:text-rose-300" },
+                    ] as const).map((t) => {
+                        const active = filterSeverity === t.key;
+                        return (
+                            <button
+                                key={t.key || "all"}
+                                type="button"
+                                onClick={() => setFilterSeverity(t.key)}
+                                className={
+                                    "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-colors whitespace-nowrap " +
+                                    (active
+                                        ? t.activeCls
+                                        : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/5")
+                                }
+                            >
+                                {t.label}
+                                <span className={
+                                    "inline-flex items-center justify-center min-w-[20px] rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums " +
+                                    (active
+                                        ? "bg-white/70 dark:bg-white/10"
+                                        : "bg-slate-200 text-slate-600 dark:bg-white/10 dark:text-slate-400")
+                                }>
+                                    {t.count}
+                                </span>
+                            </button>
+                        );
+                    })}
                 </div>
 
                 {loading ? (
