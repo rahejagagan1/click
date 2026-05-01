@@ -41,10 +41,12 @@ interface Summary {
 }
 
 const SEVERITY_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
-    low: { label: "Low", color: "bg-slate-100 dark:bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-500/20", dot: "bg-slate-400" },
-    medium: { label: "Medium", color: "bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/20", dot: "bg-amber-400" },
-    high: { label: "High", color: "bg-orange-100 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-500/20", dot: "bg-orange-500" },
-    critical: { label: "Critical", color: "bg-rose-100 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-500/20", dot: "bg-rose-500" },
+    // Severity labels are L0–L3 in the UI; DB still stores
+    // low/medium/high/critical so existing rows keep working.
+    low:      { label: "L0", color: "bg-slate-100 dark:bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-500/20", dot: "bg-slate-400" },
+    medium:   { label: "L1", color: "bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/20", dot: "bg-amber-400" },
+    high:     { label: "L2", color: "bg-orange-100 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-500/20", dot: "bg-orange-500" },
+    critical: { label: "L3", color: "bg-rose-100 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-500/20", dot: "bg-rose-500" },
 };
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
@@ -109,7 +111,8 @@ export default function ViolationsPage() {
         setLoading(true);
         const params = new URLSearchParams();
         if (filterStatus) params.set("status", filterStatus);
-        if (filterSeverity) params.set("severity", filterSeverity);
+        // Severity filter is applied client-side now so the L0-L3 tab
+        // strip can show accurate per-tier counts without re-fetching.
         fetch(`/api/violations?${params}`)
             .then(r => r.json())
             .then(d => {
@@ -118,7 +121,7 @@ export default function ViolationsPage() {
             })
             .catch(() => { })
             .finally(() => setLoading(false));
-    }, [filterStatus, filterSeverity]);
+    }, [filterStatus]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -226,13 +229,31 @@ export default function ViolationsPage() {
         }
     };
 
-    const filteredViolations = filterMonth
+    // Two-stage filter: month is applied first (used everywhere
+    // including the per-tier counts on the tab strip), then severity
+    // narrows it down for the actual list. This way the tab counts
+    // reflect the month filter but ignore the active tier so HR can
+    // see "if I cleared this tab, how many would there be?".
+    const monthFilteredViolations = filterMonth
         ? violations.filter(v => {
             const d = v.violationDate ? new Date(v.violationDate) : new Date(v.createdAt);
             const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
             return ym === filterMonth;
         })
         : violations;
+    const filteredViolations = filterSeverity
+        ? monthFilteredViolations.filter(v => v.severity === filterSeverity)
+        : monthFilteredViolations;
+    // Per-tier counts shown on the tab badges. Computed off
+    // monthFilteredViolations so the strip always reflects the
+    // current month/status scope.
+    const tierCounts = {
+        all:      monthFilteredViolations.length,
+        low:      monthFilteredViolations.filter(v => v.severity === "low").length,
+        medium:   monthFilteredViolations.filter(v => v.severity === "medium").length,
+        high:     monthFilteredViolations.filter(v => v.severity === "high").length,
+        critical: monthFilteredViolations.filter(v => v.severity === "critical").length,
+    };
 
     const toggleStatusDropdown = (e: React.MouseEvent, id: number) => {
         e.stopPropagation();
@@ -273,7 +294,7 @@ export default function ViolationsPage() {
                     { label: "Open Cases",      value: summary.open,         tint: "#dc2626", iconPath: "M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636" },
                     { label: "In Progress",     value: summary.inProgress,   tint: "#0284c7", iconPath: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" },
                     { label: "Closed Cases",    value: summary.closed,       tint: "#059669", iconPath: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
-                    { label: "High / Critical", value: summary.highCritical, tint: "#d97706", iconPath: "M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" },
+                    { label: "L2 / L3",         value: summary.highCritical, tint: "#d97706", iconPath: "M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" },
                 ].map((card) => (
                     <div
                         key={card.label}
@@ -308,14 +329,8 @@ export default function ViolationsPage() {
                     <option value="in_progress">In Progress</option>
                     <option value="closed">Closed</option>
                 </select>
-                <select value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)}
-                    className="h-9 px-2.5 text-[12.5px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-500/15">
-                    <option value="">All Severity</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="critical">Critical</option>
-                </select>
+                {/* Severity filter is now driven by the L0–L3 tab strip
+                    above the records list — no dropdown duplicate. */}
                 <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
                     className="h-9 px-2.5 text-[12.5px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-500/15 cursor-pointer"
                     onClick={e => (e.target as HTMLInputElement).showPicker()} />
@@ -340,6 +355,52 @@ export default function ViolationsPage() {
                     <span className="ml-auto text-[11px] text-slate-400 tabular-nums">
                         {filteredViolations.length} {filteredViolations.length === 1 ? "entry" : "entries"}
                     </span>
+                </div>
+
+                {/* L0–L3 tab strip — replaces the old severity dropdown.
+                    Each tab shows the count for its tier in the current
+                    month/status scope; clicking it narrows the list.
+                    Tailwind class strings are spelled out per-tint so
+                    JIT picks them up (dynamic `bg-${tint}-100` would
+                    not be detected at build time). */}
+                <div className="flex items-center gap-1 border-b border-slate-100 dark:border-white/[0.05] px-3 py-2 overflow-x-auto">
+                    {([
+                        { key: "",         label: "All", count: tierCounts.all,
+                          activeCls: "bg-slate-100 text-slate-800 ring-1 ring-inset ring-slate-300 dark:bg-white/10 dark:text-slate-200" },
+                        { key: "low",      label: "L0",  count: tierCounts.low,
+                          activeCls: "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-300 dark:bg-slate-500/15 dark:text-slate-300" },
+                        { key: "medium",   label: "L1",  count: tierCounts.medium,
+                          activeCls: "bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-300 dark:bg-amber-500/15 dark:text-amber-300" },
+                        { key: "high",     label: "L2",  count: tierCounts.high,
+                          activeCls: "bg-orange-100 text-orange-700 ring-1 ring-inset ring-orange-300 dark:bg-orange-500/15 dark:text-orange-300" },
+                        { key: "critical", label: "L3",  count: tierCounts.critical,
+                          activeCls: "bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-300 dark:bg-rose-500/15 dark:text-rose-300" },
+                    ] as const).map((t) => {
+                        const active = filterSeverity === t.key;
+                        return (
+                            <button
+                                key={t.key || "all"}
+                                type="button"
+                                onClick={() => setFilterSeverity(t.key)}
+                                className={
+                                    "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-colors whitespace-nowrap " +
+                                    (active
+                                        ? t.activeCls
+                                        : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/5")
+                                }
+                            >
+                                {t.label}
+                                <span className={
+                                    "inline-flex items-center justify-center min-w-[20px] rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums " +
+                                    (active
+                                        ? "bg-white/70 dark:bg-white/10"
+                                        : "bg-slate-200 text-slate-600 dark:bg-white/10 dark:text-slate-400")
+                                }>
+                                    {t.count}
+                                </span>
+                            </button>
+                        );
+                    })}
                 </div>
 
                 {loading ? (
@@ -451,10 +512,10 @@ export default function ViolationsPage() {
                                         <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Severity</label>
                                         <select value={editData.severity} onChange={e => setEditData(p => ({ ...p, severity: e.target.value }))}
                                             className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
-                                            <option value="low">Low</option>
-                                            <option value="medium">Medium</option>
-                                            <option value="high">High</option>
-                                            <option value="critical">Critical</option>
+                                            <option value="low">L0</option>
+                                            <option value="medium">L1</option>
+                                            <option value="high">L2</option>
+                                            <option value="critical">L3</option>
                                         </select>
                                     </div>
                                     <div>
@@ -661,10 +722,10 @@ export default function ViolationsPage() {
                             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Severity</label>
                             <select value={newViolation.severity} onChange={e => setNewViolation(p => ({ ...p, severity: e.target.value }))}
                                 className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                                <option value="critical">Critical</option>
+                                <option value="low">L0</option>
+                                <option value="medium">L1</option>
+                                <option value="high">L2</option>
+                                <option value="critical">L3</option>
                             </select>
                         </div>
                         <div>
