@@ -354,6 +354,7 @@ export default function OnboardEmployeePage() {
           employeeId: form.employeeNumber || undefined,
           designation: form.jobTitle || undefined,
           department:  form.department || undefined,
+          businessUnit: form.businessUnit || undefined,
           employmentType:
             form.workerType === "Intern"     ? "intern"
             : form.timeType === "Part Time"  ? "parttime"
