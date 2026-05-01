@@ -503,11 +503,19 @@ export function announcementEmail(args: {
 }
 
 // ── Violations ────────────────────────────────────────────────────────
-// Sent to the affected employee when a violation is first logged. The
-// note + actionTaken + status are surfaced so the user knows exactly
-// what happened and what (if anything) is being done about it.
+// Sent to the affected employee when a violation is first logged or
+// transitioned, plus a 15-day cron reminder for HR while it's still
+// in_progress. Visual style: tinted alert banner up top to signal the
+// row's severity / state at a glance, then a clean info table, then
+// per-section detail blocks for description / action / notes.
 const SEVERITY_LABEL: Record<string, string> = {
   low: "Low", medium: "Medium", high: "High", critical: "Critical",
+};
+const SEVERITY_TINT: Record<string, { bg: string; border: string; text: string }> = {
+  low:      { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569" },
+  medium:   { bg: "#fef3c7", border: "#fcd34d", text: "#92400e" },
+  high:     { bg: "#ffedd5", border: "#fdba74", text: "#9a3412" },
+  critical: { bg: "#fee2e2", border: "#fca5a5", text: "#991b1b" },
 };
 const STATUS_LABEL: Record<string, string> = {
   open: "Open", in_progress: "In progress", closed: "Closed",
@@ -515,6 +523,20 @@ const STATUS_LABEL: Record<string, string> = {
 const STATUS_COLOR: Record<string, string> = {
   open: "#ef4444", in_progress: "#0284c7", closed: "#10b981",
 };
+
+// Shared section card — used by description / action / notes blocks.
+const sectionCard = (label: string, value: string) => `
+  <div style="margin-top:10px;padding:12px 14px;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px">
+    <p style="margin:0 0 6px;font-size:10.5px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">${escape(label)}</p>
+    <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.6;white-space:pre-wrap">${escape(value)}</p>
+  </div>`;
+
+// Shared key/value row inside the violation summary table.
+const vRow = (label: string, valueHtml: string) => `
+  <tr>
+    <td style="padding:8px 14px;font-size:10.5px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;width:130px;vertical-align:middle;border-bottom:1px solid #eef2f7">${escape(label)}</td>
+    <td style="padding:8px 14px;font-size:13.5px;color:#1f2937;vertical-align:middle;border-bottom:1px solid #eef2f7">${valueHtml}</td>
+  </tr>`;
 
 export function violationCreatedEmail(args: {
   userName: string;
@@ -533,50 +555,40 @@ export function violationCreatedEmail(args: {
   const sev   = SEVERITY_LABEL[args.severity] ?? args.severity;
   const stat  = STATUS_LABEL[args.status] ?? args.status;
   const statColor = STATUS_COLOR[args.status] ?? "#64748b";
+  const sevTint = SEVERITY_TINT[args.severity] ?? SEVERITY_TINT.medium;
   const dateLabel = args.violationDate ? fmtDate(args.violationDate) : null;
 
-  const rows: Array<[string, string]> = [];
-  rows.push(["Title",    args.title]);
-  if (args.category)      rows.push(["Category", args.category]);
-  rows.push(["Severity",  sev]);
-  rows.push(["Status",    `<span style="color:${statColor};font-weight:600">${stat}</span>`]);
-  if (dateLabel)          rows.push(["Date",     dateLabel]);
-  if (args.reporterName)  rows.push(["Reported by", args.reporterName]);
+  // Severity-tinted alert banner — replaces the generic "policy
+  // violation has been recorded" line with a colour-coded callout that
+  // immediately telegraphs how serious the entry is.
+  const banner = `
+    <div style="margin:0 0 16px;padding:14px 16px;background:${sevTint.bg};border:1px solid ${sevTint.border};border-radius:8px">
+      <p style="margin:0;font-size:10.5px;color:${sevTint.text};font-weight:700;text-transform:uppercase;letter-spacing:0.12em">${escape(sev)} severity violation</p>
+      <p style="margin:6px 0 0;font-size:14px;color:#1f2937;font-weight:600;line-height:1.4">${escape(args.title)}</p>
+    </div>`;
 
-  const detailsTable = rows.map(([k, v]) => `
-    <tr>
-      <td style="padding:6px 12px;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;width:120px;vertical-align:top">${escape(k)}</td>
-      <td style="padding:6px 12px;font-size:13.5px;color:#1f2937">${v}</td>
-    </tr>`).join("");
+  const rows: string[] = [];
+  if (args.category)     rows.push(vRow("Category",  escape(args.category)));
+  rows.push(vRow("Status", `<span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700;background:${statColor}1a;color:${statColor}">${escape(stat)}</span>`));
+  if (dateLabel)         rows.push(vRow("Date",      escape(dateLabel)));
+  if (args.reporterName) rows.push(vRow("Reported by", escape(args.reporterName)));
 
   const body = `
-    <p style="margin:0 0 14px;font-size:14px;line-height:1.6">
-      Hi ${escape(args.userName)}, a policy / conduct violation has been recorded against your name.
-      Full details are below.
+    <p style="margin:0 0 14px;font-size:14px;color:#1f2937;line-height:1.6">
+      Hi ${escape(args.userName)},
     </p>
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#f8fafc;border-radius:6px;overflow:hidden">
-      ${detailsTable}
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      A policy / conduct violation has been recorded on your record. Full details below.
+    </p>
+    ${banner}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      ${rows.join("")}
     </table>
-    ${args.description ? `
-      <div style="margin-top:14px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
-        <p style="margin:0 0 4px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Description</p>
-        <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.55;white-space:pre-wrap">${escape(args.description)}</p>
-      </div>
-    ` : ""}
-    ${args.actionTaken ? `
-      <div style="margin-top:10px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
-        <p style="margin:0 0 4px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Action taken</p>
-        <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.55;white-space:pre-wrap">${escape(args.actionTaken)}</p>
-      </div>
-    ` : ""}
-    ${args.notes ? `
-      <div style="margin-top:10px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
-        <p style="margin:0 0 4px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Notes</p>
-        <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.55;white-space:pre-wrap">${escape(args.notes)}</p>
-      </div>
-    ` : ""}
-    <p style="margin:18px 0 0;font-size:12.5px;color:#64748b;line-height:1.55">
-      If you'd like to discuss this, reach out to HR or your manager directly.
+    ${args.description ? sectionCard("Description",  args.description)  : ""}
+    ${args.actionTaken ? sectionCard("Action taken", args.actionTaken)  : ""}
+    ${args.notes       ? sectionCard("Notes",        args.notes)        : ""}
+    <p style="margin:20px 0 0;padding:12px 14px;background:#f8fafc;border-left:3px solid #0f6ecd;border-radius:0 6px 6px 0;font-size:12.5px;color:#475569;line-height:1.55">
+      To discuss or appeal this, reach out to HR or your manager directly.
     </p>
     ${ctaButton("View on dashboard", link)}
   `;
@@ -613,32 +625,40 @@ export function violationStatusChangedEmail(args: {
   const newStat   = STATUS_LABEL[args.newStatus] ?? args.newStatus;
   const newColor  = STATUS_COLOR[args.newStatus] ?? "#64748b";
   const oldStat   = STATUS_LABEL[args.oldStatus] ?? args.oldStatus;
+  const oldColor  = STATUS_COLOR[args.oldStatus] ?? "#94a3b8";
 
   const subject = `Update on your violation: ${newStat}`;
   const link = `${appUrl()}/dashboard/violations`;
+
+  // Two-pill status transition — old (greyed) on the left, arrow,
+  // new (coloured + bold) on the right. Renders consistently across
+  // Gmail / Outlook / Apple Mail; tested against the major clients.
+  const transitionPill = `
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px">
+      <tr>
+        <td style="padding:14px 16px;vertical-align:middle">
+          <p style="margin:0 0 6px;font-size:10.5px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Status changed</p>
+          <span style="display:inline-block;padding:4px 12px;border-radius:999px;font-size:11.5px;font-weight:700;background:${oldColor}14;color:${oldColor}">${escape(oldStat)}</span>
+          <span style="font-size:13px;color:#94a3b8;margin:0 6px">→</span>
+          <span style="display:inline-block;padding:4px 12px;border-radius:999px;font-size:12px;font-weight:700;background:${newColor}1f;color:${newColor};box-shadow:inset 0 0 0 1px ${newColor}55">${escape(newStat)}</span>
+          ${args.changedByName ? `<p style="margin:8px 0 0;font-size:11.5px;color:#64748b">Updated by <strong style="color:#475569">${escape(args.changedByName)}</strong></p>` : ""}
+        </td>
+      </tr>
+    </table>`;
+
   const body = `
-    <p style="margin:0 0 14px;font-size:14px;line-height:1.6">
-      Hi ${escape(args.userName)}, the status of the violation
-      <strong>${escape(args.title)}</strong> has been updated.
+    <p style="margin:0 0 14px;font-size:14px;color:#1f2937;line-height:1.6">
+      Hi ${escape(args.userName)},
     </p>
-    <div style="margin:14px 0;padding:14px;background:#f8fafc;border-radius:6px;display:inline-block;width:100%;box-sizing:border-box">
-      <span style="font-size:12px;color:#64748b">${escape(oldStat)}</span>
-      <span style="font-size:12px;color:#94a3b8;margin:0 8px">→</span>
-      <span style="font-size:13.5px;color:${newColor};font-weight:600">${escape(newStat)}</span>
-      ${args.changedByName ? `<span style="font-size:11.5px;color:#94a3b8;margin-left:8px">by ${escape(args.changedByName)}</span>` : ""}
-    </div>
-    ${args.actionTaken ? `
-      <div style="margin-top:10px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
-        <p style="margin:0 0 4px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Action taken</p>
-        <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.55;white-space:pre-wrap">${escape(args.actionTaken)}</p>
-      </div>
-    ` : ""}
-    ${args.notes ? `
-      <div style="margin-top:10px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
-        <p style="margin:0 0 4px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Notes</p>
-        <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.55;white-space:pre-wrap">${escape(args.notes)}</p>
-      </div>
-    ` : ""}
+    <p style="margin:0 0 6px;font-size:13.5px;color:#475569;line-height:1.6">
+      The status of your violation has been updated.
+    </p>
+    <p style="margin:0 0 4px;font-size:14.5px;color:#1f2937;font-weight:600;line-height:1.4">
+      ${escape(args.title)}
+    </p>
+    ${transitionPill}
+    ${args.actionTaken ? sectionCard("Action taken", args.actionTaken) : ""}
+    ${args.notes       ? sectionCard("Notes",        args.notes)       : ""}
     ${ctaButton("View on dashboard", link)}
   `;
   const text = [
@@ -668,38 +688,39 @@ export function violationInProgressReminderEmail(args: {
   const subject = `Reminder: violation for ${args.affectedUserName} is still in progress`;
   const link = `${appUrl()}/dashboard/violations`;
   const sev = SEVERITY_LABEL[args.severity] ?? args.severity;
+  const sevTint = SEVERITY_TINT[args.severity] ?? SEVERITY_TINT.medium;
 
-  const rows: Array<[string, string]> = [];
-  rows.push(["Employee", args.affectedUserName]);
-  rows.push(["Title",    args.title]);
-  if (args.category)     rows.push(["Category", args.category]);
-  rows.push(["Severity", sev]);
-  rows.push(["Open for", `${args.daysOpen} day${args.daysOpen === 1 ? "" : "s"}`]);
-  if (args.reporterName) rows.push(["Reported by", args.reporterName]);
+  // Big day-counter callout — turns the central data point ("how long
+  // has this been sitting") into the focal point so the recipient
+  // immediately sees the urgency.
+  const dayCounter = `
+    <div style="margin:0 0 16px;padding:18px 16px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;text-align:center">
+      <p style="margin:0;font-size:10.5px;color:#9a3412;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Open for</p>
+      <p style="margin:6px 0 0;font-size:32px;font-weight:700;color:#9a3412;line-height:1">${args.daysOpen}<span style="font-size:14px;font-weight:600;margin-left:4px">day${args.daysOpen === 1 ? "" : "s"}</span></p>
+      <p style="margin:6px 0 0;font-size:11.5px;color:#9a3412">since the violation was logged · still <strong>in progress</strong></p>
+    </div>`;
 
-  const tableHtml = rows.map(([k, v]) => `
-    <tr>
-      <td style="padding:6px 12px;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;width:130px;vertical-align:top">${escape(k)}</td>
-      <td style="padding:6px 12px;font-size:13.5px;color:#1f2937">${escape(v)}</td>
-    </tr>`).join("");
+  const rows: string[] = [];
+  rows.push(vRow("Employee", escape(args.affectedUserName)));
+  rows.push(vRow("Title",    escape(args.title)));
+  if (args.category)     rows.push(vRow("Category", escape(args.category)));
+  rows.push(vRow("Severity", `<span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700;background:${sevTint.bg};color:${sevTint.text}">${escape(sev)}</span>`));
+  if (args.reporterName) rows.push(vRow("Reported by", escape(args.reporterName)));
 
   const body = `
-    <p style="margin:0 0 14px;font-size:14px;line-height:1.6">
-      ${args.recipientName ? `Hi ${escape(args.recipientName)},` : "Hi,"} a violation marked as <strong>in progress</strong>
-      hasn't been closed yet. Could someone take another look?
+    <p style="margin:0 0 12px;font-size:14px;color:#1f2937;line-height:1.6">
+      ${args.recipientName ? `Hi ${escape(args.recipientName)},` : "Hi,"}
     </p>
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#f8fafc;border-radius:6px;overflow:hidden">
-      ${tableHtml}
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      A violation marked <strong>in progress</strong> hasn't been closed yet — a quick nudge so it doesn't get lost.
+    </p>
+    ${dayCounter}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      ${rows.join("")}
     </table>
-    ${args.actionTaken ? `
-      <div style="margin-top:10px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
-        <p style="margin:0 0 4px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Last action taken</p>
-        <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.55;white-space:pre-wrap">${escape(args.actionTaken)}</p>
-      </div>
-    ` : ""}
-    <p style="margin:18px 0 0;font-size:12.5px;color:#64748b;line-height:1.55">
-      You're getting this reminder because the matter is still showing
-      "in progress". Update the status to "closed" once it's resolved.
+    ${args.actionTaken ? sectionCard("Last action taken", args.actionTaken) : ""}
+    <p style="margin:20px 0 0;padding:12px 14px;background:#f8fafc;border-left:3px solid #0f6ecd;border-radius:0 6px 6px 0;font-size:12.5px;color:#475569;line-height:1.55">
+      Once this is resolved, update the status to <strong>Closed</strong> on the dashboard so the reminder stops firing every 15 days.
     </p>
     ${ctaButton("Open the violation", link)}
   `;
