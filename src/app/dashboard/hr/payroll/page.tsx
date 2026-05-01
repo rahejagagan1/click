@@ -6,6 +6,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { isHRAdmin } from "@/lib/access";
 import {
   Download, FileText, Play, CheckCircle2, Clock, Plus, X, TrendingUp, ChevronRight,
   ChevronDown, Lightbulb,
@@ -146,7 +147,8 @@ function downloadPayslip(p: any, structure: any) {
 export default function PayrollPage() {
   const { data: session } = useSession();
   const user    = session?.user as any;
-  const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper || user?.orgLevel === "hr_manager";
+  // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access + role=admin.
+  const isAdmin = isHRAdmin(user);
 
   const searchParams = useSearchParams();
   const initialSubTab = (() => {

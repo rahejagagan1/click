@@ -9,6 +9,7 @@ import Link from "next/link";
 import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, MoreVertical, Coffee, AlertCircle, CheckCircle2, XCircle, Calendar, CalendarDays } from "lucide-react";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
+import { isHRAdmin } from "@/lib/access";
 
 // ── Form copy per kind ───────────────────────────────────────────────────────
 const FORM_TITLE: Record<LeaveRequestKind, string> = {
@@ -496,7 +497,8 @@ function OnDutyModal({ onClose }: { onClose: () => void }) {
 export default function AttendancePage() {
   const { data: session } = useSession();
   const user = session?.user as any;
-  const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper || user?.orgLevel === "hr_manager";
+  // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access + role=admin.
+  const isAdmin = isHRAdmin(user);
 
   // `now` ticks with the clock so week-day highlight, calendar "today", and
   // month default all track the actual wall-clock time rather than mount time.

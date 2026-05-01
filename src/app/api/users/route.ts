@@ -342,6 +342,21 @@ export async function POST(request: NextRequest) {
             return { user: created, isUpdate: !!existing };
         });
 
+        // Persist businessUnit via raw SQL — keeps things working even
+        // if the typed Prisma client hasn't been regenerated after the
+        // schema change. Same pattern other new columns use here.
+        if (profile && typeof profile.businessUnit === "string") {
+            try {
+                await prisma.$executeRawUnsafe(
+                    `UPDATE "EmployeeProfile" SET "businessUnit" = $1 WHERE "userId" = $2`,
+                    profile.businessUnit || null,
+                    user.id,
+                );
+            } catch (e) {
+                console.warn("[users POST] businessUnit update failed:", e);
+            }
+        }
+
         // Welcome / sign-in email — fire-and-forget so a transient SMTP
         // failure doesn't roll back the create.
         if (inviteToLogin && email) {

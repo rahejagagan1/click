@@ -2,6 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 
+// Mirrors src/lib/access.ts:canSeeReports — full admin tier + manager
+// tier (CMs / HoDs / HR Manager) can read the org-wide report list
+// because that's who the dashboard panel is for. Without this any
+// authenticated user could enumerate every manager's reports.
+function canSeeReports(u: any): boolean {
+    return (
+        u?.orgLevel === "ceo" ||
+        u?.isDeveloper === true ||
+        u?.orgLevel === "special_access" ||
+        u?.role === "admin" ||
+        u?.orgLevel === "hr_manager" ||
+        u?.orgLevel === "manager" ||
+        u?.orgLevel === "hod"
+    );
+}
+
 export const dynamic = "force-dynamic";
 
 const MONTH_NAMES = [
@@ -11,8 +27,11 @@ const MONTH_NAMES = [
 
 export async function GET(_req: NextRequest) {
     try {
-        const { errorResponse } = await requireAuth();
+        const { session, errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
+        if (!canSeeReports(session!.user)) {
+            return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
 
         // Fetch weekly reports and monthly reports separately
         const [weeklyReports, monthlyReports] = await Promise.all([

@@ -162,6 +162,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
   const [job, setJob] = useState({
     designation:      p.designation ?? "",
     department:       p.department ?? "",
+    businessUnit:     p.businessUnit ?? "",
     employmentType:   p.employmentType ?? "fulltime",
     workLocation:     p.workLocation ?? "office",
     joiningDate:      dateISO(p.joiningDate),
@@ -205,6 +206,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
     setJob({
       designation:      p.designation ?? "",
       department:       p.department ?? "",
+      businessUnit:     p.businessUnit ?? "",
       employmentType:   p.employmentType ?? "fulltime",
       workLocation:     p.workLocation ?? "office",
       joiningDate:      dateISO(p.joiningDate),
@@ -375,6 +377,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
         onSave={() => jobHook.save({
           designation:      job.designation.trim() || null,
           department:       job.department.trim() || null,
+          businessUnit:     job.businessUnit.trim() || null,
           employmentType:   job.employmentType,
           workLocation:     job.workLocation,
           joiningDate:      job.joiningDate || null,
@@ -393,8 +396,23 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
           </div>
           <div>
             <label className={cls.label}>Department</label>
-            <input className={cls.field} value={job.department}
-              onChange={(e) => setJob({ ...job, department: e.target.value })} />
+            <CustomSelect
+              listKey="department"
+              defaults={["HR", "Researcher", "QA", "Production", "AI", "SocialMedia", "IT"]}
+              value={job.department}
+              onChange={(v) => setJob({ ...job, department: v })}
+              placeholder="Select a department"
+            />
+          </div>
+          <div>
+            <label className={cls.label}>Business Unit</label>
+            <CustomSelect
+              listKey="businessUnit"
+              defaults={["NB Media"]}
+              value={job.businessUnit}
+              onChange={(v) => setJob({ ...job, businessUnit: v })}
+              placeholder="Select business unit"
+            />
           </div>
           <div>
             <label className={cls.label}>Employment Type</label>
