@@ -17,11 +17,15 @@ export async function GET() {
   if (errorResponse) return errorResponse;
   try {
     const self = session!.user as any;
+    // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access
+    // + role=hr_manager.
     const isFinalApprover =
       self.orgLevel === "ceo" ||
       self.isDeveloper ||
       self.orgLevel === "hr_manager" ||
-      self.role === "admin";
+      self.orgLevel === "special_access" ||
+      self.role === "admin" ||
+      self.role === "hr_manager";
 
     let myId: number | null = null;
     if (!isFinalApprover) {

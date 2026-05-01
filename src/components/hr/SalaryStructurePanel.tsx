@@ -8,13 +8,15 @@
 // Visibility rules are enforced by the parent page: HR admin tier OR the
 // profile owner can SEE this panel; only HR admin tier can SAVE.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import {
   CheckCircle2, AlertCircle, IndianRupee, Save, Wallet, Info, Lock, Calendar,
+  MoreVertical, Plus, X,
 } from "lucide-react";
 import CustomSelect from "@/components/ui/CustomSelect";
+import { DatePicker } from "@/components/ui/date-picker";
 
 type Props = {
   userId: number;
@@ -146,6 +148,26 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
   const [error, setError] = useState("");
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
+  // 3-dots menu + Add Bonus modal — admin-only.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [showBonusModal, setShowBonusModal] = useState(false);
+  // Close the dots menu on outside click / Escape so it behaves like the
+  // rest of the dashboard's overflow menus.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [menuOpen]);
+
   // Sync form once the data arrives. We don't re-sync on every data
   // change to avoid clobbering local edits — only when the underlying
   // record id changes (re-fetched from server).
@@ -248,6 +270,33 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
             >
               {isIntern ? "Intern" : "Regular"}
             </span>
+          )}
+          {/* 3-dots menu — admin-only "+ Add Bonus" entry. Hidden when
+              the viewer can't edit (no point dangling an action they
+              can't run). */}
+          {canEdit && (
+            <div className="relative" ref={menuRef}>
+              <button
+                type="button"
+                onClick={() => setMenuOpen((v) => !v)}
+                aria-label="Salary actions"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              >
+                <MoreVertical size={15} />
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-slate-200 bg-white shadow-lg py-1">
+                  <button
+                    type="button"
+                    onClick={() => { setMenuOpen(false); setShowBonusModal(true); }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-slate-700 hover:bg-slate-50"
+                  >
+                    <Plus size={13} className="text-[#3b82f6]" />
+                    Add Bonus
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -447,6 +496,193 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
           </div>
         )}
       </form>
+
+      {showBonusModal && (
+        <AddBonusModal
+          userId={userId}
+          onClose={() => setShowBonusModal(false)}
+        />
+      )}
     </section>
+  );
+}
+
+// ── Add Bonus modal ────────────────────────────────────────────────
+// Keka-style dialog: bonus type (with custom values), amount with INR
+// prefix, payment status (Due in future / Paid in past), payout date,
+// optional note. Saves to /api/hr/payroll/bonus.
+function AddBonusModal({ userId, onClose }: { userId: number; onClose: () => void }) {
+  const [bonusType, setBonusType]         = useState("");
+  const [amount, setAmount]               = useState("");
+  const [paymentStatus, setPaymentStatus] = useState<"due_future" | "paid_past">("due_future");
+  const [date, setDate]                   = useState("");
+  const [note, setNote]                   = useState("");
+  const [saving, setSaving]               = useState(false);
+  const [error, setError]                 = useState("");
+
+  const dateLabel = paymentStatus === "due_future" ? "Payout due on" : "Paid on";
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    const amt = Number(amount);
+    if (!bonusType.trim())                   { setError("Pick or create a bonus type.");        return; }
+    if (!Number.isFinite(amt) || amt <= 0)   { setError("Enter a positive amount.");            return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date))   { setError(`Pick the ${dateLabel.toLowerCase()} date.`); return; }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/hr/payroll/bonus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          amount: amt,
+          reason: note.trim() || null,
+          effectiveDate: date,
+          bonusType: bonusType.trim(),
+          paymentStatus,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Save failed");
+      onClose();
+    } catch (e: any) {
+      setError(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+          <h3 className="text-[15px] font-bold text-slate-800">Add Bonus</h3>
+          <button type="button" onClick={onClose} aria-label="Close"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+            <X size={14} />
+          </button>
+        </div>
+        <form onSubmit={submit} className="space-y-5 px-6 py-5">
+          {/* ── Bonus Type ── */}
+          <div>
+            <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Bonus Type</label>
+            {/* Reuses the global CustomSelect: defaults are common bonus
+                categories; HR can "+ Add custom value" for one-offs. */}
+            <CustomSelect
+              listKey="bonusType"
+              defaults={[
+                "Performance Incentive",
+                "Retention Bonus",
+                "Referral Bonus",
+                "Diwali Bonus",
+                "Advance Salary",
+                "Bonus Pay",
+                "Arrear",
+                "Travel Reimbursement",
+                "Reimbursed PF",
+                "Business Expense Reimbursement",
+                "Joining Bonus",
+                "Project Delivery Bonus",
+                "Spot Award",
+              ]}
+              value={bonusType}
+              onChange={setBonusType}
+              placeholder="Select or create bonus"
+            />
+          </div>
+
+          {/* ── Amount ── */}
+          <div>
+            <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Bonus amount</label>
+            <div className="flex">
+              <span className="inline-flex h-9 items-center rounded-l-lg border border-r-0 border-slate-200 bg-slate-50 px-3 text-[12px] font-semibold text-slate-500">
+                INR
+              </span>
+              <input
+                type="number" min="1" step="any"
+                value={amount} onChange={(e) => setAmount(e.target.value)}
+                placeholder="Amount"
+                className="h-9 flex-1 rounded-r-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-800 placeholder-slate-400 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15"
+              />
+            </div>
+          </div>
+
+          {/* ── Payment status ── */}
+          <div>
+            <label className="block text-[12px] font-semibold text-slate-700 mb-2">Payment status</label>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <label className="inline-flex items-center gap-2 text-[12.5px] text-slate-700 cursor-pointer">
+                <input
+                  type="radio"
+                  name="bonus-payment-status"
+                  checked={paymentStatus === "due_future"}
+                  onChange={() => setPaymentStatus("due_future")}
+                  className="h-4 w-4 text-[#3b82f6] border-slate-300 focus:ring-[#3b82f6]/30"
+                />
+                Due in future
+              </label>
+              <label className="inline-flex items-center gap-2 text-[12.5px] text-slate-700 cursor-pointer">
+                <input
+                  type="radio"
+                  name="bonus-payment-status"
+                  checked={paymentStatus === "paid_past"}
+                  onChange={() => setPaymentStatus("paid_past")}
+                  className="h-4 w-4 text-[#3b82f6] border-slate-300 focus:ring-[#3b82f6]/30"
+                />
+                Paid in past <span className="text-slate-400">(outside payroll)</span>
+              </label>
+            </div>
+          </div>
+
+          {/* ── Date — label changes with the payment status. Uses the
+              shared DatePicker (Day/Month/Year dropdowns) so the styling
+              matches the rest of the app instead of falling back to the
+              browser's native picker. */}
+          <div>
+            <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">{dateLabel}</label>
+            <div className="max-w-md">
+              <DatePicker
+                value={date}
+                onChange={setDate}
+                // Bonuses can be backdated (paid_past) or scheduled
+                // ahead (due_future) — give the year dropdown a
+                // generous range covering past structures + a few
+                // years of forward planning.
+                yearStart={new Date().getFullYear() - 5}
+                futureYears={5}
+              />
+            </div>
+          </div>
+
+          {/* ── Note ── */}
+          <div>
+            <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Note</label>
+            <textarea
+              rows={3} value={note} onChange={(e) => setNote(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 placeholder-slate-400 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 resize-none"
+            />
+          </div>
+
+          {error && (
+            <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12.5px] text-rose-700">
+              <AlertCircle size={14} className="mt-0.5 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+        </form>
+
+        <div className="flex justify-end gap-2 border-t border-slate-100 px-6 py-3.5">
+          <button type="button" onClick={onClose}
+            className="h-9 px-4 rounded-lg border border-slate-200 text-[13px] font-semibold text-slate-700 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button type="button" onClick={submit as any} disabled={saving}
+            className="h-9 px-5 rounded-lg bg-[#3b82f6] text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-60">
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

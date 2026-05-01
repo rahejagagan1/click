@@ -37,8 +37,19 @@ const REGULARIZATION_WINDOW_DAYS = 2;
 
 export const dynamic = "force-dynamic";
 
+// Mirrors src/lib/access.ts:isHRAdmin so the regularize approve gate
+// matches the rest of the HR module. Was missing special_access,
+// role=admin, and role=hr_manager — that last one locked out HR
+// Managers who happen to also have orgLevel="manager" (a common combo).
 function isHRAdmin(user: any): boolean {
-  return user?.orgLevel === "ceo" || user?.isDeveloper === true || user?.orgLevel === "hr_manager";
+  return (
+    user?.orgLevel === "ceo" ||
+    user?.isDeveloper === true ||
+    user?.orgLevel === "special_access" ||
+    user?.role === "admin" ||
+    user?.orgLevel === "hr_manager" ||
+    user?.role === "hr_manager"
+  );
 }
 
 /** Day-difference between two IST calendar days (both stored as UTC-midnight). */
@@ -233,28 +244,42 @@ export async function POST(req: NextRequest) {
     const target = await prisma.user.findUnique({ where: { id: targetUserId }, select: { name: true } });
     const dateLabel = targetDateOnly.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
 
-    // Regularization is HR-admin-only — skip the direct manager and only
-    // notify CEO / HR managers / Developers (and any "Notify" extras the
-    // applicant tagged on the form).
+    // L1 → L2 flow: notify the requester's direct manager first (they
+    // approve at stage 1) PLUS HR finalisers as a heads-up. Admin-grants
+    // skip L1 and go straight to admins for ratification.
     const devEmails = (process.env.DEVELOPER_EMAILS || "")
       .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
     const admins = await prisma.user.findMany({
       where: {
         isActive: true,
         OR: [
-          { orgLevel: { in: ["ceo", "hr_manager"] } },
+          { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
           { role: "admin" },
+          { role: "hr_manager" },
           ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
         ],
       },
       select: { id: true },
     });
     const adminIds = admins.map((u) => u.id).filter((id) => id !== targetUserId);
+    // Direct manager — gets the ping for stage-1 approval. Skip if
+    // they're already in adminIds (avoids a double notify) or the
+    // request was admin-granted (no L1 needed).
+    let l1ManagerIds: number[] = [];
+    if (!isAdminGrant) {
+      const targetUser = await prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: { managerId: true },
+      });
+      if (targetUser?.managerId && !adminIds.includes(targetUser.managerId)) {
+        l1ManagerIds = [targetUser.managerId];
+      }
+    }
 
     await Promise.all([
       notifyUsers({
         actorId:  isAdminGrant ? myId : targetUserId,
-        userIds:  [...adminIds, ...extras],
+        userIds:  [...l1ManagerIds, ...adminIds, ...extras],
         type:     "regularization",
         entityId: reg.id,
         title:    isAdminGrant
@@ -301,65 +326,137 @@ export async function PUT(req: NextRequest) {
     });
     if (!reg) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // Status guard: must be open (pending or partially_approved — partially
-    // is kept here only so any legacy rows from the old two-stage flow can
-    // still be finalised).
+    // Status guard: must be open.
     if (reg.status !== "pending" && reg.status !== "partially_approved") {
       return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
     }
 
-    // Regularization is HR-admin-only — no manager L1 stage. Only CEO /
-    // HR manager / Developer can decide. This is intentionally tighter
-    // than leave / WFH / OD / comp-off (which are L1→L2): regularizations
-    // edit attendance records directly, so we want a small set of trusted
-    // approvers.
-    if (!admin) {
-      return NextResponse.json(
-        { error: "Forbidden — only HR admin / CEO / Developer can decide regularizations." },
-        { status: 403 },
-      );
+    // ── L1 / L2 flow (mirrors leaves / WFH / on-duty / comp-off) ───
+    //   • Stage 1 (pending → partially_approved): direct manager OR HR
+    //     admin can approve. Rejection allowed at this stage by manager
+    //     OR HR.
+    //   • Stage 2 (partially_approved → approved): HR admin only.
+    //     Attendance history is rewritten ONLY at this stage so a
+    //     manager can't unilaterally edit the audit trail.
+    const isDirectManager = !!reg.user?.managerId && reg.user.managerId === myId;
+    const dateLabelEarly = new Date(reg.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+
+    // ── REJECT ─────────────────────────────────────────────────────
+    if (action === "reject") {
+      const canReject = admin || (isDirectManager && reg.status === "pending");
+      if (!canReject) {
+        return NextResponse.json({ error: "Not authorised" }, { status: 403 });
+      }
+      const { count: rejCount } = await prisma.attendanceRegularization.updateMany({
+        where: { id, status: reg.status },
+        data: {
+          status: "rejected",
+          approvedById:      reg.approvedById      ?? myId,
+          approvedAt:        reg.approvedAt        ?? new Date(),
+          approvalNote:      reg.approvalNote      ?? approvalNote,
+          finalApprovedById: reg.status === "partially_approved" ? myId : null,
+          finalApprovedAt:   reg.status === "partially_approved" ? new Date() : null,
+          finalApprovalNote: reg.status === "partially_approved" ? approvalNote : null,
+        },
+      });
+      if (rejCount === 0) {
+        return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
+      }
+      await writeAuditLog({
+        req, actorId: myId, actorEmail: callerUser?.email ?? null,
+        action: "regularize.reject", entityType: "AttendanceRegularization", entityId: id,
+        before: { status: reg.status }, after: { status: "rejected", approvalNote },
+      });
+      await notifyUsers({
+        actorId: myId, userIds: [reg.userId], type: "regularization", entityId: reg.id,
+        title: `Your regularization for ${dateLabelEarly} was rejected`,
+        body: approvalNote ? String(approvalNote).slice(0, 160) : undefined,
+        linkUrl: "/dashboard/hr/attendance",
+      });
+      return NextResponse.json(await prisma.attendanceRegularization.findUnique({ where: { id } }));
     }
 
-    // Single-stage transition: pending|partially_approved → approved|rejected.
-    const nextStatus = action === "reject" ? "rejected" : "approved";
+    // ── APPROVE — Stage 1: direct manager → partially_approved ─────
+    if (reg.status === "pending") {
+      if (!isDirectManager && !admin) {
+        return NextResponse.json({ error: "Not authorised" }, { status: 403 });
+      }
+      const { count: l1Count } = await prisma.attendanceRegularization.updateMany({
+        where: { id, status: "pending" },
+        data: {
+          status:       "partially_approved",
+          approvedById: myId,
+          approvedAt:   new Date(),
+          approvalNote,
+        },
+      });
+      if (l1Count === 0) {
+        return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
+      }
+      await writeAuditLog({
+        req, actorId: myId, actorEmail: callerUser?.email ?? null,
+        action: "regularize.approve_l1", entityType: "AttendanceRegularization", entityId: id,
+        before: { status: "pending" }, after: { status: "partially_approved", approvalNote },
+      });
+      // Notify HR finalisers + the requester.
+      const devEmailsL1 = (process.env.DEVELOPER_EMAILS || "")
+        .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+      const finalApprovers = await prisma.user.findMany({
+        where: {
+          isActive: true,
+          OR: [
+            { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
+            { role: "admin" },
+            { role: "hr_manager" },
+            ...(devEmailsL1.length > 0 ? [{ email: { in: devEmailsL1 } }] : []),
+          ],
+        },
+        select: { id: true },
+      });
+      await notifyUsers({
+        actorId: myId,
+        userIds: finalApprovers.map((u) => u.id).filter((uid) => uid !== reg.userId),
+        type: "regularization", entityId: reg.id,
+        title: `A regularization for ${dateLabelEarly} needs final approval`,
+        body: approvalNote ? `Manager approved · ${String(approvalNote).slice(0, 140)}` : "Manager approved — awaiting CEO / HR.",
+        linkUrl: "/dashboard/hr/approvals?tab=regularize",
+      });
+      await notifyUsers({
+        actorId: myId, userIds: [reg.userId], type: "regularization", entityId: reg.id,
+        title: `Your regularization for ${dateLabelEarly} is partially approved`,
+        body: "Awaiting final approval from CEO / HR.",
+        linkUrl: "/dashboard/hr/attendance",
+      });
+      return NextResponse.json(await prisma.attendanceRegularization.findUnique({ where: { id } }));
+    }
 
-    // Always stamp BOTH the L1 and L2 approver fields with the same admin
-    // user. The schema kept the two-pair shape from the old flow; setting
-    // both fields keeps existing UI components (which still render L1/L2)
-    // showing a consistent decision rather than a missing-stage gap.
+    // ── APPROVE — Stage 2: HR finalises → falls through to the
+    // attendance rewrite block below. Only HR admin can finalise.
+    if (!admin) {
+      return NextResponse.json({ error: "Only CEO / HR can finalise regularizations" }, { status: 403 });
+    }
     const now = new Date();
-    const data: any = {
-      status:            nextStatus,
-      approvedById:      reg.approvedById ?? myId,
-      approvedAt:        reg.approvedAt   ?? now,
-      approvalNote:      reg.approvalNote ?? approvalNote,
-      finalApprovedById: myId,
-      finalApprovedAt:   now,
-      finalApprovalNote: approvalNote,
-    };
-
     const { count } = await prisma.attendanceRegularization.updateMany({
-      where: { id, status: reg.status },
-      data,
+      where: { id, status: "partially_approved" },
+      data: {
+        status:            "approved",
+        finalApprovedById: myId,
+        finalApprovedAt:   now,
+        finalApprovalNote: approvalNote,
+      },
     });
     if (count === 0) {
       return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
     }
     const updated = await prisma.attendanceRegularization.findUnique({ where: { id } });
-
-    // Audit trail — captures who decided, when, before/after status, and IP.
     await writeAuditLog({
-      req,
-      actorId: myId,
-      actorEmail: callerUser?.email ?? null,
-      action: `regularize.${action}`,
-      entityType: "AttendanceRegularization",
-      entityId: id,
-      before: { status: reg.status },
-      after:  { status: nextStatus, approvalNote },
+      req, actorId: myId, actorEmail: callerUser?.email ?? null,
+      action: "regularize.approve_l2", entityType: "AttendanceRegularization", entityId: id,
+      before: { status: "partially_approved" }, after: { status: "approved", approvalNote },
     });
 
-    // Apply approved punch correction only on FINAL approval.
+    // Apply approved punch correction. We've already gated to L2
+    // approve above, so this runs unconditionally.
     //
     //  1. Clocked in, missed clock-out
     //     → keep clockIn (cap at 10:00 IST if late), clockOut = 23:59 IST.
@@ -367,7 +464,7 @@ export async function PUT(req: NextRequest) {
     //     → cap clockIn at 10:00 IST, keep clockOut.
     //  3. Missed both clock-in AND clock-out
     //     → standard 9-hour shift: 09:00 → 18:00 IST.
-    if (action === "approve" && nextStatus === "approved") {
+    {
       const dateOnly = new Date(reg.date);
       const existing = await prisma.attendance.findUnique({
         where: { userId_date: { userId: reg.userId, date: dateOnly } },
@@ -425,17 +522,14 @@ export async function PUT(req: NextRequest) {
       });
     }
 
-    // Notify the submitter of the outcome so their bell stays accurate.
-    const dateLabel = new Date(reg.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
-    const title = action === "reject"
-      ? `Your regularization for ${dateLabel} was rejected`
-      : `Your regularization for ${dateLabel} was approved`;
+    // Final-approval notification — reject + L1 paths already returned
+    // earlier, so by this point we're guaranteed L2-approved.
     await notifyUsers({
       actorId:  myId,
       userIds:  [reg.userId],
       type:     "regularization",
       entityId: reg.id,
-      title,
+      title:    `Your regularization for ${dateLabelEarly} was approved`,
       body:     approvalNote ? String(approvalNote).slice(0, 160) : undefined,
       linkUrl:  "/dashboard/hr/attendance",
     });
