@@ -405,8 +405,12 @@ export default function OnboardEmployeePage() {
         email: form.workEmail,
         role:  form.role,
         orgLevel: form.orgLevel,
-        managerId: form.reportingManagerId ? Number(form.reportingManagerId) : undefined,
-        inlineManagerId: form.dottedLineManagerId ? Number(form.dottedLineManagerId) : undefined,
+        // Send null (not undefined) when HR cleared the dropdown so
+        // the API actually clears the existing link. The API now
+        // distinguishes undefined ("don't touch") from null ("set to
+        // none") for these fields.
+        managerId: form.reportingManagerId ? Number(form.reportingManagerId) : null,
+        inlineManagerId: form.dottedLineManagerId ? Number(form.dottedLineManagerId) : null,
         inviteToLogin:    form.inviteToLogin,
         enableOnboarding: form.enableOnboarding,
         profile: {
