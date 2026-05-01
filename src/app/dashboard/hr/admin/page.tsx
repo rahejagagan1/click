@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus } from "lucide-react";
+import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3 } from "lucide-react";
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
@@ -71,6 +71,7 @@ export default function HRAdminPage() {
   const showHiringRail    = isFullAdmin
     || (HR_MANAGER_ALLOWED_RAIL_LINKS.has("hiring")   && tabAllowed("hr_hiring"));
   const showTabPermsRail  = isFullAdmin; // policy config — admin-only
+  const showManageKpisRail = isFullAdmin; // KPI uploads — admin-only
 
   const [tab, setTab] = useState("attendance-dashboard");
 
@@ -160,13 +161,37 @@ export default function HRAdminPage() {
     }));
   };
 
-  // Dept breakdown from employees
-  const deptMap: Record<string, number> = {};
+  // Dept breakdown from employees — group full employee records by
+  // department so the breakdown row can show team avatars instead of
+  // a percentage bar. Sort departments by team size, biggest first.
+  const deptEmployees: Record<string, any[]> = {};
   employees.forEach((e: any) => {
     const d = e.employeeProfile?.department || "Unassigned";
-    deptMap[d] = (deptMap[d] || 0) + 1;
+    if (!deptEmployees[d]) deptEmployees[d] = [];
+    deptEmployees[d].push(e);
   });
-  const depts = Object.entries(deptMap).sort((a, b) => b[1] - a[1]);
+  const depts = Object.entries(deptEmployees).sort((a, b) => b[1].length - a[1].length);
+
+  // Manager breakdown — anyone with orgLevel manager / hod / hr_manager
+  // counts as a manager. We then attach their direct reports (users
+  // whose User.managerId points at them) so the panel can show the
+  // team alongside the manager.
+  const isManagerRole = (u: any) =>
+    u?.orgLevel === "manager" || u?.orgLevel === "hod" || u?.orgLevel === "hr_manager";
+  const managers = employees.filter(isManagerRole);
+  const reportsByManagerId: Record<number, any[]> = {};
+  employees.forEach((e: any) => {
+    if (e.managerId) {
+      if (!reportsByManagerId[e.managerId]) reportsByManagerId[e.managerId] = [];
+      reportsByManagerId[e.managerId].push(e);
+    }
+  });
+  const managersGrouped: Array<{ manager: any; reports: any[] }> = managers
+    .map((m: any) => ({ manager: m, reports: reportsByManagerId[m.id] ?? [] }))
+    .sort((a: { reports: any[] }, b: { reports: any[] }) => b.reports.length - a.reports.length);
+
+  // Sub-tab inside Departments: "By Department" vs "By Manager".
+  const [deptView, setDeptView] = useState<"dept" | "manager">("dept");
 
   if (!isAdmin) return (
     <div className="flex items-center justify-center h-64">
@@ -241,6 +266,18 @@ export default function HRAdminPage() {
             >
               <ShieldCheck className="w-4 h-4" />
               <span className="flex-1">Tab Permissions</span>
+              <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+          )}
+          {showManageKpisRail && (
+            <Link
+              href="/dashboard/kpis/manage"
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span className="flex-1">Manage KPIs</span>
               <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
               </svg>
@@ -366,41 +403,229 @@ export default function HRAdminPage() {
           )}
 
           {/* ── Departments ── */}
-          {tab === "departments" && (
-            <>
-              <h2 className="text-[14px] font-bold text-slate-800 dark:text-white">Department Breakdown</h2>
-              <div className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-slate-100 dark:border-white/[0.04]">
-                      <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Department</th>
-                      <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Headcount</th>
-                      <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Distribution</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {depts.map(([dept, count]) => {
-                      const pct = employees.length > 0 ? (count / employees.length) * 100 : 0;
+          {tab === "departments" && (() => {
+            // Helpers used by both sub-tabs.
+            // Professional, harmonious palette — uniformly mid-saturation
+            // tones (≈ Tailwind 600 weights) that look balanced when
+            // shown side-by-side. Skips the loud reds / hot pinks so the
+            // breakdown reads as polished rather than party-coloured.
+            const palette = [
+              "#0f6ecd", // brand blue
+              "#0d9488", // teal
+              "#059669", // emerald
+              "#7c3aed", // violet
+              "#0284c7", // sky
+              "#d97706", // amber
+              "#4338ca", // indigo
+              "#0891b2", // cyan
+            ];
+            const personName = (m: any) =>
+              m.name || [m.employeeProfile?.firstName, m.employeeProfile?.lastName].filter(Boolean).join(" ") || m.email || "—";
+            const personRole = (m: any) =>
+              m.employeeProfile?.designation || m.orgLevel || "";
+            const Av = ({ m, size = 28 }: { m: any; size?: number }) => {
+              const name = personName(m);
+              const initials = name.split(" ").map((p: string) => p[0] || "").join("").slice(0, 2).toUpperCase();
+              const bg = palette[name.charCodeAt(0) % palette.length];
+              const url = m.profilePictureUrl || m.employeeProfile?.profilePictureUrl;
+              return (
+                <span
+                  title={name}
+                  aria-label={name}
+                  className="inline-block rounded-full ring-2 ring-white dark:ring-[#001529] cursor-default transition-transform hover:scale-110 hover:z-10"
+                  style={{ width: size, height: size }}
+                >
+                  {url ? (
+                    <img src={url} alt={name} className="h-full w-full rounded-full object-cover" />
+                  ) : (
+                    <span
+                      className="flex h-full w-full items-center justify-center rounded-full font-bold text-white"
+                      style={{ background: bg, fontSize: Math.round(size * 0.36) }}
+                    >
+                      {initials}
+                    </span>
+                  )}
+                </span>
+              );
+            };
+            const totalEmployees = employees.length;
+
+            return (
+              <>
+                {/* Header + sub-tabs */}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-[15px] font-bold text-slate-800 dark:text-white">
+                      {deptView === "dept" ? "Department Breakdown" : "Manager Breakdown"}
+                    </h2>
+                    <p className="mt-0.5 text-[12px] text-slate-500 dark:text-slate-400">
+                      {deptView === "dept"
+                        ? `${depts.length} ${depts.length === 1 ? "department" : "departments"} · ${totalEmployees} employees`
+                        : `${managersGrouped.length} ${managersGrouped.length === 1 ? "manager" : "managers"}`}
+                    </p>
+                  </div>
+                  <div className="inline-flex rounded-lg bg-slate-100 dark:bg-white/[0.05] p-1 self-start">
+                    {[
+                      { key: "dept",    label: "By Department" },
+                      { key: "manager", label: "By Manager"    },
+                    ].map((t) => {
+                      const active = deptView === (t.key as typeof deptView);
                       return (
-                        <tr key={dept} className="border-b border-slate-50 dark:border-white/[0.03]">
-                          <td className="px-5 py-3 text-[13px] font-medium text-slate-800 dark:text-white">{dept}</td>
-                          <td className="px-5 py-3 text-[13px] text-slate-600 dark:text-slate-300">{count}</td>
-                          <td className="px-5 py-3 w-64">
-                            <div className="flex items-center gap-3">
-                              <div className="flex-1 h-1.5 bg-slate-100 dark:bg-white/10 rounded-full overflow-hidden">
-                                <div className="h-full bg-[#008CFF] rounded-full" style={{ width: `${pct}%` }} />
-                              </div>
-                              <span className="text-[11px] text-slate-500 dark:text-slate-400 w-8 text-right">{pct.toFixed(0)}%</span>
-                            </div>
-                          </td>
-                        </tr>
+                        <button
+                          key={t.key}
+                          type="button"
+                          onClick={() => setDeptView(t.key as typeof deptView)}
+                          className={`px-3 py-1.5 rounded-md text-[12.5px] font-semibold transition-all ${
+                            active
+                              ? "bg-white dark:bg-[#001529] text-[#008CFF] shadow-sm"
+                              : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                          }`}
+                        >
+                          {t.label}
+                        </button>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
+                  </div>
+                </div>
+
+                {/* By Department — card grid */}
+                {deptView === "dept" && (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {depts.map(([dept, members]) => {
+                      const accentBg = palette[dept.charCodeAt(0) % palette.length];
+                      return (
+                        <div
+                          key={dept}
+                          className="group relative rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/80 overflow-hidden transition-shadow hover:shadow-[0_4px_18px_rgba(15,23,42,0.06)]"
+                        >
+                          {/* Soft accent strip — a fade-out gradient looks
+                              less aggressive than a flat coloured bar. */}
+                          <span
+                            aria-hidden
+                            className="absolute inset-x-0 top-0 h-[3px]"
+                            style={{ background: `linear-gradient(90deg, ${accentBg}, ${accentBg}80 65%, transparent)` }}
+                          />
+                          <div className="px-4 pt-4 pb-3 flex items-center justify-between">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {/* Pastel chip — tinted background + dark
+                                  text reads as an enterprise badge, not a
+                                  child's sticker. */}
+                              <span
+                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-bold text-[13px] ring-1"
+                                style={{
+                                  background: `${accentBg}14`,
+                                  color: accentBg,
+                                  boxShadow: `inset 0 0 0 1px ${accentBg}33`,
+                                }}
+                              >
+                                {dept.slice(0, 2).toUpperCase()}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="truncate text-[13.5px] font-bold text-slate-800 dark:text-white">{dept}</p>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                  {members.length} {members.length === 1 ? "member" : "members"}
+                                </p>
+                              </div>
+                            </div>
+                            <span className="text-[20px] font-bold tabular-nums text-slate-300 dark:text-white/15">
+                              {members.length}
+                            </span>
+                          </div>
+                          <div className="px-4 pb-4">
+                            {members.length === 0 ? (
+                              <p className="text-[12px] text-slate-400">No employees</p>
+                            ) : (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {members.slice(0, 14).map((m: any) => <Av key={m.id} m={m} size={28} />)}
+                                {members.length > 14 && (
+                                  <span
+                                    title={members.slice(14).map(personName).join(", ")}
+                                    className="inline-flex h-7 items-center justify-center rounded-full bg-slate-100 dark:bg-white/[0.06] px-2 text-[10px] font-bold text-slate-600 dark:text-slate-300"
+                                  >
+                                    +{members.length - 14}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {depts.length === 0 && (
+                      <div className="md:col-span-2 xl:col-span-3 rounded-xl border border-dashed border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/80 px-6 py-10 text-center text-[13px] text-slate-500">
+                        No employees imported yet.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* By Manager — list of managers with department + reports */}
+                {deptView === "manager" && (
+                  <div className="rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/80 overflow-hidden">
+                    {managersGrouped.length === 0 ? (
+                      <div className="px-6 py-12 text-center text-[13px] text-slate-500">
+                        No employees with the Manager / HoD role.
+                      </div>
+                    ) : (
+                      <ul className="divide-y divide-slate-100 dark:divide-white/[0.04]">
+                        {managersGrouped.map(({ manager: m, reports }) => {
+                          const dept = m.employeeProfile?.department || "Unassigned";
+                          const accentBg = palette[dept.charCodeAt(0) % palette.length];
+                          return (
+                            <li key={m.id} className="px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="flex items-start gap-3 min-w-0">
+                                <Av m={m} size={40} />
+                                <div className="min-w-0">
+                                  <p className="truncate text-[13.5px] font-semibold text-slate-800 dark:text-white">
+                                    {personName(m)}
+                                  </p>
+                                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px]">
+                                    {personRole(m) && (
+                                      <span className="text-slate-500 dark:text-slate-400">{personRole(m)}</span>
+                                    )}
+                                    <span
+                                      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ring-1"
+                                      style={{
+                                        background: `${accentBg}14`,
+                                        color: accentBg,
+                                        boxShadow: `inset 0 0 0 1px ${accentBg}33`,
+                                      }}
+                                    >
+                                      {dept}
+                                    </span>
+                                    <span className="text-slate-400">
+                                      · {reports.length} {reports.length === 1 ? "report" : "reports"}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="shrink-0 flex flex-wrap items-center gap-1.5 sm:justify-end">
+                                {reports.length === 0 ? (
+                                  <span className="text-[11.5px] text-slate-400">No direct reports</span>
+                                ) : (
+                                  <>
+                                    {reports.slice(0, 8).map((r: any) => <Av key={r.id} m={r} size={24} />)}
+                                    {reports.length > 8 && (
+                                      <span
+                                        title={reports.slice(8).map(personName).join(", ")}
+                                        className="inline-flex h-6 items-center justify-center rounded-full bg-slate-100 dark:bg-white/[0.06] px-2 text-[10px] font-bold text-slate-600 dark:text-slate-300"
+                                      >
+                                        +{reports.length - 8}
+                                      </span>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </>
+            );
+          })()}
           {/* ── Holidays ── */}
           {tab === "holidays" && (
             <>

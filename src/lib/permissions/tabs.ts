@@ -57,7 +57,9 @@ export const TAB_CATALOG: TabDef[] = [
   { key: "hr_hiring",   label: "Hiring",        description: "Job openings + applications inbox",  pathPrefixes: ["/dashboard/hr/hiring"], defaultForNewUser: false },
   { key: "hr_offboard", label: "Offboarding",   description: "Exit workflow + clearance tracking", pathPrefixes: ["/dashboard/hr/offboard"], defaultForNewUser: false },
   { key: "reports",     label: "Reports",       description: "Manager weekly / monthly reports",   pathPrefixes: ["/dashboard/reports"],                   defaultForNewUser: false },
-  { key: "departments", label: "Departments",   description: "Department pages",                   pathPrefixes: ["/dashboard/department"],                defaultForNewUser: false },
+  // Tab key kept as "departments" for backwards-compat with existing
+  // UserTabPermission rows; only the user-facing label and URL changed.
+  { key: "departments", label: "KPIs",           description: "Per-department KPIs (role-scoped)",  pathPrefixes: ["/dashboard/kpis"],                      defaultForNewUser: true  },
   { key: "violations",  label: "Violation Log", description: "Attendance / policy violations",     pathPrefixes: ["/dashboard/violations"],                defaultForNewUser: false },
 ];
 

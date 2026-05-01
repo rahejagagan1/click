@@ -13,8 +13,14 @@ import {
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { isHRAdmin as canViewAsHRAdmin } from "@/lib/access";
+import EditProfilePanel from "@/components/hr/EditProfilePanel";
 
-const TABS = ["About", "Profile", "Job", "Attendance", "Documents", "Assets"] as const;
+// "Edit Profile" is HR-admin-only — the canonical place to update any
+// employee field, including salary (which the panel embeds). The
+// previous standalone "Salary" tab and the inline edit pencils on the
+// Profile tab have been retired so there's exactly one canonical edit
+// surface.
+const TABS = ["About", "Profile", "Job", "Attendance", "Documents", "Assets", "Edit Profile"] as const;
 type Tab = typeof TABS[number];
 
 const fmtDate = (d: string | Date | null | undefined) =>
@@ -68,12 +74,25 @@ export default function EmployeeDetailPage() {
   const [teamQuery, setTeamQuery] = useState("");
   const { data: session } = useSession();
   const me = session?.user as any;
+  // Manager list for the Edit Profile → Job & Work section. Only fetched
+  // when the viewer can actually open that tab to avoid an extra round
+  // trip for non-admin viewers.
+  const { data: managers = [] } = useSWR<Array<{ id: number; name: string }>>(
+    () => (canViewAsHRAdmin(me) ? "/api/managers" : null),
+    fetcher,
+  );
   // Same gate the PUT endpoint enforces — anyone in this set can edit other
   // employees' profiles via the people detail page. Includes ceo / dev /
   // special_access / role=admin / hr_manager.
   const isHRAdmin = canViewAsHRAdmin(me);
   const canEdit = isHRAdmin;
-  const [editSection, setEditSection] = useState<null | "primary" | "contact" | "address" | "identity">(null);
+  // Salary tab is visible only to HR admin tier OR the profile owner —
+  // i.e. a user can see their own salary structure, and admins can see /
+  // edit anyone's. Editing is HR-admin-only (canEdit above).
+  // Edit Profile is HR-admin-only (matches the PUT endpoint's gate).
+  // Profile owners view their own salary on /dashboard/hr/payroll.
+  const showEditTab = isHRAdmin;
+  const visibleTabs = TABS.filter((t) => t !== "Edit Profile" || showEditTab);
 
   if (isLoading) {
     return (
@@ -220,7 +239,7 @@ export default function EmployeeDetailPage() {
           {/* Tab bar — sits at the bottom of the identity card */}
           <div className="border-t border-slate-100 px-7">
             <div className="flex gap-0 overflow-x-auto">
-              {TABS.map((tab) => (
+              {visibleTabs.map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)}
                   className={`relative px-4 py-3.5 text-[11.5px] font-bold uppercase tracking-wider whitespace-nowrap transition-colors ${
                     activeTab === tab
@@ -309,7 +328,7 @@ export default function EmployeeDetailPage() {
             {activeTab === "Profile" && (
               <div className="space-y-5">
                 {/* ── Primary Details ── */}
-                <DetailCard title="Primary Details" onEdit={canEdit ? () => setEditSection("primary") : undefined}>
+                <DetailCard title="Primary Details">
                   <Grid3>
                     <KV label="First Name"            value={p.firstName ?? user.name?.split(" ")[0]} />
                     <KV label="Middle Name"           value={p.middleName} />
@@ -324,7 +343,7 @@ export default function EmployeeDetailPage() {
                 </DetailCard>
 
                 {/* ── Contact Details ── */}
-                <DetailCard title="Contact Details" onEdit={canEdit ? () => setEditSection("contact") : undefined}>
+                <DetailCard title="Contact Details">
                   <Grid3>
                     <KV label="Work Email"     value={user.email} />
                     <KV label="Personal Email" value={p.personalEmail} />
@@ -336,7 +355,7 @@ export default function EmployeeDetailPage() {
                 </DetailCard>
 
                 {/* ── Addresses ── */}
-                <DetailCard title="Addresses" onEdit={canEdit ? () => setEditSection("address") : undefined}>
+                <DetailCard title="Addresses">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <p className="text-[10px] uppercase tracking-[0.1em] text-slate-400 font-semibold mb-1.5">Current Address</p>
@@ -364,11 +383,8 @@ export default function EmployeeDetailPage() {
                 </DetailCard>
 
                 {/* ── Identity Information (PAN / Aadhaar) ── */}
-                {(p.panNumber || p.aadhaarNumber || p.parentName || canEdit) && (
-                  <DetailCard
-                    title="Identity Information"
-                    onEdit={canEdit ? () => setEditSection("identity") : undefined}
-                  >
+                {(p.panNumber || p.aadhaarNumber || p.parentName) && (
+                  <DetailCard title="Identity Information">
                     <Grid3>
                       <KV label="PAN Number"     value={maskPan(p.panNumber)} />
                       <KV label="Aadhaar Number" value={maskAadhaar(p.aadhaarNumber)} />
@@ -438,6 +454,10 @@ export default function EmployeeDetailPage() {
                 ) : <EmptyState icon={Laptop} label="No assets assigned" />}
               </section>
             )}
+
+            {activeTab === "Edit Profile" && showEditTab && (
+              <EditProfilePanel userId={userId} user={user} managers={managers} />
+            )}
           </main>
 
           {/* ── Right rail: Reporting Team (sticky on lg+) ── */}
@@ -488,15 +508,10 @@ export default function EmployeeDetailPage() {
         </div>
       </div>
 
-      {/* Edit modal — only mounted while a section is being edited. */}
-      {editSection && (
-        <ProfileEditModal
-          section={editSection}
-          userId={userId}
-          user={user}
-          onClose={() => setEditSection(null)}
-        />
-      )}
+      {/* Edit modal retired — see the new "Edit Profile" tab for the
+          canonical edit surface. ProfileEditModal stays defined below
+          for now (no longer mounted) and can be removed in a follow-up
+          cleanup once the new tab is verified in production. */}
     </div>
   );
 }
