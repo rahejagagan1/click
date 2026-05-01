@@ -45,6 +45,23 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     });
     if (!user) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+    // Inline manager — fetched via raw SQL so the route works even when
+    // `prisma generate` hasn't picked up the new column yet (same
+    // pattern we use for businessUnit / lastReminderAt).
+    let inlineManager: { id: number; name: string; profilePictureUrl: string | null; role: string } | null = null;
+    try {
+      const rows = await prisma.$queryRawUnsafe<Array<{ id: number; name: string; profilePictureUrl: string | null; role: string }>>(
+        `SELECT m.id, m.name, m."profilePictureUrl", m.role::text AS role
+           FROM "User" u
+           LEFT JOIN "User" m ON m.id = u."inlineManagerId"
+          WHERE u.id = $1 AND m.id IS NOT NULL`,
+        id,
+      );
+      inlineManager = rows[0] ?? null;
+    } catch (e) {
+      console.warn("[people GET] inlineManager lookup failed:", e);
+    }
+
     // Reshape to what the detail page reads.
     const { employeeProfile, heldAssets, ownedDocuments, teamMembers, userShift, ...rest } = user;
     const payload = {
@@ -54,6 +71,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       assets:        heldAssets.map((a) => ({ ...a.asset, assignedAt: a.assignedAt })),
       directReports: teamMembers,
       shift:         userShift?.shift ?? null,
+      inlineManager,
     };
     return NextResponse.json(serializeBigInt(payload));
   } catch (e) {
@@ -92,7 +110,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       designation, department, businessUnit, employmentType, workLocation, joiningDate,
       noticePeriodDays,
       // User row fields — role / orgLevel / manager / team membership.
-      role: newRole, orgLevel, managerId, teamCapsule,
+      role: newRole, orgLevel, managerId, inlineManagerId, teamCapsule,
     } = body;
 
     const target = await prisma.user.findUnique({ where: { id }, select: { id: true } });
@@ -178,6 +196,30 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         } catch (e) {
           console.warn("[people PUT] new-column raw update failed:", e);
         }
+      }
+    }
+
+    // inlineManagerId lives on User, not EmployeeProfile, and the typed
+    // client may not know about it yet. Raw SQL keeps this independent
+    // of `prisma generate` cache state on dev/VPS.
+    if (inlineManagerId !== undefined) {
+      const newInlineId = inlineManagerId === null || inlineManagerId === ""
+        ? null
+        : parseInt(String(inlineManagerId), 10);
+      if (newInlineId !== null && newInlineId === id) {
+        return NextResponse.json(
+          { error: "Inline manager cannot be the same person." },
+          { status: 400 },
+        );
+      }
+      try {
+        await prisma.$executeRawUnsafe(
+          `UPDATE "User" SET "inlineManagerId" = $1 WHERE id = $2`,
+          newInlineId,
+          id,
+        );
+      } catch (e) {
+        console.warn("[people PUT] inlineManagerId update failed:", e);
       }
     }
 
