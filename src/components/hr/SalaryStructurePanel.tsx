@@ -16,6 +16,7 @@ import {
   MoreVertical, Plus, X,
 } from "lucide-react";
 import CustomSelect from "@/components/ui/CustomSelect";
+import { DatePicker } from "@/components/ui/date-picker";
 
 type Props = {
   userId: number;
@@ -634,14 +635,24 @@ function AddBonusModal({ userId, onClose }: { userId: number; onClose: () => voi
             </div>
           </div>
 
-          {/* ── Date — label changes with the payment status ── */}
+          {/* ── Date — label changes with the payment status. Uses the
+              shared DatePicker (Day/Month/Year dropdowns) so the styling
+              matches the rest of the app instead of falling back to the
+              browser's native picker. */}
           <div>
             <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">{dateLabel}</label>
-            <input
-              type="date" value={date} onChange={(e) => setDate(e.target.value)}
-              placeholder="Select"
-              className="h-9 w-full max-w-xs rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-800 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15"
-            />
+            <div className="max-w-md">
+              <DatePicker
+                value={date}
+                onChange={setDate}
+                // Bonuses can be backdated (paid_past) or scheduled
+                // ahead (due_future) — give the year dropdown a
+                // generous range covering past structures + a few
+                // years of forward planning.
+                yearStart={new Date().getFullYear() - 5}
+                futureYears={5}
+              />
+            </div>
           </div>
 
           {/* ── Note ── */}

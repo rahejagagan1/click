@@ -501,3 +501,221 @@ export function announcementEmail(args: {
   ].join("\n");
   return { subject, html, text };
 }
+
+// ── Violations ────────────────────────────────────────────────────────
+// Sent to the affected employee when a violation is first logged. The
+// note + actionTaken + status are surfaced so the user knows exactly
+// what happened and what (if anything) is being done about it.
+const SEVERITY_LABEL: Record<string, string> = {
+  low: "Low", medium: "Medium", high: "High", critical: "Critical",
+};
+const STATUS_LABEL: Record<string, string> = {
+  open: "Open", in_progress: "In progress", closed: "Closed",
+};
+const STATUS_COLOR: Record<string, string> = {
+  open: "#ef4444", in_progress: "#0284c7", closed: "#10b981",
+};
+
+export function violationCreatedEmail(args: {
+  userName: string;
+  title: string;
+  description?: string | null;
+  severity: string;
+  status: string;
+  category?: string | null;
+  actionTaken?: string | null;
+  notes?: string | null;
+  reporterName?: string | null;
+  violationDate?: string | Date | null;
+}): EmailContent {
+  const subject = `A violation has been logged on your record`;
+  const link = `${appUrl()}/dashboard/violations`;
+  const sev   = SEVERITY_LABEL[args.severity] ?? args.severity;
+  const stat  = STATUS_LABEL[args.status] ?? args.status;
+  const statColor = STATUS_COLOR[args.status] ?? "#64748b";
+  const dateLabel = args.violationDate ? fmtDate(args.violationDate) : null;
+
+  const rows: Array<[string, string]> = [];
+  rows.push(["Title",    args.title]);
+  if (args.category)      rows.push(["Category", args.category]);
+  rows.push(["Severity",  sev]);
+  rows.push(["Status",    `<span style="color:${statColor};font-weight:600">${stat}</span>`]);
+  if (dateLabel)          rows.push(["Date",     dateLabel]);
+  if (args.reporterName)  rows.push(["Reported by", args.reporterName]);
+
+  const detailsTable = rows.map(([k, v]) => `
+    <tr>
+      <td style="padding:6px 12px;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;width:120px;vertical-align:top">${escape(k)}</td>
+      <td style="padding:6px 12px;font-size:13.5px;color:#1f2937">${v}</td>
+    </tr>`).join("");
+
+  const body = `
+    <p style="margin:0 0 14px;font-size:14px;line-height:1.6">
+      Hi ${escape(args.userName)}, a policy / conduct violation has been recorded against your name.
+      Full details are below.
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#f8fafc;border-radius:6px;overflow:hidden">
+      ${detailsTable}
+    </table>
+    ${args.description ? `
+      <div style="margin-top:14px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
+        <p style="margin:0 0 4px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Description</p>
+        <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.55;white-space:pre-wrap">${escape(args.description)}</p>
+      </div>
+    ` : ""}
+    ${args.actionTaken ? `
+      <div style="margin-top:10px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
+        <p style="margin:0 0 4px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Action taken</p>
+        <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.55;white-space:pre-wrap">${escape(args.actionTaken)}</p>
+      </div>
+    ` : ""}
+    ${args.notes ? `
+      <div style="margin-top:10px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
+        <p style="margin:0 0 4px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Notes</p>
+        <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.55;white-space:pre-wrap">${escape(args.notes)}</p>
+      </div>
+    ` : ""}
+    <p style="margin:18px 0 0;font-size:12.5px;color:#64748b;line-height:1.55">
+      If you'd like to discuss this, reach out to HR or your manager directly.
+    </p>
+    ${ctaButton("View on dashboard", link)}
+  `;
+  const text = [
+    `Hi ${args.userName},`,
+    `A violation has been recorded against your name.`,
+    ``,
+    `Title: ${args.title}`,
+    args.category ? `Category: ${args.category}` : null,
+    `Severity: ${sev}`,
+    `Status: ${stat}`,
+    dateLabel ? `Date: ${dateLabel}` : null,
+    args.reporterName ? `Reported by: ${args.reporterName}` : null,
+    args.description ? `\nDescription:\n${args.description}` : null,
+    args.actionTaken ? `\nAction taken:\n${args.actionTaken}` : null,
+    args.notes ? `\nNotes:\n${args.notes}` : null,
+    ``,
+    `Open: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html: SHELL(subject, body), text };
+}
+
+// Sent to the affected employee whenever the status (or action / notes)
+// changes — open → in_progress → closed, etc.
+export function violationStatusChangedEmail(args: {
+  userName: string;
+  title: string;
+  oldStatus: string;
+  newStatus: string;
+  actionTaken?: string | null;
+  notes?: string | null;
+  changedByName?: string | null;
+}): EmailContent {
+  const newStat   = STATUS_LABEL[args.newStatus] ?? args.newStatus;
+  const newColor  = STATUS_COLOR[args.newStatus] ?? "#64748b";
+  const oldStat   = STATUS_LABEL[args.oldStatus] ?? args.oldStatus;
+
+  const subject = `Update on your violation: ${newStat}`;
+  const link = `${appUrl()}/dashboard/violations`;
+  const body = `
+    <p style="margin:0 0 14px;font-size:14px;line-height:1.6">
+      Hi ${escape(args.userName)}, the status of the violation
+      <strong>${escape(args.title)}</strong> has been updated.
+    </p>
+    <div style="margin:14px 0;padding:14px;background:#f8fafc;border-radius:6px;display:inline-block;width:100%;box-sizing:border-box">
+      <span style="font-size:12px;color:#64748b">${escape(oldStat)}</span>
+      <span style="font-size:12px;color:#94a3b8;margin:0 8px">→</span>
+      <span style="font-size:13.5px;color:${newColor};font-weight:600">${escape(newStat)}</span>
+      ${args.changedByName ? `<span style="font-size:11.5px;color:#94a3b8;margin-left:8px">by ${escape(args.changedByName)}</span>` : ""}
+    </div>
+    ${args.actionTaken ? `
+      <div style="margin-top:10px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
+        <p style="margin:0 0 4px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Action taken</p>
+        <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.55;white-space:pre-wrap">${escape(args.actionTaken)}</p>
+      </div>
+    ` : ""}
+    ${args.notes ? `
+      <div style="margin-top:10px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
+        <p style="margin:0 0 4px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Notes</p>
+        <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.55;white-space:pre-wrap">${escape(args.notes)}</p>
+      </div>
+    ` : ""}
+    ${ctaButton("View on dashboard", link)}
+  `;
+  const text = [
+    `Hi ${args.userName},`,
+    `The status of the violation "${args.title}" has changed: ${oldStat} → ${newStat}${args.changedByName ? ` (by ${args.changedByName})` : ""}.`,
+    args.actionTaken ? `\nAction taken:\n${args.actionTaken}` : null,
+    args.notes ? `\nNotes:\n${args.notes}` : null,
+    ``,
+    `Open: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html: SHELL(subject, body), text };
+}
+
+// Cron-scheduled gentle nudge to HR / CEO / admins when a violation has
+// been sitting "in progress" for too long. Sent at most every 15 days
+// per violation — throttle is enforced by Violation.lastReminderAt.
+export function violationInProgressReminderEmail(args: {
+  recipientName?: string | null;
+  affectedUserName: string;
+  title: string;
+  daysOpen: number;
+  severity: string;
+  category?: string | null;
+  reporterName?: string | null;
+  actionTaken?: string | null;
+}): EmailContent {
+  const subject = `Reminder: violation for ${args.affectedUserName} is still in progress`;
+  const link = `${appUrl()}/dashboard/violations`;
+  const sev = SEVERITY_LABEL[args.severity] ?? args.severity;
+
+  const rows: Array<[string, string]> = [];
+  rows.push(["Employee", args.affectedUserName]);
+  rows.push(["Title",    args.title]);
+  if (args.category)     rows.push(["Category", args.category]);
+  rows.push(["Severity", sev]);
+  rows.push(["Open for", `${args.daysOpen} day${args.daysOpen === 1 ? "" : "s"}`]);
+  if (args.reporterName) rows.push(["Reported by", args.reporterName]);
+
+  const tableHtml = rows.map(([k, v]) => `
+    <tr>
+      <td style="padding:6px 12px;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;width:130px;vertical-align:top">${escape(k)}</td>
+      <td style="padding:6px 12px;font-size:13.5px;color:#1f2937">${escape(v)}</td>
+    </tr>`).join("");
+
+  const body = `
+    <p style="margin:0 0 14px;font-size:14px;line-height:1.6">
+      ${args.recipientName ? `Hi ${escape(args.recipientName)},` : "Hi,"} a violation marked as <strong>in progress</strong>
+      hasn't been closed yet. Could someone take another look?
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#f8fafc;border-radius:6px;overflow:hidden">
+      ${tableHtml}
+    </table>
+    ${args.actionTaken ? `
+      <div style="margin-top:10px;padding:12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
+        <p style="margin:0 0 4px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Last action taken</p>
+        <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.55;white-space:pre-wrap">${escape(args.actionTaken)}</p>
+      </div>
+    ` : ""}
+    <p style="margin:18px 0 0;font-size:12.5px;color:#64748b;line-height:1.55">
+      You're getting this reminder because the matter is still showing
+      "in progress". Update the status to "closed" once it's resolved.
+    </p>
+    ${ctaButton("Open the violation", link)}
+  `;
+  const text = [
+    args.recipientName ? `Hi ${args.recipientName},` : "Hi,",
+    `A violation marked "in progress" still hasn't been closed.`,
+    ``,
+    `Employee: ${args.affectedUserName}`,
+    `Title: ${args.title}`,
+    args.category ? `Category: ${args.category}` : null,
+    `Severity: ${sev}`,
+    `Open for: ${args.daysOpen} day${args.daysOpen === 1 ? "" : "s"}`,
+    args.reporterName ? `Reported by: ${args.reporterName}` : null,
+    args.actionTaken ? `\nLast action taken:\n${args.actionTaken}` : null,
+    ``,
+    `Open: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html: SHELL(subject, body), text };
+}
