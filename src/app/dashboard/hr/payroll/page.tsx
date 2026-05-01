@@ -57,11 +57,21 @@ function StatusBadge({ status }: { status: string }) {
 function downloadPayslip(p: any, structure: any) {
   const MONTHS_FULL = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const fmt = (n: any) => new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(parseFloat(n || 0));
+  const isIntern      = structure?.salaryType === "intern";
   const monthlyBasic  = structure ? fmt(parseFloat(structure.basic) / 12) : "—";
   const monthlyHra    = structure ? fmt(parseFloat(structure.hra) / 12) : "—";
   const specialAllow  = structure
     ? fmt(parseFloat(p.grossEarnings) - parseFloat(structure.basic) / 12 - parseFloat(structure.hra) / 12)
     : "—";
+
+  // Interns get a single "Monthly Stipend" earnings row — no HRA / Special
+  // breakdown applies to a flat-stipend payout. Regular employees keep
+  // the full Basic / HRA / Special component breakdown.
+  const earningsRowsHtml = isIntern
+    ? `<tr><td>Monthly Stipend</td><td class="amount">₹${fmt(p.grossEarnings)}</td></tr>`
+    : `<tr><td>Basic Salary</td><td class="amount">₹${monthlyBasic}</td></tr>
+       <tr><td>House Rent Allowance (HRA)</td><td class="amount">₹${monthlyHra}</td></tr>
+       <tr><td>Special Allowance</td><td class="amount">₹${specialAllow}</td></tr>`;
 
   const html = `<!DOCTYPE html>
 <html><head><title>Payslip - ${MONTHS_FULL[p.month]} ${p.year}</title>
@@ -105,9 +115,7 @@ function downloadPayslip(p: any, structure: any) {
 <div class="section-title">Earnings</div>
 <table class="table">
   <tr><th>Component</th><th style="text-align:right">Amount (₹)</th></tr>
-  <tr><td>Basic Salary</td><td class="amount">₹${monthlyBasic}</td></tr>
-  <tr><td>House Rent Allowance (HRA)</td><td class="amount">₹${monthlyHra}</td></tr>
-  <tr><td>Special Allowance</td><td class="amount">₹${specialAllow}</td></tr>
+  ${earningsRowsHtml}
   <tr class="total-row"><td>Gross Earnings</td><td class="amount">₹${fmt(p.grossEarnings)}</td></tr>
 </table>
 
@@ -178,19 +186,28 @@ export default function PayrollPage() {
     ? new Date(myStructure.effectiveFrom).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" })
     : "—";
 
-  // Earnings rows for the breakup modal / salary card.
+  // Earnings rows for the breakup modal / salary card. Interns get a
+  // single "Monthly Stipend" row even when other component fields are
+  // populated, since the stipend is a flat payout not a Basic+HRA split.
   const earningsRows = useMemo(() => {
     if (!myStructure) return [];
+    const isIntern = myStructure.salaryType === "intern";
     const basic   = parseFloat(myStructure.basic || 0);
     const hra     = parseFloat(myStructure.hra || 0);
     const special = parseFloat(myStructure.specialAllowance || 0);
     const rows: { label: string; annual: number }[] = [];
+    if (isIntern) {
+      // Intern: one row covering the annualised stipend (basic × 12-equivalent).
+      const stipend = basic > 0 ? basic : annualCtc;
+      if (stipend > 0) rows.push({ label: "Monthly Stipend", annual: stipend });
+      return rows;
+    }
     if (basic)   rows.push({ label: "Basic Salary",              annual: basic   });
     if (hra)     rows.push({ label: "House Rent Allowance",      annual: hra     });
     if (special) rows.push({ label: "Special Allowance",         annual: special });
     // If the structure is flat (single stipend), fall back to one row covering CTC.
     if (rows.length === 0 && annualCtc > 0) {
-      rows.push({ label: "Stipend", annual: annualCtc });
+      rows.push({ label: "Monthly Stipend", annual: annualCtc });
     }
     return rows;
   }, [myStructure, annualCtc]);
@@ -902,7 +919,13 @@ function formatDate(iso?: string | null): string {
 function renderEarnings(p: any, structure: any): { label: string; value: string }[] {
   const gross = parseFloat(p.grossEarnings || 0);
   if (!structure) {
-    return [{ label: "Stipend", value: fmtInr(gross) }];
+    return [{ label: "Monthly Stipend", value: fmtInr(gross) }];
+  }
+  // Interns: single "Monthly Stipend" row regardless of which DB columns
+  // happen to be populated. Regular employees keep the Basic / HRA /
+  // Special breakdown.
+  if (structure.salaryType === "intern") {
+    return [{ label: "Monthly Stipend", value: fmtInr(gross) }];
   }
   const basic   = parseFloat(structure.basic   || 0) / 12;
   const hra     = parseFloat(structure.hra     || 0) / 12;
@@ -911,6 +934,6 @@ function renderEarnings(p: any, structure: any): { label: string; value: string 
   if (basic)   rows.push({ label: "Basic Salary",              value: fmtInr(basic) });
   if (hra)     rows.push({ label: "House Rent Allowance",      value: fmtInr(hra)   });
   if (special) rows.push({ label: "Special Allowance",         value: fmtInr(special) });
-  if (rows.length === 0) rows.push({ label: "Stipend", value: fmtInr(gross) });
+  if (rows.length === 0) rows.push({ label: "Monthly Stipend", value: fmtInr(gross) });
   return rows;
 }
