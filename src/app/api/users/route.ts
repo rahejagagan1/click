@@ -10,9 +10,26 @@ export const dynamic = 'force-dynamic';
 import { serializeBigInt } from "@/lib/utils";
 import { resolveTeamCapsuleForSave } from "@/lib/capsule-matching";
 
+// CEO + developer only — used for destructive actions (DELETE).
+// Onboarding employees is gated separately by `canCreateUsers` so HR
+// managers / admins / special_access can also onboard.
 function canManageUsers(session: any): boolean {
     const user = session?.user as any;
     return user?.orgLevel === "ceo" || user?.isDeveloper === true;
+}
+
+// HR-admin tier — mirrors src/lib/access.ts:isHRAdmin so the onboarding
+// form (POST /api/users) works for everyone the UI shows the wizard to:
+// CEO / developer / special_access / role=admin / orgLevel=hr_manager.
+function canCreateUsers(session: any): boolean {
+    const user = session?.user as any;
+    return (
+        user?.orgLevel === "ceo" ||
+        user?.isDeveloper === true ||
+        user?.orgLevel === "special_access" ||
+        user?.role === "admin" ||
+        user?.orgLevel === "hr_manager"
+    );
 }
 
 export async function GET(request: Request) {
@@ -52,12 +69,12 @@ export async function GET(request: Request) {
     }
 }
 
-// POST: Add new user (CEO / Developer only)
+// POST: Add new user — HR admin tier (CEO / dev / admin / special_access / hr_manager)
 export async function POST(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
-        if (!canManageUsers(session)) {
-            return NextResponse.json({ error: "Only CEO and developers can add users" }, { status: 403 });
+        if (!canCreateUsers(session)) {
+            return NextResponse.json({ error: "Only HR managers and admins can add users" }, { status: 403 });
         }
 
         const body = await request.json();
@@ -324,6 +341,21 @@ export async function POST(request: NextRequest) {
 
             return { user: created, isUpdate: !!existing };
         });
+
+        // Persist businessUnit via raw SQL — keeps things working even
+        // if the typed Prisma client hasn't been regenerated after the
+        // schema change. Same pattern other new columns use here.
+        if (profile && typeof profile.businessUnit === "string") {
+            try {
+                await prisma.$executeRawUnsafe(
+                    `UPDATE "EmployeeProfile" SET "businessUnit" = $1 WHERE "userId" = $2`,
+                    profile.businessUnit || null,
+                    user.id,
+                );
+            } catch (e) {
+                console.warn("[users POST] businessUnit update failed:", e);
+            }
+        }
 
         // Welcome / sign-in email — fire-and-forget so a transient SMTP
         // failure doesn't roll back the create.

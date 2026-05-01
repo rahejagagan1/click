@@ -4,13 +4,17 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import { isHRAdmin } from "@/lib/access";
 
 const DOC_CATEGORIES = ["All", "Identity", "Education", "Experience", "Finance", "Legal", "Other"];
 
 export default function DocumentsPage() {
   const { data: session } = useSession();
   const user = session?.user as any;
-  const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper;
+  // Mirrors the API gate. Was: ceo | isDeveloper (missing special_access
+  // + role=admin + hr_manager). HR admins now correctly see the upload
+  // button — matches what /api/hr/documents accepts.
+  const isAdmin = isHRAdmin(user);
   const [category, setCategory] = useState("All");
   const [showUpload, setShowUpload] = useState(false);
 

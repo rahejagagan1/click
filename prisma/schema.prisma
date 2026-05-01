@@ -837,6 +837,10 @@ model EmployeeProfile {
   // ── Existing fields ──
   designation       String?
   department        String?
+  /// "Business Unit" the employee belongs to (e.g. "NB Media"). Free-text
+  /// since HR can extend the dropdown via the OptionList table — keep
+  /// nullable so legacy rows survive without backfill.
+  businessUnit      String?
   employmentType    String    @default("fulltime")  // fulltime | parttime | contract | intern
   workLocation      String    @default("office")    // office | remote | hybrid
   joiningDate       DateTime?

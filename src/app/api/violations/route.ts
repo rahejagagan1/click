@@ -5,12 +5,17 @@ import { authOptions } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
+// Mirrors src/lib/access.ts:isHRAdmin so the API gate matches the UI's
+// canViewViolationLog logic. Previously missed role=admin and
+// orgLevel=hr_manager, locking out HR managers + admins.
 function hasViolationAccess(session: any): boolean {
     const user = session?.user as any;
     return (
         user?.orgLevel === "ceo" ||
         user?.orgLevel === "special_access" ||
+        user?.orgLevel === "hr_manager" ||
         user?.role === "hr_manager" ||
+        user?.role === "admin" ||
         user?.isDeveloper === true
     );
 }
@@ -145,14 +150,20 @@ export async function PATCH(request: NextRequest) {
     }
 }
 
-// DELETE: Only CEO and Developer can delete
+// DELETE: admin tier (CEO / dev / special_access / role=admin). HR
+// Manager intentionally NOT included — destructive log delete should
+// stay above HR's normal write access.
 export async function DELETE(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
         const user = session?.user as any;
-        const canDelete = user?.orgLevel === "ceo" || user?.isDeveloper === true;
+        const canDelete =
+            user?.orgLevel === "ceo" ||
+            user?.orgLevel === "special_access" ||
+            user?.role === "admin" ||
+            user?.isDeveloper === true;
         if (!canDelete) {
-            return NextResponse.json({ error: "Only CEO and developers can delete violations" }, { status: 403 });
+            return NextResponse.json({ error: "Only admins can delete violations" }, { status: 403 });
         }
 
         const { id } = await request.json();
