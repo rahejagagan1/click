@@ -129,12 +129,15 @@ export default function KekaImportModal({
   const createOne = async (row: KekaRow, patch: KekaFormPatch): Promise<{ ok: boolean; error?: string; userId?: number }> => {
     try {
       const fullName = patch.displayName.trim() || [patch.firstName, patch.middleName, patch.lastName].filter(Boolean).join(" ").trim();
-      const payload = {
+      // Intentionally NOT sending role / orgLevel — bulk-imported users
+      // either already exist (in which case HR has set their role and
+      // we must not overwrite it) or are brand-new (in which case the
+      // API defaults them to "member"). Same reasoning for managerId:
+      // we send it only when the name-match resolved, so a "no match"
+      // doesn't accidentally clear an existing manager link.
+      const payload: any = {
         name:  fullName,
         email: patch.workEmail,
-        role:  "member",
-        orgLevel: "member",
-        managerId: patch.reportingManagerId ? Number(patch.reportingManagerId) : undefined,
         inviteToLogin:    true,
         // Bulk-imported users are existing Keka employees, not new
         // hires — skip the first-login onboarding wizard so they don't
@@ -160,6 +163,12 @@ export default function KekaImportModal({
           noticePeriodDays: Number(patch.noticePeriodDays) || 30,
         },
       };
+      // Send managerId only when we matched a real user — undefined
+      // (omitted) means "don't touch", whereas null would clear an
+      // existing manager link.
+      if (patch.reportingManagerId) {
+        payload.managerId = Number(patch.reportingManagerId);
+      }
       const res  = await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

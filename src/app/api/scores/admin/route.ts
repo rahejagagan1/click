@@ -70,9 +70,12 @@ export async function GET(request: NextRequest) {
             },
         });
 
-        // Get all users for the hub view
+        // Get all users for the hub view. Bulk-imported users default
+        // to role=member + orgLevel=member, so the previous
+        // member-only NOT filter silently hid most of the org. The
+        // admin view always wants the full active roster.
         const allUsers = await prisma.user.findMany({
-            where: { isActive: true, NOT: { role: "member", orgLevel: "member" } },
+            where: { isActive: true },
             select: {
                 id: true,
                 name: true,
