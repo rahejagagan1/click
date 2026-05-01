@@ -28,7 +28,13 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        const where: any = { isActive: true, NOT: { role: "member", orgLevel: "member" } };
+        // Show every active user the caller is allowed to see. The
+        // previous filter excluded role=member AND orgLevel=member,
+        // which silently hid everyone bulk-imported from Keka (they
+        // default to member/member) — managers ended up with empty
+        // rating lists. Visibility is already gated by
+        // getVisibleUserIds, so we don't need a second role-based gate.
+        const where: any = { isActive: true };
         if (visibleIds !== null) {
             where.id = { in: visibleIds };
         }
