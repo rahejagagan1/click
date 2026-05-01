@@ -4,6 +4,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import { isHRAdmin } from "@/lib/access";
 
 const TOP_TABS = [
   { key: "home",        label: "HOME",              href: "/dashboard/hr/home"  },
@@ -35,7 +36,8 @@ function DoughnutChart({ available, total, color }: { available: number; total: 
 export default function LeavesPage() {
   const { data: session } = useSession();
   const user = session?.user as any;
-  const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper || user?.orgLevel === "hr_manager";
+  // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access + role=admin.
+  const isAdmin = isHRAdmin(user);
   const [view, setView] = useState<"my" | "team">("my");
   const [showApply, setShowApply] = useState(false);
   const [showCompOff, setShowCompOff] = useState(false);
