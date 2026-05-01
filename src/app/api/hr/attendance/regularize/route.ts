@@ -397,17 +397,31 @@ export async function PUT(req: NextRequest) {
       }
 
       const totalMin = Math.max(0, Math.round((finalClockOut.getTime() - finalClockIn.getTime()) / 60000));
-      await prisma.attendance.upsert({
-        where: { userId_date: { userId: reg.userId, date: dateOnly } },
-        create: {
-          userId: reg.userId, date: dateOnly,
-          clockIn: finalClockIn, clockOut: finalClockOut,
-          status: "present", totalMinutes: totalMin, isRegularized: true,
-        },
-        update: {
-          clockIn: finalClockIn, clockOut: finalClockOut,
-          status: "present", totalMinutes: totalMin, isRegularized: true,
-        },
+      // Regularization is a whole-day override: collapse the sessions
+      // list to a single regularized session so the parent's total and
+      // sessions[] stay coherent. Done in a transaction with the upsert.
+      await prisma.$transaction(async (tx) => {
+        const upserted = await tx.attendance.upsert({
+          where: { userId_date: { userId: reg.userId, date: dateOnly } },
+          create: {
+            userId: reg.userId, date: dateOnly,
+            clockIn: finalClockIn, clockOut: finalClockOut,
+            status: "present", totalMinutes: totalMin, isRegularized: true,
+          },
+          update: {
+            clockIn: finalClockIn, clockOut: finalClockOut,
+            status: "present", totalMinutes: totalMin, isRegularized: true,
+          },
+        });
+        // Replace any existing sessions with one canonical pair.
+        await tx.$executeRawUnsafe(
+          `DELETE FROM "AttendanceSession" WHERE "attendanceId" = $1`,
+          upserted.id,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO "AttendanceSession" ("attendanceId","clockIn","clockOut") VALUES ($1, $2, $3)`,
+          upserted.id, finalClockIn, finalClockOut,
+        );
       });
     }
 
