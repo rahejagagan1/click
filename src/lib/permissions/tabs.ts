@@ -23,7 +23,20 @@ export type TabKey =
   | "hr_offboard"
   | "reports"
   | "departments"
-  | "violations";
+  | "violations"
+  // ── HR Admin sub-tabs (inside /dashboard/hr/admin) ───────────
+  // Per-user toggles for the inner panel each section. The parent
+  // `hr_admin` toggle still gates the whole HR Dashboard; these keys
+  // additionally hide individual sub-tabs from users who have HR
+  // Dashboard access but not specific sections.
+  | "hr_admin_attendance"
+  | "hr_admin_approvals"
+  | "hr_admin_leaves"
+  | "hr_admin_holidays"
+  | "hr_admin_assets"
+  | "hr_admin_leave_types"
+  | "hr_admin_shifts"
+  | "hr_admin_departments";
 
 export type TabDef = {
   key: TabKey;
@@ -33,6 +46,9 @@ export type TabDef = {
   pathPrefixes: string[];
   /** Default for a freshly-onboarded employee with no explicit row. */
   defaultForNewUser: boolean;
+  /** Optional grouping label so the Permissions UI can nest related
+   *  toggles (e.g. all HR Admin sub-tabs under "HR Dashboard sections"). */
+  group?: string;
 };
 
 // Ordered to match the real sidebar top-to-bottom.
@@ -61,6 +77,18 @@ export const TAB_CATALOG: TabDef[] = [
   // UserTabPermission rows; only the user-facing label and URL changed.
   { key: "departments", label: "KPIs",           description: "Per-department KPIs (role-scoped)",  pathPrefixes: ["/dashboard/kpis"],                      defaultForNewUser: true  },
   { key: "violations",  label: "Violation Log", description: "Attendance / policy violations",     pathPrefixes: ["/dashboard/violations"],                defaultForNewUser: false },
+  // ── HR Dashboard sub-tabs ────────────────────────────────────────
+  // Sub-keys that gate the inner panels of /dashboard/hr/admin. They
+  // only apply to viewers who already have the parent `hr_admin` tab
+  // open, so toggling these for a non-HR user is a no-op.
+  { key: "hr_admin_attendance",    label: "Attendance Dashboard", description: "Today's attendance board",        pathPrefixes: ["/dashboard/hr/admin?tab=attendance-dashboard"], defaultForNewUser: false, group: "HR Dashboard sections" },
+  { key: "hr_admin_approvals",     label: "Approvals",            description: "Leave / WFH / regularization approvals",      pathPrefixes: ["/dashboard/hr/admin?tab=approvals"],            defaultForNewUser: false, group: "HR Dashboard sections" },
+  { key: "hr_admin_leaves",        label: "Leave Balances",       description: "Per-employee leave balance editor",            pathPrefixes: ["/dashboard/hr/admin?tab=leaves"],               defaultForNewUser: false, group: "HR Dashboard sections" },
+  { key: "hr_admin_holidays",      label: "Holidays & Calendar",  description: "Company holiday list",                         pathPrefixes: ["/dashboard/hr/admin?tab=holidays"],             defaultForNewUser: false, group: "HR Dashboard sections" },
+  { key: "hr_admin_assets",        label: "Assets",               description: "Company asset register",                       pathPrefixes: ["/dashboard/hr/admin?tab=assets"],               defaultForNewUser: false, group: "HR Dashboard sections" },
+  { key: "hr_admin_leave_types",   label: "Leave Types",          description: "Configure leave categories",                   pathPrefixes: ["/dashboard/hr/admin?tab=leave-types"],          defaultForNewUser: false, group: "HR Dashboard sections" },
+  { key: "hr_admin_shifts",        label: "Shift Templates",      description: "Define attendance shifts",                     pathPrefixes: ["/dashboard/hr/admin?tab=shifts"],               defaultForNewUser: false, group: "HR Dashboard sections" },
+  { key: "hr_admin_departments",   label: "Departments (HR)",     description: "HR Dashboard department breakdown",            pathPrefixes: ["/dashboard/hr/admin?tab=departments"],          defaultForNewUser: false, group: "HR Dashboard sections" },
 ];
 
 export const TAB_CATALOG_BY_KEY: Record<TabKey, TabDef> = Object.fromEntries(
@@ -96,6 +124,10 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     hr_my_team:true, hr_admin:true, hr_people:true,
     hr_hiring:true, hr_offboard:true,
     reports:true, departments:true, violations:true,
+    // All HR Dashboard sub-tabs on by default for full admins.
+    hr_admin_attendance:true, hr_admin_approvals:true, hr_admin_leaves:true,
+    hr_admin_holidays:true, hr_admin_assets:true, hr_admin_leave_types:true,
+    hr_admin_shifts:true, hr_admin_departments:true,
   },
   // special_access is the senior-admin role — same visibility as CEO
   // (minus the literal /dashboard CEO-only landing). Sidebar's isAdmin
@@ -105,6 +137,9 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     hr_my_team:true, hr_admin:true, hr_people:true,
     hr_hiring:true, hr_offboard:true,
     reports:true, departments:true, violations:true,
+    hr_admin_attendance:true, hr_admin_approvals:true, hr_admin_leaves:true,
+    hr_admin_holidays:true, hr_admin_assets:true, hr_admin_leave_types:true,
+    hr_admin_shifts:true, hr_admin_departments:true,
   },
   hod: {
     hr_my_team: true, scores: true, reports: true,
@@ -116,6 +151,12 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     violations: true,
     // HR Manager extras — visibility into team performance + org metrics.
     cases: true, scores: true, reports: true, company: true, departments: true,
+    // HR Dashboard sub-tabs the curated whitelist (HR_MANAGER_ALLOWED_TABS
+    // in src/lib/access.ts) currently allows for HR Manager: attendance,
+    // leaves, holidays, assets, departments. Approvals / leave-types /
+    // shifts default OFF — admins can flip them on per-user.
+    hr_admin_attendance:true, hr_admin_leaves:true, hr_admin_holidays:true,
+    hr_admin_assets:true, hr_admin_departments:true,
   },
   manager: {
     scores: true, reports: true,

@@ -83,6 +83,29 @@ function EditModal({ title, fields, values, onSave, onClose }: {
 export default function ProfilePage() {
   const { data: session } = useSession();
   const { data: profile, isLoading } = useSWR("/api/hr/profile", fetcher);
+  // Today's attendance — drives the live status pill in the header so
+  // the badge actually reflects whether the user is clocked in / out /
+  // missed clock-out / on leave instead of always showing "NOT IN YET".
+  const { data: attendance } = useSWR<{ todayRecord?: any }>(
+    "/api/hr/attendance",
+    fetcher,
+    { refreshInterval: 60_000 },
+  );
+  const today = attendance?.todayRecord;
+  const hasOpenSession = Array.isArray(today?.sessions)
+    ? today.sessions.some((s: any) => !s.clockOut)
+    : !!(today?.clockIn && !today?.clockOut);
+  const totalMins = Number(today?.totalMinutes ?? 0);
+  const headerStatus: { label: string; cls: string } = (() => {
+    if (today?.status === "on_leave")          return { label: "ON LEAVE",       cls: "bg-violet-500/10 text-violet-600 border-violet-200 dark:border-violet-500/20" };
+    if (today?.status === "holiday")           return { label: "HOLIDAY",        cls: "bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-500/20" };
+    if (today?.status === "weekend")           return { label: "WEEKLY OFF",     cls: "bg-slate-400/15 text-slate-600 border-slate-200 dark:border-slate-500/20" };
+    if (today?.status === "missed_clock_out")  return { label: "MISSED CLOCK-OUT", cls: "bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-500/20" };
+    if (hasOpenSession)                        return { label: "CLOCKED IN",     cls: "bg-emerald-500/10 text-emerald-600 border-emerald-200 dark:border-emerald-500/20" };
+    if (today?.clockIn && totalMins >= 540)    return { label: "DAY COMPLETE",   cls: "bg-emerald-500/10 text-emerald-600 border-emerald-200 dark:border-emerald-500/20" };
+    if (today?.clockIn && today?.clockOut)     return { label: "ON BREAK",       cls: "bg-slate-400/15 text-slate-700 border-slate-200 dark:border-slate-500/20" };
+    return { label: "NOT IN YET", cls: "bg-red-500/10 text-red-500 border-red-200 dark:border-red-500/20" };
+  })();
   const [tab, setTab] = useState<ProfileTab>("ABOUT");
 
   // Persist whether the user has ever opened the PROFILE tab so the red
@@ -219,7 +242,9 @@ export default function ProfilePage() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-[20px] font-bold text-slate-800 dark:text-white tracking-tight">{profile?.name}</h1>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/10 text-red-500 border border-red-200 dark:border-red-500/20">NOT IN YET</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${headerStatus.cls}`}>
+                  {headerStatus.label}
+                </span>
               </div>
               <div className="flex items-center gap-4 mt-1.5 flex-wrap">
                 {ep?.officeLocation && <span className="flex items-center gap-1 text-[12px] text-slate-500 dark:text-slate-400"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>{ep.officeLocation}</span>}

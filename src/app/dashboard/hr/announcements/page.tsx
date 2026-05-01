@@ -4,11 +4,15 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import { isAdmin as isAdminUser } from "@/lib/access";
 
 export default function AnnouncementsPage() {
   const { data: session } = useSession();
   const user = session?.user as any;
-  const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper;
+  // Was: ceo | isDeveloper. Missing special_access + role=admin —
+  // those users couldn't see the create button even though the API
+  // allowed them. Now matches src/lib/access.ts:isAdmin exactly.
+  const isAdmin = isAdminUser(user);
   const [showCreate, setShowCreate] = useState(false);
 
   const { data: announcements = [], isLoading } = useSWR("/api/hr/announcements", fetcher);

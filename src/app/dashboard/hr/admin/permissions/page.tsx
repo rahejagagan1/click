@@ -245,9 +245,19 @@ function UserDetail({ userId }: { userId: number }) {
         </div>
       )}
 
-      {/* Toggle grid */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        {TAB_CATALOG.map((tab, i) => {
+      {/* Toggle grid — split into "Top-level tabs" and grouped sections
+          so HR Dashboard sub-tabs aren't a confusing flat list. Tabs
+          without a `group` go in the default top section. */}
+      {(() => {
+        const topLevel = TAB_CATALOG.filter((t) => !t.group);
+        const groups = new Map<string, typeof TAB_CATALOG>();
+        for (const t of TAB_CATALOG) {
+          if (!t.group) continue;
+          if (!groups.has(t.group)) groups.set(t.group, []);
+          groups.get(t.group)!.push(t);
+        }
+
+        const renderTabRow = (tab: (typeof TAB_CATALOG)[number], i: number, total: number) => {
           const on = draft[tab.key] ?? false;
           const disabled = (data.protected && !data.actorIsDeveloper) || saving;
           const roleDefault = roleDefaults[tab.key];
@@ -255,7 +265,7 @@ function UserDetail({ userId }: { userId: number }) {
           return (
             <div
               key={tab.key}
-              className={`flex items-center justify-between px-5 py-3.5 ${i !== TAB_CATALOG.length - 1 ? "border-b border-slate-100" : ""}`}
+              className={`flex items-center justify-between px-5 py-3.5 ${i !== total - 1 ? "border-b border-slate-100" : ""}`}
             >
               <div className="flex-1 min-w-0 pr-4">
                 <div className="flex items-center gap-2">
@@ -289,8 +299,31 @@ function UserDetail({ userId }: { userId: number }) {
               </button>
             </div>
           );
-        })}
-      </div>
+        };
+
+        return (
+          <>
+            {/* Top-level tabs */}
+            <p className="mb-2 text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-500">Top-level tabs</p>
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              {topLevel.map((t, i) => renderTabRow(t, i, topLevel.length))}
+            </div>
+
+            {/* Grouped sub-tabs (HR Dashboard sections, etc.) */}
+            {Array.from(groups.entries()).map(([groupName, list]) => (
+              <div key={groupName} className="mt-6">
+                <p className="mb-2 text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-500">{groupName}</p>
+                <p className="mb-2 text-[11px] text-slate-500">
+                  These toggles only matter for users who already have HR Dashboard access — they hide individual sections within it.
+                </p>
+                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                  {list.map((t, i) => renderTabRow(t, i, list.length))}
+                </div>
+              </div>
+            ))}
+          </>
+        );
+      })()}
     </div>
   );
 }
