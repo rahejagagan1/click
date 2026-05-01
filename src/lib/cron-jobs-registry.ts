@@ -10,7 +10,8 @@ export type CronJobId =
   | "clickup"
   | "users"
   | "ratings"
-  | "all_sync";
+  | "all_sync"
+  | "violation_reminders";
 
 export type CronJobDefinition = {
   id: CronJobId;
@@ -55,6 +56,14 @@ export const CRON_JOB_DEFINITIONS: CronJobDefinition[] = [
     name: "Full sync (ClickUp + YouTube + Ratings)",
     description:
       "End-to-end pipeline: ClickUp tasks → YouTube stats → monthly ratings. Use this for a single nightly catch-up run.",
+    defaultIntervalHours: 24,
+  },
+  {
+    id: "violation_reminders",
+    name: "Violation in-progress reminders",
+    description:
+      "Emails HR / CEO / admins / special_access / developers about every violation that has been 'in progress' for 15+ days. Throttled per-violation via lastReminderAt — only nudges every 15 days.",
+    // Run daily; the per-row 15-day throttle keeps the email volume sane.
     defaultIntervalHours: 24,
   },
 ];
