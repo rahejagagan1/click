@@ -1020,7 +1020,14 @@ export default function AttendancePage() {
                   <strong>Location unavailable.</strong> Your browser can't share your location (HTTPS or a supported browser is required). Clock-in needs location.
                 </div>
               )}
-              {/* Button */}
+              {/* Button — multi-session aware:
+                  · Not clocked in yet         → "Web Clock-In"
+                  · Currently clocked in       → "Web Clock-Out"
+                  · Clocked out, on break      → "Resume Clock-In" (always
+                    available; total may already be 9h+ for overtime).
+                  Day Complete is shown as an adjacent badge when 9h has
+                  been accumulated, NOT as a terminal state — the rule is
+                  employees can keep punching in/out throughout the day. */}
               {!todayRec?.clockIn ? (
                 <button onClick={clockIn}
                   disabled={clockingIn}
@@ -1033,9 +1040,17 @@ export default function AttendancePage() {
                   Web Clock-Out
                 </button>
               ) : (
-                <span className="h-9 px-5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 rounded-lg text-[13px] font-bold flex items-center whitespace-nowrap w-fit">
-                  ✓ Day Complete
-                </span>
+                <div className="flex flex-col gap-1.5 w-fit">
+                  <button onClick={clockIn} disabled={clockingIn}
+                    className="h-9 px-5 bg-[#ff4a5c] hover:bg-[#ff3045] text-white rounded-lg text-[13px] font-bold transition-colors shadow-sm whitespace-nowrap w-fit disabled:opacity-70 disabled:cursor-wait">
+                    {clockingIn ? "Getting location…" : "Resume Clock-In"}
+                  </button>
+                  {(todayRec.totalMinutes ?? 0) >= 540 && (
+                    <span className="h-7 px-3 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 rounded-md text-[11.5px] font-bold flex items-center whitespace-nowrap w-fit">
+                      ✓ Day Complete · 9h reached
+                    </span>
+                  )}
+                </div>
               )}
 
               {/* Elapsed since clock-in — lives right under the button, Keka-style */}
@@ -1259,15 +1274,44 @@ export default function AttendancePage() {
                       return dateIso >= from && dateIso <= to;
                     });
                     const missedClockOut = rec.clockIn && !rec.clockOut && !isTodayRow && !rec.isRegularized && !_onLeaveQuickCheck;
-                    // Live elapsed: only for today's open session. Past days freeze at the
-                    // recorded totalMinutes (which is 0 until a regularization lands).
-                    const liveMins  = isTodayRow && rec.clockIn && !rec.clockOut && clock
-                      ? Math.floor((clock.getTime() - new Date(rec.clockIn).getTime()) / 60000)
-                      : (rec.totalMinutes || 0);
+                    // Sessions list (one entry per (in, out) pair). Older
+                    // backends may not yet ship `sessions`; fall back to a
+                    // synthetic single-session list so the UI keeps working.
+                    const sessions: Array<{ clockIn: string; clockOut: string | null }> =
+                      Array.isArray(rec.sessions) && rec.sessions.length > 0
+                        ? rec.sessions
+                        : (rec.clockIn ? [{ clockIn: rec.clockIn, clockOut: rec.clockOut ?? null }] : []);
+                    const openSession = sessions.find((s) => !s.clockOut);
+                    const isCurrentlyClockedIn = isTodayRow && !!openSession;
+                    const isOnBreak = isTodayRow && !openSession && sessions.some((s) => s.clockOut) && !rec.isRegularized
+                      ? sessions.length > 0 && (rec.totalMinutes || 0) < 540
+                      : false;
+
+                    // Live elapsed: sum of all closed sessions + (now - openSession.clockIn)
+                    // when there's an open one. While clocked out (on break or done) the
+                    // counter is frozen at the recorded totalMinutes — the wall clock keeps
+                    // ticking but the worked-hours figure does NOT.
+                    const liveMins = (() => {
+                      if (!isTodayRow) return rec.totalMinutes || 0;
+                      const stored = rec.totalMinutes || 0;
+                      if (openSession && clock) {
+                        const openStart = new Date(openSession.clockIn).getTime();
+                        return stored + Math.max(0, Math.floor((clock.getTime() - openStart) / 60000));
+                      }
+                      return stored;
+                    })();
                     const hrs       = liveMins ? fmtMins(liveMins) : "0h 0m";
                     const pct       = liveMins ? Math.min((liveMins / 540) * 100, 100) : 0;
                     const met9h     = liveMins >= 540;
                     const hasClock  = !!rec.clockIn;
+                    // First clock-in past the 10:00 AM IST cutoff → "Late".
+                    // Uses the FIRST session's clockIn so resume sessions don't
+                    // accidentally clear / set the flag.
+                    const firstIn = sessions[0]?.clockIn ? new Date(sessions[0].clockIn) : null;
+                    const isLateFirstIn = !!firstIn && (() => {
+                      const istHr = (firstIn.getUTCHours() + 5 + Math.floor((firstIn.getUTCMinutes() + 30) / 60)) % 24;
+                      return istHr >= 10;
+                    })();
 
                     return (
                       <tr key={rec.id || rec.date}
@@ -1298,6 +1342,18 @@ export default function AttendancePage() {
                             )}
                             {missedClockOut && !hasPendingAny && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold uppercase tracking-wider">Missed</span>
+                            )}
+                            {/* "LATE" — first clock-in past 10:00 AM IST.
+                                Shown alongside Today/Pending so the row
+                                states are non-exclusive. */}
+                            {isLateFirstIn && hasClock && !hasPendingAny && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-bold uppercase tracking-wider">Late</span>
+                            )}
+                            {/* "ON BREAK" — currently between sessions on
+                                today's row. Day still in progress, timer
+                                paused. */}
+                            {isOnBreak && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-bold uppercase tracking-wider">On break</span>
                             )}
                             {hasPendingAny && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#008CFF]/15 text-[#008CFF] font-bold uppercase tracking-wider">Pending</span>
@@ -1330,9 +1386,32 @@ export default function AttendancePage() {
                               Missed clock-out — regularize to log hours
                             </span>
                           ) : hasClock ? (
-                            <div className="flex items-center gap-3">
-                              <TimelineBar liveMins={liveMins} />
-                              <LocationPin raw={rec.location} />
+                            <div className="flex flex-col gap-1.5">
+                              <div className="flex items-center gap-3">
+                                <TimelineBar liveMins={liveMins} />
+                                <LocationPin raw={rec.location} />
+                              </div>
+                              {/* Multi-session days: render every (in → out)
+                                  pair as a small chip so the user sees the
+                                  full punch history at a glance. Single-
+                                  session days fall back to a compact pair. */}
+                              {sessions.length > 1 && (
+                                <div className="flex flex-wrap items-center gap-1">
+                                  {sessions.map((s, i) => (
+                                    <span
+                                      key={i}
+                                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums ${
+                                        s.clockOut
+                                          ? "bg-slate-100 text-slate-600 dark:bg-white/[0.05] dark:text-slate-300"
+                                          : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+                                      }`}
+                                      title={`Session ${i + 1}`}
+                                    >
+                                      {fmtT(s.clockIn)} <span className="opacity-60">→</span> {s.clockOut ? fmtT(s.clockOut) : "now"}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           ) : approvedRegRow && !rec.clockIn ? (
                             <span className="text-[12px] font-medium text-emerald-600 dark:text-emerald-400">
@@ -1396,7 +1475,25 @@ export default function AttendancePage() {
                                 : "Pending";
                               c = { label: which, Icon: Clock3, tone: "text-[#008CFF]" };
                             } else if (missedClockOut) {
-                              c = { label: "Missed clock-out", Icon: AlertCircle, tone: "text-amber-500" };
+                              // Surface the recorded clock-in time inside the
+                              // tooltip so the user has an exact reference
+                              // when filling the regularization form. For
+                              // multi-session days, list every session.
+                              const sessLabel = sessions.length > 1
+                                ? sessions.map((s) => `${fmtT(s.clockIn) ?? "?"} → ${s.clockOut ? fmtT(s.clockOut) : "—"}`).join(", ")
+                                : fmtT(rec.clockIn) ?? "?";
+                              c = {
+                                label: `Missed clock-out · ${sessLabel}`,
+                                Icon: AlertCircle, tone: "text-amber-500",
+                              };
+                            } else if (rec.clockOut && !rec.clockIn && !isTodayRow && !rec.isRegularized) {
+                              // Symmetrical case: rare, but if a row has a
+                              // clock-out without a clock-in, hint the user.
+                              const outAt = fmtT(rec.clockOut);
+                              c = {
+                                label: outAt ? `Missed clock-in · clocked out ${outAt}` : "Missed clock-in",
+                                Icon: AlertCircle, tone: "text-amber-500",
+                              };
                             } else if (onLeave) {
                               c = { label: leaveLabel, Icon: Coffee, tone: "text-violet-500" };
                             } else if (isHoliday) {
@@ -1406,9 +1503,26 @@ export default function AttendancePage() {
                             } else if (isTodayRow && !hasClock) {
                               c = { label: "Awaiting clock-in", Icon: Clock3, tone: "text-[#008CFF]" };
                             } else if (hasClock && met9h) {
-                              c = { label: "Present", Icon: CheckCircle2, tone: "text-emerald-500" };
+                              // Show every session pair so the user can see
+                              // exactly when they were clocked in/out.
+                              const sessLabel = sessions.length > 0
+                                ? sessions.map((s) => `${fmtT(s.clockIn) ?? "?"} → ${s.clockOut ? fmtT(s.clockOut) : "now"}`).join(", ")
+                                : "";
+                              c = { label: sessLabel ? `Present · ${sessLabel}` : "Present", Icon: CheckCircle2, tone: "text-emerald-500" };
                             } else if (hasClock) {
-                              c = { label: "Present | Missing Swipe(s)", Icon: AlertCircle, tone: "text-orange-500" };
+                              // Surface the punch times directly in the
+                              // tooltip — for multi-session days, list each
+                              // pair; for the common single-session case,
+                              // show the open / closed times. e.g.
+                              //   "Present | Missing Swipe(s) · 09:30 → now"
+                              //   "Present | Missing Swipe(s) · 09:30 → 10:30, 11:30 → now"
+                              const sessLabel = sessions.length > 0
+                                ? sessions.map((s) => `${fmtT(s.clockIn) ?? "?"} → ${s.clockOut ? fmtT(s.clockOut) : "now"}`).join(", ")
+                                : (rec.clockIn ? `${fmtT(rec.clockIn)} → ${rec.clockOut ? fmtT(rec.clockOut) : "—"}` : "");
+                              c = {
+                                label: sessLabel ? `Present | Missing Swipe(s) · ${sessLabel}` : "Present | Missing Swipe(s)",
+                                Icon: AlertCircle, tone: "text-orange-500",
+                              };
                             } else {
                               c = { label: "Absent", Icon: XCircle, tone: "text-rose-500" };
                             }
