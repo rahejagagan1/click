@@ -125,20 +125,29 @@ export async function POST(request: NextRequest) {
                 select: { id: true, clickupUserId: true },
             });
 
-            const created = existing
-                ? await tx.user.update({
-                    where: { id: existing.id },
-                    data: {
-                        name,
-                        role: role || undefined,
-                        orgLevel: orgLevel || undefined,
-                        teamCapsule: resolvedCapsule,
-                        managerId: managerId || null,
-                        // Only set the synthetic id when nothing real is stored.
-                        ...(existing.clickupUserId ? {} : { clickupUserId: resolvedClickupId }),
-                    },
-                })
-                : await tx.user.create({
+            // Update branch: ONLY touch role / orgLevel / managerId
+            // when the caller explicitly sent them. This is what
+            // protects the bulk-Keka import from clobbering existing
+            // leads/managers down to "member" — the bulk path now
+            // omits those fields, so existing values are preserved.
+            // Single-employee onboarding still sets role/orgLevel
+            // explicitly (it always sends a value), so its behaviour
+            // is unchanged.
+            let created;
+            if (existing) {
+                const updateData: any = { name };
+                if (resolvedCapsule !== null || teamCapsule !== undefined) updateData.teamCapsule = resolvedCapsule;
+                if (!existing.clickupUserId) updateData.clickupUserId = resolvedClickupId;
+                if (role !== undefined && role !== null && role !== "") updateData.role = role;
+                if (orgLevel !== undefined && orgLevel !== null && orgLevel !== "") updateData.orgLevel = orgLevel;
+                if (managerId !== undefined) {
+                    updateData.managerId = (managerId === null || managerId === "" || managerId === 0)
+                        ? null
+                        : Number(managerId);
+                }
+                created = await tx.user.update({ where: { id: existing.id }, data: updateData });
+            } else {
+                created = await tx.user.create({
                     data: {
                         name,
                         email,
@@ -149,6 +158,7 @@ export async function POST(request: NextRequest) {
                         managerId: managerId || null,
                     },
                 });
+            }
 
             // Mark new hire for first-login wizard if HR opted in. Done via
             // raw SQL so it works before `prisma generate` has picked up the

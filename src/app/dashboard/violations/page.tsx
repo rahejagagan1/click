@@ -126,7 +126,10 @@ export default function ViolationsPage() {
     useEffect(() => { fetchData(); }, [fetchData]);
 
     useEffect(() => {
-        fetch("/api/users").then(r => r.json()).then(d => {
+        // ?all=true so the dropdown includes plain members (default
+        // role/orgLevel after a Keka bulk import) — otherwise newly
+        // onboarded employees can't be picked as the affected user.
+        fetch("/api/users?all=true").then(r => r.json()).then(d => {
             if (Array.isArray(d)) setUsers(d);
         }).catch(() => { });
     }, []);
