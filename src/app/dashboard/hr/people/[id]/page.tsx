@@ -215,7 +215,7 @@ export default function EmployeeDetailPage() {
             <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Business Unit</p>
-                <p className="mt-1 text-[13px] font-medium text-slate-800">{user.teamCapsule || "—"}</p>
+                <p className="mt-1 text-[13px] font-medium text-slate-800">{user.profile?.businessUnit || user.teamCapsule || "—"}</p>
               </div>
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Department</p>

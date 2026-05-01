@@ -4,13 +4,17 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { isAdmin as isAdminUser, canSeeReports } from "@/lib/access";
 
 export default function AllReportsPage() {
     const { data: session, status } = useSession();
     const router = useRouter();
     const sessionUser = session?.user as any;
-    const isCeoOrAdmin = sessionUser?.orgLevel === "ceo" || sessionUser?.isDeveloper === true || sessionUser?.orgLevel === "special_access";
-    const canAccessReports = isCeoOrAdmin || sessionUser?.orgLevel === "manager" || sessionUser?.orgLevel === "hod";
+    // Was: ceo | dev | special_access (missing role=admin). Use the
+    // central helpers so adding a role to admin-tier in one place
+    // doesn't require remembering to update each report page too.
+    const isCeoOrAdmin = isAdminUser(sessionUser);
+    const canAccessReports = canSeeReports(sessionUser);
 
     const [allowedManagerIds, setAllowedManagerIds] = useState<number[]>([]);
     const [accessChecked, setAccessChecked] = useState(false);
