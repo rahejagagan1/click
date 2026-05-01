@@ -3,6 +3,7 @@
 // for that dimension yet — so the UI matches Keka. If a user's data happens to
 // contain a value outside this list, it's merged in at render time.
 import { USER_ROLE_OPTIONS, getUserRoleLabel } from "@/lib/user-role-options";
+import { DEPARTMENTS } from "@/lib/departments";
 
 export const UNASSIGNED = "__unassigned__";
 
@@ -11,24 +12,12 @@ export const ENTITY_LABEL: Record<string, string> = {
   NB: "NB Media",
 };
 
-// Department taxonomy (from the HR doc / Keka reference). These render as
-// checkboxes; Select All toggles every one on / off.
-export const DEFAULT_DEPARTMENTS = [
-  "Human Resources",
-  "HR Operations & TA",
-  "NB_Artificial Intelligence",
-  "NB_Content Strategy & Research",
-  "NB_Content",
-  "NB_Research",
-  "NB_Executive Leadership Team",
-  "NB_Finance",
-  "NB_Human Resources",
-  "NB_IT Support",
-  "NB_Operations",
-  "NB_Production",
-  "NB_Sales",
-  "NB_Social Media",
-] as const;
+// Department taxonomy. Single source of truth lives in
+// `src/lib/departments.ts` so the values stored by onboarding / Edit
+// Profile match the values the People / Org-tree / Approvals filters
+// look for. (Previously this was a divergent NB_-prefixed list — filters
+// never matched stored values.)
+export const DEFAULT_DEPARTMENTS = DEPARTMENTS;
 
 // Default Location options (edit as real data accumulates).
 export const DEFAULT_LOCATIONS = ["Mohali"] as const;

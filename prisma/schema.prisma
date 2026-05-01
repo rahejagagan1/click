@@ -47,6 +47,11 @@ model User {
   role              UserRole   @default(member)
   orgLevel          OrgLevel   @default(member)
   managerId         Int?
+  /// Day-to-day / dotted-line manager. Independent of the formal
+  /// reporting line in `managerId` — used for org-tree views that need
+  /// to show a secondary supervisor (e.g. a team lead who runs the
+  /// rituals while the head-of-department signs off).
+  inlineManagerId   Int?
   teamCapsule       String?
   /// Monthly case delivery target for CM/PM (denominator for delivery %). Per-manager.
   monthlyDeliveryTargetCases Int?
@@ -62,6 +67,8 @@ model User {
 
   manager           User?      @relation("TeamHierarchy", fields: [managerId], references: [id])
   teamMembers       User[]     @relation("TeamHierarchy")
+  inlineManager     User?      @relation("InlineHierarchy", fields: [inlineManagerId], references: [id])
+  inlineReports     User[]     @relation("InlineHierarchy")
 
   assignedCases     Case[]     @relation("CaseAssignee")
   researchedCases   Case[]     @relation("CaseResearcher")
@@ -132,6 +139,7 @@ model User {
   exitsInitiated         EmployeeExit[]      @relation("ExitInitiator")
 
   @@index([managerId])
+  @@index([inlineManagerId])
 }
 
 // ═══════════════════════════════════════════════════════

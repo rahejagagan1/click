@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import SalaryStructurePanel from "@/components/hr/SalaryStructurePanel";
 import CustomSelect from "@/components/ui/CustomSelect";
+import { DEPARTMENTS } from "@/lib/departments";
 
 type Manager = { id: number; name: string };
 
@@ -170,6 +171,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
     role:             user.role ?? "member",
     orgLevel:         user.orgLevel ?? "member",
     managerId:        user.manager?.id ? String(user.manager.id) : "",
+    inlineManagerId:  user.inlineManager?.id ? String(user.inlineManager.id) : "",
     teamCapsule:      user.teamCapsule ?? "",
   });
   const jobHook = useSaveSection(userId);
@@ -214,6 +216,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
       role:             user.role ?? "member",
       orgLevel:         user.orgLevel ?? "member",
       managerId:        user.manager?.id ? String(user.manager.id) : "",
+      inlineManagerId:  user.inlineManager?.id ? String(user.inlineManager.id) : "",
       teamCapsule:      user.teamCapsule ?? "",
     });
     setIdentity((s) => ({ ...s, parentName: p.parentName ?? "" }));
@@ -385,6 +388,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
           role:             job.role,
           orgLevel:         job.orgLevel,
           managerId:        job.managerId === "" ? null : Number(job.managerId),
+          inlineManagerId:  job.inlineManagerId === "" ? null : Number(job.inlineManagerId),
           teamCapsule:      job.teamCapsule.trim() || null,
         })}
       >
@@ -398,7 +402,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
             <label className={cls.label}>Department</label>
             <CustomSelect
               listKey="department"
-              defaults={["HR", "Researcher", "QA", "Production", "AI", "SocialMedia", "IT"]}
+              defaults={DEPARTMENTS}
               value={job.department}
               onChange={(v) => setJob({ ...job, department: v })}
               placeholder="Select a department"
@@ -466,6 +470,14 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
             <select className={cls.field} value={job.managerId}
               onChange={(e) => setJob({ ...job, managerId: e.target.value })}>
               <option value="">— No manager —</option>
+              {managerOpts.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={cls.label}>Inline Manager</label>
+            <select className={cls.field} value={job.inlineManagerId}
+              onChange={(e) => setJob({ ...job, inlineManagerId: e.target.value })}>
+              <option value="">— No inline manager —</option>
               {managerOpts.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </div>

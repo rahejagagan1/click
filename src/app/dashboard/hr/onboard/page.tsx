@@ -6,7 +6,11 @@ import { useRouter } from "next/navigation";
 import { User as UserIcon, Briefcase, Settings as SettingsIcon, IndianRupee, Check, X } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
 import { JOB_TITLES } from "@/lib/job-titles";
+import { DEPARTMENTS } from "@/lib/departments";
 import CustomSelect from "@/components/ui/CustomSelect";
+import KekaImportModal from "@/components/hr/KekaImportModal";
+import type { KekaRow, KekaFormPatch } from "@/lib/keka-import";
+import { Upload as UploadIcon } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LocalStorage key for the draft. Bump the suffix if the Form shape changes
@@ -134,12 +138,30 @@ export default function OnboardEmployeePage() {
   const [error, setError]     = useState("");
   const [success, setSuccess] = useState("");
 
+  // Keka import state — modal visibility + a small banner telling HR
+  // which row was just pulled in. The set of HRM IDs already onboarded
+  // in this session keeps the modal from offering "Pre-fill" twice for
+  // the same employee after a save.
+  const [importOpen, setImportOpen] = useState(false);
+  const [importedFrom, setImportedFrom] = useState<{ hrm: string; name: string } | null>(null);
+  const [importDoneIds, setImportDoneIds] = useState<Set<string>>(() => new Set());
+
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm(f => ({ ...f, [k]: v }));
 
-  const { data: opts } = useSWR("/api/hr/onboard/options", fetcher);
+  const { data: opts, mutate: refreshOpts } = useSWR("/api/hr/onboard/options", fetcher);
   const shifts    = opts?.shifts    ?? [];
   const leaveTypes = opts?.leaveTypes ?? [];
   const managers  = opts?.managers  ?? [];
+  const allUsers: Array<{ id: number; name: string }> = opts?.allUsers ?? [];
+
+  // Union of the server-side existing employee IDs and any IDs created
+  // in this session — what the modal uses to grey out "already
+  // onboarded" rows.
+  const mergedOnboardedIds = useMemo(() => {
+    const s = new Set<string>(importDoneIds);
+    for (const id of (opts?.existingEmployeeIds ?? [])) s.add(id);
+    return s;
+  }, [importDoneIds, opts?.existingEmployeeIds]);
 
   // Auto-pick the regular 9 am – 6 pm shift once the shifts list loads.
   // HR can still change the selection manually; we only set it when the
@@ -166,6 +188,42 @@ export default function OnboardEmployeePage() {
   // "HRM" for HRM47). HR can still override it manually — once they type,
   // we stop overwriting.
   const [attendanceTouched, setAttendanceTouched] = useState(false);
+
+  // Handle a row pick from the Keka import modal. Spreads the mapped
+  // patch onto the form, marks displayName as touched (so the
+  // first/middle/last useEffect doesn't immediately overwrite it), and
+  // remembers the HRM ID so the modal won't re-offer the same row.
+  const handleImportPick = (row: KekaRow, patch: KekaFormPatch) => {
+    setForm((f) => ({
+      ...f,
+      firstName:           patch.firstName,
+      middleName:          patch.middleName,
+      lastName:            patch.lastName,
+      displayName:         patch.displayName,
+      workEmail:           patch.workEmail,
+      gender:              patch.gender,
+      dateOfBirth:         patch.dateOfBirth,
+      mobileCountry:       patch.mobileCountry,
+      mobileNumber:        patch.mobileNumber,
+      employeeNumber:      patch.employeeNumber,
+      joiningDate:         patch.joiningDate,
+      jobTitle:            patch.jobTitle,
+      department:          patch.department,
+      workerType:          patch.workerType,
+      timeType:            patch.timeType,
+      location:            patch.location,
+      jobLocation:         patch.jobLocation,
+      noticePeriodDays:    patch.noticePeriodDays,
+      internshipEndDate:   patch.internshipEndDate,
+      leavePlan:           patch.leavePlan,
+      reportingManagerId:  patch.reportingManagerId,
+      // Salary tab is left untouched on purpose — HR enters it.
+    }));
+    setDisplayTouched(true);
+    setAttendanceTouched(false);  // attendance auto-derive will re-fire from the new HRM id
+    setImportedFrom({ hrm: row.employeeNumber, name: row.displayName });
+    setStep(1);                   // always start the review at the first step
+  };
 
   // ── Existing-user lookup by Work Email ────────────────────────────
   // Type a name or email — the dropdown suggests matching User rows so
@@ -348,6 +406,7 @@ export default function OnboardEmployeePage() {
         role:  form.role,
         orgLevel: form.orgLevel,
         managerId: form.reportingManagerId ? Number(form.reportingManagerId) : undefined,
+        inlineManagerId: form.dottedLineManagerId ? Number(form.dottedLineManagerId) : undefined,
         inviteToLogin:    form.inviteToLogin,
         enableOnboarding: form.enableOnboarding,
         profile: {
@@ -406,9 +465,17 @@ export default function OnboardEmployeePage() {
           ? `${data.name}'s existing account was linked and onboarding details saved.`
           : `${data.name} onboarded successfully.`
       );
+      // Mark this HRM ID as done so the import modal dims it on the
+      // next file-pick. State is intentionally session-only — a fresh
+      // page load resets it, matching how the draft is wiped below.
+      if (form.employeeNumber) {
+        setImportDoneIds((s) => new Set(s).add(form.employeeNumber));
+      }
       // Wipe the draft so the next visit starts clean.
       try { localStorage.removeItem(DRAFT_KEY); } catch {}
-      setTimeout(() => router.push("/dashboard/hr/people"), 1400);
+      // Bounce back to HR Admin so HR can either pick the next employee
+      // from the same Keka import or jump elsewhere in the dashboard.
+      setTimeout(() => router.push("/dashboard/hr/admin"), 1400);
     } catch (e: any) {
       setError(e?.message || "Failed to onboard");
     } finally {
@@ -527,6 +594,38 @@ export default function OnboardEmployeePage() {
 
       {/* ── Body ── */}
       <div className="p-6 max-w-5xl mx-auto">
+        {/* Import-from-Keka entry point. Sits above the form so HR sees
+            it before they start typing. The "Imported …" pill below
+            confirms which row was just pulled in. */}
+        {step === 1 && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-white/10 dark:bg-white/[0.02]">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#008CFF]/10 text-[#008CFF]">
+                <UploadIcon size={16} />
+              </div>
+              <div>
+                <p className="text-[13px] font-semibold text-slate-800 dark:text-white">Import from Keka</p>
+                <p className="text-[11.5px] text-slate-500 dark:text-slate-400">
+                  Upload a Keka CSV / Excel export once — pre-fill steps 1, 2, 3 for each employee in seconds.
+                </p>
+                {importedFrom && (
+                  <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                    Imported {importedFrom.hrm} · {importedFrom.name}
+                  </p>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setImportOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-[#008CFF]/30 bg-[#008CFF]/5 px-3.5 py-2 text-[12.5px] font-semibold text-[#008CFF] transition-colors hover:bg-[#008CFF]/10 hover:border-[#008CFF]/50"
+            >
+              <UploadIcon size={13} />
+              {importedFrom ? "Pick another row" : "Upload & pick row"}
+            </button>
+          </div>
+        )}
+
         {step === 1 && (
           <StepCard title="Employee Details">
             <Grid cols={1}>
@@ -696,7 +795,7 @@ export default function OnboardEmployeePage() {
                     everyone, not just one browser. */}
                 <CustomSelect
                   listKey="department"
-                  defaults={["HR", "Researcher", "QA", "Production", "AI", "SocialMedia", "IT"]}
+                  defaults={DEPARTMENTS}
                   value={form.department}
                   onChange={v => set("department", v)}
                   placeholder="Select a department"
@@ -717,7 +816,7 @@ export default function OnboardEmployeePage() {
                   opts={[{ value: "", label: "— Select —" }, ...managers.map((m: any) => ({ value: String(m.id), label: `${m.name} · ${m.orgLevel}` }))]}
                 />
               </Field>
-              <Field label="Dotted Line Manager">
+              <Field label="Inline Manager">
                 <Select
                   v={form.dottedLineManagerId}
                   set={v => set("dottedLineManagerId", v)}
@@ -963,6 +1062,26 @@ export default function OnboardEmployeePage() {
           </div>
         )}
       </div>
+
+      <KekaImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onPick={handleImportPick}
+        managers={managers}
+        allUsers={allUsers}
+        onboardedIds={mergedOnboardedIds}
+        onBulkComplete={(createdHrmIds) => {
+          // Add bulk-created IDs to the session set so re-opening the
+          // modal greys them immediately, then refresh the canonical
+          // list from the server (picks up the freshly-created rows).
+          setImportDoneIds((s) => {
+            const next = new Set(s);
+            createdHrmIds.forEach((id) => next.add(id));
+            return next;
+          });
+          refreshOpts();
+        }}
+      />
     </div>
   );
 }
