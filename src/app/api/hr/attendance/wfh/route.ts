@@ -12,7 +12,9 @@ export async function GET(req: NextRequest) {
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
   const myId = await resolveUserId(session);
-  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
+  // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access + role=admin + role=hr_manager.
+  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager"
+                || user.orgLevel === "special_access" || user.role === "admin" || user.role === "hr_manager";
   const { searchParams } = new URL(req.url);
   const view = searchParams.get("view") || "my";
 
@@ -104,7 +106,9 @@ export async function PUT(req: NextRequest) {
   const user = session!.user as any;
   const myId = await resolveUserId(session);
   if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
-  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
+  // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access + role=admin + role=hr_manager.
+  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager"
+                || user.orgLevel === "special_access" || user.role === "admin" || user.role === "hr_manager";
 
   try {
     const body = await req.json();
