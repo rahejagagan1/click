@@ -9,13 +9,19 @@ export async function GET() {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
+        // Anyone who could plausibly be picked as a Reporting / Inline
+        // Manager. The previous filter was too narrow (missed CEO,
+        // special_access, leads, sub-leads, and anyone whose orgLevel
+        // hadn't been bumped above "member" but who already has direct
+        // reports). HR explicitly picks managers, so the dropdown
+        // should err on the side of "show enough".
         const managers = await prisma.user.findMany({
             where: {
                 isActive: true,
                 OR: [
-                    { orgLevel: { in: ["hod", "manager", "hr_manager"] } },
-                    { role: { in: ["production_manager", "researcher_manager", "hr_manager"] } },
-                    { AND: [{ role: "qa" }, { orgLevel: { in: ["manager", "hod"] } }] },
+                    { orgLevel: { in: ["ceo", "special_access", "hod", "manager", "hr_manager", "lead", "sub_lead"] } },
+                    { role: { in: ["admin", "production_manager", "researcher_manager", "hr_manager", "lead", "sub_lead", "manager"] } },
+                    { teamMembers: { some: {} } },   // already managing somebody
                 ],
             },
             orderBy: { name: "asc" },

@@ -163,7 +163,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
   const [job, setJob] = useState({
     designation:      p.designation ?? "",
     department:       p.department ?? "",
-    businessUnit:     p.businessUnit ?? "",
+    businessUnit:     p.businessUnit ?? "NB Media",
     employmentType:   p.employmentType ?? "fulltime",
     workLocation:     p.workLocation ?? "office",
     joiningDate:      dateISO(p.joiningDate),
@@ -208,7 +208,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
     setJob({
       designation:      p.designation ?? "",
       department:       p.department ?? "",
-      businessUnit:     p.businessUnit ?? "",
+      businessUnit:     p.businessUnit ?? "NB Media",
       employmentType:   p.employmentType ?? "fulltime",
       workLocation:     p.workLocation ?? "office",
       joiningDate:      dateISO(p.joiningDate),
@@ -380,7 +380,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
         onSave={() => jobHook.save({
           designation:      job.designation.trim() || null,
           department:       job.department.trim() || null,
-          businessUnit:     job.businessUnit.trim() || null,
+          businessUnit:     job.businessUnit.trim() || "NB Media",
           employmentType:   job.employmentType,
           workLocation:     job.workLocation,
           joiningDate:      job.joiningDate || null,

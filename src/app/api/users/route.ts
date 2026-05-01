@@ -368,11 +368,16 @@ export async function POST(request: NextRequest) {
         // Persist businessUnit via raw SQL — keeps things working even
         // if the typed Prisma client hasn't been regenerated after the
         // schema change. Same pattern other new columns use here.
-        if (profile && typeof profile.businessUnit === "string") {
+        // Defaults to "NB Media" when caller didn't supply one or sent
+        // a blank — we treat it as a single-business-unit org for now.
+        if (profile && typeof profile === "object") {
+            const bu = (typeof profile.businessUnit === "string" && profile.businessUnit.trim())
+                ? profile.businessUnit.trim()
+                : "NB Media";
             try {
                 await prisma.$executeRawUnsafe(
                     `UPDATE "EmployeeProfile" SET "businessUnit" = $1 WHERE "userId" = $2`,
-                    profile.businessUnit || null,
+                    bu,
                     user.id,
                 );
             } catch (e) {

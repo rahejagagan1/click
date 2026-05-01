@@ -508,8 +508,11 @@ export function announcementEmail(args: {
 // in_progress. Visual style: tinted alert banner up top to signal the
 // row's severity / state at a glance, then a clean info table, then
 // per-section detail blocks for description / action / notes.
+// UI-side severity labels are L0–L3; DB still stores
+// low/medium/high/critical. Update both this map and the violations
+// page if the user-facing labels ever change again.
 const SEVERITY_LABEL: Record<string, string> = {
-  low: "Low", medium: "Medium", high: "High", critical: "Critical",
+  low: "L0", medium: "L1", high: "L2", critical: "L3",
 };
 const SEVERITY_TINT: Record<string, { bg: string; border: string; text: string }> = {
   low:      { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569" },
@@ -563,7 +566,7 @@ export function violationCreatedEmail(args: {
   // immediately telegraphs how serious the entry is.
   const banner = `
     <div style="margin:0 0 16px;padding:14px 16px;background:${sevTint.bg};border:1px solid ${sevTint.border};border-radius:8px">
-      <p style="margin:0;font-size:10.5px;color:${sevTint.text};font-weight:700;text-transform:uppercase;letter-spacing:0.12em">${escape(sev)} severity violation</p>
+      <p style="margin:0;font-size:10.5px;color:${sevTint.text};font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Severity ${escape(sev)} — Violation logged</p>
       <p style="margin:6px 0 0;font-size:14px;color:#1f2937;font-weight:600;line-height:1.4">${escape(args.title)}</p>
     </div>`;
 

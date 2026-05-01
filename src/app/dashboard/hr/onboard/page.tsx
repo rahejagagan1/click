@@ -109,7 +109,7 @@ const EMPTY: Form = {
   mobileCountry: "+91", mobileNumber: "",
   joiningDate: new Date().toISOString().slice(0, 10),
   jobTitle: "", secondaryJobTitle: "", timeType: "Full Time",
-  legalEntity: "NB Media Productions", businessUnit: "", department: "",
+  legalEntity: "NB Media Productions", businessUnit: "NB Media", department: "",
   location: "Mohali", workerType: "Regular Employee",
   reportingManagerId: "", dottedLineManagerId: "",
   probationPolicy: "Regular Employees", noticePeriodDays: "30",
@@ -413,7 +413,7 @@ export default function OnboardEmployeePage() {
           employeeId: form.employeeNumber || undefined,
           designation: form.jobTitle || undefined,
           department:  form.department || undefined,
-          businessUnit: form.businessUnit || undefined,
+          businessUnit: form.businessUnit || "NB Media",
           employmentType:
             form.workerType === "Intern"     ? "intern"
             : form.timeType === "Part Time"  ? "parttime"
