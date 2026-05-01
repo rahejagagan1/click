@@ -215,7 +215,11 @@ export default function EmployeeDetailPage() {
             <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Business Unit</p>
-                <p className="mt-1 text-[13px] font-medium text-slate-800">{user.profile?.businessUnit || user.teamCapsule || "—"}</p>
+                {/* Always shows a value — falls back to "NB Media" so
+                    the read-only profile never displays "—" for the
+                    org's only business unit even if the row's column
+                    is still NULL (legacy rows pre-backfill). */}
+                <p className="mt-1 text-[13px] font-medium text-slate-800">{user.profile?.businessUnit || user.teamCapsule || "NB Media"}</p>
               </div>
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">Department</p>
