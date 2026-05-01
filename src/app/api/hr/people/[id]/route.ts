@@ -62,11 +62,32 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       console.warn("[people GET] inlineManager lookup failed:", e);
     }
 
+    // Extended onboarding fields — fetched via raw SQL so the GET
+    // returns them even when `prisma generate` is stale on the VPS.
+    // Merged onto profile below so EditProfilePanel can read them
+    // through the same `user.profile.foo` shape it uses for everything.
+    let extended: Record<string, unknown> = {};
+    try {
+      const erows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+        `SELECT "secondaryJobTitle", "legalEntity", "jobLocation",
+                "probationPolicy", "internshipEndDate",
+                "leavePlan", "holidayList", "weeklyOff",
+                "attendanceNumber", "timeTrackingPolicy", "penalizationPolicy",
+                "workCountry", "nationality"
+           FROM "EmployeeProfile"
+          WHERE "userId" = $1`,
+        id,
+      );
+      extended = erows[0] ?? {};
+    } catch (e) {
+      console.warn("[people GET] extended fields lookup failed:", e);
+    }
+
     // Reshape to what the detail page reads.
     const { employeeProfile, heldAssets, ownedDocuments, teamMembers, userShift, ...rest } = user;
     const payload = {
       ...rest,
-      profile:       employeeProfile,
+      profile:       employeeProfile ? { ...employeeProfile, ...extended } : null,
       documents:     ownedDocuments,
       assets:        heldAssets.map((a) => ({ ...a.asset, assignedAt: a.assignedAt })),
       directReports: teamMembers,
@@ -109,6 +130,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       // Job + work details (Edit Profile → Job & Work section).
       designation, department, businessUnit, employmentType, workLocation, joiningDate,
       noticePeriodDays,
+      // Extended onboarding fields — every wizard input is now editable.
+      workCountry, nationality,
+      secondaryJobTitle, legalEntity, jobLocation, probationPolicy, internshipEndDate,
+      leavePlan, holidayList, weeklyOff, attendanceNumber, timeTrackingPolicy, penalizationPolicy,
       // User row fields — role / orgLevel / manager / team membership.
       role: newRole, orgLevel, managerId, inlineManagerId, teamCapsule,
     } = body;
@@ -139,6 +164,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (noticePeriodDays  !== undefined) profileData.noticePeriodDays  = noticePeriodDays === null || noticePeriodDays === ""
                                                                           ? 30
                                                                           : Math.max(0, parseInt(String(noticePeriodDays), 10) || 0);
+    if (workCountry       !== undefined) profileData.workCountry       = workCountry || "India";
+    if (nationality       !== undefined) profileData.nationality       = nationality || "India";
     if (panNumber         !== undefined) profileData.panNumber         = encryptPII(panNumber);
     if (aadhaarNumber     !== undefined) profileData.aadhaarNumber     = encryptPII(aadhaarNumber);
     if (aadhaarEnrollment !== undefined) profileData.aadhaarEnrollment = encryptPII(aadhaarEnrollment);
@@ -186,6 +213,23 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (personalEmail !== undefined) { setParts.push(`"personalEmail" = $${i++}`); args.push(personalEmail || null); }
       if (maritalStatus !== undefined) { setParts.push(`"maritalStatus" = $${i++}`); args.push(maritalStatus || null); }
       if (businessUnit  !== undefined) { setParts.push(`"businessUnit" = $${i++}`);  args.push(businessUnit  || "NB Media"); }
+      // ── Extended onboarding fields — written via raw SQL so the
+      //    route doesn't need a fresh `prisma generate` cycle on the
+      //    VPS to start accepting edits to these columns. ──
+      if (secondaryJobTitle  !== undefined) { setParts.push(`"secondaryJobTitle" = $${i++}`);  args.push(secondaryJobTitle  || null); }
+      if (legalEntity        !== undefined) { setParts.push(`"legalEntity" = $${i++}`);        args.push(legalEntity        || null); }
+      if (jobLocation        !== undefined) { setParts.push(`"jobLocation" = $${i++}`);        args.push(jobLocation        || null); }
+      if (probationPolicy    !== undefined) { setParts.push(`"probationPolicy" = $${i++}`);    args.push(probationPolicy    || null); }
+      if (internshipEndDate  !== undefined) {
+        setParts.push(`"internshipEndDate" = $${i++}`);
+        args.push(internshipEndDate ? new Date(internshipEndDate) : null);
+      }
+      if (leavePlan          !== undefined) { setParts.push(`"leavePlan" = $${i++}`);          args.push(leavePlan          || null); }
+      if (holidayList        !== undefined) { setParts.push(`"holidayList" = $${i++}`);        args.push(holidayList        || null); }
+      if (weeklyOff          !== undefined) { setParts.push(`"weeklyOff" = $${i++}`);          args.push(weeklyOff          || null); }
+      if (attendanceNumber   !== undefined) { setParts.push(`"attendanceNumber" = $${i++}`);   args.push(attendanceNumber   || null); }
+      if (timeTrackingPolicy !== undefined) { setParts.push(`"timeTrackingPolicy" = $${i++}`); args.push(timeTrackingPolicy || null); }
+      if (penalizationPolicy !== undefined) { setParts.push(`"penalizationPolicy" = $${i++}`); args.push(penalizationPolicy || null); }
       if (setParts.length > 0) {
         args.push(id);
         try {
