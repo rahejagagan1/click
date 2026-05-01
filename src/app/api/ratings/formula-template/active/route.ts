@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: "Missing roleType" }, { status: 400 });
         }
 
-        const template = await prisma.formulaTemplate.findFirst({
+        let template = await prisma.formulaTemplate.findFirst({
             where: { roleType, isActive: true },
             orderBy: { version: "desc" },
             select: {
@@ -33,6 +33,31 @@ export async function GET(request: NextRequest) {
                 sections: true,
             },
         });
+
+        // No active template yet — auto-seed from the default template
+        // catalog if one exists for this roleType. Mirrors what the
+        // calculator does on first run; ensures the manager rating
+        // form always has something to render even on a fresh DB.
+        if (!template) {
+            try {
+                const { ensureDefaultTemplate } = await import("@/lib/ratings/unified-calculator");
+                await ensureDefaultTemplate(roleType);
+                template = await prisma.formulaTemplate.findFirst({
+                    where: { roleType, isActive: true },
+                    orderBy: { version: "desc" },
+                    select: {
+                        id: true,
+                        roleType: true,
+                        version: true,
+                        label: true,
+                        sections: true,
+                    },
+                });
+            } catch {
+                // No default catalog entry → return null and let the
+                // caller render the "create a template" empty state.
+            }
+        }
 
         if (!template) {
             return NextResponse.json(null);
