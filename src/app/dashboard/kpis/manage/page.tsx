@@ -14,6 +14,7 @@ import {
   ArrowLeft, BarChart3, FileText, Upload, Trash2, AlertCircle, CheckCircle2,
 } from "lucide-react";
 import { isFullHRAdmin } from "@/lib/access";
+import { DEPARTMENTS } from "@/lib/departments";
 
 type Doc = {
   id: number;
@@ -23,10 +24,6 @@ type Doc = {
   uploadedAt: string;
   uploadedBy: number | null;
 };
-
-const DEPARTMENTS = [
-  "HR", "Researcher", "QA", "Production", "AI", "SocialMedia", "IT",
-];
 
 export default function ManageKpisPage() {
   const { data: session, status } = useSession();

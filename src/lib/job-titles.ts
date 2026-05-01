@@ -5,11 +5,13 @@
 export const JOB_TITLES = [
   "AI",
   "Artificial Intelligence Intern",
+  "Associate Graphic Designer",
   "Associate Script Writer",
   "Associate Video Editor",
   "Brand Face and Strategist",
   "Content Quality Assurance Specialist",
   "Content Researcher",
+  "Content Review & Quality Associate",
   "Content Strategist",
   "Content Team Lead",
   "Executive Assistant",
@@ -17,6 +19,7 @@ export const JOB_TITLES = [
   "HR Manager",
   "Head - Quality Assurance",
   "IT Security Intern",
+  "Script Quality Assurance Associate",
   "Script Quality Assurance Specialist",
   "Script Writer",
   "Sr. Content Researcher",
@@ -25,4 +28,5 @@ export const JOB_TITLES = [
   "Sr. Video Editor",
   "Talent Acquisition Specialist",
   "Video Editor",
+  "Video Editor and Spotify Content Strategist",
 ];
