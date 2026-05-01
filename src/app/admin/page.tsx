@@ -121,6 +121,9 @@ export default function AdminPage() {
     const [ytVideos, setYtVideos] = useState<any[]>([]);
     const [ytError, setYtError] = useState<string | null>(null);
     const [userView, setUserView] = useState<"tree" | "table">("tree");
+    // Free-text search across the Users table — matches name, email,
+    // and orgLevel/role so admins can quickly jump to a user.
+    const [userSearch, setUserSearch] = useState("");
     const [ytApiMode, setYtApiMode] = useState<"data_api" | "analytics_api">("data_api");
     const [ytChannelCount, setYtChannelCount] = useState(0);
 
@@ -690,14 +693,56 @@ export default function AdminPage() {
                 </div>
             )}
 
-            {activeTab === "users" && (
+            {activeTab === "users" && (() => {
+                // Apply the free-text search filter ONLY for the table
+                // view — the org-tree view manages its own collapse state
+                // and would break if we hid arbitrary nodes mid-tree.
+                const q = userSearch.trim().toLowerCase();
+                const filteredUsers = q
+                    ? users.filter((u: any) => {
+                        const fields = [
+                            u.name, u.email, u.orgLevel, u.role,
+                            u.employeeProfile?.designation,
+                            u.employeeProfile?.department,
+                        ].filter(Boolean) as string[];
+                        return fields.some((f) => String(f).toLowerCase().includes(q));
+                    })
+                    : users;
+                return (
                 <div className="rounded-2xl bg-[#12122a] border border-white/5 overflow-hidden">
-                    <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+                    <div className="flex flex-col gap-3 px-5 py-4 border-b border-white/5 lg:flex-row lg:items-center lg:justify-between">
                         <div>
-                            <h2 className="text-sm font-semibold text-white">Users ({users.length})</h2>
+                            <h2 className="text-sm font-semibold text-white">
+                                Users ({userView === "table" ? `${filteredUsers.length}${q ? ` of ${users.length}` : ""}` : users.length})
+                            </h2>
                             <p className="text-xs text-slate-500 mt-0.5">Manage roles, org levels, and team hierarchy</p>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                            {/* Search — shown for the table view only. */}
+                            {userView === "table" && (
+                                <div className="relative">
+                                    <svg className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 19a8 8 0 110-16 8 8 0 010 16z" />
+                                    </svg>
+                                    <input
+                                        type="search"
+                                        value={userSearch}
+                                        onChange={(e) => setUserSearch(e.target.value)}
+                                        placeholder="Search name, email, role…"
+                                        className="h-9 w-56 rounded-lg bg-white/[0.04] border border-white/10 pl-8 pr-7 text-[12.5px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500/60 focus:ring-2 focus:ring-violet-500/15"
+                                    />
+                                    {userSearch && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setUserSearch("")}
+                                            aria-label="Clear search"
+                                            className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded text-slate-500 hover:bg-white/10 hover:text-slate-200"
+                                        >
+                                            ×
+                                        </button>
+                                    )}
+                                </div>
+                            )}
                             {canManageUsers && userView === "table" && (
                                 <button onClick={() => setShowAddUser(true)}
                                     className="flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all bg-emerald-600 hover:bg-emerald-500 border-emerald-500/30 text-white">
@@ -762,7 +807,14 @@ export default function AdminPage() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {users.map((user: any) => {
+                                    {filteredUsers.length === 0 && q && (
+                                        <tr>
+                                            <td colSpan={7} className="px-5 py-10 text-center text-[12.5px] text-slate-500">
+                                                No users match "{userSearch}".
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {filteredUsers.map((user: any) => {
                                         const managers = users.filter((u: any) =>
                                             ["ceo", "special_access", "hod", "manager", "hr_manager", "lead", "sub_lead"].includes(u.orgLevel || "member") ||
                                             u.role === "production_manager" ||
@@ -964,7 +1016,8 @@ export default function AdminPage() {
                         </div>
                     )}
                 </div>
-            )}
+                );
+            })()}
 
             {/* Add User Modal */}
             {showAddUser && (
