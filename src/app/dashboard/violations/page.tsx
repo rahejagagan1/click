@@ -41,10 +41,12 @@ interface Summary {
 }
 
 const SEVERITY_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
-    low: { label: "Low", color: "bg-slate-100 dark:bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-500/20", dot: "bg-slate-400" },
-    medium: { label: "Medium", color: "bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/20", dot: "bg-amber-400" },
-    high: { label: "High", color: "bg-orange-100 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-500/20", dot: "bg-orange-500" },
-    critical: { label: "Critical", color: "bg-rose-100 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-500/20", dot: "bg-rose-500" },
+    // Severity labels are L0–L3 in the UI; DB still stores
+    // low/medium/high/critical so existing rows keep working.
+    low:      { label: "L0", color: "bg-slate-100 dark:bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-500/20", dot: "bg-slate-400" },
+    medium:   { label: "L1", color: "bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/20", dot: "bg-amber-400" },
+    high:     { label: "L2", color: "bg-orange-100 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-500/20", dot: "bg-orange-500" },
+    critical: { label: "L3", color: "bg-rose-100 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-500/20", dot: "bg-rose-500" },
 };
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
@@ -273,7 +275,7 @@ export default function ViolationsPage() {
                     { label: "Open Cases",      value: summary.open,         tint: "#dc2626", iconPath: "M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636" },
                     { label: "In Progress",     value: summary.inProgress,   tint: "#0284c7", iconPath: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" },
                     { label: "Closed Cases",    value: summary.closed,       tint: "#059669", iconPath: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
-                    { label: "High / Critical", value: summary.highCritical, tint: "#d97706", iconPath: "M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" },
+                    { label: "L2 / L3",         value: summary.highCritical, tint: "#d97706", iconPath: "M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" },
                 ].map((card) => (
                     <div
                         key={card.label}
@@ -311,10 +313,10 @@ export default function ViolationsPage() {
                 <select value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)}
                     className="h-9 px-2.5 text-[12.5px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-500/15">
                     <option value="">All Severity</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="critical">Critical</option>
+                    <option value="low">L0</option>
+                    <option value="medium">L1</option>
+                    <option value="high">L2</option>
+                    <option value="critical">L3</option>
                 </select>
                 <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
                     className="h-9 px-2.5 text-[12.5px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-500/15 cursor-pointer"
@@ -451,10 +453,10 @@ export default function ViolationsPage() {
                                         <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Severity</label>
                                         <select value={editData.severity} onChange={e => setEditData(p => ({ ...p, severity: e.target.value }))}
                                             className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
-                                            <option value="low">Low</option>
-                                            <option value="medium">Medium</option>
-                                            <option value="high">High</option>
-                                            <option value="critical">Critical</option>
+                                            <option value="low">L0</option>
+                                            <option value="medium">L1</option>
+                                            <option value="high">L2</option>
+                                            <option value="critical">L3</option>
                                         </select>
                                     </div>
                                     <div>
@@ -661,10 +663,10 @@ export default function ViolationsPage() {
                             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Severity</label>
                             <select value={newViolation.severity} onChange={e => setNewViolation(p => ({ ...p, severity: e.target.value }))}
                                 className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                                <option value="critical">Critical</option>
+                                <option value="low">L0</option>
+                                <option value="medium">L1</option>
+                                <option value="high">L2</option>
+                                <option value="critical">L3</option>
                             </select>
                         </div>
                         <div>
