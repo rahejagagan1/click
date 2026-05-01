@@ -232,58 +232,76 @@ export default function ViolationsPage() {
     };
 
     return (
-        <div className="max-w-6xl mx-auto space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900 dark:text-white">System Violation Log</h1>
-                    <p className="text-sm text-slate-500 mt-1">Track and manage policy violations across the organization</p>
+        <div className="max-w-6xl mx-auto space-y-5 p-1">
+            {/* ── Header ── */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 className="text-[22px] font-bold tracking-tight text-slate-800 dark:text-white">System Violation Log</h1>
+                        <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">Track and manage policy violations across the organization</p>
+                    </div>
                 </div>
                 <button
                     onClick={() => setShowNewForm(true)}
-                    className="px-4 py-2.5 bg-rose-500 hover:bg-rose-600 text-white text-sm font-semibold rounded-xl transition-colors flex items-center gap-2 shadow-sm"
+                    className="self-start inline-flex items-center gap-2 px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white text-[13px] font-semibold rounded-lg transition-colors shadow-sm"
                 >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
                     </svg>
                     Report Violation
                 </button>
             </div>
 
-            {/* ═══ Summary Cards ═══ */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {/* ── Summary Cards ── pastel tints + dark text, matches the
+                KPI department-breakdown style for a consistent look. */}
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
                 {[
-                    { label: "Total Violations", value: summary.total, icon: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z", color: "from-slate-500 to-slate-600", bg: "bg-slate-50 dark:bg-slate-500/5", border: "border-slate-200 dark:border-slate-500/10" },
-                    { label: "Open Cases", value: summary.open, icon: "M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636", color: "from-red-500 to-red-600", bg: "bg-red-50 dark:bg-red-500/5", border: "border-red-200 dark:border-red-500/10" },
-                    { label: "In Progress", value: summary.inProgress, icon: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15", color: "from-blue-500 to-blue-600", bg: "bg-blue-50 dark:bg-blue-500/5", border: "border-blue-200 dark:border-blue-500/10" },
-                    { label: "Closed Cases", value: summary.closed, icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z", color: "from-emerald-500 to-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-500/5", border: "border-emerald-200 dark:border-emerald-500/10" },
-                    { label: "High / Critical", value: summary.highCritical, icon: "M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z", color: "from-orange-500 to-rose-600", bg: "bg-orange-50 dark:bg-orange-500/5", border: "border-orange-200 dark:border-orange-500/10" },
+                    { label: "Total",           value: summary.total,        tint: "#64748b", iconPath: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" },
+                    { label: "Open Cases",      value: summary.open,         tint: "#dc2626", iconPath: "M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636" },
+                    { label: "In Progress",     value: summary.inProgress,   tint: "#0284c7", iconPath: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" },
+                    { label: "Closed Cases",    value: summary.closed,       tint: "#059669", iconPath: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
+                    { label: "High / Critical", value: summary.highCritical, tint: "#d97706", iconPath: "M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" },
                 ].map((card) => (
-                    <div key={card.label} className={`rounded-2xl ${card.bg} border ${card.border} p-5 transition-all hover:shadow-md`}>
-                        <div className="flex items-center justify-between mb-3">
-                            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${card.color} flex items-center justify-center shadow-sm`}>
-                                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={card.icon} />
+                    <div
+                        key={card.label}
+                        className="relative overflow-hidden rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#0d1b2e] p-4 transition-shadow hover:shadow-[0_4px_18px_rgba(15,23,42,0.06)]"
+                    >
+                        <span aria-hidden className="absolute inset-x-0 top-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${card.tint}, ${card.tint}80 65%, transparent)` }} />
+                        <div className="flex items-start gap-3">
+                            <span
+                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1"
+                                style={{ background: `${card.tint}14`, color: card.tint, boxShadow: `inset 0 0 0 1px ${card.tint}33` }}
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={card.iconPath} />
                                 </svg>
+                            </span>
+                            <div className="min-w-0">
+                                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">{card.label}</p>
+                                <p className="mt-1 text-[22px] font-bold leading-none text-slate-800 dark:text-white tabular-nums">{card.value}</p>
                             </div>
                         </div>
-                        <p className="text-3xl font-bold text-slate-900 dark:text-white">{card.value}</p>
-                        <p className="text-xs text-slate-500 font-medium mt-1 uppercase tracking-wider">{card.label}</p>
                     </div>
                 ))}
             </div>
 
-            {/* ═══ Filters ═══ */}
-            <div className="flex items-center gap-3 flex-wrap">
+            {/* ── Filters bar — wrapped in a card so it visually anchors. */}
+            <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#0d1b2e] px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+                <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400 mr-1">Filter</span>
                 <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-                    className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
+                    className="h-9 px-2.5 text-[12.5px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-500/15">
                     <option value="">All Status</option>
                     <option value="open">Open</option>
                     <option value="in_progress">In Progress</option>
                     <option value="closed">Closed</option>
                 </select>
                 <select value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)}
-                    className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
+                    className="h-9 px-2.5 text-[12.5px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-500/15">
                     <option value="">All Severity</option>
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
@@ -291,36 +309,49 @@ export default function ViolationsPage() {
                     <option value="critical">Critical</option>
                 </select>
                 <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
-                    className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30 cursor-pointer"
+                    className="h-9 px-2.5 text-[12.5px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-500/15 cursor-pointer"
                     onClick={e => (e.target as HTMLInputElement).showPicker()} />
-                {filterMonth && (
-                    <button onClick={() => setFilterMonth("")} className="text-xs text-slate-500 hover:text-rose-500 transition-colors">Clear</button>
+                {(filterStatus || filterSeverity || filterMonth) && (
+                    <button onClick={() => { setFilterStatus(""); setFilterSeverity(""); setFilterMonth(""); }}
+                        className="h-9 px-2.5 text-[11.5px] font-semibold text-slate-500 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors">
+                        Clear all
+                    </button>
                 )}
-                <span className="text-xs text-slate-500 ml-auto">{filteredViolations.length} record{filteredViolations.length !== 1 ? "s" : ""}</span>
+                <span className="ml-auto text-[11.5px] text-slate-500 tabular-nums">
+                    {filteredViolations.length} record{filteredViolations.length !== 1 ? "s" : ""}
+                </span>
             </div>
 
-            {/* ═══ Records Table ═══ */}
-            <div className="rounded-2xl bg-white dark:bg-[#12122a] border border-slate-200 dark:border-white/5 shadow-sm">
-                <div className="px-6 py-4 border-b border-slate-100 dark:border-white/5">
-                    <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                        <svg className="w-4 h-4 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                        </svg>
-                        Violation Records
-                    </h2>
+            {/* ── Records Card ── */}
+            <div className="rounded-xl bg-white dark:bg-[#0d1b2e] border border-slate-200 dark:border-white/[0.06] shadow-[0_1px_2px_rgba(15,23,42,0.04)] overflow-hidden">
+                <div className="px-5 py-3 border-b border-slate-100 dark:border-white/[0.05] flex items-center gap-2">
+                    <svg className="w-4 h-4 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    <h2 className="text-[13px] font-bold text-slate-800 dark:text-white">Violation Records</h2>
+                    <span className="ml-auto text-[11px] text-slate-400 tabular-nums">
+                        {filteredViolations.length} {filteredViolations.length === 1 ? "entry" : "entries"}
+                    </span>
                 </div>
 
                 {loading ? (
-
-                    <div className="p-10 text-center text-sm text-slate-500">Loading violations...</div>
+                    <div className="p-12 text-center">
+                        <div className="inline-block w-7 h-7 rounded-full border-2 border-rose-200 border-t-rose-500 animate-spin" />
+                        <p className="mt-3 text-[12.5px] text-slate-500">Loading violations…</p>
+                    </div>
                 ) : filteredViolations.length === 0 ? (
-                    <div className="p-10 text-center">
-                        <div className="w-16 h-16 rounded-2xl bg-emerald-50 dark:bg-emerald-500/5 flex items-center justify-center mx-auto mb-3">
-                            <svg className="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="px-6 py-14 text-center">
+                        <div className="w-14 h-14 rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
+                            <svg className="w-7 h-7 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                         </div>
-                        <p className="text-sm text-slate-500">No violations found</p>
+                        <p className="text-[14px] font-semibold text-slate-700 dark:text-slate-200">No violations found</p>
+                        <p className="mt-1 text-[12px] text-slate-500">
+                            {filterStatus || filterSeverity || filterMonth
+                                ? "Try clearing the filters above."
+                                : "All clear — no policy violations have been logged."}
+                        </p>
                     </div>
                 ) : (
                     <div className="divide-y divide-slate-50 dark:divide-white/[0.03]">
@@ -541,12 +572,11 @@ export default function ViolationsPage() {
         </div>
     )
 }
-            </div >
+            </div>
 
-    {/* ═══ New Violation Modal ═══ */ }
-{
-    showNewForm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowNewForm(false)}>
+            {/* ── New Violation Modal ── */}
+            {showNewForm && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowNewForm(false)}>
             <div className="bg-white dark:bg-[#1a1a35] rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-white/10 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-slate-100 dark:border-white/5 flex items-center justify-between shrink-0">
                     <h3 className="text-base font-bold text-slate-900 dark:text-white">Report New Violation</h3>
@@ -670,8 +700,7 @@ export default function ViolationsPage() {
                 </div>
             </div>
         </div>
-    )
-}
-        </div >
+            )}
+        </div>
     );
 }

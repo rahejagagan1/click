@@ -394,7 +394,7 @@ export default function JobApplyPage() {
               <div className="relative mt-4 h-px bg-slate-200" />
 
               <a
-                href="/jobs"
+                href="https://nbmedia.co.in/careers"
                 className="relative mt-4 inline-flex items-center gap-1 text-[12px] font-semibold text-[#3b82f6] hover:text-[#2563eb]"
               >
                 <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg>

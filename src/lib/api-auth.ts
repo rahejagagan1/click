@@ -53,8 +53,16 @@ export async function requireAuth() {
 }
 
 /**
- * Checks auth and requires HR admin access (CEO, developer, or HR manager).
- * Use this for all Keka HR module admin routes.
+ * Checks auth and requires HR admin access. Mirrors the client-side
+ * `isHRAdmin` helper in src/lib/access.ts so the server and the UI agree
+ * on who can hit HR admin endpoints (onboarding, employee CRUD, etc.).
+ *
+ * Allowed:
+ *   • orgLevel === "ceo"
+ *   • isDeveloper === true
+ *   • orgLevel === "special_access"   ← was missing previously
+ *   • role     === "admin"            ← was missing previously
+ *   • orgLevel === "hr_manager"       (covers HR Manager + "normal HR")
  */
 export async function requireHRAdmin() {
     const { session, errorResponse } = await requireAuth();
@@ -63,8 +71,10 @@ export async function requireHRAdmin() {
     const user = session!.user as any;
     const isHRAdmin =
         user.orgLevel === "ceo" ||
-        user.orgLevel === "hr_manager" ||
-        user.isDeveloper === true;
+        user.isDeveloper === true ||
+        user.orgLevel === "special_access" ||
+        user.role === "admin" ||
+        user.orgLevel === "hr_manager";
 
     if (!isHRAdmin) {
         return {

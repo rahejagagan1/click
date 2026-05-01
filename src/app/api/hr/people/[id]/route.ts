@@ -5,14 +5,15 @@ import { serializeBigInt } from "@/lib/utils";
 import { encryptPII } from "@/lib/pii-crypto";
 
 // Editing other employees' profiles is reserved for HR ops + admins.
-// (`requireHRAdmin` would work but we also want to permit role=admin, which
-// some admins are flagged as instead of having orgLevel=ceo.)
+// Mirrors src/lib/access.ts:isHRAdmin so the server gate matches the UI:
+// CEO / developer / special_access / role=admin / hr_manager.
 function canEditOthers(session: any): boolean {
   const u = session?.user;
   if (!u) return false;
   return (
     u.orgLevel === "ceo" ||
     u.orgLevel === "hr_manager" ||
+    u.orgLevel === "special_access" ||
     u.role === "admin" ||
     u.isDeveloper === true
   );
@@ -87,6 +88,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       address, city, state, profilePictureUrl,
       // Sensitive — encrypted at rest before save.
       panNumber, parentName, aadhaarNumber, aadhaarEnrollment,
+      // Job + work details (Edit Profile → Job & Work section).
+      designation, department, employmentType, workLocation, joiningDate,
+      noticePeriodDays,
+      // User row fields — role / orgLevel / manager / team membership.
+      role: newRole, orgLevel, managerId, teamCapsule,
     } = body;
 
     const target = await prisma.user.findUnique({ where: { id }, select: { id: true } });
@@ -94,11 +100,27 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const existing = await prisma.employeeProfile.findUnique({ where: { userId: id } });
 
     // Build the EmployeeProfile patch using only the typed columns.
-    const profileData: Record<string, unknown> = {
-      phone, gender, bloodGroup,
-      dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
-      emergencyContact, emergencyPhone, address, city, state, parentName,
-    };
+    // Each field is only included when explicitly sent (not undefined) so
+    // partial section saves don't overwrite untouched fields with null.
+    const profileData: Record<string, unknown> = {};
+    if (phone             !== undefined) profileData.phone             = phone;
+    if (gender            !== undefined) profileData.gender            = gender;
+    if (bloodGroup        !== undefined) profileData.bloodGroup        = bloodGroup;
+    if (dateOfBirth       !== undefined) profileData.dateOfBirth       = dateOfBirth ? new Date(dateOfBirth) : null;
+    if (emergencyContact  !== undefined) profileData.emergencyContact  = emergencyContact;
+    if (emergencyPhone    !== undefined) profileData.emergencyPhone    = emergencyPhone;
+    if (address           !== undefined) profileData.address           = address;
+    if (city              !== undefined) profileData.city              = city;
+    if (state             !== undefined) profileData.state             = state;
+    if (parentName        !== undefined) profileData.parentName        = parentName;
+    if (designation       !== undefined) profileData.designation       = designation || null;
+    if (department        !== undefined) profileData.department        = department || null;
+    if (employmentType    !== undefined) profileData.employmentType    = employmentType || "fulltime";
+    if (workLocation      !== undefined) profileData.workLocation      = workLocation || "office";
+    if (joiningDate       !== undefined) profileData.joiningDate       = joiningDate ? new Date(joiningDate) : null;
+    if (noticePeriodDays  !== undefined) profileData.noticePeriodDays  = noticePeriodDays === null || noticePeriodDays === ""
+                                                                          ? 30
+                                                                          : Math.max(0, parseInt(String(noticePeriodDays), 10) || 0);
     if (panNumber         !== undefined) profileData.panNumber         = encryptPII(panNumber);
     if (aadhaarNumber     !== undefined) profileData.aadhaarNumber     = encryptPII(aadhaarNumber);
     if (aadhaarEnrollment !== undefined) profileData.aadhaarEnrollment = encryptPII(aadhaarEnrollment);
@@ -108,6 +130,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (typeof displayName === "string" && displayName.trim().length > 0) {
       userPatch.name = displayName.trim().slice(0, 120);
     }
+    if (newRole   !== undefined) userPatch.role     = newRole;
+    if (orgLevel  !== undefined) userPatch.orgLevel = orgLevel;
+    if (managerId !== undefined) {
+      userPatch.managerId = managerId === null || managerId === "" ? null : parseInt(String(managerId), 10);
+    }
+    if (teamCapsule !== undefined) userPatch.teamCapsule = teamCapsule || null;
 
     const txOps: any[] = [];
     if (Object.keys(userPatch).length > 0) {

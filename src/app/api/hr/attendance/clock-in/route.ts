@@ -59,8 +59,10 @@ export async function POST(req: NextRequest) {
       shiftStart.setHours(sh, sm + 15, 0);
       if (now > shiftStart) status = "late";
     }
-    // Hard 10:00 AM IST cutoff: past 10 AM applies the half-day penalty; user can regularize.
-    if (istHour(now) >= 10) status = "half_day";
+    // Hard 10:00 AM IST cutoff: first clock-in past 10 AM is flagged "late".
+    // Half-day penalty no longer applied at clock-in — half_day status is now
+    // a function of total accumulated minutes at clock-out time.
+    if (istHour(now) >= 10) status = "late";
 
     const wl = (profile?.workLocation || "office").toLowerCase();
     const isRemote = !!approvedWfh || wl === "remote" || wl === "hybrid";
@@ -69,40 +71,66 @@ export async function POST(req: NextRequest) {
       lat: bodyLat, lng: bodyLng, address: bodyAddr,
     });
 
-    // ── Race-safe clock-in ──────────────────────────────────────────────
-    // (1) Atomically set clockIn ONLY if the row exists and clockIn is null.
-    //     `updateMany` is a single WHERE-guarded UPDATE in Postgres — two
-    //     concurrent requests cannot both succeed.
-    const updated = await prisma.attendance.updateMany({
-      where: { userId, date: today, clockIn: null },
-      data: { clockIn: now, status, ipAddress: ip, location },
-    });
-
-    // (2) If we updated a row, fetch + return it.
-    if (updated.count === 1) {
-      const record = await prisma.attendance.findUnique({
+    // ── Multi-session clock-in ──────────────────────────────────────────
+    // The new model: each Attendance row owns N AttendanceSession rows.
+    // Clock-in opens a new session. Three cases for the parent row:
+    //
+    //   (a) No row exists yet for today  → create row + first session.
+    //   (b) Row exists, NO open session  → append a new "resume" session,
+    //                                      clear the row's clockOut so the
+    //                                      sweeper / UI know we're active.
+    //   (c) Row exists with an OPEN session (clockOut on row is null while
+    //       clockIn is set) → user is already clocked in; 409.
+    //
+    // We do this in a transaction so the parent + session stay consistent.
+    const result = await prisma.$transaction(async (tx) => {
+      const existing = await tx.attendance.findUnique({
         where: { userId_date: { userId, date: today } },
       });
-      return NextResponse.json(record);
-    }
 
-    // (3) updateMany touched 0 rows → either no row yet, or clockIn was
-    //     already set. Try to create the row; the unique index
-    //     @@unique([userId, date]) makes this atomic.
-    try {
-      const record = await prisma.attendance.create({
-        data: { userId, date: today, clockIn: now, status, ipAddress: ip, location },
-      });
-      return NextResponse.json(record);
-    } catch (e: any) {
-      // P2002 = unique constraint violation → a row already exists, meaning
-      // clockIn must already be set (either from a prior request or a
-      // concurrent one that won the race).
-      if (e?.code === "P2002") {
-        return NextResponse.json({ error: "Already clocked in today" }, { status: 409 });
+      // (a) brand-new day
+      if (!existing) {
+        const created = await tx.attendance.create({
+          data: { userId, date: today, clockIn: now, status, ipAddress: ip, location },
+        });
+        await tx.$executeRawUnsafe(
+          `INSERT INTO "AttendanceSession" ("attendanceId","clockIn") VALUES ($1, $2)`,
+          created.id, now,
+        );
+        return { record: created, conflict: false as const };
       }
-      throw e;
+
+      // (c) currently clocked-in
+      if (existing.clockIn && !existing.clockOut) {
+        return { record: existing, conflict: true as const };
+      }
+
+      // (b) resume — append session and re-open the parent row.
+      const updated = await tx.attendance.update({
+        where: { id: existing.id },
+        data: {
+          clockOut: null,
+          // Keep the FIRST session's clockIn on the parent so "first clock-in
+          // of the day" semantics survive (used for late detection elsewhere).
+          clockIn:  existing.clockIn ?? now,
+          // Don't downgrade an existing "present"/"late" status on resume.
+          status:   existing.status === "missed_clock_out" || existing.status === "absent" ? status : existing.status,
+          ipAddress: ip,
+          // Refresh location to the new session's location.
+          location,
+        },
+      });
+      await tx.$executeRawUnsafe(
+        `INSERT INTO "AttendanceSession" ("attendanceId","clockIn") VALUES ($1, $2)`,
+        updated.id, now,
+      );
+      return { record: updated, conflict: false as const };
+    });
+
+    if (result.conflict) {
+      return NextResponse.json({ error: "Already clocked in" }, { status: 409 });
     }
+    return NextResponse.json(result.record);
   } catch (e) {
     return serverError(e, "POST /api/hr/attendance/clock-in");
   }

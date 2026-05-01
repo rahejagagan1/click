@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
-import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench } from "lucide-react";
+import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench, Target } from "lucide-react";
 
 // Consistent Keka-style icon: thin outline, fixed size / stroke.
 const icon = (Cmp: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>) => (
@@ -571,75 +571,26 @@ export default function Sidebar() {
                     </div>
                 ))}
 
-                {/* Dept. — visible to admins (AND tab-permission allows it) */}
-                {isAdmin && tabAllowed("departments") && (() => {
-                    const isDeptActive = pathname.startsWith("/dashboard/departments");
+                {/* KPIs — visible to all users (the page itself scopes the
+                    visible employees by role: self / team / all-departments).
+                    Tab-permission still gates show/hide. */}
+                {tabAllowed("departments") && (() => {
+                    const isKpiActive = pathname.startsWith("/dashboard/kpis");
                     return (
-                        <div
-                            ref={deptTriggerRef}
-                            className="relative"
-                            onMouseEnter={handleDeptMouseEnter}
-                            onMouseLeave={handleDeptMouseLeave}
-                        >
-                            <div
-                                className={cn(
-                                    "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer",
-                                    isDeptActive
-                                        ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
-                                        : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
-                                )}
-                            >
-                                <span className="flex flex-col items-center gap-1">
-                                    <span className={cn(isDeptActive ? "text-[#0f6ecd]" : "")}>
-                                        <Users size={18} strokeWidth={1.5} />
-                                    </span>
-                                    Dept.
-                                </span>
-                                <svg
-                                    className={cn(
-                                        "hidden",
-                                        deptHovered ? "rotate-90" : ""
-                                    )}
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                            </div>
-
-                            {/* Flyout submenu */}
-                            {deptHovered && typeof document !== "undefined" && createPortal(
-                                <div
-                                    style={{ position: "fixed", left: 108, top: deptY, zIndex: 9999, maxHeight: `calc(100vh - ${deptY}px - 16px)` }}
-                                    className="w-52 overflow-y-auto rounded-xl border border-[#cfd8e3] bg-[#eef2f6] py-2 shadow-xl shadow-slate-300/30 scrollbar-thin animate-in fade-in slide-in-from-left-2 duration-200"
-                                    onMouseEnter={handleDeptMouseEnter}
-                                    onMouseLeave={handleDeptMouseLeave}
-                                >
-                                    <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-medium mb-1 px-4 py-1">
-                                        Departments
-                                    </p>
-                                    {DEPARTMENTS.map((dept) => (
-                                        <Link
-                                            key={dept.slug}
-                                            href={`/dashboard/departments/${dept.slug}`}
-                                            className={cn(
-                                                "flex items-center justify-between px-4 py-2 text-sm transition-all duration-150",
-                                                pathname === `/dashboard/departments/${dept.slug}`
-                                                    ? "bg-[#eef4fb] font-medium text-[#1f3b57]"
-                                                    : "text-[#34495e] hover:bg-[#dde4ec] hover:text-[#1f3b57]"
-                                            )}
-                                        >
-                                            <span className="truncate">{dept.label}</span>
-                                            <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                            </svg>
-                                        </Link>
-                                    ))}
-                                </div>,
-                                document.body
+                        <Link
+                            href="/dashboard/kpis"
+                            className={cn(
+                                "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
+                                isKpiActive
+                                    ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
+                                    : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                             )}
-                        </div>
+                        >
+                            <span className={cn(isKpiActive ? "text-[#0f6ecd]" : "")}>
+                                <Target size={18} strokeWidth={1.5} />
+                            </span>
+                            KPIs
+                        </Link>
                     );
                 })()}
 
