@@ -17,11 +17,16 @@ export async function GET(req: NextRequest) {
   try {
     const self = session!.user as any;
 
+    // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access
+    // + role=hr_manager. Tanvi-style HR Managers couldn't see the
+    // approvals queue.
     const isFinalApprover =
         self.orgLevel === "ceo" ||
         self.isDeveloper ||
         self.orgLevel === "hr_manager" ||
-        self.role === "admin";
+        self.orgLevel === "special_access" ||
+        self.role === "admin" ||
+        self.role === "hr_manager";
 
     // Final approvers see everything — they don't need a DB row to view.
     // Everyone else must resolve to a User id so we can scope to their team.

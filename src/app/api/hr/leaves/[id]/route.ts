@@ -39,11 +39,16 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     });
     if (!application) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+    // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access
+    // + role=hr_manager. Tanvi-style HR Managers (role=hr_manager,
+    // orgLevel=manager) couldn't finalise leave applications.
     const isFinalApprover =
       self.orgLevel === "ceo" ||
       self.isDeveloper ||
       self.orgLevel === "hr_manager" ||
-      self.role === "admin";
+      self.orgLevel === "special_access" ||
+      self.role === "admin" ||
+      self.role === "hr_manager";
     const isDirectManager = application.user?.managerId === myId;
     const year = new Date(application.fromDate).getFullYear();
     const totalDays = parseFloat(application.totalDays.toString());
@@ -267,11 +272,16 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (errorResponse) return errorResponse;
   try {
     const self = session!.user as any;
+    // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access
+    // + role=hr_manager. Tanvi-style HR Managers (role=hr_manager,
+    // orgLevel=manager) couldn't finalise leave applications.
     const isFinalApprover =
       self.orgLevel === "ceo" ||
       self.isDeveloper ||
       self.orgLevel === "hr_manager" ||
-      self.role === "admin";
+      self.orgLevel === "special_access" ||
+      self.role === "admin" ||
+      self.role === "hr_manager";
     if (!isFinalApprover) return NextResponse.json({ error: "Only HR admin can delete leaves" }, { status: 403 });
 
     const { id: idParam } = await params;

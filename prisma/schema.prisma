@@ -804,6 +804,10 @@ model Violation {
   violationDate       DateTime?
   responsiblePersonId Int?
   resolvedAt          DateTime?
+  /// Last time the in-progress reminder email was sent. The cron uses
+  /// this to decide whether to fire another reminder (~ every 15 days).
+  /// Null = never reminded yet.
+  lastReminderAt      DateTime?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
