@@ -23,15 +23,18 @@ type AdminTabDef = {
   label: string;
   icon: React.ComponentType<{ className?: string; size?: number; strokeWidth?: number }>;
 };
-const ADMIN_TABS: AdminTabDef[] = [
-  { key: "attendance-dashboard", label: "Attendance Dashboard", icon: LayoutDashboard },
-  { key: "approvals",            label: "Approvals",            icon: CheckSquare     },
-  { key: "leaves",               label: "Leave Balances",       icon: Calendar        },
-  { key: "holidays",             label: "Holidays & Calendar",  icon: CalendarDays    },
-  { key: "assets",               label: "Assets",               icon: Package         },
-  { key: "leave-types",          label: "Leave Types",          icon: Calendar        },
-  { key: "shifts",               label: "Shift Templates",      icon: Clock           },
-  { key: "departments",          label: "Departments",          icon: Users           },
+// Each sub-tab also carries the TabKey it's gated by in the central
+// permissions catalog. Tab Permissions UI flipping any of these to
+// false hides that section from the user.
+const ADMIN_TABS: Array<AdminTabDef & { permKey: string }> = [
+  { key: "attendance-dashboard", label: "Attendance Dashboard", icon: LayoutDashboard, permKey: "hr_admin_attendance"     },
+  { key: "approvals",            label: "Approvals",            icon: CheckSquare,     permKey: "hr_admin_approvals"      },
+  { key: "leaves",               label: "Leave Balances",       icon: Calendar,        permKey: "hr_admin_leaves"         },
+  { key: "holidays",             label: "Holidays & Calendar",  icon: CalendarDays,    permKey: "hr_admin_holidays"       },
+  { key: "assets",               label: "Assets",               icon: Package,         permKey: "hr_admin_assets"         },
+  { key: "leave-types",          label: "Leave Types",          icon: Calendar,        permKey: "hr_admin_leave_types"    },
+  { key: "shifts",               label: "Shift Templates",      icon: Clock,           permKey: "hr_admin_shifts"         },
+  { key: "departments",          label: "Departments",          icon: Users,           permKey: "hr_admin_departments"    },
 ];
 
 const DAYS_LABEL = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -56,11 +59,15 @@ export default function HRAdminPage() {
   );
   const tabAllowed = (key: string) => (perms?.permissions?.[key] ?? true);
 
-  // Filter tabs + rail links based on tier. Full admin → everything.
-  // hr_manager only → whitelist from src/lib/access.ts.
-  const visibleTabs = isFullAdmin
+  // Filter tabs by tier first, then by per-user permission so admins
+  // can grant / revoke individual sub-tabs through Tab Permissions UI.
+  // tabAllowed() defaults to true when no explicit row exists — so
+  // existing users keep seeing every tab they're entitled to until
+  // someone flips the toggle.
+  const tierTabs = isFullAdmin
     ? ADMIN_TABS
     : ADMIN_TABS.filter((t) => HR_MANAGER_ALLOWED_TABS.has(t.key));
+  const visibleTabs = tierTabs.filter((t) => tabAllowed(t.permKey));
   // Rail links: full admins always see them; hr_manager-tier sees them
   // when both the curated whitelist allows it AND their tab permission
   // is on. Other roles see them only if Tab Permissions explicitly grants.
@@ -75,14 +82,16 @@ export default function HRAdminPage() {
 
   const [tab, setTab] = useState("attendance-dashboard");
 
-  // If an hr_manager somehow ends up on a tab their tier can't see
-  // (e.g. via a bookmarked URL or a stale state), snap them back to
-  // the default. Full admins have access to everything so this is a
-  // no-op for them.
+  // If the current tab isn't visible (because tier-curation OR a
+  // per-user revoke removed it), snap to the first visible tab. We
+  // can't always pick attendance-dashboard since admins might revoke
+  // even that one for a specific user.
   useEffect(() => {
-    if (isFullAdmin) return;
-    if (!HR_MANAGER_ALLOWED_TABS.has(tab)) setTab("attendance-dashboard");
-  }, [isFullAdmin, tab]);
+    if (visibleTabs.length === 0) return;
+    if (!visibleTabs.some((t) => t.key === tab)) {
+      setTab(visibleTabs[0].key);
+    }
+  }, [visibleTabs, tab]);
 
   const { data: leaveTypes = [] } = useSWR("/api/hr/admin/leave-types", fetcher);
   const { data: shifts = [] }     = useSWR("/api/hr/admin/shifts", fetcher);

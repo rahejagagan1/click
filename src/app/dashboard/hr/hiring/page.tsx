@@ -12,6 +12,7 @@ import { useState } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
+import { isHRAdmin } from "@/lib/access";
 import {
   Briefcase, Mail, Phone, ExternalLink, FileText, Plus, X, Trash2,
   CheckCircle2, Clock, Star, MessageSquare, XCircle, Trophy,
@@ -50,8 +51,9 @@ const fmtDate = (d: string | Date) =>
 export default function HiringPage() {
   const { data: session } = useSession();
   const me = session?.user as any;
-  const canManage = me?.orgLevel === "ceo" || me?.isDeveloper === true ||
-                    me?.orgLevel === "hr_manager" || me?.role === "admin";
+  // Mirrors src/lib/access.ts:isHRAdmin so adding a role to the
+  // admin tier elsewhere doesn't drift this page.
+  const canManage = isHRAdmin(me);
 
   const [tab, setTab] = useState<"apps" | "openings" | "form">("apps");
 
