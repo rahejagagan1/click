@@ -80,6 +80,7 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const {
             name, email, role, orgLevel, clickupUserId, teamCapsule, managerId,
+            inlineManagerId,            // optional secondary / dotted-line manager
             inviteToLogin,              // boolean: if true, email a welcome / sign-in link
             enableOnboarding,           // boolean: if true, gate first login behind /onboarding
             profile,                    // optional EmployeeProfile payload
@@ -157,6 +158,28 @@ export async function POST(request: NextRequest) {
                     `UPDATE "User" SET "onboardingPending" = true WHERE id = $1`,
                     created.id,
                 );
+            }
+
+            // Inline manager — same raw-SQL pattern (typed client may not
+            // know about the column on a stale `prisma generate` cache).
+            // Self-reference guarded: a brand-new user can't pick themselves
+            // anyway, but the explicit check matches the PUT endpoint.
+            if (inlineManagerId !== undefined) {
+                const inlineId = inlineManagerId === null || inlineManagerId === ""
+                    ? null
+                    : Number(inlineManagerId);
+                if (inlineId !== null && inlineId !== created.id) {
+                    await tx.$executeRawUnsafe(
+                        `UPDATE "User" SET "inlineManagerId" = $1 WHERE id = $2`,
+                        inlineId,
+                        created.id,
+                    );
+                } else if (inlineId === null) {
+                    await tx.$executeRawUnsafe(
+                        `UPDATE "User" SET "inlineManagerId" = NULL WHERE id = $1`,
+                        created.id,
+                    );
+                }
             }
 
             if (profile && typeof profile === "object") {

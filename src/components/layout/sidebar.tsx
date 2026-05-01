@@ -204,14 +204,20 @@ export default function Sidebar() {
         return Math.max(margin, Math.min(y, vh - h - margin));
     }, []);
 
+    // Mirrors the canonical list in src/lib/departments.ts. The flyout
+    // that rendered these entries was retired when KPIs got simplified
+    // to a single page — kept here for `estHeight` math + so any future
+    // reactivation picks up the latest taxonomy without drift.
     const DEPARTMENTS = [
-        { label: "HR Dept.", slug: "hr" },
+        { label: "HR Dept.",         slug: "hr" },
         { label: "Researcher Dept.", slug: "researcher" },
-        { label: "QA Dept.", slug: "qa" },
+        { label: "Scripting Dept.",  slug: "scripting" },
+        { label: "QA Dept.",         slug: "qa" },
         { label: "Production Dept.", slug: "production" },
-        { label: "AI Dept.", slug: "ai" },
+        { label: "Design Dept.",     slug: "design" },
+        { label: "AI Dept.",         slug: "ai" },
         { label: "SocialMedia Dept.", slug: "socialmedia" },
-        { label: "IT Dept.", slug: "it" },
+        { label: "IT Dept.",         slug: "it" },
     ];
 
     const handleDeptMouseEnter = () => {
