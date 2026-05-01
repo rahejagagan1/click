@@ -881,6 +881,22 @@ model EmployeeProfile {
   parentName        String?          // father's / spouse's name, as printed on the PAN card
   aadhaarNumber     String?
   aadhaarEnrollment String?
+  // ── Extended onboarding fields (job + work settings) ──
+  // All optional so the column adds don't break legacy rows. The
+  // onboarding wizard captured these in the form already; before this
+  // migration they were thrown away. HR's Edit Profile reads/writes
+  // them now so every onboarding field is cross-checkable.
+  secondaryJobTitle  String?
+  legalEntity        String?
+  jobLocation        String?         // City-level (Mohali / Delhi / Mumbai / Remote) — distinct from workLocation (office/remote/hybrid).
+  probationPolicy    String?
+  internshipEndDate  DateTime?
+  leavePlan          String?
+  holidayList        String?
+  weeklyOff          String?
+  attendanceNumber   String?
+  timeTrackingPolicy String?
+  penalizationPolicy String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
