@@ -7,6 +7,7 @@ import { runFullSync, syncUsers as runUsersSync } from "@/lib/clickup/sync-engin
 import { syncYoutubeStats } from "@/lib/youtube/sync";
 import { calculateMonthlyRatings } from "@/lib/ratings/calculator";
 import { runYoutubeDashboardSync } from "@/lib/youtube/yt-dashboard-sync";
+import { sendViolationInProgressReminders } from "@/lib/hr/violation-reminders";
 import type { CronJobId } from "@/lib/cron-jobs-registry";
 
 export const CRON_JOB_RUNNERS: Record<CronJobId, () => Promise<void>> = {
@@ -20,4 +21,5 @@ export const CRON_JOB_RUNNERS: Record<CronJobId, () => Promise<void>> = {
     await syncYoutubeStats();
     await calculateMonthlyRatings();
   },
+  violation_reminders: async () => { await sendViolationInProgressReminders(); },
 };
