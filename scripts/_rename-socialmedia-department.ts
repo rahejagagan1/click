@@ -1,14 +1,22 @@
-// One-shot: rename existing EmployeeProfile.department values from
-// "SocialMedia" → "Social Media". The dropdown was renamed to add
-// the space + "Content Strategist", and existing stored rows would
-// otherwise look like a one-off custom value in the merged options.
-//
-// Idempotent — safe to re-run; only writes when there's something to fix.
+// One-shot: renames stale EmployeeProfile.department values to the
+// new canonical labels in src/lib/departments.ts. Idempotent — safe
+// to re-run; only writes when there's something to fix.
 //
 // Run:  npx tsx scripts/_rename-socialmedia-department.ts
 // Add `--dry` to preview without writing.
 
 import { PrismaClient } from "@prisma/client";
+
+// old → new department label rewrites. Add new entries when the
+// canonical list in src/lib/departments.ts evolves.
+const RENAMES: Array<[string, string]> = [
+  ["SocialMedia",        "Social Media Team"],   // missing space + now suffixed "Team"
+  ["Social Media",       "Social Media Team"],   // earlier rename, now suffixed
+  ["Researcher",         "Researchers"],         // singular → plural
+  ["Editor",             "Editors"],             // singular → plural
+  ["Researcher Manager", "Research Manager"],    // wording change
+  ["AI",                 "AI Team"],             // suffixed "Team"
+];
 
 async function main() {
   const url = process.env.DATABASE_URL;
@@ -16,25 +24,32 @@ async function main() {
   const isDry = process.argv.includes("--dry");
   const prisma = new PrismaClient({ datasources: { db: { url } } });
 
+  let totalUpdated = 0;
   try {
-    const rows = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
-      `SELECT COUNT(*)::bigint AS count
-         FROM "EmployeeProfile"
-        WHERE "department" = 'SocialMedia'`,
-    );
-    const count = Number(rows[0]?.count ?? 0n);
-    if (count === 0) {
-      console.log("No 'SocialMedia' rows to rename — nothing to do.");
-      return;
+    for (const [from, to] of RENAMES) {
+      const rows = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
+        `SELECT COUNT(*)::bigint AS count FROM "EmployeeProfile" WHERE "department" = $1`,
+        from,
+      );
+      const count = Number(rows[0]?.count ?? 0n);
+      if (count === 0) continue;
+
+      if (isDry) {
+        console.log(`[dry] Would rename ${count} rows: '${from}' → '${to}'`);
+      } else {
+        const updated = await prisma.$executeRawUnsafe(
+          `UPDATE "EmployeeProfile" SET "department" = $1 WHERE "department" = $2`,
+          to,
+          from,
+        );
+        console.log(`✓ Renamed ${updated} rows: '${from}' → '${to}'`);
+        totalUpdated += Number(updated);
+      }
     }
-    if (isDry) {
-      console.log(`[dry] Would rename ${count} EmployeeProfile rows from 'SocialMedia' → 'Social Media'.`);
-      return;
+    if (!isDry) {
+      console.log("");
+      console.log(totalUpdated === 0 ? "Nothing to rename — DB is already clean." : `✓ Total: ${totalUpdated} rows renamed.`);
     }
-    const updated = await prisma.$executeRawUnsafe(
-      `UPDATE "EmployeeProfile" SET "department" = 'Social Media' WHERE "department" = 'SocialMedia'`,
-    );
-    console.log(`✓ Renamed ${updated} rows.`);
   } finally {
     await prisma.$disconnect();
   }
