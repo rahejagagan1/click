@@ -243,8 +243,11 @@ export default function HRHomePage() {
   const clockOut = async () => { await fetch("/api/hr/attendance/clock-out", { method: "POST" }); mutate(`/api/hr/attendance?month=${monthKey}`); };
   const onLeave  = (boardData?.board || []).filter((u: any) => u.status === "on_leave");
   // Split clocked-in employees by their actual location mode (from Attendance.location JSON).
+  // "Working Remotely" lists ONLY users who applied for WFH today —
+  // permanent remote / hybrid folks live under the Remote Clock-in
+  // filter on the attendance dashboard, not on this card.
   const clockedIn = (boardData?.board || []).filter((u: any) => u.status === "present" || u.status === "late");
-  const remote    = clockedIn.filter((u: any) => parseAttLoc(u.location).mode === "remote");
+  const remote    = (boardData?.board || []).filter((u: any) => u.wfhToday === true);
   const inOffice  = clockedIn.filter((u: any) => parseAttLoc(u.location).mode !== "remote");
   const balances = (balanceData as any[]).filter(b => b.leaveType).slice(0, 3);
   const ringColors = ["#008CFF", "#00bcd4", "#9c27b0"];
