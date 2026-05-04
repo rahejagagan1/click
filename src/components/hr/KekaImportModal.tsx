@@ -139,10 +139,12 @@ export default function KekaImportModal({
         name:  fullName,
         email: patch.workEmail,
         inviteToLogin:    true,
-        // Bulk-imported users are existing Keka employees, not new
-        // hires — skip the first-login onboarding wizard so they don't
-        // get bounced to /onboarding the next time they sign in.
-        enableOnboarding: false,
+        // Flag every bulk-imported user for the first-login wizard.
+        // Keka doesn't carry the personal info we need (PAN, Aadhaar,
+        // address, emergency contact) — the wizard captures those
+        // from the employee directly. /api/onboarding/complete clears
+        // the flag once they finish, so it's a one-time step.
+        enableOnboarding: true,
         profile: {
           employeeId:   patch.employeeNumber || undefined,
           firstName:    patch.firstName || undefined,
