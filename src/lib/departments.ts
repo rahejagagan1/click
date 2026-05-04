@@ -3,14 +3,27 @@
 // job-titles.ts pattern so dropdowns stay scannable and consistent
 // across surfaces. Extend by appending — alphabetised inside the
 // dropdown is handled by the consumer if needed.
+// Aligned with the ClickUp KPI doc list — every department here has
+// either a KPI list or is a real org function (HR / Production / Design
+// / Scripting). Mirrors the screenshot the user shared on 2026-05-01.
 export const DEPARTMENTS = [
   "HR",
-  "Researcher",
+  "Managers",
+  "Researchers",
+  "Research Manager",
   "Scripting",
-  "QA",
+  "Writers",
+  "Editors",
+  "Content Strategist",
+  "Content Database Executive",
+  "Video QA",
+  "Script QA",
+  "QA Manager",
   "Production",
   "Design",
-  "AI",
-  "SocialMedia",
+  "GC Team",
+  "AI Team",
+  "Social Media Team",
+  "Social Media Manager",
   "IT",
 ];
