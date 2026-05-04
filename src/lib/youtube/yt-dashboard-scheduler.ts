@@ -27,6 +27,35 @@ const CLOCK_OUT_MIN  = 0;
 let schedulerStarted    = false;
 let lastMissedCloseRun  = 0;
 
+// Track when we last logged a DB-unreachable error so a brief outage
+// doesn't paper the console with stack traces every 60s. Logs once,
+// then stays quiet for 5 minutes before logging the same condition
+// again. Re-keyed by the call-site label so each subsystem still
+// surfaces its first failure.
+const DB_DOWN_QUIET_MS = 5 * 60 * 1000;
+const lastDbDownLog = new Map<string, number>();
+
+/**
+ * If the error looks like a Prisma "can't reach DB" (P1001), log a
+ * one-line warning at most once per 5 minutes per label and swallow
+ * the rest. Anything else logs normally so real bugs aren't hidden.
+ */
+function logSchedulerError(label: string, err: any): void {
+  const isDbDown =
+    err?.code === "P1001" ||
+    /Can't reach database server/i.test(String(err?.message || ""));
+  if (isDbDown) {
+    const now = Date.now();
+    const last = lastDbDownLog.get(label) ?? 0;
+    if (now - last >= DB_DOWN_QUIET_MS) {
+      lastDbDownLog.set(label, now);
+      console.warn(`[CronScheduler/${label}] DB unreachable — pausing this job until the next tick that connects.`);
+    }
+    return;
+  }
+  console.error(`[CronScheduler/${label}]`, err);
+}
+
 // Per-day gates persist in SyncConfig (NOT in memory) — otherwise a
 // post-window restart wipes the gate and the next tick re-fires the
 // emails. SyncConfig keys + payload shape mirror the leave-accrual
@@ -115,7 +144,7 @@ export function startInternalCronScheduler(): void {
     console.log("[CronScheduler] 60s poll started (YouTube dashboard + HR missed-clockout sweeper)");
 
     setInterval(() => {
-        maybeRunDueCronJobs().catch((e) => console.error("[CronScheduler/jobs]", e));
+        maybeRunDueCronJobs().catch((e) => logSchedulerError("jobs", e));
 
         // HR: sweep stale clock-ins once an hour. Cheap single UPDATE; usually 0 rows.
         const now = Date.now();
@@ -125,7 +154,7 @@ export function startInternalCronScheduler(): void {
                 .then((n) => {
                     if (n > 0) console.log(`[CronScheduler/hr] Flagged ${n} missed clock-out(s)`);
                 })
-                .catch((e) => console.error("[CronScheduler/hr]", e));
+                .catch((e) => logSchedulerError("hr-missed-close", e));
         }
 
         // ── HR: daily attendance reminder emails ─────────────────────
@@ -148,7 +177,7 @@ export function startInternalCronScheduler(): void {
                     const n = await sendMissedClockInReminders();
                     if (n > 0) console.log(`[CronScheduler/hr] Sent ${n} missed clock-in reminder(s)`);
                 })
-                .catch((e) => console.error("[CronScheduler/hr] clock-in:", e));
+                .catch((e) => logSchedulerError("hr-clock-in", e));
         }
 
         // Clock-out reminder — 20:00 IST. Same idea but with a wider cap
@@ -162,7 +191,7 @@ export function startInternalCronScheduler(): void {
                     const n = await sendMissedClockOutReminders();
                     if (n > 0) console.log(`[CronScheduler/hr] Sent ${n} missed clock-out reminder(s)`);
                 })
-                .catch((e) => console.error("[CronScheduler/hr] clock-out:", e));
+                .catch((e) => logSchedulerError("hr-clock-out", e));
         }
 
         // ── HR: monthly sick-leave accrual (+1 SL day per active user, capped at 12) ──
@@ -170,6 +199,6 @@ export function startInternalCronScheduler(): void {
         // own last-run key in SyncConfig so it fires once per month even
         // across restarts.
         maybeRunSickLeaveAccrual()
-            .catch((e) => console.error("[CronScheduler/hr] sick-leave accrual:", e));
+            .catch((e) => logSchedulerError("hr-sick-leave-accrual", e));
     }, TICK_MS);
 }
