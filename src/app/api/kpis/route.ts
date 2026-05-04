@@ -73,13 +73,18 @@ export async function GET() {
         : [];
 
     type MemberRow = Member & { department: string | null };
+    // Exclude CEO-tier users from the KPI listing — they don't have a
+    // KPI document tracked against them, so without this filter their
+    // department string ("CEO & FOUNDER") rendered as a one-member
+    // empty card. Other tiers (special_access / hr_manager / etc.)
+    // are still included so HR's own KPIs show up.
     const members = isTopTier
       ? await prisma.$queryRawUnsafe<MemberRow[]>(
           `SELECT u.id, u.name, u."profilePictureUrl",
                   ep.designation, ep.department
              FROM "User" u
              LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
-            WHERE u."isActive" = true
+            WHERE u."isActive" = true AND u."orgLevel" <> 'ceo'
             ORDER BY ep.department ASC NULLS LAST, u.name ASC`,
         )
       : myDepartment
@@ -88,7 +93,8 @@ export async function GET() {
                     ep.designation, ep.department
                FROM "User" u
                LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
-              WHERE u."isActive" = true AND ep.department = $1
+              WHERE u."isActive" = true AND u."orgLevel" <> 'ceo'
+                AND ep.department = $1
               ORDER BY u.name ASC`,
             myDepartment,
           )
