@@ -10,12 +10,14 @@ import { PrismaClient } from "@prisma/client";
 // old → new department label rewrites. Add new entries when the
 // canonical list in src/lib/departments.ts evolves.
 const RENAMES: Array<[string, string]> = [
-  ["SocialMedia",        "Social Media Team"],   // missing space + now suffixed "Team"
-  ["Social Media",       "Social Media Team"],   // earlier rename, now suffixed
-  ["Researcher",         "Researchers"],         // singular → plural
-  ["Editor",             "Editors"],             // singular → plural
-  ["Researcher Manager", "Research Manager"],    // wording change
-  ["AI",                 "AI Team"],             // suffixed "Team"
+  ["SocialMedia",                  "Social Media Team"],   // missing space + now suffixed "Team"
+  ["Social Media",                 "Social Media Team"],   // earlier rename, now suffixed
+  ["Researcher",                   "Researchers"],         // singular → plural
+  ["Editor",                       "Editors"],             // singular → plural
+  ["Researcher Manager",           "Research Manager"],    // wording change
+  ["AI",                           "AI Team"],             // suffixed "Team"
+  ["Content Strategy & Research",  "Content Strategist"],  // legacy label
+  ["Content Strategy",             "Content Strategist"],  // legacy label
 ];
 
 async function main() {
