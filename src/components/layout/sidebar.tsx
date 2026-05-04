@@ -220,7 +220,6 @@ export default function Sidebar() {
         { label: "Video QA Dept.",                   slug: "video-qa" },
         { label: "Script QA Dept.",                  slug: "script-qa" },
         { label: "QA Manager Dept.",                 slug: "qa-manager" },
-        { label: "Production Dept.",                 slug: "production" },
         { label: "Design Dept.",                     slug: "design" },
         { label: "AI Team Dept.",                    slug: "ai-team" },
         { label: "Social Media Dept.",               slug: "social-media" },

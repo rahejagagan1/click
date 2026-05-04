@@ -18,7 +18,6 @@ export const DEPARTMENTS = [
   "Video QA",
   "Script QA",
   "QA Manager",
-  "Production",
   "Design",
   "AI Team",
   "Social Media",
