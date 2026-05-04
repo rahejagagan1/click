@@ -876,7 +876,7 @@ export default function OnboardEmployeePage() {
             <Grid>
               <Field label="Org Level">
                 <Select v={form.orgLevel} set={v => set("orgLevel", v)} opts={[
-                  "member", "production_team", "sub_lead", "lead",
+                  "member", "sub_lead", "lead",
                   "manager", "hr_manager", "hod", "special_access", "ceo",
                 ]} />
               </Field>

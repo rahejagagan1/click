@@ -85,3 +85,32 @@ export const HR_MANAGER_ALLOWED_RAIL_LINKS = new Set<string>([
 export function isFullHRAdmin(user: ClientUser): boolean {
   return isAdmin(user) || user?.role === "hr_manager";
 }
+
+/**
+ * True when this user can be assigned as someone else's Reporting /
+ * Inline Manager. Used by:
+ *   • The "Manager" dropdown on the Admin → Users table
+ *   • /api/managers (Manager Reports sidebar + onboarding form)
+ *
+ * Mirroring the API filter here keeps the picker UI in sync with the
+ * sidebar — a manager who shows up on one list shows up on both.
+ *
+ * Excluded on purpose: lead / sub_lead orgLevels (they're tagging
+ * tiers, not assignment targets), the legacy `production_team`
+ * orgLevel, and anyone whose only manager-ish claim is "happens to
+ * have a direct report" (Keka imports left lots of stale managerIds).
+ */
+export function isPickableAsManager(user: ClientUser): boolean {
+  if (!user) return false;
+  if (user.orgLevel === "ceo")            return true;
+  if (user.orgLevel === "special_access") return true;
+  if (user.orgLevel === "hod")            return true;
+  if (user.orgLevel === "manager")        return true;
+  if (user.orgLevel === "hr_manager")     return true;
+  if (user.role === "admin")              return true;
+  if (user.role === "manager")            return true;
+  if (user.role === "production_manager") return true;
+  if (user.role === "researcher_manager") return true;
+  if (user.role === "hr_manager")         return true;
+  return false;
+}

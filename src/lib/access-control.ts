@@ -1,6 +1,6 @@
 import prisma from "@/lib/prisma";
 
-export type OrgLevel = "ceo" | "special_access" | "hod" | "manager" | "hr_manager" | "lead" | "sub_lead" | "production_team" | "member";
+export type OrgLevel = "ceo" | "special_access" | "hod" | "manager" | "hr_manager" | "lead" | "sub_lead" | "member";
 
 /**
  * Returns the list of user IDs the given user is allowed to see.
@@ -63,12 +63,8 @@ export async function getVisibleUserIds(
         return [userId, ...descendantIds];
     }
 
-    // Production Team — sees only self
-    if (orgLevel === "production_team") {
-        return [userId];
-    }
-
-    // Member — zero access
+    // Member — zero access (legacy "production_team" users were
+    // migrated to member; same effective visibility scope).
     return [];
 }
 

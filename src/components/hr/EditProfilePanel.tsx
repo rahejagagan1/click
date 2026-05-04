@@ -560,7 +560,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
             <label className={cls.label}>Org Level</label>
             <select className={cls.field} value={job.orgLevel}
               onChange={(e) => setJob({ ...job, orgLevel: e.target.value })}>
-              {["ceo","special_access","hod","manager","hr_manager","lead","sub_lead","production_team","member"]
+              {["ceo","special_access","hod","manager","hr_manager","lead","sub_lead","member"]
                 .map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           </div>

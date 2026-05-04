@@ -31,7 +31,6 @@ const ORG_LABELS: Record<string, string> = {
     hr_manager: "HR",
     lead: "Lead",
     sub_lead: "Sub Lead",
-    production_team: "Production Team",
     member: "Member",
 };
 
@@ -43,7 +42,6 @@ const ORG_COLORS: Record<string, string> = {
     hr_manager: "border-pink-500/40 bg-pink-500/5",
     lead: "border-blue-500/40 bg-blue-500/5",
     sub_lead: "border-purple-500/40 bg-purple-500/5",
-    production_team: "border-slate-400/30 bg-white/[0.02]",
     member: "border-slate-600/30 bg-white/[0.01]",
 };
 
@@ -55,7 +53,6 @@ const ORG_BADGE_COLORS: Record<string, string> = {
     hr_manager: "bg-pink-500/15 text-pink-400 border-pink-500/25",
     lead: "bg-blue-500/15 text-blue-400 border-blue-500/25",
     sub_lead: "bg-purple-500/15 text-purple-400 border-purple-500/25",
-    production_team: "bg-slate-500/15 text-slate-400 border-slate-500/25",
     member: "bg-slate-600/15 text-slate-500 border-slate-600/25",
 };
 
@@ -67,7 +64,6 @@ const ORG_OPTIONS = [
     { value: "hr_manager", label: "HR" },
     { value: "lead", label: "Lead" },
     { value: "sub_lead", label: "Sub Lead" },
-    { value: "production_team", label: "Production Team" },
     { value: "member", label: "Member (No Access)" },
 ];
 
