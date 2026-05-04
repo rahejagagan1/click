@@ -307,8 +307,32 @@ const mkAB = (id: string, reviewer = ""): AndrewBRow => ({ id, reviewer, targetF
 interface AndrewSBRow { id: string; person: string; thumbnailsDone: string; avgCtr: string; remark: string; autoFilled?: boolean; }
 const mkSBRow = (id: string, person = ""): AndrewSBRow => ({ id, person, thumbnailsDone: "", avgCtr: "", remark: "" });
 
-interface AndrewSCRow { id: string; capsule: string; currentMonthViews: string; lastMonthViews: string; remark: string; autoFilled?: boolean; }
-const mkSCRow = (id: string, capsule = ""): AndrewSCRow => ({ id, capsule, currentMonthViews: "", lastMonthViews: "", remark: "" });
+interface AndrewSCRow {
+    id: string;
+    capsule: string;
+    currentMonthViews: string;
+    // Mirrors the Section D spreadsheet HR shared on 2026-05-04 — these
+    // four columns sit between the current-month views and previous-
+    // month views so the table reads left-to-right as a single month
+    // snapshot before the comparison.
+    viewsNotCountingShorts: string;
+    subscriberCount: string;
+    videosUploaded: string;
+    titlesThumbnailsChanged: string;
+    lastMonthViews: string;
+    remark: string;
+    autoFilled?: boolean;
+}
+const mkSCRow = (id: string, capsule = ""): AndrewSCRow => ({
+    id, capsule,
+    currentMonthViews:        "",
+    viewsNotCountingShorts:   "",
+    subscriberCount:          "",
+    videosUploaded:           "",
+    titlesThumbnailsChanged:  "",
+    lastMonthViews:           "",
+    remark:                   "",
+});
 
 const mkNishantRow = (id: string, name = ""): NishantResearcherRow => ({
     id, researcher: name, approvedCasesRTC: "", avgRating: "",
@@ -757,12 +781,18 @@ export default function MonthlyReportPage() {
         if (!capsuleViewsData?.views?.length) return;
         if (isLocked || isSubmitted || isDraftSaved) return;
         const rows: AndrewSCRow[] = capsuleViewsData.views.map((v: any, i: number) => ({
-            id:                `sc-auto-${i}-${Date.now()}`,
-            capsule:           v.capsule           ?? "",
-            currentMonthViews: v.currentMonthViews ?? "",
-            lastMonthViews:    v.lastMonthViews    ?? "",
-            remark:            "",
-            autoFilled:        true,
+            id:                       `sc-auto-${i}-${Date.now()}`,
+            capsule:                  v.capsule           ?? "",
+            currentMonthViews:        v.currentMonthViews ?? "",
+            // The four Section-D columns aren't in the capsule-views API
+            // yet — leave blank so HR/Andrew can fill them by hand.
+            viewsNotCountingShorts:   "",
+            subscriberCount:          "",
+            videosUploaded:           "",
+            titlesThumbnailsChanged:  "",
+            lastMonthViews:           v.lastMonthViews    ?? "",
+            remark:                   "",
+            autoFilled:               true,
         }));
         // Pad with at least one empty row if data is sparse
         if (rows.length === 0) rows.push(mkSCRow("sc-1"));
@@ -1165,14 +1195,18 @@ export default function MonthlyReportPage() {
                                 <p className="text-[11px] text-amber-100 mt-0.5">Compare current month ({monthName} {year}) vs previous month views</p>
                             </div>
                             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 shadow-sm">
-                                <table ref={scTableRef as any} className="border-collapse w-full" style={{minWidth:800}}>
+                                <table ref={scTableRef as any} className="border-collapse w-full" style={{minWidth:1200}}>
                                     <thead>
                                         <tr>
-                                            <ATh colIndex={0} widths={scColWidths} setWidths={setScColWidths} tableRef={scTableRef as any} colCount={5}>Capsule / Channel <span style={{color:"#fca5a5"}}>*</span></ATh>
+                                            <ATh colIndex={0} widths={scColWidths} setWidths={setScColWidths} tableRef={scTableRef as any} colCount={9}>Capsule / Channel <span style={{color:"#fca5a5"}}>*</span></ATh>
                                             <ATh colIndex={1} widths={scColWidths} setWidths={setScColWidths}>{monthName} {year} Views <span style={{color:"#fca5a5"}}>*</span></ATh>
-                                            <ATh colIndex={2} widths={scColWidths} setWidths={setScColWidths}>Previous Month Views <span style={{color:"#fca5a5"}}>*</span></ATh>
-                                            <ATh colIndex={3} widths={scColWidths} setWidths={setScColWidths}>Difference (↑ / ↓)</ATh>
-                                            <ATh colIndex={4} widths={scColWidths} setWidths={setScColWidths}><span style={{color:"#fde68a",fontStyle:"italic",fontSize:"10px",fontWeight:400}}>Remark (optional)</span></ATh>
+                                            <ATh colIndex={2} widths={scColWidths} setWidths={setScColWidths}>Views (Not Counting Shorts)</ATh>
+                                            <ATh colIndex={3} widths={scColWidths} setWidths={setScColWidths}>Subscriber Count</ATh>
+                                            <ATh colIndex={4} widths={scColWidths} setWidths={setScColWidths}>Videos Uploaded</ATh>
+                                            <ATh colIndex={5} widths={scColWidths} setWidths={setScColWidths}>Titles &amp; Thumbnails Changed</ATh>
+                                            <ATh colIndex={6} widths={scColWidths} setWidths={setScColWidths}>Previous Month Views <span style={{color:"#fca5a5"}}>*</span></ATh>
+                                            <ATh colIndex={7} widths={scColWidths} setWidths={setScColWidths}>Difference (↑ / ↓)</ATh>
+                                            <ATh colIndex={8} widths={scColWidths} setWidths={setScColWidths}><span style={{color:"#fde68a",fontStyle:"italic",fontSize:"10px",fontWeight:400}}>Remark (optional)</span></ATh>
                                             <th className="px-2 py-2 bg-[#1e3a5f] border border-[#2a4a6f] w-8"></th>
                                         </tr>
                                     </thead>
@@ -1188,6 +1222,18 @@ export default function MonthlyReportPage() {
                                                     </ATd>
                                                     <ATd>
                                                         <AInput value={row.currentMonthViews} onChange={v=>setSCR(idx,"currentMonthViews",v)} placeholder="e.g. 50000" disabled={aDisabled} />
+                                                    </ATd>
+                                                    <ATd>
+                                                        <AInput value={row.viewsNotCountingShorts} onChange={v=>setSCR(idx,"viewsNotCountingShorts",v)} placeholder="e.g. 45000" disabled={aDisabled} />
+                                                    </ATd>
+                                                    <ATd>
+                                                        <AInput value={row.subscriberCount} onChange={v=>setSCR(idx,"subscriberCount",v)} placeholder="e.g. 12.1k" disabled={aDisabled} />
+                                                    </ATd>
+                                                    <ATd>
+                                                        <AInput value={row.videosUploaded} onChange={v=>setSCR(idx,"videosUploaded",v)} placeholder="e.g. 10 + 6 shorts" disabled={aDisabled} />
+                                                    </ATd>
+                                                    <ATd>
+                                                        <ATextarea value={row.titlesThumbnailsChanged} onChange={v=>setSCR(idx,"titlesThumbnailsChanged",v)} placeholder="e.g. 1 - <title>" disabled={aDisabled} />
                                                     </ATd>
                                                     <ATd>
                                                         <AInput value={row.lastMonthViews} onChange={v=>setSCR(idx,"lastMonthViews",v)} placeholder="e.g. 45000" disabled={aDisabled} />
