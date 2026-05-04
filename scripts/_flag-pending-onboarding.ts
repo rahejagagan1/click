@@ -24,6 +24,7 @@
 //       npx tsx scripts/_flag-pending-onboarding.ts --all                       # also flag rows that already have emergencyContact
 //       npx tsx scripts/_flag-pending-onboarding.ts --emails=a@x.com,b@y.com    # only these users
 //       npx tsx scripts/_flag-pending-onboarding.ts --exclude=a@x.com,b@y.com   # everyone EXCEPT these
+//       npx tsx scripts/_flag-pending-onboarding.ts --unflag-all                # reverse: clear every onboardingPending flag
 //
 // Developers (anyone listed in process.env.DEVELOPER_EMAILS) are
 // always skipped automatically — they don't need to walk through the
@@ -35,8 +36,9 @@ import { PrismaClient } from "@prisma/client";
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) { console.error("DATABASE_URL is not set"); process.exit(1); }
-  const isDry  = process.argv.includes("--dry");
-  const all    = process.argv.includes("--all");
+  const isDry      = process.argv.includes("--dry");
+  const all        = process.argv.includes("--all");
+  const unflagAll  = process.argv.includes("--unflag-all");
   const emails = process.argv.find((a) => a.startsWith("--emails="))?.slice(9).split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) ?? null;
 
   // Always-excluded set: developer emails from .env + anything passed via --exclude.
@@ -49,6 +51,25 @@ async function main() {
   const prisma = new PrismaClient({ datasources: { db: { url } } });
 
   try {
+    // ── Unflag-all branch — clears every onboardingPending=true row ──
+    if (unflagAll) {
+      const pending = await prisma.$queryRawUnsafe<Array<{ id: number; email: string; name: string }>>(
+        `SELECT id, email, name FROM "User" WHERE "onboardingPending" = true ORDER BY email`,
+      );
+      if (pending.length === 0) {
+        console.log("No users currently flagged as onboarding-pending — nothing to clear.");
+        return;
+      }
+      console.log(`${isDry ? "[dry] would clear" : "Clearing"} the onboarding flag for ${pending.length} users:`);
+      for (const u of pending) console.log(`  ${u.email.padEnd(40)} ${u.name}`);
+      if (isDry) return;
+      await prisma.$executeRawUnsafe(
+        `UPDATE "User" SET "onboardingPending" = false WHERE "onboardingPending" = true`,
+      );
+      console.log(`✓ Cleared ${pending.length} flags. Nobody will be bounced to /onboarding on next sign-in.`);
+      return;
+    }
+
     // Build the candidate set. Default is "PAN is NULL" — the wizard's
     // signature output. --all overrides to flag everyone active with
     // an EmployeeProfile.
