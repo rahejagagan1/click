@@ -16,8 +16,10 @@ const HOUR_MS    = 60 * 60 * 1000;
 //     cut-off so people still have time to clock in before half-day kicks in.
 //   • Clock-OUT reminder fires at 20:00 IST — well after the standard
 //     6 PM end of shift; anyone still without a clock-out has missed it.
-const CLOCK_IN_HOUR  = 9;
-const CLOCK_IN_MIN   = 58;
+// Fire AFTER the half-day cut-off (10:00 IST), not before. Previously
+// 09:58, which sent the email mid-clock-in window for late arrivals.
+const CLOCK_IN_HOUR  = 10;
+const CLOCK_IN_MIN   = 15;
 const CLOCK_OUT_HOUR = 20;
 const CLOCK_OUT_MIN  = 0;
 
