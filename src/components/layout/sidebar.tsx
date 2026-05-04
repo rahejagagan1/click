@@ -209,15 +209,20 @@ export default function Sidebar() {
     // to a single page — kept here for `estHeight` math + so any future
     // reactivation picks up the latest taxonomy without drift.
     const DEPARTMENTS = [
-        { label: "HR Dept.",         slug: "hr" },
-        { label: "Researcher Dept.", slug: "researcher" },
-        { label: "Scripting Dept.",  slug: "scripting" },
-        { label: "QA Dept.",         slug: "qa" },
-        { label: "Production Dept.", slug: "production" },
-        { label: "Design Dept.",     slug: "design" },
-        { label: "AI Dept.",         slug: "ai" },
-        { label: "SocialMedia Dept.", slug: "socialmedia" },
-        { label: "IT Dept.",         slug: "it" },
+        { label: "HR Dept.",                 slug: "hr" },
+        { label: "Researcher Dept.",         slug: "researcher" },
+        { label: "Researcher Manager Dept.", slug: "researcher-manager" },
+        { label: "Scripting Dept.",          slug: "scripting" },
+        { label: "Writers Dept.",            slug: "writers" },
+        { label: "Editor Dept.",             slug: "editor" },
+        { label: "Content Strategist Dept.", slug: "content-strategist" },
+        { label: "Video QA Dept.",           slug: "video-qa" },
+        { label: "Script QA Dept.",          slug: "script-qa" },
+        { label: "Production Dept.",         slug: "production" },
+        { label: "Design Dept.",             slug: "design" },
+        { label: "AI Dept.",                 slug: "ai" },
+        { label: "Social Media Dept.",       slug: "social-media" },
+        { label: "IT Dept.",                 slug: "it" },
     ];
 
     const handleDeptMouseEnter = () => {
