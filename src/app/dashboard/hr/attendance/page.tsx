@@ -621,8 +621,12 @@ export default function AttendancePage() {
     if (!c) return null;
     return String(c).slice(0, 10); // YYYY-MM-DD (UTC component is fine — User.createdAt is a timestamp)
   })();
+  // Drop balance-only types (e.g. Carry Over Leave) — they're shown
+  // on the leave-balances grid but mustn't appear in the apply form.
   const leaveTypes: { id: number; name: string }[] = Array.isArray(leaveTypesData)
-    ? leaveTypesData.map((t: any) => ({ id: t.id, name: t.name }))
+    ? leaveTypesData
+        .filter((t: any) => t.applicable !== false)
+        .map((t: any) => ({ id: t.id, name: t.name }))
     : [];
 
   const clockIn  = async () => {
