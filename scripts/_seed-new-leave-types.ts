@@ -34,6 +34,18 @@ async function main() {
   const prisma = new PrismaClient({ datasources: { db: { url } } });
 
   try {
+    // Postgres auto-increment sequence drift can leave the next-value
+    // pointing at an already-used id (happens after raw SQL inserts /
+    // backup restores). Resync the sequence to MAX(id) before any
+    // insert so the .create() call lands on a free slot.
+    try {
+      await prisma.$executeRawUnsafe(
+        `SELECT setval(pg_get_serial_sequence('"LeaveType"', 'id'), (SELECT COALESCE(MAX(id), 1) FROM "LeaveType"))`,
+      );
+    } catch (e) {
+      console.warn("[warn] Could not resync LeaveType id sequence — continuing anyway:", e);
+    }
+
     let created = 0, updated = 0, kept = 0;
     for (const r of ROWS) {
       const existing = await prisma.leaveType.findUnique({ where: { code: r.code } });
