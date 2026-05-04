@@ -1738,8 +1738,12 @@ export default function HRHomePage() {
   // attendance page.
   const [otherForm, setOtherForm] = useState<LeaveRequestKind | null>(null);
   const { data: leaveTypesData = [] } = useSWR(`/api/hr/admin/leave-types`, fetcher);
+  // Drop balance-only types (e.g. Carry Over Leave) — they're shown
+  // on the leave-balances grid but mustn't appear in the apply form.
   const otherLeaveTypes: { id: number; name: string }[] = Array.isArray(leaveTypesData)
-    ? leaveTypesData.map((t: any) => ({ id: t.id, name: t.name }))
+    ? leaveTypesData
+        .filter((t: any) => t.applicable !== false)
+        .map((t: any) => ({ id: t.id, name: t.name }))
     : [];
   const otherTitle: Record<LeaveRequestKind, string> = {
     wfh:        "Request Work From Home",
