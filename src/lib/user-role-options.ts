@@ -9,6 +9,7 @@ export const USER_ROLE_OPTIONS: { value: string; label: string }[] = [
     { value: "sub_lead", label: "Sub Lead" },
     { value: "writer", label: "Writer" },
     { value: "editor", label: "Editor" },
+    { value: "graphic_designer", label: "Graphic Designer" },
     { value: "qa", label: "QA" },
     { value: "researcher", label: "Researcher" },
     { value: "gc", label: "GC" },
