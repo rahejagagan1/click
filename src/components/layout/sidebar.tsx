@@ -209,15 +209,25 @@ export default function Sidebar() {
     // to a single page — kept here for `estHeight` math + so any future
     // reactivation picks up the latest taxonomy without drift.
     const DEPARTMENTS = [
-        { label: "HR Dept.",         slug: "hr" },
-        { label: "Researcher Dept.", slug: "researcher" },
-        { label: "Scripting Dept.",  slug: "scripting" },
-        { label: "QA Dept.",         slug: "qa" },
-        { label: "Production Dept.", slug: "production" },
-        { label: "Design Dept.",     slug: "design" },
-        { label: "AI Dept.",         slug: "ai" },
-        { label: "SocialMedia Dept.", slug: "socialmedia" },
-        { label: "IT Dept.",         slug: "it" },
+        { label: "HR Dept.",                         slug: "hr" },
+        { label: "Managers Dept.",                   slug: "managers" },
+        { label: "Researchers Dept.",                slug: "researchers" },
+        { label: "Research Manager Dept.",           slug: "research-manager" },
+        { label: "Scripting Dept.",                  slug: "scripting" },
+        { label: "Writers Dept.",                    slug: "writers" },
+        { label: "Editors Dept.",                    slug: "editors" },
+        { label: "Content Strategist Dept.",         slug: "content-strategist" },
+        { label: "Content Database Executive Dept.", slug: "content-database-executive" },
+        { label: "Video QA Dept.",                   slug: "video-qa" },
+        { label: "Script QA Dept.",                  slug: "script-qa" },
+        { label: "QA Manager Dept.",                 slug: "qa-manager" },
+        { label: "Production Dept.",                 slug: "production" },
+        { label: "Design Dept.",                     slug: "design" },
+        { label: "GC Team Dept.",                    slug: "gc-team" },
+        { label: "AI Team Dept.",                    slug: "ai-team" },
+        { label: "Social Media Team Dept.",          slug: "social-media-team" },
+        { label: "Social Media Manager Dept.",       slug: "social-media-manager" },
+        { label: "IT Dept.",                         slug: "it" },
     ];
 
     const handleDeptMouseEnter = () => {
