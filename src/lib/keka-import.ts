@@ -150,11 +150,21 @@ export function deriveDepartment(jobTitle: string, kekaDept: string): string {
   // Designers — graphic / motion / UI.
   if (jt.includes("graphic design") || jt.includes(" designer"))            return "Design";
 
-  // QA — split into Script vs Video where the title signals it,
-  // otherwise default to Video QA (the more common case).
-  if (jt.includes("script qa") || jt.includes("quality assurance (script)")) return "Script QA";
-  if (jt.includes("video qa") || jt.includes("quality assurance (video)"))   return "Video QA";
-  if (jt.includes("quality assurance") || jt.match(/\bqa\b/))                return "Video QA";
+  // Social media — checked BEFORE Content Strategist so titles like
+  // "Social Media Content Strategist" land in Social Media, not the
+  // generic strategist bucket.
+  if (jt.includes("social media"))                                          return "Social Media";
+
+  // QA — split into Script vs Video where the title signals it.
+  // "Script Quality" / "Content Review" / "Content Quality" all read as
+  // script-side review work; everything else QA-flavoured defaults to
+  // Video QA (the more common case in this org).
+  if (jt.includes("script qa") || jt.includes("script quality")
+   || jt.includes("quality assurance (script)"))                            return "Script QA";
+  if (jt.includes("content review") || jt.includes("content quality"))      return "Script QA";
+  if (jt.includes("video qa") || jt.includes("video quality")
+   || jt.includes("quality assurance (video)"))                             return "Video QA";
+  if (jt.includes("quality assurance") || jt.match(/\bqa\b/))               return "Video QA";
 
   // Writers — script writers, content writers, content team leads.
   if (jt.includes("script writer") || jt.includes("content writer")
@@ -169,29 +179,28 @@ export function deriveDepartment(jobTitle: string, kekaDept: string): string {
   if (jt.includes("content operations executive"))                          return "Content Operations Executive";
   if (jt.includes("content strategist") || jt.includes("strategist"))       return "Content Strategist";
 
-  // HR
+  // HR — recruiters / TA / EAs / generic HR titles all roll up here.
+  if (jt.includes("talent acquisition") || jt.includes("recruiter"))        return "HR";
+  if (jt.includes("executive assistant"))                                   return "HR";
   if (jt.includes("hr ") || jt.includes("human resource"))                  return "HR";
 
   // AI / ML engineers
   if (jt.includes("ai engineer") || jt.includes("ml engineer")
    || jt.includes("artificial intelligence"))                               return "AI Team";
 
-  // Social media
-  if (jt.includes("social media"))                                          return "Social Media";
+  // IT — support, security/infosec interns, system admins.
+  if (jt.includes("it support") || jt.includes("it security")
+   || jt.includes("security intern") || jt.includes("infosec")
+   || jt.includes("system admin"))                                          return "IT";
 
-  // IT support
-  if (jt.includes("it support") || jt.includes("system admin"))             return "IT";
-
-  // Production — broader fallback (head of production, production exec,
-  // etc.) AFTER the more specific matches above.
-  if (jt.includes("production"))                                            return "Production";
+  // Note: "Production" was retired as a canonical department —
+  // production-flavoured titles already get routed to Editors / Design /
+  // Writers above. Anything else stays unmatched so HR sets it manually.
 
   // Keka department hint as a last fallback.
   const k = (kekaDept ?? "").toLowerCase();
   if (k.includes("human resources"))         return "HR";
-  if (k.includes("production"))              return "Production";
   if (k.includes("research"))                return "Researchers";
-  if (k.includes("operations"))              return "Production";
   if (k.includes("artificial intelligence")) return "AI Team";
   if (k.includes("social media"))            return "Social Media";
   if (k.match(/\bit\b/))                     return "IT";
