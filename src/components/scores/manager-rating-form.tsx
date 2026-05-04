@@ -96,9 +96,25 @@ export default function ManagerRatingForm({ teamMembers, onSubmit, onClose }: Ma
     // Show rating sections for any role that has a formula template
     const hasRatingTemplate = !!selectedMember && !["admin", "manager"].includes(selectedMember.role);
 
+    // Map a User.role to the FormulaTemplate.roleType the rating system
+    // actually has templates for. Mirrors the same mapping the
+    // /api/scores/manager-rating POST handler uses when triggering
+    // calculation, so the form and the save path agree on which
+    // template to render. Anything not explicitly listed (writer,
+    // researcher, qa, member, lead, sub_lead, …) falls through to
+    // "writer", which is the generic content-team template.
+    const normaliseRoleType = (role: string): string => {
+        if (role === "editor")              return "editor";
+        if (role === "production_manager")  return "production_manager";
+        if (role === "hr_manager")          return "hr_manager";
+        if (role === "researcher_manager")  return "researcher_manager";
+        return "writer";
+    };
+
     // Fetch active template sections for the selected user's role
     const fetchTemplateSections = async (role: string) => {
-        const cached = templateCacheRef.current[role];
+        const roleType = normaliseRoleType(role);
+        const cached = templateCacheRef.current[roleType];
         if (cached) {
             setTemplateSections(cached.sections);
             setTemplateMissing(cached.missing);
@@ -109,7 +125,7 @@ export default function ManagerRatingForm({ teamMembers, onSubmit, onClose }: Ma
         setLoadingTemplate(true);
         setTemplateMissing(false);
         try {
-            const res = await fetch(`/api/ratings/formula-template/active?roleType=${role}`);
+            const res = await fetch(`/api/ratings/formula-template/active?roleType=${roleType}`);
             if (res.ok) {
                 const tmpl = await res.json();
                 if (tmpl) {
@@ -128,7 +144,7 @@ export default function ManagerRatingForm({ teamMembers, onSubmit, onClose }: Ma
                             key: String(s.passthrough_manager_adjustment_key),
                             label: String(s.label || s.key || "Pillar"),
                         }));
-                    templateCacheRef.current[role] = {
+                    templateCacheRef.current[roleType] = {
                         sections,
                         missing: false,
                         ytAdjKey,
@@ -140,7 +156,7 @@ export default function ManagerRatingForm({ teamMembers, onSubmit, onClose }: Ma
                     setPassthroughAdjPanels(passthroughAdjPanels);
                 } else {
                     // No active template for this role
-                    templateCacheRef.current[role] = {
+                    templateCacheRef.current[roleType] = {
                         sections: [],
                         missing: true,
                         ytAdjKey: null,
