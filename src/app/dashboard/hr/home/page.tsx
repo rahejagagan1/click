@@ -1892,15 +1892,12 @@ export default function HRHomePage() {
   );
   // Split clocked-in employees by their actual location mode (from Attendance.location JSON).
   const clockedIn = (boardData?.board || []).filter((u: any) => u.status === "present" || u.status === "late");
-  // Working Remotely — clocked-in remote users PLUS anyone with an applied
-  // (non-rejected) WFH for today. Same rationale as `onLeave`: the list shows
-  // intent, not just proven clock-ins.
-  const remoteClockedIn = clockedIn.filter((u: any) => parseAttLoc(u.location).mode === "remote");
-  const remoteIds = new Set<number>(remoteClockedIn.map((u: any) => u.id));
-  const remote = [
-    ...remoteClockedIn,
-    ...((boardData?.board || []) as any[]).filter((u: any) => u.wfhToday === true && !remoteIds.has(u.id)),
-  ];
+  // Working Remotely — ONLY employees who explicitly applied for WFH
+  // today. Permanent remote / hybrid folks who clock in from home as
+  // their default mode show up under the "Remote Clock-in" filter on
+  // the attendance dashboard, not here. This card flags exception
+  // cases: office-default people who took WFH for a day.
+  const remote = ((boardData?.board || []) as any[]).filter((u: any) => u.wfhToday === true);
   // Show only leave types the user actually has a quota or in-flight
   // activity for — drop fully-zero rows (no quota AND nothing used or
   // pending) so the card doesn't render six "0 days" tiles for every
