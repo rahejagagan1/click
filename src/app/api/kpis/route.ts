@@ -45,10 +45,14 @@ function bucketForManager(role: string | null): string {
 // bucket regardless of their stored EmployeeProfile.department —
 // otherwise the "Managers" card shows 0 members because nobody has
 // `department = "Managers"` (department is a domain, not a role).
+//
+// HR-tier users (orgLevel/role = "hr_manager") are an exception:
+// they belong to the HR card, not the generic Managers card, since
+// HR has its own KPI doc and their domain IS HR.
 function bucketFor(m: { orgLevel: string | null; role: string | null; department: string | null }): string | null {
+  if (m.orgLevel === "hr_manager" || m.role === "hr_manager") return "HR";
   const isManager =
     m.orgLevel === "manager" ||
-    m.orgLevel === "hr_manager" ||
     (m.role || "").endsWith("_manager");
   if (isManager) return bucketForManager(m.role);
   return m.department;
