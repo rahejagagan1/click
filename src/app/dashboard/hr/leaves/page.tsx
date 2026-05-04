@@ -299,7 +299,13 @@ export default function LeavesPage() {
       {showApply && (
         <>
           <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowApply(false)} />
-          <RequestLeavePanel leaveTypes={leaveTypes} onClose={() => setShowApply(false)} />
+          {/* Filter to applicable types only — balance-only buckets like
+              Carry Over Leave still surface on the leave-balances grid
+              but mustn't be selectable in the apply form. */}
+          <RequestLeavePanel
+            leaveTypes={leaveTypes.filter((lt: any) => lt.applicable !== false)}
+            onClose={() => setShowApply(false)}
+          />
         </>
       )}
 
