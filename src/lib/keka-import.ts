@@ -193,16 +193,14 @@ export function deriveDepartment(jobTitle: string, kekaDept: string): string {
    || jt.includes("security intern") || jt.includes("infosec")
    || jt.includes("system admin"))                                          return "IT";
 
-  // Production — broader fallback (head of production, production exec,
-  // etc.) AFTER the more specific matches above.
-  if (jt.includes("production"))                                            return "Production";
+  // Note: "Production" was retired as a canonical department —
+  // production-flavoured titles already get routed to Editors / Design /
+  // Writers above. Anything else stays unmatched so HR sets it manually.
 
   // Keka department hint as a last fallback.
   const k = (kekaDept ?? "").toLowerCase();
   if (k.includes("human resources"))         return "HR";
-  if (k.includes("production"))              return "Production";
   if (k.includes("research"))                return "Researchers";
-  if (k.includes("operations"))              return "Production";
   if (k.includes("artificial intelligence")) return "AI Team";
   if (k.includes("social media"))            return "Social Media";
   if (k.match(/\bit\b/))                     return "IT";
