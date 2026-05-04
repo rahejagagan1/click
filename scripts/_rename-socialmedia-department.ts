@@ -26,6 +26,27 @@ async function main() {
 
   let totalUpdated = 0;
   try {
+    // Strip leading/trailing whitespace first — Keka exports occasionally
+    // sneak a trailing space in (e.g. "AI ") which then dodges the
+    // exact-match rename below.
+    if (isDry) {
+      const trimRows = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
+        `SELECT COUNT(*)::bigint AS count FROM "EmployeeProfile"
+          WHERE "department" IS NOT NULL AND "department" <> TRIM("department")`,
+      );
+      const tcount = Number(trimRows[0]?.count ?? 0n);
+      if (tcount > 0) console.log(`[dry] Would TRIM whitespace on ${tcount} rows.`);
+    } else {
+      const trimmed = await prisma.$executeRawUnsafe(
+        `UPDATE "EmployeeProfile" SET "department" = TRIM("department")
+          WHERE "department" IS NOT NULL AND "department" <> TRIM("department")`,
+      );
+      if (Number(trimmed) > 0) {
+        console.log(`✓ Trimmed whitespace on ${trimmed} rows.`);
+        totalUpdated += Number(trimmed);
+      }
+    }
+
     for (const [from, to] of RENAMES) {
       const rows = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
         `SELECT COUNT(*)::bigint AS count FROM "EmployeeProfile" WHERE "department" = $1`,
