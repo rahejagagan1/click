@@ -136,20 +136,57 @@ export function parseNoticePeriod(raw: string): number {
 // if nothing matches. Returned values must match canonical labels in
 // src/lib/departments.ts so the KPI listing buckets cleanly without
 // needing the rename helper to fix things up after import.
+//
+// Order matters — more specific patterns must match before broader
+// ones. e.g. "video editor" must hit `editor` first, "head of
+// production" must hit before plain `production`.
 export function deriveDepartment(jobTitle: string, kekaDept: string): string {
   const jt = (jobTitle ?? "").toLowerCase();
-  if (jt.includes("video editor"))                                    return "Production";
-  if (jt.includes("graphic design") || jt.includes(" designer"))      return "Design";
-  // QA imports default to "Video QA" — HR can flip individuals to
-  // "Script QA" after import. Either way both are canonical so the
-  // card surfaces correctly without a follow-up rename.
-  if (jt.includes("quality assurance") || jt.match(/\bqa\b/))         return "Video QA";
-  if (jt.includes("script writer") || jt.includes("content team lead") || jt.includes("creative head")) return "Writers";
-  if (jt.includes("content researcher") || jt.includes("content research")) return "Researchers";
-  if (jt.includes("content strategist") || jt.includes("strategist")) return "Content Strategist";
-  if (jt.includes("hr ") || jt.includes("human resource"))            return "HR";
-  if (jt.includes("head of production"))                              return "Production";
 
+  // Editors (post-production video). Specific before generic.
+  if (jt.includes("video editor"))                                          return "Editors";
+  if (jt.includes("editor"))                                                return "Editors";
+
+  // Designers — graphic / motion / UI.
+  if (jt.includes("graphic design") || jt.includes(" designer"))            return "Design";
+
+  // QA — split into Script vs Video where the title signals it,
+  // otherwise default to Video QA (the more common case).
+  if (jt.includes("script qa") || jt.includes("quality assurance (script)")) return "Script QA";
+  if (jt.includes("video qa") || jt.includes("quality assurance (video)"))   return "Video QA";
+  if (jt.includes("quality assurance") || jt.match(/\bqa\b/))                return "Video QA";
+
+  // Writers — script writers, content writers, content team leads.
+  if (jt.includes("script writer") || jt.includes("content writer")
+   || jt.includes("content team lead") || jt.includes("creative head"))     return "Writers";
+
+  // Researchers
+  if (jt.includes("content researcher") || jt.includes("content research")
+   || jt.includes("researcher"))                                            return "Researchers";
+
+  // Content Strategist — strategist roles + the renamed "Content
+  // Operations Executive" line.
+  if (jt.includes("content operations executive"))                          return "Content Operations Executive";
+  if (jt.includes("content strategist") || jt.includes("strategist"))       return "Content Strategist";
+
+  // HR
+  if (jt.includes("hr ") || jt.includes("human resource"))                  return "HR";
+
+  // AI / ML engineers
+  if (jt.includes("ai engineer") || jt.includes("ml engineer")
+   || jt.includes("artificial intelligence"))                               return "AI Team";
+
+  // Social media
+  if (jt.includes("social media"))                                          return "Social Media";
+
+  // IT support
+  if (jt.includes("it support") || jt.includes("system admin"))             return "IT";
+
+  // Production — broader fallback (head of production, production exec,
+  // etc.) AFTER the more specific matches above.
+  if (jt.includes("production"))                                            return "Production";
+
+  // Keka department hint as a last fallback.
   const k = (kekaDept ?? "").toLowerCase();
   if (k.includes("human resources"))         return "HR";
   if (k.includes("production"))              return "Production";
