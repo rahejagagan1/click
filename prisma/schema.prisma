@@ -987,6 +987,12 @@ model LeaveType {
   isPaid              Boolean   @default(true)
   applicableGender    String    @default("all")  // all | male | female
   isActive            Boolean   @default(true)
+  // When false the balance is read-only — shown on the leave-balances
+  // grid for record-keeping but hidden from the apply-leave dropdown.
+  // Used for legacy / encashment-only buckets like Carry Over Leave
+  // that the company doesn't auto-credit anymore but still pays out
+  // at exit for old employees who already have a stored balance.
+  applicable          Boolean   @default(true)
   createdAt           DateTime  @default(now())
 
   balances            LeaveBalance[]
