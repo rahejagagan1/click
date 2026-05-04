@@ -1,3 +1,4 @@
+import prisma from "@/lib/prisma";
 import { getCronJobsConfig, saveCronJobsConfig } from "@/lib/cron-jobs-config";
 import { CRON_JOB_IDS, type CronJobId } from "@/lib/cron-jobs-registry";
 import { CRON_JOB_RUNNERS } from "@/lib/cron-jobs-runners";
@@ -25,10 +26,35 @@ const CLOCK_OUT_MIN  = 0;
 
 let schedulerStarted    = false;
 let lastMissedCloseRun  = 0;
-// Per-day gates: keyed by YYYY-MM-DD IST so each reminder fires at most
-// once per local day even if the server restarts mid-window.
-let lastClockInRunDay:  string | null = null;
-let lastClockOutRunDay: string | null = null;
+
+// Per-day gates persist in SyncConfig (NOT in memory) — otherwise a
+// post-window restart wipes the gate and the next tick re-fires the
+// emails. SyncConfig keys + payload shape mirror the leave-accrual
+// helper.
+const SYNC_KEY_CLOCK_IN  = "hr_missed_clockin_last_day";
+const SYNC_KEY_CLOCK_OUT = "hr_missed_clockout_last_day";
+
+/**
+ * Try to claim today's "fired" slot for the given SyncConfig key.
+ * Returns true if this caller successfully claimed it (and should run
+ * the reminder), false if today's slot was already claimed.
+ *
+ * The marker is written BEFORE the caller sends emails so:
+ *   • a 60s retick mid-send can't double-fire
+ *   • a server restart mid-send finds the gate already stamped
+ *     and skips the second batch
+ */
+async function claimDailyGate(key: string, day: string): Promise<boolean> {
+  const row = await prisma.syncConfig.findUnique({ where: { key } });
+  const lastDay = (row?.value as { lastDay?: string } | null)?.lastDay ?? null;
+  if (lastDay === day) return false;
+  await prisma.syncConfig.upsert({
+    where:  { key },
+    create: { key, value: { lastDay: day } },
+    update: { value: { lastDay: day } },
+  });
+  return true;
+}
 
 /** YYYY-MM-DD in IST, plus current hour/minute as integers. */
 function istClock(): { day: string; hour: number; minute: number } {
@@ -108,16 +134,18 @@ export function startInternalCronScheduler(): void {
         //   • we haven't already fired today.
         const t = istClock();
 
-        // Clock-in reminder — 09:58 IST. Window check is "past or equal"
-        // so a server restarted at 10:05 still fires today (once).
+        // Clock-in reminder — 10:15 IST. Window check is "past or equal"
+        // so a server restarted at 10:20 still fires today (once),
+        // protected by the SyncConfig gate against re-firing.
         const pastClockInWindow = (t.hour > CLOCK_IN_HOUR)
             || (t.hour === CLOCK_IN_HOUR && t.minute >= CLOCK_IN_MIN);
         // Don't keep nagging late in the day — give a 2-hour cap.
         const stillInClockInRange = t.hour < (CLOCK_IN_HOUR + 2);
-        if (pastClockInWindow && stillInClockInRange && lastClockInRunDay !== t.day) {
-            lastClockInRunDay = t.day;
-            sendMissedClockInReminders()
-                .then((n) => {
+        if (pastClockInWindow && stillInClockInRange) {
+            claimDailyGate(SYNC_KEY_CLOCK_IN, t.day)
+                .then(async (claimed) => {
+                    if (!claimed) return;
+                    const n = await sendMissedClockInReminders();
                     if (n > 0) console.log(`[CronScheduler/hr] Sent ${n} missed clock-in reminder(s)`);
                 })
                 .catch((e) => console.error("[CronScheduler/hr] clock-in:", e));
@@ -127,10 +155,11 @@ export function startInternalCronScheduler(): void {
         // (until midnight IST) so a 21:30 restart still fires once.
         const pastClockOutWindow = (t.hour > CLOCK_OUT_HOUR)
             || (t.hour === CLOCK_OUT_HOUR && t.minute >= CLOCK_OUT_MIN);
-        if (pastClockOutWindow && lastClockOutRunDay !== t.day) {
-            lastClockOutRunDay = t.day;
-            sendMissedClockOutReminders()
-                .then((n) => {
+        if (pastClockOutWindow) {
+            claimDailyGate(SYNC_KEY_CLOCK_OUT, t.day)
+                .then(async (claimed) => {
+                    if (!claimed) return;
+                    const n = await sendMissedClockOutReminders();
                     if (n > 0) console.log(`[CronScheduler/hr] Sent ${n} missed clock-out reminder(s)`);
                 })
                 .catch((e) => console.error("[CronScheduler/hr] clock-out:", e));
