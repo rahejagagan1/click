@@ -150,13 +150,15 @@ export async function GET() {
     // Admin tier sees every CANONICAL department (always — even with
     //   0 members and no doc) so the listing matches the upload form
     //   in /dashboard/kpis/manage. Any legacy stored department label
-    //   that doesn't match the canonical list is appended at the end
-    //   so HR still sees orphan rows that need re-classifying.
+    //   that still has live members tagged to it (an orphan-with-
+    //   people) is appended so HR can spot rows that need re-classifying.
+    //   Orphan docs WITHOUT members (e.g. a doc lingering after a team
+    //   was retired) are intentionally NOT surfaced — re-upload to a
+    //   canonical name to bring them back.
     // Everyone else sees only their own bucket.
     const deptKeys = new Set<string>();
     if (isTopTier) {
-      for (const d of DEPARTMENTS)   deptKeys.add(d);
-      for (const d of docs)          if (d.department) deptKeys.add(d.department);
+      for (const d of DEPARTMENTS) deptKeys.add(d);
       for (const m of visibleMembers) {
         const b = memberBucket.get(m.id);
         if (b) deptKeys.add(b);

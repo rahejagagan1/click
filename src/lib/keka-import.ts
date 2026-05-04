@@ -131,28 +131,33 @@ export function parseNoticePeriod(raw: string): number {
 }
 
 // Job-title-driven derivation. Keka's department names (NB_Production
-// etc.) don't 1:1 map to our short list (Production vs Scripting), so
-// the title is the more reliable signal. Falls back to a Keka-dept
-// hint, then to "" if nothing matches.
+// etc.) don't 1:1 map to our canonical list, so the title is the
+// more reliable signal. Falls back to a Keka-dept hint, then to ""
+// if nothing matches. Returned values must match canonical labels in
+// src/lib/departments.ts so the KPI listing buckets cleanly without
+// needing the rename helper to fix things up after import.
 export function deriveDepartment(jobTitle: string, kekaDept: string): string {
   const jt = (jobTitle ?? "").toLowerCase();
   if (jt.includes("video editor"))                                    return "Production";
   if (jt.includes("graphic design") || jt.includes(" designer"))      return "Design";
-  if (jt.includes("quality assurance") || jt.match(/\bqa\b/))         return "QA";
-  if (jt.includes("script writer") || jt.includes("content team lead") || jt.includes("creative head")) return "Scripting";
-  if (jt.includes("content researcher") || jt.includes("content research")) return "Researcher";
-  if (jt.includes("content strategist") || jt.includes("strategist")) return "Researcher";
+  // QA imports default to "Video QA" — HR can flip individuals to
+  // "Script QA" after import. Either way both are canonical so the
+  // card surfaces correctly without a follow-up rename.
+  if (jt.includes("quality assurance") || jt.match(/\bqa\b/))         return "Video QA";
+  if (jt.includes("script writer") || jt.includes("content team lead") || jt.includes("creative head")) return "Writers";
+  if (jt.includes("content researcher") || jt.includes("content research")) return "Researchers";
+  if (jt.includes("content strategist") || jt.includes("strategist")) return "Content Strategist";
   if (jt.includes("hr ") || jt.includes("human resource"))            return "HR";
   if (jt.includes("head of production"))                              return "Production";
 
   const k = (kekaDept ?? "").toLowerCase();
-  if (k.includes("human resources"))      return "HR";
-  if (k.includes("production"))           return "Production";
-  if (k.includes("research"))             return "Researcher";
-  if (k.includes("operations"))           return "Production";
-  if (k.includes("artificial intelligence")) return "AI";
-  if (k.includes("social media"))         return "SocialMedia";
-  if (k.match(/\bit\b/))                  return "IT";
+  if (k.includes("human resources"))         return "HR";
+  if (k.includes("production"))              return "Production";
+  if (k.includes("research"))                return "Researchers";
+  if (k.includes("operations"))              return "Production";
+  if (k.includes("artificial intelligence")) return "AI Team";
+  if (k.includes("social media"))            return "Social Media";
+  if (k.match(/\bit\b/))                     return "IT";
   return "";
 }
 
