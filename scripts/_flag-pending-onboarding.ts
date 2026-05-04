@@ -1,7 +1,14 @@
 // One-shot: flips User.onboardingPending = true for anyone who is
 // active, has an EmployeeProfile (i.e. they've been onboarded by HR),
-// but hasn't gone through the first-login wizard yet — heuristic =
-// their PAN field is still NULL (the wizard always writes PAN).
+// but hasn't gone through the first-login wizard yet.
+//
+// Heuristic: EmployeeProfile.emergencyContact IS NULL.
+// Rationale: that field is set ONLY by the wizard
+// (/api/onboarding/complete writes it; Keka doesn't export it; HR's
+// Edit Profile lets HR overwrite it but new rows start NULL). So a
+// NULL value is a near-certain signal the user never finished the
+// wizard. The previous heuristic (panNumber IS NULL) was wrong — PAN
+// is never wizard-fed.
 //
 // Why this exists: the first version of the Keka bulk importer set
 // enableOnboarding=false, so users created in that window never got
@@ -14,7 +21,7 @@
 //
 // Run:  npx tsx scripts/_flag-pending-onboarding.ts
 //       npx tsx scripts/_flag-pending-onboarding.ts --dry                       # preview only
-//       npx tsx scripts/_flag-pending-onboarding.ts --all                       # also flag rows that already have PAN
+//       npx tsx scripts/_flag-pending-onboarding.ts --all                       # also flag rows that already have emergencyContact
 //       npx tsx scripts/_flag-pending-onboarding.ts --emails=a@x.com,b@y.com    # only these users
 //       npx tsx scripts/_flag-pending-onboarding.ts --exclude=a@x.com,b@y.com   # everyone EXCEPT these
 //
@@ -51,7 +58,7 @@ async function main() {
     ];
     const args: any[] = [];
     if (!all) {
-      filterParts.push(`(ep."panNumber" IS NULL OR ep."panNumber" = '')`);
+      filterParts.push(`(ep."emergencyContact" IS NULL OR ep."emergencyContact" = '')`);
     }
     if (emails && emails.length > 0) {
       filterParts.push(`u.email = ANY($1::text[])`);
