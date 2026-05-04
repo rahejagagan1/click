@@ -103,13 +103,13 @@ export const TAB_CATALOG_BY_KEY: Record<TabKey, TabDef> = Object.fromEntries(
  *    hod                  → 4 basics + My Team + Scores + Reports
  *    hr_manager           → 4 basics + My Team + HR Dashboard
  *    manager              → 4 basics + Scores + Reports
- *    lead / sub_lead / production_team / member → 4 basics only
+ *    lead / sub_lead / member → 4 basics only
  *
  *  Without `orgLevel` we fall back to the catalog's static defaults.
  */
 export type OrgLevel =
   | "ceo" | "special_access" | "hod" | "hr_manager" | "manager"
-  | "lead" | "sub_lead" | "production_team" | "member";
+  | "lead" | "sub_lead" | "member";
 
 // Role-aware tab defaults — mirrors the sidebar's access logic:
 //   isAdmin           = ceo || isDeveloper            → adminOnly items (Cases, Company)

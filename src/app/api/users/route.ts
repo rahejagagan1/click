@@ -38,12 +38,18 @@ export async function GET(request: Request) {
         if (errorResponse) return errorResponse;
 
         const { searchParams } = new URL(request.url);
-        const includeAll = searchParams.get("all") === "true";
+        const includeAll      = searchParams.get("all") === "true";
+        const includeInactive = searchParams.get("includeInactive") === "true";
 
-        const where: any = { isActive: true };
-        if (!includeAll) {
-            where.NOT = { role: "member", orgLevel: "member" };
-        }
+        // Default = active only. `?all=true` widens the role filter so
+        // post-Keka member/member rows are pickable in dropdowns. The
+        // separate `?includeInactive=true` flag is needed for the admin
+        // user table — HR keeps inactive employees visible (with the
+        // "Inactive" badge) for record-keeping but they're still
+        // excluded from rating lists, email reminders, and login.
+        const where: any = {};
+        if (!includeInactive) where.isActive = true;
+        if (!includeAll)      where.NOT = { role: "member", orgLevel: "member" };
 
         const users = await prisma.user.findMany({
             where,
