@@ -6,11 +6,16 @@
 export const DEPARTMENTS = [
   "HR",
   "Researcher",
+  "Researcher Manager",
   "Scripting",
-  "QA",
+  "Writers",
+  "Editor",
+  "Content Strategist",
+  "Video QA",
+  "Script QA",
   "Production",
   "Design",
   "AI",
-  "SocialMedia",
+  "Social Media",
   "IT",
 ];
