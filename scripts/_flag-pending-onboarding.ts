@@ -13,9 +13,15 @@
 // the wizard (PAN populated) are skipped.
 //
 // Run:  npx tsx scripts/_flag-pending-onboarding.ts
-//       npx tsx scripts/_flag-pending-onboarding.ts --dry        # preview only
-//       npx tsx scripts/_flag-pending-onboarding.ts --all        # also flag rows that already have PAN
-//       npx tsx scripts/_flag-pending-onboarding.ts --emails=a@x.com,b@y.com   # only these users
+//       npx tsx scripts/_flag-pending-onboarding.ts --dry                       # preview only
+//       npx tsx scripts/_flag-pending-onboarding.ts --all                       # also flag rows that already have PAN
+//       npx tsx scripts/_flag-pending-onboarding.ts --emails=a@x.com,b@y.com    # only these users
+//       npx tsx scripts/_flag-pending-onboarding.ts --exclude=a@x.com,b@y.com   # everyone EXCEPT these
+//
+// Developers (anyone listed in process.env.DEVELOPER_EMAILS) are
+// always skipped automatically — they don't need to walk through the
+// employee wizard. Combine with --exclude to drop additional people
+// (e.g. HR admin) for the same reason.
 
 import { PrismaClient } from "@prisma/client";
 
@@ -24,7 +30,14 @@ async function main() {
   if (!url) { console.error("DATABASE_URL is not set"); process.exit(1); }
   const isDry  = process.argv.includes("--dry");
   const all    = process.argv.includes("--all");
-  const emails = process.argv.find((a) => a.startsWith("--emails="))?.slice(9).split(",").map((s) => s.trim()).filter(Boolean) ?? null;
+  const emails = process.argv.find((a) => a.startsWith("--emails="))?.slice(9).split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) ?? null;
+
+  // Always-excluded set: developer emails from .env + anything passed via --exclude.
+  const cliExcludes = process.argv.find((a) => a.startsWith("--exclude="))?.slice(10)
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) ?? [];
+  const devEmails = (process.env.DEVELOPER_EMAILS || "")
+    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const excludeSet = new Set<string>([...cliExcludes, ...devEmails]);
 
   const prisma = new PrismaClient({ datasources: { db: { url } } });
 
@@ -57,10 +70,20 @@ async function main() {
       ...args,
     );
 
-    const toFlag = candidates.filter((c) => !c.alreadyPending);
+    // Drop already-pending rows AND anyone in the exclude set
+    // (developers + --exclude list). Excluded folks are reported
+    // separately so HR can see what was held back.
+    const toFlag    = candidates.filter((c) => !c.alreadyPending && !excludeSet.has(c.email.toLowerCase()));
+    const heldBack  = candidates.filter((c) =>  excludeSet.has(c.email.toLowerCase()));
+
+    if (heldBack.length > 0) {
+      console.log(`Excluded ${heldBack.length} (developers + --exclude):`);
+      for (const c of heldBack) console.log(`  - ${c.email}`);
+      console.log("");
+    }
 
     if (toFlag.length === 0) {
-      console.log(`No rows need flagging — ${candidates.length} matched the filter, all already pending or already done.`);
+      console.log(`No rows need flagging — ${candidates.length} matched the filter, all already pending / done / excluded.`);
       return;
     }
 
