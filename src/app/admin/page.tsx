@@ -13,6 +13,7 @@ import {
     teamCapsuleSelectionKeyToName,
 } from "@/lib/team-capsule-catalog-ui";
 import { USER_ROLE_OPTIONS } from "@/lib/user-role-options";
+import { isPickableAsManager } from "@/lib/access";
 
 interface ListItem {
     id: string;
@@ -265,7 +266,7 @@ export default function AdminPage() {
     useEffect(() => {
         if (activeTab === "users" && users.length === 0) {
             setUsersLoading(true);
-            fetch("/api/users?all=true")
+            fetch("/api/users?all=true&includeInactive=true")
                 .then(r => r.json())
                 .then(data => { setUsers(Array.isArray(data) ? data : data.users || []); setUsersLoading(false); })
                 .catch(() => setUsersLoading(false));
@@ -297,7 +298,7 @@ export default function AdminPage() {
                 return;
             }
             setUnmatchedClickup(prev => prev.filter(u => u.id !== id));
-            const freshRes = await fetch("/api/users?all=true");
+            const freshRes = await fetch("/api/users?all=true&includeInactive=true");
             const fresh = await freshRes.json();
             if (Array.isArray(fresh)) setUsers(fresh);
         } finally {
@@ -441,7 +442,7 @@ export default function AdminPage() {
             setTimeout(() => setSyncDone(null), 4000);
             // Refresh users list after user sync
             if (type === "users") {
-                const data = await fetch("/api/users?all=true").then(r => r.json());
+                const data = await fetch("/api/users?all=true&includeInactive=true").then(r => r.json());
                 setUsers(Array.isArray(data) ? data : data.users || []);
             }
         } catch { setError("Sync failed"); }
@@ -482,7 +483,7 @@ export default function AdminPage() {
                     managerId: "",
                 });
                 // Refresh users
-                const fresh = await fetch("/api/users?all=true").then(r => r.json());
+                const fresh = await fetch("/api/users?all=true&includeInactive=true").then(r => r.json());
                 setUsers(Array.isArray(fresh) ? fresh : fresh.users || []);
             }
         } catch { alert("Failed to add user"); }
@@ -498,7 +499,7 @@ export default function AdminPage() {
                 body: JSON.stringify({ id: userId }),
             });
             if (res.ok) {
-                const fresh = await fetch("/api/users?all=true").then(r => r.json());
+                const fresh = await fetch("/api/users?all=true&includeInactive=true").then(r => r.json());
                 setUsers(Array.isArray(fresh) ? fresh : fresh.users || []);
             }
         } catch { }
@@ -787,7 +788,7 @@ export default function AdminPage() {
                                     const err = await patchRes.json().catch(() => ({}));
                                     throw new Error((err as { error?: string }).error || `Save failed (${patchRes.status})`);
                                 }
-                                const res = await fetch("/api/users?all=true");
+                                const res = await fetch("/api/users?all=true&includeInactive=true");
                                 const freshUsers = await res.json();
                                 if (Array.isArray(freshUsers)) setUsers(freshUsers);
                             }}
@@ -815,11 +816,9 @@ export default function AdminPage() {
                                         </tr>
                                     )}
                                     {filteredUsers.map((user: any) => {
-                                        const managers = users.filter((u: any) =>
-                                            ["ceo", "special_access", "hod", "manager", "hr_manager", "lead", "sub_lead"].includes(u.orgLevel || "member") ||
-                                            u.role === "production_manager" ||
-                                            u.role === "researcher_manager"
-                                        );
+                                        // Single source of truth — same list as
+                                        // /api/managers (Manager Reports sidebar).
+                                        const managers = users.filter((u: any) => isPickableAsManager(u));
                                         return (
                                             <tr key={user.id} className="border-b border-white/[0.02] hover:bg-white/[0.02]">
                                                 <td className="px-5 py-3">
@@ -854,7 +853,6 @@ export default function AdminPage() {
                                                         <option value="hr_manager">HR</option>
                                                         <option value="lead">Lead</option>
                                                         <option value="sub_lead">Sub Lead</option>
-                                                        <option value="production_team">Production Team</option>
                                                         <option value="member">Member (No Access)</option>
                                                     </select>
                                                 </td>
@@ -1051,7 +1049,6 @@ export default function AdminPage() {
                                 <select value={newUser.orgLevel} onChange={e => setNewUser(p => ({ ...p, orgLevel: e.target.value }))}
                                     className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-slate-300 focus:outline-none focus:ring-1 focus:ring-violet-500/40">
                                     <option value="member">Member</option>
-                                    <option value="production_team">Production Team</option>
                                     <option value="sub_lead">Sub Lead</option>
                                     <option value="lead">Lead</option>
                                     <option value="hr_manager">HR</option>
@@ -1098,7 +1095,7 @@ export default function AdminPage() {
                                 <select value={newUser.managerId} onChange={e => setNewUser(p => ({ ...p, managerId: e.target.value }))}
                                     className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-slate-300 focus:outline-none focus:ring-1 focus:ring-violet-500/40">
                                     <option value="">No Manager</option>
-                                    {users.filter((u: any) => ["ceo", "special_access", "hod", "manager", "hr_manager", "lead", "sub_lead"].includes(u.orgLevel || "member")).map((m: any) => (
+                                    {users.filter((u: any) => isPickableAsManager(u)).map((m: any) => (
                                         <option key={m.id} value={m.id}>{m.name} ({m.orgLevel})</option>
                                     ))}
                                 </select>
