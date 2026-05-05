@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { ThumbsUp, MessageSquare, Send, BarChart2, Award, MoreHorizontal, X, ChevronDown, Pencil, Trash2 } from "lucide-react";
+import { ThumbsUp, MessageSquare, Send, BarChart2, Award, MoreHorizontal, X, ChevronDown, Pencil, Trash2, Link2, Check } from "lucide-react";
 import Link from "next/link";
 import { isHRAdmin } from "@/lib/access";
 
@@ -41,14 +41,15 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
   );
   const [reactionCount, setReactionCount] = useState(post.reactions.length);
 
-  // Edit/delete menu state. Author always allowed; HR admins can also
-  // moderate. Anyone else doesn't see the dots.
+  // Dots-menu state. Copy link is shown to everyone; Edit only to the
+  // author; Delete to the author + HR admins (moderation).
   const isAuthor   = post.author.id === sessionUserId;
-  const canMutate  = isAuthor || isHRAdmin(sessionUser);
+  const canDelete  = isAuthor || isHRAdmin(sessionUser);
   const [menuOpen, setMenuOpen]   = useState(false);
   const [editing,  setEditing]    = useState(false);
   const [draft,    setDraft]      = useState(post.content);
   const [saving,   setSaving]     = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   // Close the dots menu on outside click — same UX as anywhere else
@@ -100,6 +101,24 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
     mutate("/api/hr/engage/posts");
   };
 
+  // Copy a sharable URL pointing at this post. There's no per-post
+  // permalink page yet — the engage feed lives at /dashboard/hr/engage,
+  // so we hash-fragment the post id (#post-N). The feed is single-page
+  // so any future deep-link handler can scroll to the matching card.
+  const copyLink = async () => {
+    const url = `${window.location.origin}/dashboard/hr/engage#post-${post.id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 1800);
+    } catch {
+      // Fallback for browsers / contexts where the Clipboard API is
+      // blocked (HTTP, sandboxed iframes). Show the URL so the user
+      // can copy manually.
+      window.prompt("Copy this link:", url);
+    }
+  };
+
   const isPraise = post.type === "praise";
 
   // Long-content truncation — collapse to ~280 chars or 4 lines and
@@ -113,7 +132,7 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
     : post.content.slice(0, COLLAPSE_AT).trimEnd() + "…";
 
   return (
-    <div className="bg-white dark:bg-[#0d1b2a] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+    <div id={`post-${post.id}`} className="bg-white dark:bg-[#0d1b2a] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden scroll-mt-24">
       {isPraise && (
         <div className="bg-gradient-to-r from-amber-500/10 to-orange-500/5 border-b border-amber-200/50 dark:border-amber-500/20 px-5 py-2 flex items-center gap-2">
           <Award className="w-4 h-4 text-amber-500" />
@@ -133,35 +152,43 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
               <p className="text-[11px] text-slate-500 dark:text-slate-400">{timeAgo(post.createdAt)}</p>
             </div>
           </div>
-          {canMutate && (
-            <div className="relative" ref={menuRef}>
-              <button
-                onClick={() => setMenuOpen((p) => !p)}
-                aria-label="More options"
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 transition-colors"
-              >
-                <MoreHorizontal className="w-4 h-4" />
-              </button>
-              {menuOpen && (
-                <div className="absolute right-0 top-full mt-1 z-10 min-w-[140px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0d1b2a] shadow-lg overflow-hidden">
-                  {isAuthor && (
-                    <button
-                      onClick={() => { setMenuOpen(false); setDraft(post.content); setEditing(true); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors"
-                    >
-                      <Pencil className="w-3.5 h-3.5" /> Edit
-                    </button>
-                  )}
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setMenuOpen((p) => !p)}
+              aria-label="More options"
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 transition-colors"
+            >
+              <MoreHorizontal className="w-4 h-4" />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full mt-1 z-10 min-w-[150px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0d1b2a] shadow-lg overflow-hidden">
+                {isAuthor && (
+                  <button
+                    onClick={() => { setMenuOpen(false); setDraft(post.content); setEditing(true); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors"
+                  >
+                    <Pencil className="w-3.5 h-3.5" /> Edit
+                  </button>
+                )}
+                <button
+                  onClick={() => { setMenuOpen(false); copyLink(); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors"
+                >
+                  {linkCopied
+                    ? (<><Check className="w-3.5 h-3.5 text-emerald-600" /> Link copied</>)
+                    : (<><Link2 className="w-3.5 h-3.5" /> Copy link</>)}
+                </button>
+                {canDelete && (
                   <button
                     onClick={() => { setMenuOpen(false); deletePost(); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Delete
                   </button>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {editing ? (
