@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, serverError } from "@/lib/api-auth";
+import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -15,12 +15,7 @@ export async function GET(req: NextRequest) {
   if (errorResponse) return errorResponse;
 
   const self = session!.user as any;
-  const canView =
-    self.isDeveloper === true ||
-    self.role === "admin" ||
-    self.orgLevel === "ceo" ||
-    self.orgLevel === "hr_manager";
-  if (!canView) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!isHRAdmin(self)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
     const { searchParams } = new URL(req.url);
