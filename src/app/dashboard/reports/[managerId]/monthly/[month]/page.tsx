@@ -3,7 +3,7 @@
 import React from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ResizableTh } from "@/components/ui/ResizableTh";
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, createContext, useContext } from "react";
 import { useSession } from "next-auth/react";
 import useSWR from "swr";
 import type { ManagerReportFormat } from "@/lib/reports/manager-report-format";
@@ -265,6 +265,27 @@ function ATextarea({ value, onChange, placeholder = "", disabled = false }: {
     );
 }
 
+/** Andrew report header cell — module-level for the same reason as ATd/AInput.
+ *  Was previously declared inline inside the QA-report render branch, which
+ *  gave it a new function identity on every keystroke → React unmounted +
+ *  remounted the ResizableTh subtree → column widths reset and the table
+ *  repainted on every typed character. Stable identity = no remount. */
+function ATh({ children, colIndex, widths, setWidths, tableRef, colCount }: {
+    children: React.ReactNode;
+    colIndex: number;
+    widths: Record<number, number>;
+    setWidths: React.Dispatch<React.SetStateAction<Record<number, number>>>;
+    tableRef?: React.RefObject<HTMLTableElement>;
+    colCount?: number;
+}) {
+    return (
+        <ResizableTh colIndex={colIndex} widths={widths} setWidths={setWidths} minWidth={80} tableRef={tableRef} colCount={colCount}
+            className="px-3 py-2.5 text-left text-[12px] font-bold bg-[#1e3a5f] border border-[#2a4a6f] whitespace-normal leading-tight">
+            <span style={{ color: '#ffffff' }}>{children}</span>
+        </ResizableTh>
+    );
+}
+
 /* ──────────────────────────────────────────────────────────────
    Main page component
    ────────────────────────────────────────────────────────────── */
@@ -381,6 +402,104 @@ function DragScrollDiv({ children, className }: { children: React.ReactNode; cla
             onMouseDown={onMouseDown} onMouseLeave={stop} onMouseUp={stop} onMouseMove={onMouseMove}>
             {children}
         </div>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// HR Manager Monthly Report — module-scoped primitives.
+//
+// These USED to live inline inside MonthlyReportPage's render. Every
+// keystroke triggered setState → parent re-render → new function
+// references for HrInput/HrTextarea/HrSelect → React saw a different
+// component type → unmounted + remounted the entire input subtree on
+// every character → the input lost focus after one key (the "typing
+// bug" reported by HR). Hoisting them here gives them stable identity
+// across renders, so React reuses the same DOM nodes and focus stays.
+//
+// `locked` was a closed-over local in the old inline versions. To
+// avoid threading it as a prop through ~97 call sites, the HR return
+// JSX wraps everything in <HrLockedContext.Provider value={locked}>
+// and the components below read it via useContext. Default `false`
+// is safe — outside the provider these components aren't rendered.
+// ─────────────────────────────────────────────────────────────────────
+const HrLockedContext = createContext<boolean>(false);
+
+function HrTh({ children }: { children: React.ReactNode }) {
+    return (
+        <th className="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-white bg-[#1e3a5f] border border-[#1e3a5f]/60 whitespace-normal leading-snug">{children}</th>
+    );
+}
+
+function HrTd({ children, className = "" }: { children?: React.ReactNode; className?: string }) {
+    return (
+        <td className={`px-3 py-2.5 border-b border-slate-100 dark:border-white/5 text-[13px] align-top text-white ${className}`}>{children}</td>
+    );
+}
+
+function HrInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+    const locked = useContext(HrLockedContext);
+    return (
+        <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={locked ? "" : "—"} readOnly={locked}
+            className={`w-full bg-transparent text-[13px] text-white placeholder:text-slate-400 focus:outline-none rounded px-1 py-0.5 ${locked ? "cursor-default" : "hover:bg-blue-50/50 dark:hover:bg-white/5 focus:bg-blue-50 dark:focus:bg-white/10 focus:ring-1 focus:ring-blue-300/60"} transition-colors`} />
+    );
+}
+
+function HrTextarea({ value, onChange, rows = 3 }: { value: string; onChange: (v: string) => void; rows?: number }) {
+    const locked = useContext(HrLockedContext);
+    return (
+        <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={locked ? "" : "Type here…"} readOnly={locked} rows={rows}
+            className={`w-full rounded-lg border text-[13px] px-3 py-2.5 text-white placeholder:text-slate-400 focus:outline-none resize-y transition-all leading-relaxed ${locked ? "bg-slate-50 dark:bg-white/[0.03] border-slate-100 dark:border-white/5 cursor-default opacity-80" : "bg-white dark:bg-[#1a1a32] border-slate-200 dark:border-white/10 focus:ring-2 focus:ring-blue-400/30 focus:border-blue-400/60 shadow-sm"}`} />
+    );
+}
+
+function HrSelect({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) {
+    const locked = useContext(HrLockedContext);
+    return (
+        <select value={value} onChange={e => onChange(e.target.value)} disabled={locked}
+            className={`w-full text-[13px] text-white bg-transparent focus:outline-none rounded px-1 py-0.5 ${locked ? "cursor-default" : "hover:bg-blue-50/50 dark:hover:bg-white/5 focus:ring-1 focus:ring-blue-300/60"} transition-colors`}>
+            <option value="">—</option>
+            {options.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+    );
+}
+
+function SectionHeader({ num, title, objective, color = "#1e3a5f" }: { num: string; title: string; objective?: string; color?: string }) {
+    return (
+        <div className="flex items-start gap-3 px-6 py-4 border-b border-slate-100 dark:border-white/5 bg-slate-50/60 dark:bg-white/[0.02]">
+            <span className="mt-0.5 flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-[12px] font-bold shadow-sm" style={{ background: color, color: "#ffffff" }}>{num}</span>
+            <div>
+                <h2 className="text-[14px] font-bold text-white leading-tight">{title}</h2>
+                {objective && <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{objective}</p>}
+            </div>
+        </div>
+    );
+}
+
+function SubHeader({ label }: { label: string }) {
+    return (
+        <div className="flex items-center gap-2 mb-3">
+            <div className="w-1 h-4 rounded-full bg-[#1e3a5f]/60" />
+            <h3 className="text-[12px] font-semibold uppercase tracking-wide text-white">{label}</h3>
+        </div>
+    );
+}
+
+function AddRowBtn({ onClick }: { onClick: () => void }) {
+    return (
+        <button onClick={onClick} className="mt-2.5 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+            Add Row
+        </button>
+    );
+}
+
+function DelBtn({ onClick }: { onClick: () => void }) {
+    return (
+        <td className="px-1.5 border-b border-slate-100 dark:border-white/5 w-7">
+            <button onClick={onClick} className="w-5 h-5 flex items-center justify-center rounded text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+        </td>
     );
 }
 
@@ -615,6 +734,20 @@ export default function MonthlyReportPage() {
     const [isSubmitted,  setIsSubmitted]  = useState(false);
     const [isDraftSaved, setIsDraftSaved] = useState(false);
     const [submitting,        setSubmitting]        = useState(false);
+    // Synchronous re-entry guard for postReport. `submitting` is React
+    // state — there's a render gap between click → setState → re-render
+    // where the disabled prop hasn't been applied yet, so a double-click
+    // (or Submit clicked while a Save-Draft is mid-flight) can fire two
+    // concurrent POSTs. A ref is checked synchronously in postReport
+    // before the await, so the second click is dropped immediately.
+    const submitInFlight = React.useRef(false);
+    // Auto-fill guards. Each section's auto-fill must run AT MOST once
+    // per page load. Without these refs, an SWR revalidation (window
+    // focus, network reconnect, …) can briefly flip isLoading → true →
+    // false, which re-triggers the auto-fill useEffects and overwrites
+    // user edits in memory that haven't been saved as a draft yet.
+    const hasAutoFilledQaSectionA = React.useRef(false);
+    const hasAutoFilledThumbnails = React.useRef(false);
     const [submitError,       setSubmitError]       = useState<string | null>(null);
     const [statusLoaded,      setStatusLoaded]      = useState(false);
     const [showConfirm,       setShowConfirm]       = useState(false);
@@ -734,14 +867,22 @@ export default function MonthlyReportPage() {
     useEffect(() => {
         if (!statusLoaded || !isQaReport) return;
         if (isLocked || isSubmitted || isDraftSaved) return;
+        if (hasAutoFilledQaSectionA.current) return;
+        hasAutoFilledQaSectionA.current = true;
         fetchAndFillAndrewMonthly();
         fetchAndFillAbhishekMonthly();
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [statusLoaded, isQaReport, managerId, monthIndex, year]);
 
-    // Auto-fill Section B thumbnail counts from API
+    // Auto-fill Section B thumbnail counts from API.
+    // Same guards as Section A: don't overwrite a saved/locked report,
+    // and don't fire twice (an SWR refetch could otherwise blow away
+    // edited counts that haven't been saved yet).
     useEffect(() => {
         if (!thumbnailData?.thumbnailData?.length) return;
+        if (isLocked || isSubmitted || isDraftSaved) return;
+        if (hasAutoFilledThumbnails.current) return;
+        hasAutoFilledThumbnails.current = true;
         setAndrewSBRows(prev => prev.map(row => {
             const match = thumbnailData.thumbnailData.find(
                 (t: any) => t.person?.toLowerCase() === row.person?.toLowerCase()
@@ -864,6 +1005,8 @@ export default function MonthlyReportPage() {
             const err = validateRequired();
             if (err) { setSubmitError(err); setShowConfirm(false); return; }
         }
+        if (submitInFlight.current) return;
+        submitInFlight.current = true;
         setSubmitting(true);
         setSubmitError(null);
         setShowConfirm(false);
@@ -924,6 +1067,12 @@ export default function MonthlyReportPage() {
             if (isDraft) {
                 setIsDraftSaved(true);
                 setIsSubmitted(false);
+                // Admins can save-as-draft on a locked report — that
+                // unlocks the DB record (the API treats isDraft=true as
+                // shouldLock=false). Mirror that locally so the UI
+                // switches out of read-only mode without needing a
+                // page reload.
+                if (isAdmin) setIsLocked(false);
             } else {
                 setIsSubmitted(true);
                 setIsDraftSaved(false);
@@ -936,6 +1085,7 @@ export default function MonthlyReportPage() {
             setSubmitError(e.message);
         }
         setSubmitting(false);
+        submitInFlight.current = false;
     };
 
     const handleSubmit    = () => postReport(false);
@@ -1001,12 +1151,10 @@ export default function MonthlyReportPage() {
 
     /* ──────────────── Andrew James Monthly Report ──────────────── */
     if (isQaReport) {
-        const ATh = ({ children, colIndex, widths, setWidths, tableRef, colCount }: { children: React.ReactNode; colIndex: number; widths: Record<number,number>; setWidths: React.Dispatch<React.SetStateAction<Record<number,number>>>; tableRef?: React.RefObject<HTMLTableElement>; colCount?: number }) => (
-            <ResizableTh colIndex={colIndex} widths={widths} setWidths={setWidths} minWidth={80} tableRef={tableRef} colCount={colCount}
-                className="px-3 py-2.5 text-left text-[12px] font-bold bg-[#1e3a5f] border border-[#2a4a6f] whitespace-normal leading-tight">
-                <span style={{ color: '#ffffff' }}>{children}</span>
-            </ResizableTh>
-        );
+        // ATh is defined at module top-level (above) so its identity stays
+        // stable across re-renders and the ResizableTh tree isn't unmounted
+        // on every keystroke. Don't declare it inline here.
+
         // Pre-compute disabled helpers for Andrew inputs
         const aDisabled  = isLocked && !isAdmin;   // manually-filled columns: editable unless report is locked (admins can always edit)
         const aAutoLock  = true;                   // auto-filled columns (Month, Reviewer, Target, Total Reviews, Avg QA Score, Avg Rating): always read-only for everyone
@@ -1531,57 +1679,20 @@ export default function MonthlyReportPage() {
         const locked = isLocked && !isAdmin;
 
         // ── Reusable primitives ──
-        const HrTh = ({ children }: { children: React.ReactNode }) => (
-            <th className="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-white bg-[#1e3a5f] border border-[#1e3a5f]/60 whitespace-normal leading-snug">{children}</th>
-        );
-        const HrTd = ({ children, className = "" }: { children?: React.ReactNode; className?: string }) => (
-            <td className={`px-3 py-2.5 border-b border-slate-100 dark:border-white/5 text-[13px] align-top text-white ${className}`}>{children}</td>
-        );
-        const HrInput = ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-            <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={locked ? "" : "—"} readOnly={locked}
-                className={`w-full bg-transparent text-[13px] text-white placeholder:text-slate-400 focus:outline-none rounded px-1 py-0.5 ${locked ? "cursor-default" : "hover:bg-blue-50/50 dark:hover:bg-white/5 focus:bg-blue-50 dark:focus:bg-white/10 focus:ring-1 focus:ring-blue-300/60"} transition-colors`} />
-        );
-        const HrTextarea = ({ value, onChange, rows = 3 }: { value: string; onChange: (v: string) => void; rows?: number }) => (
-            <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={locked ? "" : "Type here…"} readOnly={locked} rows={rows}
-                className={`w-full rounded-lg border text-[13px] px-3 py-2.5 text-white placeholder:text-slate-400 focus:outline-none resize-y transition-all leading-relaxed ${locked ? "bg-slate-50 dark:bg-white/[0.03] border-slate-100 dark:border-white/5 cursor-default opacity-80" : "bg-white dark:bg-[#1a1a32] border-slate-200 dark:border-white/10 focus:ring-2 focus:ring-blue-400/30 focus:border-blue-400/60 shadow-sm"}`} />
-        );
-        const HrSelect = ({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) => (
-            <select value={value} onChange={e => onChange(e.target.value)} disabled={locked}
-                className={`w-full text-[13px] text-white bg-transparent focus:outline-none rounded px-1 py-0.5 ${locked ? "cursor-default" : "hover:bg-blue-50/50 dark:hover:bg-white/5 focus:ring-1 focus:ring-blue-300/60"} transition-colors`}>
-                <option value="">—</option>
-                {options.map(o => <option key={o} value={o}>{o}</option>)}
-            </select>
-        );
-        const SectionHeader = ({ num, title, objective, color = "#1e3a5f" }: { num: string; title: string; objective?: string; color?: string }) => (
-            <div className="flex items-start gap-3 px-6 py-4 border-b border-slate-100 dark:border-white/5 bg-slate-50/60 dark:bg-white/[0.02]">
-                <span className="mt-0.5 flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-[12px] font-bold shadow-sm" style={{ background: color, color: "#ffffff" }}>{num}</span>
-                <div>
-                    <h2 className="text-[14px] font-bold text-white leading-tight">{title}</h2>
-                    {objective && <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{objective}</p>}
-                </div>
-            </div>
-        );
-        const SubHeader = ({ label }: { label: string }) => (
-            <div className="flex items-center gap-2 mb-3">
-                <div className="w-1 h-4 rounded-full bg-[#1e3a5f]/60" />
-                <h3 className="text-[12px] font-semibold uppercase tracking-wide text-white">{label}</h3>
-            </div>
-        );
-        const AddRowBtn = ({ onClick }: { onClick: () => void }) => (
-            <button onClick={onClick} className="mt-2.5 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors">
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
-                Add Row
-            </button>
-        );
-        const DelBtn = ({ onClick }: { onClick: () => void }) => (
-            <td className="px-1.5 border-b border-slate-100 dark:border-white/5 w-7">
-                <button onClick={onClick} className="w-5 h-5 flex items-center justify-center rounded text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
-            </td>
-        );
+        //
+        // All Hr* primitives live at module top-level (above this
+        // component) so their function identity is stable across
+        // re-renders. Previously they were defined inline here, which
+        // gave them a new identity on every keystroke → React saw a
+        // different component type → unmounted + remounted the input
+        // subtree → focus lost after one character (the "typing bug").
+        //
+        // `locked` is passed down through HrLockedContext rather than
+        // a per-call prop so the 97 existing call sites don't need
+        // updating. The provider wraps the JSX returned below.
 
         return (
+            <HrLockedContext.Provider value={locked}>
             <div className="max-w-5xl mx-auto pb-16 space-y-5 px-2">
                 {/* ── Back ── */}
                 <button onClick={() => router.back()} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors group mt-2">
@@ -1997,6 +2108,7 @@ export default function MonthlyReportPage() {
                     </div>
                 )}
             </div>
+            </HrLockedContext.Provider>
         );
     }
 
