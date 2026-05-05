@@ -102,6 +102,16 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
 
   const isPraise = post.type === "praise";
 
+  // Long-content truncation — collapse to ~280 chars or 4 lines and
+  // show a "View more" toggle. Matches the reference layout where
+  // birthday-style posts get clipped under a fold.
+  const COLLAPSE_AT = 280;
+  const tooLong    = post.content.length > COLLAPSE_AT || (post.content.match(/\n/g)?.length ?? 0) > 3;
+  const [expanded, setExpanded] = useState(false);
+  const visibleBody = !tooLong || expanded
+    ? post.content
+    : post.content.slice(0, COLLAPSE_AT).trimEnd() + "…";
+
   return (
     <div className="bg-white dark:bg-[#0d1b2a] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
       {isPraise && (
@@ -180,35 +190,64 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
             </div>
           </div>
         ) : (
-          <p className="mt-3 text-[14px] text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">{post.content}</p>
+          <>
+            <p className="mt-3 text-[14px] text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">{visibleBody}</p>
+            {tooLong && (
+              <button
+                onClick={() => setExpanded((p) => !p)}
+                className="mt-1 text-[12.5px] font-semibold text-[#008CFF] hover:text-[#0077dd]"
+              >
+                {expanded ? "View less" : "View more"}
+              </button>
+            )}
+          </>
         )}
 
         {post.mediaUrl && (
-          <img src={post.mediaUrl} alt="media"
-            className="mt-3 rounded-xl max-w-full max-h-[400px] object-contain border border-slate-100 dark:border-white/5" />
+          // Wrap the media in a centered container with a neutral
+          // letterbox so portrait + landscape images both look
+          // intentional. `object-contain` keeps the whole image visible
+          // (no crop), centered horizontally and vertically.
+          <div className="mt-4 overflow-hidden rounded-xl border border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
+            <img
+              src={post.mediaUrl}
+              alt="post media"
+              className="block mx-auto max-h-[500px] w-auto max-w-full object-contain"
+            />
+          </div>
         )}
       </div>
 
-      {/* Reactions bar */}
-      <div className="flex items-center justify-between px-5 py-2.5 border-t border-slate-100 dark:border-white/[0.04]">
-        <div className="flex items-center gap-1 text-[12px] text-slate-500 dark:text-slate-400">
-          {reactionCount > 0 && <span>👍 {reactionCount} {reactionCount === 1 ? "reaction" : "reactions"}</span>}
-          {post.comments.length > 0 && <span className="ml-3">• {post.comments.length} {post.comments.length === 1 ? "comment" : "comments"}</span>}
+      {/* Footer — Like / Comment on the left, reaction summary on the right.
+          Single row replaces the previous two-row layout (separate count
+          row + full-width action split) so the card matches the reference
+          design HR shared. */}
+      <div className="flex items-center justify-between px-2 sm:px-3 py-1.5 border-t border-slate-100 dark:border-white/[0.04]">
+        <div className="flex items-center">
+          <button onClick={react}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors ${
+              localReacted ? "text-[#008CFF]" : "text-slate-500 dark:text-slate-400"
+            }`}>
+            <ThumbsUp className="w-4 h-4" />Like
+          </button>
+          <button onClick={() => setShowComments(p => !p)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors">
+            <MessageSquare className="w-4 h-4" />Comment
+          </button>
         </div>
-      </div>
-
-      {/* Action buttons */}
-      <div className="flex items-center border-t border-slate-100 dark:border-white/[0.04]">
-        <button onClick={react}
-          className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-[12px] font-medium hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors ${
-            localReacted ? "text-[#008CFF]" : "text-slate-500 dark:text-slate-400"
-          }`}>
-          <ThumbsUp className="w-4 h-4" />Like
-        </button>
-        <button onClick={() => setShowComments(p => !p)}
-          className="flex-1 flex items-center justify-center gap-2 py-2.5 text-[12px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors border-l border-slate-100 dark:border-white/[0.04]">
-          <MessageSquare className="w-4 h-4" />Comment
-        </button>
+        <div className="flex items-center gap-1.5 pr-2 text-[12px] text-slate-500 dark:text-slate-400">
+          {reactionCount > 0 && (
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-flex items-center -space-x-1">
+                <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-[#008CFF] text-white text-[10px] ring-2 ring-white dark:ring-[#0d1b2a]">👍</span>
+              </span>
+              <span>{reactionCount} {reactionCount === 1 ? "reaction" : "reactions"}</span>
+            </span>
+          )}
+          {post.comments.length > 0 && (
+            <span>{reactionCount > 0 ? "•" : ""} {post.comments.length} {post.comments.length === 1 ? "Comment" : "Comments"}</span>
+          )}
+        </div>
       </div>
 
       {/* Comments section */}
