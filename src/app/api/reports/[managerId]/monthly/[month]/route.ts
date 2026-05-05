@@ -393,7 +393,13 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
                         select: { id: true },
                     }),
                 ]);
-                const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-IN", {
+                // `month` is the 0-based index parsed from the URL (0=Jan,
+                // 11=Dec) — same convention as the client-side monthIndex
+                // and as the JavaScript Date constructor. The previous
+                // `month - 1` underflowed for January (gave December of
+                // the prior year), so the notification email read the
+                // wrong month name for any January report.
+                const monthLabel = new Date(year, month, 1).toLocaleDateString("en-IN", {
                     month: "long", year: "numeric",
                 });
                 const link        = `/dashboard/reports/${managerId}/monthly/${month}?year=${year}`;
