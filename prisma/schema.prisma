@@ -1016,9 +1016,13 @@ model LeaveBalance {
   userId          Int
   leaveTypeId     Int
   year            Int
-  totalDays       Decimal   @default(0)  @db.Decimal(5, 1)
-  usedDays        Decimal   @default(0)  @db.Decimal(5, 1)
-  pendingDays     Decimal   @default(0)  @db.Decimal(5, 1)
+  // Decimal(6,2) so HR-entered values like 1.68 survive intact —
+  // Decimal(5,1) was rounding everything to 1 decimal at storage,
+  // which broke Carry Over Leave (HR enters precise carry-forward
+  // figures that get paid out at exit).
+  totalDays       Decimal   @default(0)  @db.Decimal(6, 2)
+  usedDays        Decimal   @default(0)  @db.Decimal(6, 2)
+  pendingDays     Decimal   @default(0)  @db.Decimal(6, 2)
   /// Last YYYY-MM in which monthly accrual ran for this row. Used to
   /// keep Sick Leave's "+1 day per month" idempotent — re-runs in the
   /// same month are no-ops.
