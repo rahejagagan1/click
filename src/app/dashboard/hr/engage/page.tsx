@@ -7,6 +7,7 @@ import { useSession } from "next-auth/react";
 import { ThumbsUp, MessageSquare, Send, BarChart2, Award, MoreHorizontal, X, ChevronDown, Pencil, Trash2, Link2, Check } from "lucide-react";
 import Link from "next/link";
 import { isHRAdmin } from "@/lib/access";
+import { PageShell, PageHeader, PageContainer } from "@/components/layout";
 
 function Avatar({ name, url, size = 36 }: { name: string; url?: string | null; size?: number }) {
   const initials = name.split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase();
@@ -367,15 +368,12 @@ export default function EngagePage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f4f7f8] dark:bg-[#011627]">
-
-      {/* Header */}
-      <div className="bg-white dark:bg-[#001529] border-b border-slate-200 dark:border-white/[0.06] px-6 py-4">
-        <h1 className="text-[15px] font-bold text-slate-800 dark:text-white">Engage</h1>
-        <p className="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">Connect with your team — post updates, polls, and appreciation</p>
-      </div>
-
-      <div className="max-w-3xl mx-auto p-5 space-y-4">
+    <PageShell>
+      <PageHeader
+        title="Engage"
+        subtitle="Connect with your team — post updates, polls, and appreciation"
+      />
+      <PageContainer maxWidth="md" className="py-5 space-y-4">
 
         {/* Compose card */}
         <div className="bg-white dark:bg-[#0d1b2a] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
@@ -454,7 +452,7 @@ export default function EngagePage() {
             <PostCard key={post.id} post={post} sessionUser={user} />
           ))
         )}
-      </div>
-    </div>
+      </PageContainer>
+    </PageShell>
   );
 }
