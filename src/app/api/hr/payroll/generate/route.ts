@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, serverError } from "@/lib/api-auth";
+import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 
 // POST /api/hr/payroll/generate — generate payslips for a payroll run
 export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
-  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
-  if (!isAdmin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!isHRAdmin(user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
     const { runId } = await req.json();

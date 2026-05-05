@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, serverError } from "@/lib/api-auth";
+import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -10,11 +10,7 @@ async function requireCalendarEditor() {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return { session: null, errorResponse };
   const user = session!.user as any;
-  const canEdit =
-    user.isDeveloper === true ||
-    user.role === "admin" ||
-    user.orgLevel === "ceo" ||
-    user.orgLevel === "hr_manager";
+  const canEdit = isHRAdmin(user);
   if (!canEdit) {
     return {
       session: null,
