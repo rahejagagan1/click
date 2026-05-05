@@ -1,10 +1,11 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { ThumbsUp, MessageSquare, Send, BarChart2, Award, MoreHorizontal, X, ChevronDown } from "lucide-react";
+import { ThumbsUp, MessageSquare, Send, BarChart2, Award, MoreHorizontal, X, ChevronDown, Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
+import { isHRAdmin } from "@/lib/access";
 
 function Avatar({ name, url, size = 36 }: { name: string; url?: string | null; size?: number }) {
   const initials = name.split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase();
@@ -31,13 +32,35 @@ function timeAgo(date: string) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function PostCard({ post, sessionUserId }: { post: any; sessionUserId: number }) {
+function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
+  const sessionUserId = sessionUser?.dbId;
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [localReacted, setLocalReacted] = useState(
     post.reactions.some((r: any) => r.userId === sessionUserId)
   );
   const [reactionCount, setReactionCount] = useState(post.reactions.length);
+
+  // Edit/delete menu state. Author always allowed; HR admins can also
+  // moderate. Anyone else doesn't see the dots.
+  const isAuthor   = post.author.id === sessionUserId;
+  const canMutate  = isAuthor || isHRAdmin(sessionUser);
+  const [menuOpen, setMenuOpen]   = useState(false);
+  const [editing,  setEditing]    = useState(false);
+  const [draft,    setDraft]      = useState(post.content);
+  const [saving,   setSaving]     = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the dots menu on outside click — same UX as anywhere else
+  // we use this pattern.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [menuOpen]);
 
   const react = async () => {
     setLocalReacted((p: boolean) => !p);
@@ -53,6 +76,27 @@ function PostCard({ post, sessionUserId }: { post: any; sessionUserId: number })
       body: JSON.stringify({ content: commentText }),
     });
     setCommentText("");
+    mutate("/api/hr/engage/posts");
+  };
+
+  const saveEdit = async () => {
+    if (!draft.trim() || draft === post.content) { setEditing(false); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/hr/engage/posts/${post.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: draft }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || "Could not save edit"); return; }
+      setEditing(false);
+      mutate("/api/hr/engage/posts");
+    } finally { setSaving(false); }
+  };
+
+  const deletePost = async () => {
+    if (!confirm("Delete this post? This can't be undone.")) return;
+    const res = await fetch(`/api/hr/engage/posts/${post.id}`, { method: "DELETE" });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || "Could not delete"); return; }
     mutate("/api/hr/engage/posts");
   };
 
@@ -79,12 +123,65 @@ function PostCard({ post, sessionUserId }: { post: any; sessionUserId: number })
               <p className="text-[11px] text-slate-500 dark:text-slate-400">{timeAgo(post.createdAt)}</p>
             </div>
           </div>
-          <button className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 transition-colors">
-            <MoreHorizontal className="w-4 h-4" />
-          </button>
+          {canMutate && (
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={() => setMenuOpen((p) => !p)}
+                aria-label="More options"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 transition-colors"
+              >
+                <MoreHorizontal className="w-4 h-4" />
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full mt-1 z-10 min-w-[140px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0d1b2a] shadow-lg overflow-hidden">
+                  {isAuthor && (
+                    <button
+                      onClick={() => { setMenuOpen(false); setDraft(post.content); setEditing(true); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors"
+                    >
+                      <Pencil className="w-3.5 h-3.5" /> Edit
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { setMenuOpen(false); deletePost(); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        <p className="mt-3 text-[14px] text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">{post.content}</p>
+        {editing ? (
+          <div className="mt-3 space-y-2">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={3}
+              className="w-full resize-none rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 px-3 py-2 text-[14px] text-slate-700 dark:text-slate-200 focus:outline-none focus:border-[#008CFF]"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setEditing(false); setDraft(post.content); }}
+                disabled={saving}
+                className="h-8 px-3 rounded-lg text-[12px] font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={saving}
+                className="h-8 px-4 rounded-lg bg-[#008CFF] hover:bg-[#0077dd] text-white text-[12px] font-semibold disabled:opacity-50"
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-3 text-[14px] text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">{post.content}</p>
+        )}
 
         {post.mediaUrl && (
           <img src={post.mediaUrl} alt="media"
@@ -257,7 +354,7 @@ export default function EngagePage() {
           </div>
         ) : (
           posts.map((post: any) => (
-            <PostCard key={post.id} post={post} sessionUserId={sessionUserId} />
+            <PostCard key={post.id} post={post} sessionUser={user} />
           ))
         )}
       </div>
