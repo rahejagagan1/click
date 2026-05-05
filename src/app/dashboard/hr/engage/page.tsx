@@ -1,5 +1,6 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
@@ -50,17 +51,38 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
   const [draft,    setDraft]      = useState(post.content);
   const [saving,   setSaving]     = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const menuBtnRef = useRef<HTMLButtonElement | null>(null);
+  const menuPanelRef = useRef<HTMLDivElement | null>(null);
 
-  // Close the dots menu on outside click — same UX as anywhere else
-  // we use this pattern.
+  // Compute the dropdown's screen position from the trigger's bounding
+  // box and render via a body-level portal. Going through a portal
+  // sidesteps the card's overflow-hidden — the previous menu rendered
+  // inside the card and was getting clipped, which is why "nothing
+  // appeared" when clicking the dots.
+  const openMenu = () => {
+    if (!menuBtnRef.current) return;
+    const r = menuBtnRef.current.getBoundingClientRect();
+    setMenuPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+    setMenuOpen(true);
+  };
+
   useEffect(() => {
     if (!menuOpen) return;
     const onDoc = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      const insideBtn   = menuBtnRef.current?.contains(e.target as Node);
+      const insidePanel = menuPanelRef.current?.contains(e.target as Node);
+      if (!insideBtn && !insidePanel) setMenuOpen(false);
     };
+    const onScroll = () => setMenuOpen(false); // close on scroll — fixed pos drifts
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    window.addEventListener("scroll",   onScroll, true);
+    window.addEventListener("resize",   onScroll);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
   }, [menuOpen]);
 
   const react = async () => {
@@ -152,43 +174,48 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
               <p className="text-[11px] text-slate-500 dark:text-slate-400">{timeAgo(post.createdAt)}</p>
             </div>
           </div>
-          <div className="relative" ref={menuRef}>
-            <button
-              onClick={() => setMenuOpen((p) => !p)}
-              aria-label="More options"
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 transition-colors"
+          <button
+            ref={menuBtnRef}
+            onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
+            aria-label="More options"
+            aria-expanded={menuOpen}
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 transition-colors"
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </button>
+          {menuOpen && menuPos && typeof document !== "undefined" && createPortal(
+            <div
+              ref={menuPanelRef}
+              style={{ position: "fixed", top: menuPos.top, right: menuPos.right, zIndex: 1000 }}
+              className="min-w-[160px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0d1b2a] shadow-lg overflow-hidden"
             >
-              <MoreHorizontal className="w-4 h-4" />
-            </button>
-            {menuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-10 min-w-[150px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0d1b2a] shadow-lg overflow-hidden">
-                {isAuthor && (
-                  <button
-                    onClick={() => { setMenuOpen(false); setDraft(post.content); setEditing(true); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors"
-                  >
-                    <Pencil className="w-3.5 h-3.5" /> Edit
-                  </button>
-                )}
+              {isAuthor && (
                 <button
-                  onClick={() => { setMenuOpen(false); copyLink(); }}
+                  onClick={() => { setMenuOpen(false); setDraft(post.content); setEditing(true); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors"
                 >
-                  {linkCopied
-                    ? (<><Check className="w-3.5 h-3.5 text-emerald-600" /> Link copied</>)
-                    : (<><Link2 className="w-3.5 h-3.5" /> Copy link</>)}
+                  <Pencil className="w-3.5 h-3.5" /> Edit
                 </button>
-                {canDelete && (
-                  <button
-                    onClick={() => { setMenuOpen(false); deletePost(); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" /> Delete
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+              )}
+              <button
+                onClick={() => { setMenuOpen(false); copyLink(); }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors"
+              >
+                {linkCopied
+                  ? (<><Check className="w-3.5 h-3.5 text-emerald-600" /> Link copied</>)
+                  : (<><Link2 className="w-3.5 h-3.5" /> Copy link</>)}
+              </button>
+              {canDelete && (
+                <button
+                  onClick={() => { setMenuOpen(false); deletePost(); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete
+                </button>
+              )}
+            </div>,
+            document.body,
+          )}
         </div>
 
         {editing ? (
