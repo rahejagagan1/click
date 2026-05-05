@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -9,9 +9,7 @@ export async function GET(req: NextRequest) {
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
   const myId = await resolveUserId(session);
-  // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access + role=admin + role=hr_manager.
-  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager"
-                || user.orgLevel === "special_access" || user.role === "admin" || user.role === "hr_manager";
+  const isAdmin = isHRAdmin(user);
   const { searchParams } = new URL(req.url);
   const view = searchParams.get("view") || "my";
 
@@ -61,9 +59,7 @@ export async function PUT(req: NextRequest) {
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
   const myId = await resolveUserId(session);
-  // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access + role=admin + role=hr_manager.
-  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager"
-                || user.orgLevel === "special_access" || user.role === "admin" || user.role === "hr_manager";
+  const isAdmin = isHRAdmin(user);
 
   try {
     const { id, action, approvalNote } = await req.json();
