@@ -72,13 +72,15 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Cascade-delete reactions + comments first to avoid FK violations
-    // (the schema may not have ON DELETE CASCADE wired everywhere).
-    await prisma.$transaction([
-      prisma.engageReaction.deleteMany({ where: { postId: id } }).catch(() => null) as any,
-      prisma.engageComment.deleteMany({ where: { postId: id } }).catch(() => null) as any,
-      prisma.engagePost.delete({ where: { id } }),
-    ]);
+    // EngageReaction.post and EngageComment.post both declare
+    // `onDelete: Cascade` (see schema.prisma) — Postgres clears the
+    // children for us when the parent row goes away, so no manual
+    // pre-delete or transaction is needed. The previous version wrapped
+    // these in $transaction([...]) with `.catch()` chained to each inner
+    // delete, which broke the call: `$transaction` requires
+    // PrismaPromise[] and `.catch()` returns a plain Promise, so Prisma
+    // rejected the whole call with "Internal server error".
+    await prisma.engagePost.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   } catch (e) { return serverError(e, "DELETE /api/hr/engage/posts/[id]"); }
 }
