@@ -263,15 +263,18 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
         )}
 
         {post.mediaUrl && (
-          // Wrap the media in a centered container with a neutral
-          // letterbox so portrait + landscape images both look
-          // intentional. `object-contain` keeps the whole image visible
-          // (no crop), centered horizontally and vertically.
+          // Image fills the post card width and grows to its natural
+          // height, capped so a single tall portrait can't dominate
+          // the feed. Matches the Keka layout HR shared — work-
+          // anniversary cards / posters render large and prominent
+          // instead of tiny letterboxed thumbnails. `object-contain`
+          // keeps the whole image visible (no crop). The subtle
+          // background only shows on rare wider-than-card images.
           <div className="mt-4 overflow-hidden rounded-xl border border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
             <img
               src={post.mediaUrl}
               alt="post media"
-              className="block mx-auto max-h-[500px] w-auto max-w-full object-contain"
+              className="block w-full h-auto max-h-[640px] object-contain"
             />
           </div>
         )}
