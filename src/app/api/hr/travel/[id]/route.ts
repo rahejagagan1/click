@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
@@ -9,7 +9,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         const { id: idRaw } = await params;
   const user = session!.user as any;
   const myId = await resolveUserId(session);
-  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
+  const isAdmin = isHRAdmin(user);
 
   try {
     const id = parseInt(idRaw);
