@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   const user = session!.user as any;
   const myId = await resolveUserId(session);
   if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
-  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
+  const isAdmin = isHRAdmin(user);
 
   try {
     const { searchParams } = new URL(req.url);
