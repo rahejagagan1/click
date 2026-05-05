@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, serverError } from "@/lib/api-auth";
+import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 import { istTodayDateOnly } from "@/lib/ist-date";
 
 // GET /api/hr/attendance?userId=X&month=2026-04
@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   try {
     const self = session!.user as any;
     const { searchParams } = new URL(req.url);
-    const isAdmin = self.orgLevel === "ceo" || self.isDeveloper || self.orgLevel === "hr_manager";
+    const isAdmin = isHRAdmin(self);
 
     // Resolve dbId — fallback to DB lookup by email if session doesn't have it
     let myDbId = self.dbId;

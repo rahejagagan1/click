@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, serverError } from "@/lib/api-auth";
+import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 import { accrueLeavesForEveryone } from "@/lib/leave-accrual";
 
 export const dynamic = "force-dynamic";
-
-function isHRAdmin(u: any) {
-  return u?.orgLevel === "ceo" || u?.isDeveloper === true || u?.orgLevel === "hr_manager";
-}
 
 /**
  * GET /api/hr/admin/leave-balances?year=2026
@@ -47,7 +43,10 @@ export async function GET(req: NextRequest) {
       }),
       prisma.leaveType.findMany({
         where: { isActive: true },
-        select: { id: true, name: true, code: true, daysPerYear: true },
+        // Include `applicable` so the matrix UI can hide the policy-reset
+        // button + apply-defaults pass for balance-only types like
+        // Carry Over Leave.
+        select: { id: true, name: true, code: true, daysPerYear: true, applicable: true },
         orderBy: { name: "asc" },
       }),
       prisma.leaveBalance.findMany({
