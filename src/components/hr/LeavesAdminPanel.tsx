@@ -302,7 +302,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                   <input
                     ref={totalInputRef}
                     type="number"
-                    step="0.5"
+                    step="0.01"
                     min="0"
                     value={form.total}
                     onChange={(e) => setForm((f) => ({ ...f, total: e.target.value }))}
@@ -332,7 +332,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                   <div>
                     <label className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Used</label>
                     <input
-                      type="number" step="0.5" min="0"
+                      type="number" step="0.01" min="0"
                       value={form.used}
                       onChange={(e) => setForm((f) => ({ ...f, used: e.target.value }))}
                       className="mt-1 w-full rounded border border-slate-200 bg-white px-2.5 py-1.5 text-center text-[13px] tabular-nums text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30"
@@ -341,7 +341,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                   <div>
                     <label className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Pending</label>
                     <input
-                      type="number" step="0.5" min="0"
+                      type="number" step="0.01" min="0"
                       value={form.pending}
                       onChange={(e) => setForm((f) => ({ ...f, pending: e.target.value }))}
                       className="mt-1 w-full rounded border border-slate-200 bg-white px-2.5 py-1.5 text-center text-[13px] tabular-nums text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30"
