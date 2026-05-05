@@ -154,9 +154,13 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
     : post.content.slice(0, COLLAPSE_AT).trimEnd() + "…";
 
   return (
-    <div id={`post-${post.id}`} className="bg-white dark:bg-[#0d1b2a] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden scroll-mt-24">
+    // overflow-visible (was overflow-hidden) so any absolute children
+    // — including a dropdown if the portal route is unavailable —
+    // aren't clipped at the card boundary. Image and praise header
+    // already have their own internal overflow-hidden where needed.
+    <div id={`post-${post.id}`} className="bg-white dark:bg-[#0d1b2a] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-visible scroll-mt-24">
       {isPraise && (
-        <div className="bg-gradient-to-r from-amber-500/10 to-orange-500/5 border-b border-amber-200/50 dark:border-amber-500/20 px-5 py-2 flex items-center gap-2">
+        <div className="rounded-t-xl bg-gradient-to-r from-amber-500/10 to-orange-500/5 border-b border-amber-200/50 dark:border-amber-500/20 px-5 py-2 flex items-center gap-2">
           <Award className="w-4 h-4 text-amber-500" />
           <span className="text-[12px] font-semibold text-amber-700 dark:text-amber-400">
             {post.author.name} praised {post.praiseTo?.name}
