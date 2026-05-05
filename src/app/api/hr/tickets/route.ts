@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
 
 export async function GET(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
     const myId = await resolveUserId(session);
     if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
     const { searchParams } = new URL(req.url);
-    const isAdmin = self.orgLevel === "ceo" || self.isDeveloper || self.orgLevel === "hr_manager";
+    const isAdmin = isHRAdmin(self);
     const view = searchParams.get("view") || "my";
     const status = searchParams.get("status");
 
