@@ -54,7 +54,11 @@ export async function GET(_req: NextRequest) {
             year:        r.year,
             isMonthly:   false,
             period:      `${MONTH_NAMES[r.month]} ${r.year} — Week ${r.week}`,
-            viewUrl:     `/dashboard/reports/${r.managerId}/weekly/${r.week}?month=${r.month}`,
+            // Year is required so the report page loads the right
+            // year's data — without it, the page falls back to the
+            // current year and a 2025 report viewed in 2026 silently
+            // shows a blank form instead of the saved data.
+            viewUrl:     `/dashboard/reports/${r.managerId}/weekly/${r.week}?month=${r.month}&year=${r.year}`,
             isLocked:    r.isLocked,
             submittedAt: r.submittedAt,
         }));
@@ -68,7 +72,8 @@ export async function GET(_req: NextRequest) {
             year:        r.year,
             isMonthly:   true,
             period:      `${MONTH_NAMES[r.month]} ${r.year} — Monthly Report`,
-            viewUrl:     `/dashboard/reports/${r.managerId}/monthly/${r.month}`,
+            // Year is required (see weekly viewUrl above for context).
+            viewUrl:     `/dashboard/reports/${r.managerId}/monthly/${r.month}?year=${r.year}`,
             isLocked:    r.isLocked,
             submittedAt: r.submittedAt,
         }));
