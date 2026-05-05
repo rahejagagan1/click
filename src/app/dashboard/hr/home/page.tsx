@@ -1404,11 +1404,17 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
         )}
 
         {post.mediaUrl ? (
+          // Image fills the home-feed card width and grows to its
+          // natural height, capped so a tall portrait can't dominate
+          // the feed. Matches the Keka layout — posters / anniversary
+          // cards render prominently instead of as small thumbnails.
+          // Lower max-height than the engage page since home cards sit
+          // alongside other widgets.
           <div className="mt-3 overflow-hidden rounded-[3px] border border-[#ecf1f5] bg-[#f8fafc]">
             <img
               src={post.mediaUrl}
               alt="Post media"
-              className="block mx-auto max-h-[360px] w-auto max-w-full object-contain"
+              className="block w-full h-auto max-h-[480px] object-contain"
             />
           </div>
         ) : null}
