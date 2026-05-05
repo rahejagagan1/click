@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, serverError } from "@/lib/api-auth";
+import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 import { istTodayDateOnly } from "@/lib/ist-date";
 import { parseAttLoc } from "@/lib/attendance-location";
 import { serializeBigInt } from "@/lib/utils";
@@ -16,12 +16,7 @@ export async function GET() {
   if (errorResponse) return errorResponse;
 
   const self = session!.user as any;
-  const canView =
-    self.isDeveloper === true ||
-    self.role === "admin" ||
-    self.orgLevel === "ceo" ||
-    self.orgLevel === "hr_manager";
-  if (!canView) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!isHRAdmin(self)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
     const today = istTodayDateOnly();
