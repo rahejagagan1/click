@@ -1962,11 +1962,18 @@ export default function HRHomePage() {
   // splits into a Clock-out / Cancel pair so a stray click doesn't
   // close the day. Auto-cancels after 6s if the user walks away.
   const [confirmingClockOut, setConfirmingClockOut] = useState(false);
+  // True while the async clockOut() call is in flight. Used to keep
+  // the Confirm/Cancel pair on screen until the API call resolves
+  // (otherwise the synchronous setConfirmingClockOut(false) reverted
+  // the button to "Web Clock-Out" before todayRec.clockOut had
+  // refreshed — looking like the action did nothing) AND to disable
+  // the Confirm button so a rapid double-click can't fire two POSTs.
+  const [clockingOut, setClockingOut] = useState(false);
   useEffect(() => {
-    if (!confirmingClockOut) return;
+    if (!confirmingClockOut || clockingOut) return;
     const t = setTimeout(() => setConfirmingClockOut(false), 6000);
     return () => clearTimeout(t);
-  }, [confirmingClockOut]);
+  }, [confirmingClockOut, clockingOut]);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.permissions?.query) {
@@ -2347,18 +2354,29 @@ export default function HRHomePage() {
                     confirmingClockOut ? (
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={() => { setConfirmingClockOut(false); clockOut(); }}
-                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3 text-[11px] font-semibold bg-red-600 text-white transition-all duration-150 hover:brightness-110"
+                          onClick={async () => {
+                            if (clockingOut) return;
+                            setClockingOut(true);
+                            try {
+                              await clockOut();
+                            } finally {
+                              setClockingOut(false);
+                              setConfirmingClockOut(false);
+                            }
+                          }}
+                          disabled={clockingOut}
+                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3 text-[11px] font-semibold bg-red-600 text-white transition-all duration-150 hover:brightness-110 disabled:opacity-70 disabled:cursor-wait"
                           style={{
                             background:  "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
                             boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.25), 0 3px 10px -3px rgba(239,68,68,0.6), 0 1px 2px rgba(0,0,0,0.10)",
                           }}
                         >
-                          Confirm Clock-out
+                          {clockingOut ? "Clocking out…" : "Confirm Web Clock-Out"}
                         </button>
                         <button
                           onClick={() => setConfirmingClockOut(false)}
-                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3 text-[11px] font-semibold bg-slate-700 text-white transition-all duration-150 hover:brightness-110"
+                          disabled={clockingOut}
+                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3 text-[11px] font-semibold bg-slate-700 text-white transition-all duration-150 hover:brightness-110 disabled:opacity-70 disabled:cursor-not-allowed"
                           style={{
                             background:  "linear-gradient(180deg, #334155 0%, #1e293b 100%)",
                             boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.12), 0 1px 2px rgba(0,0,0,0.10)",
