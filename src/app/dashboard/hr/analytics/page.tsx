@@ -203,11 +203,15 @@ export default function HRHomePage() {
   // button splits into a Confirm + Cancel pair so a stray click can't
   // end the day. Auto-collapses after 6s if the user walks away.
   const [confirmingClockOut, setConfirmingClockOut] = useState(false);
+  // Held while the async clockOut() POST is in flight. Keeps the
+  // Confirm/Cancel pair visible until the API resolves and disables
+  // Confirm so a double-click can't fire two POSTs.
+  const [clockingOut, setClockingOut] = useState(false);
   useEffect(() => {
-    if (!confirmingClockOut) return;
+    if (!confirmingClockOut || clockingOut) return;
     const t = setTimeout(() => setConfirmingClockOut(false), 6000);
     return () => clearTimeout(t);
-  }, [confirmingClockOut]);
+  }, [confirmingClockOut, clockingOut]);
 
   useEffect(() => {
     const tick = () => {
@@ -339,15 +343,26 @@ export default function HRHomePage() {
                   confirmingClockOut ? (
                     <div className="flex items-center gap-1">
                       <button
-                        onClick={() => { setConfirmingClockOut(false); clockOut(); }}
-                        className="h-7 px-3 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
+                        onClick={async () => {
+                          if (clockingOut) return;
+                          setClockingOut(true);
+                          try {
+                            await clockOut();
+                          } finally {
+                            setClockingOut(false);
+                            setConfirmingClockOut(false);
+                          }
+                        }}
+                        disabled={clockingOut}
+                        className="h-7 px-3 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95 disabled:opacity-70 disabled:cursor-wait disabled:active:scale-100"
                         style={{ background: "#dc2626" }}
                       >
-                        Confirm Web Clock-Out
+                        {clockingOut ? "Clocking out…" : "Confirm Web Clock-Out"}
                       </button>
                       <button
                         onClick={() => setConfirmingClockOut(false)}
-                        className="h-7 px-3 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
+                        disabled={clockingOut}
+                        className="h-7 px-3 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed disabled:active:scale-100"
                         style={{ background: "#475569" }}
                       >
                         Cancel
