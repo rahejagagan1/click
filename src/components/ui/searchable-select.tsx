@@ -77,16 +77,36 @@ export default function SearchableSelect({
         const onKey = (e: KeyboardEvent) => {
             if (e.key === "Escape") setOpen(false);
         };
-        const onScroll = () => setOpen(false); // fixed pos drifts on scroll
+        // The panel uses position:fixed, so scrolling an *outer*
+        // container (page, modal body, etc.) drifts the trigger out
+        // from under it — close in that case. But the listener is in
+        // capture phase, which means it ALSO sees scroll events from
+        // the panel's own option list. Without this guard, trying to
+        // scroll the dropdown immediately collapsed it. Re-position
+        // the panel instead of closing when the trigger is still on
+        // screen, so wheel-scrolling a long list page works smoothly.
+        const onOuterScroll = (e: Event) => {
+            if (panelRef.current?.contains(e.target as Node)) return;
+            if (!triggerRef.current) { setOpen(false); return; }
+            const r = triggerRef.current.getBoundingClientRect();
+            const off = 4;
+            // Trigger scrolled out of view → no anchor, just close.
+            if (r.bottom < 0 || r.top > window.innerHeight) {
+                setOpen(false);
+                return;
+            }
+            setPos({ top: r.bottom + off, left: r.left, width: r.width });
+        };
+        const onResize = () => setOpen(false);
         document.addEventListener("mousedown", onDoc);
         document.addEventListener("keydown",   onKey);
-        window.addEventListener("scroll",      onScroll, true);
-        window.addEventListener("resize",      onScroll);
+        window.addEventListener("scroll",      onOuterScroll, true);
+        window.addEventListener("resize",      onResize);
         return () => {
             document.removeEventListener("mousedown", onDoc);
             document.removeEventListener("keydown",   onKey);
-            window.removeEventListener("scroll",      onScroll, true);
-            window.removeEventListener("resize",      onScroll);
+            window.removeEventListener("scroll",      onOuterScroll, true);
+            window.removeEventListener("resize",      onResize);
         };
     }, [open]);
 
