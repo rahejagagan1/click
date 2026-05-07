@@ -1279,7 +1279,7 @@ export default function AttendancePage() {
                       }}
                       className="h-8 px-4 bg-red-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap transition-all duration-150 hover:brightness-110 hover:-translate-y-px"
                     >
-                      Confirm Clock-Out
+                      Confirm Web Clock-Out
                     </button>
                     <button
                       onClick={() => setConfirmingClockOut(false)}
