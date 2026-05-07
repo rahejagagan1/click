@@ -6,7 +6,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, MoreVertical, Coffee, AlertCircle, CheckCircle2, XCircle, Calendar, CalendarDays } from "lucide-react";
+import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, MoreVertical, Coffee, AlertCircle, CheckCircle2, XCircle, Calendar, CalendarDays, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
 import { isHRAdmin } from "@/lib/access";
@@ -726,6 +726,16 @@ export default function AttendancePage() {
   // the browser is busy asking the OS for coordinates (first-time GPS/Wi-Fi
   // lookup on Windows can take 10–15s).
   const [clockingIn, setClockingIn] = useState(false);
+  // Two-step Clock-Out confirmation (Keka pattern). First click flips
+  // this to true and the button splits into a Clock-out / Cancel pair
+  // so a stray click doesn't end the day. Auto-cancels after 6s if the
+  // user walks away. Mirrors the home Quick-Access tile's behaviour.
+  const [confirmingClockOut, setConfirmingClockOut] = useState(false);
+  useEffect(() => {
+    if (!confirmingClockOut) return;
+    const t = setTimeout(() => setConfirmingClockOut(false), 6000);
+    return () => clearTimeout(t);
+  }, [confirmingClockOut]);
 
   useEffect(() => {
     setClock(new Date());
@@ -1256,14 +1266,42 @@ export default function AttendancePage() {
                   {clockingIn ? "Getting location…" : "Web Clock-In"}
                 </button>
               ) : !todayRec?.clockOut ? (
-                <button onClick={clockOut}
-                  style={{
-                    background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
-                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
-                  }}
-                  className="h-9 px-5 bg-red-600 text-white rounded-lg text-[13px] font-bold tracking-tight whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px">
-                  Web Clock-Out
-                </button>
+                // Two-step confirmation. First click splits the single
+                // Web Clock-Out button into a red Confirm + dark Cancel
+                // pair (Keka pattern). Auto-collapses after 6s.
+                confirmingClockOut ? (
+                  <div className="flex items-center gap-1.5 w-fit">
+                    <button
+                      onClick={() => { setConfirmingClockOut(false); clockOut(); }}
+                      style={{
+                        background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
+                        boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
+                      }}
+                      className="h-9 px-4 bg-red-600 text-white rounded-lg text-[13px] font-bold tracking-tight whitespace-nowrap transition-all duration-150 hover:brightness-110 hover:-translate-y-px"
+                    >
+                      Web Clock-Out
+                    </button>
+                    <button
+                      onClick={() => setConfirmingClockOut(false)}
+                      style={{
+                        background: "linear-gradient(180deg, #334155 0%, #1e293b 100%)",
+                        boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.12), 0 1px 2px rgba(0,0,0,0.10)",
+                      }}
+                      className="h-9 px-4 bg-slate-700 text-white rounded-lg text-[13px] font-bold tracking-tight whitespace-nowrap transition-all duration-150 hover:brightness-110"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => setConfirmingClockOut(true)}
+                    style={{
+                      background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
+                    }}
+                    className="h-9 px-5 bg-red-600 text-white rounded-lg text-[13px] font-bold tracking-tight whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px">
+                    Web Clock-Out
+                  </button>
+                )
               ) : (
                 <div className="flex flex-col gap-1.5 w-fit">
                   <button onClick={clockIn} disabled={clockingIn}
@@ -1671,53 +1709,12 @@ export default function AttendancePage() {
                                   })()}
                                 />
                               </div>
-                              {/* Multi-session days: render every (in → out)
-                                  pair as a clean pill so the user sees the
-                                  full punch history at a glance. Each pill
-                                  has a status dot (pulsing for the live
-                                  session), tabular time range, and a
-                                  duration badge. */}
-                              {sessions.length > 1 && (
-                                <div className="flex flex-wrap items-center justify-center gap-1.5">
-                                  {sessions.map((s, i) => {
-                                    const open = !s.clockOut;
-                                    const startMs = new Date(s.clockIn).getTime();
-                                    const endMs   = s.clockOut
-                                      ? new Date(s.clockOut).getTime()
-                                      : (clock?.getTime() ?? Date.now());
-                                    const mins = Math.max(0, Math.round((endMs - startMs) / 60000));
-                                    const dur = mins >= 60
-                                      ? `${Math.floor(mins / 60)}h ${mins % 60}m`
-                                      : `${mins}m`;
-                                    return (
-                                      <span
-                                        key={i}
-                                        title={`Session ${i + 1} · ${dur}${open ? " (live)" : ""}`}
-                                        className={`inline-flex items-center gap-1.5 rounded-full pl-1.5 pr-1.5 py-[3px] text-[11px] font-medium tabular-nums ring-1 ring-inset ${
-                                          open
-                                            ? "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20"
-                                            : "bg-slate-50 text-slate-600 ring-slate-200 dark:bg-white/[0.04] dark:text-slate-300 dark:ring-white/10"
-                                        }`}
-                                      >
-                                        <span className="relative inline-flex h-1.5 w-1.5 shrink-0">
-                                          {open && (
-                                            <span className="absolute inset-0 rounded-full bg-emerald-400 opacity-75 animate-ping" />
-                                          )}
-                                          <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${open ? "bg-emerald-500" : "bg-slate-400 dark:bg-slate-500"}`} />
-                                        </span>
-                                        <span className="inline-flex items-center gap-1">
-                                          {fmtT(s.clockIn)}
-                                          <span className="mx-1 opacity-50">–</span>
-                                          {s.clockOut ? fmtT(s.clockOut) : <span className="font-semibold">now</span>}
-                                        </span>
-                                        <span className={`ml-0.5 text-[10px] font-semibold ${open ? "text-emerald-600/80 dark:text-emerald-400/80" : "text-slate-400 dark:text-slate-500"}`}>
-                                          · {dur}
-                                        </span>
-                                      </span>
-                                    );
-                                  })}
-                                </div>
-                              )}
+                              {/* The multi-session in/out grid lives in the
+                                  LOG-icon hover popover (see the LOG TD
+                                  below) so the row stays compact. Hover
+                                  the status icon at the right edge of
+                                  the row to see every Web Clock In/Out
+                                  pair for the day. */}
                             </div>
                           ) : approvedRegRow && !rec.clockIn ? (
                             <span className="text-[12px] font-medium text-emerald-600 dark:text-emerald-400">
@@ -1782,25 +1779,9 @@ export default function AttendancePage() {
                                 : "Pending";
                               c = { label: which, Icon: Clock3, tone: "text-[#008CFF]" };
                             } else if (missedClockOut) {
-                              // Surface the recorded clock-in time inside the
-                              // tooltip so the user has an exact reference
-                              // when filling the regularization form. For
-                              // multi-session days, list every session.
-                              const sessLabel = sessions.length > 1
-                                ? sessions.map((s) => `${fmtT(s.clockIn) ?? "?"} → ${s.clockOut ? fmtT(s.clockOut) : "—"}`).join(", ")
-                                : fmtT(rec.clockIn) ?? "?";
-                              c = {
-                                label: `Missed clock-out · ${sessLabel}`,
-                                Icon: AlertCircle, tone: "text-amber-500",
-                              };
+                              c = { label: "Missed clock-out", Icon: AlertCircle, tone: "text-amber-500" };
                             } else if (rec.clockOut && !rec.clockIn && !isTodayRow && !rec.isRegularized) {
-                              // Symmetrical case: rare, but if a row has a
-                              // clock-out without a clock-in, hint the user.
-                              const outAt = fmtT(rec.clockOut);
-                              c = {
-                                label: outAt ? `Missed clock-in · clocked out ${outAt}` : "Missed clock-in",
-                                Icon: AlertCircle, tone: "text-amber-500",
-                              };
+                              c = { label: "Missed clock-in", Icon: AlertCircle, tone: "text-amber-500" };
                             } else if (onLeave) {
                               c = { label: leaveLabel, Icon: Coffee, tone: "text-violet-500" };
                             } else if (isHoliday) {
@@ -1810,39 +1791,76 @@ export default function AttendancePage() {
                             } else if (isTodayRow && !hasClock) {
                               c = { label: "Awaiting clock-in", Icon: Clock3, tone: "text-[#008CFF]" };
                             } else if (hasClock && met9h) {
-                              // Show every session pair so the user can see
-                              // exactly when they were clocked in/out.
-                              const sessLabel = sessions.length > 0
-                                ? sessions.map((s) => `${fmtT(s.clockIn) ?? "?"} → ${s.clockOut ? fmtT(s.clockOut) : "now"}`).join(", ")
-                                : "";
-                              c = { label: sessLabel ? `Present · ${sessLabel}` : "Present", Icon: CheckCircle2, tone: "text-emerald-500" };
+                              c = { label: "Present", Icon: CheckCircle2, tone: "text-emerald-500" };
                             } else if (hasClock) {
-                              // Surface the punch times directly in the
-                              // tooltip — for multi-session days, list each
-                              // pair; for the common single-session case,
-                              // show the open / closed times. e.g.
-                              //   "Present | Missing Swipe(s) · 09:30 → now"
-                              //   "Present | Missing Swipe(s) · 09:30 → 10:30, 11:30 → now"
-                              const sessLabel = sessions.length > 0
-                                ? sessions.map((s) => `${fmtT(s.clockIn) ?? "?"} → ${s.clockOut ? fmtT(s.clockOut) : "now"}`).join(", ")
-                                : (rec.clockIn ? `${fmtT(rec.clockIn)} → ${rec.clockOut ? fmtT(rec.clockOut) : "—"}` : "");
-                              c = {
-                                label: sessLabel ? `Present | Missing Swipe(s) · ${sessLabel}` : "Present | Missing Swipe(s)",
-                                Icon: AlertCircle, tone: "text-orange-500",
-                              };
+                              c = { label: "Present | Missing Swipe(s)", Icon: AlertCircle, tone: "text-orange-500" };
                             } else {
                               c = { label: "Absent", Icon: XCircle, tone: "text-rose-500" };
                             }
                             const Icon = c.Icon;
+                            // Rich popover when there's at least one session
+                            // — Keka-style 2-column in/out grid stacked
+                            // under a status header. For non-session rows
+                            // (Holiday, Weekly Off, Awaiting, etc.) fall
+                            // back to the small text tooltip so we don't
+                            // render an empty popover.
+                            const hasSessions = sessions.length > 0;
                             return (
                               <span className="group relative inline-flex">
                                 <Icon size={20} strokeWidth={2} className={c.tone} />
-                                <span
-                                  role="tooltip"
-                                  className="pointer-events-none absolute right-full top-1/2 z-20 mr-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-white opacity-0 shadow-lg ring-1 ring-white/[0.06] transition-opacity duration-150 group-hover:opacity-100 dark:bg-slate-900"
-                                >
-                                  {c.label}
-                                </span>
+                                {hasSessions ? (
+                                  <div
+                                    role="tooltip"
+                                    className="pointer-events-none absolute right-full top-1/2 z-30 mr-2 -translate-y-1/2 w-[230px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0a1526] px-3 py-2.5 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                                  >
+                                    {/* Status header — small dot in the
+                                        same tone as the icon, then the
+                                        label (Present / Missing Swipe(s) /
+                                        Missed clock-out). */}
+                                    <div className="flex items-center gap-1.5 mb-2">
+                                      <span className={`w-1.5 h-1.5 rounded-full ${c.tone.replace("text-", "bg-")}`} />
+                                      <span className={`text-[11px] font-bold uppercase tracking-wide ${c.tone}`}>{c.label}</span>
+                                    </div>
+                                    {/* Web Clock In grid — green ↙ + time
+                                        on the left, red ↗ + time on the
+                                        right. Live session shows "now". */}
+                                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-1">Web Clock In</p>
+                                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 tabular-nums">
+                                      {sessions.map((s, i) => {
+                                        const open = !s.clockOut;
+                                        return (
+                                          <div key={i} className="contents">
+                                            <span className="inline-flex items-center gap-1 text-[12px] text-slate-700 dark:text-slate-200 font-medium">
+                                              <ArrowDownLeft size={13} strokeWidth={2.4} className="text-emerald-500 shrink-0" />
+                                              {fmtT(s.clockIn)}
+                                            </span>
+                                            {open ? (
+                                              <span className="inline-flex items-center gap-1 text-[12px] font-medium">
+                                                <span className="relative inline-flex h-3 w-3 shrink-0 items-center justify-center">
+                                                  <span className="absolute inset-0 rounded-full bg-emerald-400/40 animate-ping" />
+                                                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                                </span>
+                                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">now</span>
+                                              </span>
+                                            ) : (
+                                              <span className="inline-flex items-center gap-1 text-[12px] text-slate-700 dark:text-slate-200 font-medium">
+                                                <ArrowUpRight size={13} strokeWidth={2.4} className="text-rose-500 shrink-0" />
+                                                {fmtT(s.clockOut!)}
+                                              </span>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span
+                                    role="tooltip"
+                                    className="pointer-events-none absolute right-full top-1/2 z-20 mr-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-white opacity-0 shadow-lg ring-1 ring-white/[0.06] transition-opacity duration-150 group-hover:opacity-100 dark:bg-slate-900"
+                                  >
+                                    {c.label}
+                                  </span>
+                                )}
                               </span>
                             );
                           })()}
