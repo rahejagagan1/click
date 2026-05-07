@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Clock, ExternalLink, Wrench, Subtitles, ClipboardList } from "lucide-react";
+import { Clock, ExternalLink, Wrench, Subtitles, ClipboardList, History } from "lucide-react";
 
 // Custom "VO" letter-mark, used in place of a Lucide glyph for the
 // Extractor tool (which pulls voice-over audio). Matches the same prop
@@ -51,6 +51,14 @@ const TOOLS: Tool[] = [
     external: true,
     Icon: Subtitles,
     accent: "#9b6bd1",
+  },
+  {
+    name: "Old SRT Model",
+    description: "Legacy subtitle generator hosted on Streamlit — kept for fallback / archive use.",
+    href: "https://srtnbmedia.streamlit.app/",
+    external: true,
+    Icon: History,
+    accent: "#64748b",
   },
   {
     name: "Case Tracker",
