@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { randomUUID } from "node:crypto";
-import { writeFile, mkdir } from "node:fs/promises";
-import { resolve, extname } from "node:path";
+import { extname } from "node:path";
 import prisma from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -24,6 +22,22 @@ const ALLOWED_EXTS = new Set([
   ".pdf", ".doc", ".docx", ".rtf", ".odt",
   ".txt", ".md", ".png", ".jpg", ".jpeg", ".webp",
 ]);
+
+// Fallback MIME map — used only when the upload's own `type` field
+// is missing or generic (octet-stream). Keys mirror ALLOWED_EXTS.
+const MIME_BY_EXT: Record<string, string> = {
+  ".pdf":  "application/pdf",
+  ".doc":  "application/msword",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".rtf":  "application/rtf",
+  ".odt":  "application/vnd.oasis.opendocument.text",
+  ".txt":  "text/plain",
+  ".md":   "text/markdown",
+  ".png":  "image/png",
+  ".jpg":  "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+};
 
 // Mirrors src/lib/access.ts:isHRAdmin so the API gate matches the UI's
 // canViewViolationLog logic. Previously missed role=admin and
@@ -59,8 +73,16 @@ export async function GET(request: NextRequest) {
         if (category) where.category = category;
 
         const [violations, summary] = await Promise.all([
-            prisma.violation.findMany({
+            // `omit` keeps the BYTEA blob out of the list payload —
+            // hauling several MB per row over the wire on every page
+            // load would make this endpoint unusable. The blob is only
+            // ever fetched via the dedicated download route. Cast to
+            // `any` because the typed client may lag a fresh schema
+            // (`prisma generate` runs on every prod build, but local
+            // dev caches until restart).
+            (prisma.violation as any).findMany({
                 where,
+                omit: { actionTakenFileBlob: true },
                 include: {
                     user: { select: { id: true, name: true, role: true, profilePictureUrl: true, teamCapsule: true } },
                     reporter: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
@@ -95,11 +117,15 @@ export async function GET(request: NextRequest) {
 
 // POST: Create a new violation.
 //
-// Now accepts EITHER application/json (legacy callers) or
+// Accepts EITHER application/json (legacy callers) or
 // multipart/form-data (the violations form, which can attach a file).
-// The form-data path also pulls an optional PDF/doc out of the
-// `actionTakenFile` field, writes it to /public/uploads/violations/,
-// and stores the URL + original filename on the row.
+// The form-data path pulls an optional PDF/doc out of the
+// `actionTakenFile` field and stores the bytes directly in Postgres
+// (`actionTakenFileBlob`). We deliberately do NOT write to the
+// filesystem — atomic deploys + Docker rebuilds wipe `public/uploads/`
+// on every release, which 404'd every prior attachment. Postgres
+// BYTEA gives us redeploy-proof storage with the existing backup
+// story for free.
 export async function POST(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
@@ -110,11 +136,13 @@ export async function POST(request: NextRequest) {
         const user = session?.user as any;
         const ctype = request.headers.get("content-type") ?? "";
 
-        // Branch on content-type so the JSON callers (curl, integration
-        // tests, edits) keep working — only the form upload path touches fs.
+        // Branch on content-type so JSON callers (curl, integration
+        // tests, edits) keep working — only the form upload path
+        // carries a file payload.
         let body: any = {};
-        let actionTakenFileUrl:  string | null = null;
+        let actionTakenFileBlob: Buffer | null = null;
         let actionTakenFileName: string | null = null;
+        let actionTakenFileMime: string | null = null;
 
         if (ctype.includes("multipart/form-data")) {
             const form = await request.formData();
@@ -143,17 +171,16 @@ export async function POST(request: NextRequest) {
                 if (!ALLOWED_EXTS.has(ext)) {
                     return NextResponse.json({ error: "File must be a PDF, Word, RTF, ODT, TXT, or image" }, { status: 400 });
                 }
-                const safeBase = file.name
-                    .replace(/\.[^.]+$/, "")
-                    .replace(/[^A-Za-z0-9._-]+/g, "_")
-                    .slice(0, 60) || "action";
-                const stamped = `${randomUUID()}-${safeBase}${ext}`;
-                const dir     = resolve(process.cwd(), "public", "uploads", "violations");
-                await mkdir(dir, { recursive: true });
-                const buf     = Buffer.from(await file.arrayBuffer());
-                await writeFile(resolve(dir, stamped), buf);
-                actionTakenFileUrl  = `/uploads/violations/${stamped}`;
+                actionTakenFileBlob = Buffer.from(await file.arrayBuffer());
                 actionTakenFileName = file.name;
+                // Trust the browser's Content-Type when present; fall
+                // back to an extension-based guess so the download
+                // route can stamp Content-Type correctly even for
+                // files uploaded by clients that omit `type` (some
+                // mobile browsers do this with .pdf).
+                actionTakenFileMime = file.type && file.type !== "application/octet-stream"
+                    ? file.type
+                    : MIME_BY_EXT[ext] ?? "application/octet-stream";
             }
         } else {
             body = await request.json();
@@ -163,35 +190,29 @@ export async function POST(request: NextRequest) {
             ? body.category.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()) + " Violation"
             : "Violation Report");
 
-        // The reporter defaults to the logged-in user (preserves the
-        // legacy behaviour) but the form now lets HR pick someone else
-        // — e.g. logging a violation on a manager's behalf. We validate
-        // the picked user exists and is in the manager / admin tier so
-        // a tampered request can't pin a violation on a random member.
+        // The reporter defaults to the logged-in user but the form
+        // lets HR pick anyone in the directory — they may be filing
+        // a violation on behalf of a peer who flagged it. We just
+        // confirm the user exists (FK guard); access to the form
+        // itself is already gated by `hasViolationAccess` above, so
+        // we don't need to re-restrict the reportedBy candidate.
         let reportedBy = user.dbId as number;
         if (body.reportedById && Number(body.reportedById) !== user.dbId) {
             const candidate = await prisma.user.findUnique({
                 where: { id: Number(body.reportedById) },
-                select: { id: true, role: true, orgLevel: true },
+                select: { id: true },
             });
-            const eligible = !!candidate && (
-                candidate.orgLevel === "ceo" ||
-                candidate.orgLevel === "special_access" ||
-                candidate.orgLevel === "hod" ||
-                candidate.orgLevel === "manager" ||
-                candidate.role === "admin" ||
-                candidate.role === "manager" ||
-                candidate.role === "production_manager" ||
-                candidate.role === "researcher_manager" ||
-                candidate.role === "hr_manager"
-            );
-            if (eligible) reportedBy = candidate!.id;
+            if (candidate) reportedBy = candidate.id;
         }
 
         // `data: any` so TypeScript doesn't fight the new attachment
         // columns until the next clean `prisma generate` runs (the
         // typed client may lag; same workaround used in the PATCH
-        // handler for lastReminderAt).
+        // handler for lastReminderAt). New uploads go to the BYTEA
+        // column — `actionTakenFileUrl` stays null going forward and
+        // remains in the schema only so old rows continue to render
+        // until the back-fill script runs (or for one transition
+        // release, whichever comes first).
         const data: any = {
             userId: body.userId,
             reportedBy,
@@ -201,8 +222,9 @@ export async function POST(request: NextRequest) {
             status: body.status || "open",
             category: body.category || null,
             actionTaken: body.actionTaken || null,
-            actionTakenFileUrl,
+            actionTakenFileBlob,
             actionTakenFileName,
+            actionTakenFileMime,
             notes: body.notes || null,
             violationDate: body.violationDate ? new Date(body.violationDate) : null,
             responsiblePersonId: body.responsiblePersonId || null,
@@ -243,7 +265,16 @@ export async function POST(request: NextRequest) {
     }
 }
 
-// PATCH: Update violation status/action
+// PATCH: Update violation status/action.
+//
+// Accepts EITHER application/json (status flips, simple text edits)
+// or multipart/form-data (the edit panel, when HR re-uploads or
+// removes the action document). The form-data path mirrors POST: a
+// fresh file goes straight into the `actionTakenFileBlob` BYTEA
+// column with mime + filename; an explicit `clearActionTakenFile=1`
+// flag nulls the trio out (used for "Remove" without replacement).
+// Edits that don't touch the attachment stay on the JSON path so we
+// don't pay the multipart parsing cost on every status change.
 export async function PATCH(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
@@ -251,8 +282,65 @@ export async function PATCH(request: NextRequest) {
             return NextResponse.json({ error: "Access denied" }, { status: 403 });
         }
 
-        const body = await request.json();
-        const { id, status, actionTaken, severity, notes, responsiblePersonId } = body;
+        const ctype = request.headers.get("content-type") ?? "";
+        let id:                  number | undefined;
+        let status:              string | undefined;
+        let actionTaken:         string | undefined;
+        let severity:            string | undefined;
+        let notes:               string | undefined;
+        let responsiblePersonId: number | null | undefined;
+        let newFileBlob:         Buffer | null = null;
+        let newFileName:         string | null = null;
+        let newFileMime:         string | null = null;
+        let clearFile = false;
+
+        if (ctype.includes("multipart/form-data")) {
+            const form = await request.formData();
+            const get = (k: string) => {
+                const v = form.get(k);
+                return typeof v === "string" ? v : null;
+            };
+            id                  = Number(get("id")) || undefined;
+            status              = get("status")     || undefined;
+            actionTaken         = get("actionTaken") ?? undefined;
+            severity            = get("severity")   || undefined;
+            notes               = get("notes")      ?? undefined;
+            const rp            = get("responsiblePersonId");
+            responsiblePersonId = rp === null ? undefined : (rp ? Number(rp) : null);
+            clearFile           = get("clearActionTakenFile") === "1";
+
+            const file = form.get("actionTakenFile");
+            if (file instanceof File && file.size > 0) {
+                if (file.size > MAX_FILE_BYTES) {
+                    return NextResponse.json({ error: "File must be 10 MB or smaller" }, { status: 400 });
+                }
+                const ext = extname(file.name).toLowerCase();
+                if (!ALLOWED_EXTS.has(ext)) {
+                    return NextResponse.json({ error: "File must be a PDF, Word, RTF, ODT, TXT, or image" }, { status: 400 });
+                }
+                newFileBlob = Buffer.from(await file.arrayBuffer());
+                newFileName = file.name;
+                newFileMime = file.type && file.type !== "application/octet-stream"
+                    ? file.type
+                    : MIME_BY_EXT[ext] ?? "application/octet-stream";
+                // A fresh upload always wins over a stale clear flag —
+                // the UI also resets clearEditFile when a file is
+                // picked, but we re-enforce it here for safety.
+                clearFile = false;
+            }
+        } else {
+            const body = await request.json();
+            id                  = body.id;
+            status              = body.status;
+            actionTaken         = body.actionTaken;
+            severity            = body.severity;
+            notes               = body.notes;
+            responsiblePersonId = body.responsiblePersonId;
+        }
+
+        if (!id) {
+            return NextResponse.json({ error: "id is required" }, { status: 400 });
+        }
 
         // Snapshot the row first so we can detect a status change AFTER
         // the update and know what to email about.
@@ -265,6 +353,21 @@ export async function PATCH(request: NextRequest) {
         if (severity) data.severity = severity;
         if (responsiblePersonId !== undefined) data.responsiblePersonId = responsiblePersonId || null;
         if (status === "closed") data.resolvedAt = new Date();
+        // Attachment branches: a fresh upload writes all three
+        // columns AND clears the legacy URL fallback so the row
+        // doesn't try to render two attachments. An explicit clear
+        // nulls everything out.
+        if (newFileBlob) {
+            data.actionTakenFileBlob = newFileBlob;
+            data.actionTakenFileName = newFileName;
+            data.actionTakenFileMime = newFileMime;
+            data.actionTakenFileUrl  = null;
+        } else if (clearFile) {
+            data.actionTakenFileBlob = null;
+            data.actionTakenFileName = null;
+            data.actionTakenFileMime = null;
+            data.actionTakenFileUrl  = null;
+        }
         // (lastReminderAt reset is handled via raw SQL after the typed
         //  update below — the typed client may not know about the new
         //  column on a stale `prisma generate` cache.)
