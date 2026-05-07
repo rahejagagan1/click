@@ -1537,18 +1537,18 @@ export default function MonthlyReportPage() {
                         </thead>
                         <tbody>
                             {nRows.map((row, idx) => (
-                                <tr key={row.id} className="group hover:bg-emerald-50/40 dark:hover:bg-emerald-900/20 transition-colors">
+                                <tr key={row.id} className="group hover:bg-slate-50/60 dark:hover:bg-white/[0.03] transition-colors">
                                     <NCell colored="bg-slate-50 dark:bg-[#2a2a42] text-slate-700 dark:text-slate-300 font-medium"><NInput value={row.researcher} onChange={v => setNR(idx, "researcher", v)} placeholder="Name" /></NCell>
-                                    {/* Approved Cases (RTC) + Avg Rating used to render
-                                        as read-only spans with an italic "auto" stub
-                                        because the page auto-merged ClickUp stats into
-                                        these columns. The report is fully manual now,
-                                        so they need to be inputs the manager can type
-                                        into — same NInput shape as the FOIA columns. */}
-                                    <NCell center colored="bg-emerald-50 dark:bg-emerald-900/20 text-slate-800 dark:text-slate-200">
+                                    {/* Approved Cases (RTC) + Avg Rating are manual
+                                        inputs (the auto-merge from ClickUp stats was
+                                        removed when this report went fully manual).
+                                        No coloured background — falls back to NCell's
+                                        default white so the table reads as a clean
+                                        editable grid. */}
+                                    <NCell center>
                                         <NInput value={row.approvedCasesRTC} onChange={v => setNR(idx, "approvedCasesRTC", v)} placeholder="" />
                                     </NCell>
-                                    <NCell center colored="bg-emerald-50 dark:bg-emerald-900/20 text-slate-800 dark:text-slate-200">
+                                    <NCell center>
                                         <NInput value={row.avgRating} onChange={v => setNR(idx, "avgRating", v)} placeholder="" />
                                     </NCell>
                                     <NCell center colored={`bg-white dark:bg-[#32324a] ${row.approvedCasesFOIA && !isNaN(Number(row.approvedCasesFOIA)) && Number(row.approvedCasesFOIA) > 20 ? "text-red-600 font-semibold" : "text-slate-800 dark:text-slate-200"}`}><NInput value={row.approvedCasesFOIA} onChange={v => setNR(idx, "approvedCasesFOIA", v)} placeholder="N/A" /></NCell>
