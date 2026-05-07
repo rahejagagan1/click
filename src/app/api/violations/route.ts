@@ -73,17 +73,43 @@ export async function GET(request: NextRequest) {
         if (category) where.category = category;
 
         const [violations, summary] = await Promise.all([
-            // `omit` keeps the BYTEA blob out of the list payload —
-            // hauling several MB per row over the wire on every page
-            // load would make this endpoint unusable. The blob is only
-            // ever fetched via the dedicated download route. Cast to
-            // `any` because the typed client may lag a fresh schema
-            // (`prisma generate` runs on every prod build, but local
-            // dev caches until restart).
+            // Explicit `select` listing only the pre-BYTEA-migration
+            // columns + relations. Two reasons:
+            //   1. Keeps the multi-MB `actionTakenFileBlob` out of the
+            //      list payload — fetching it per-row would tank page
+            //      load. The blob is only read by the dedicated
+            //      download route.
+            //   2. Works whether or not the BYTEA migration has been
+            //      applied on the target DB. `omit` would silently
+            //      ask for the new column in the SELECT and 500 on
+            //      Postgres if the column doesn't exist yet (deploy /
+            //      migrate skew). With an explicit select listing only
+            //      old columns, the endpoint is forward-compatible.
+            //      Once `prisma migrate deploy` is reliably running on
+            //      every release, we can add `actionTakenFileMime`
+            //      back here.
+            // Cast to any because the cached typed client may lag a
+            // fresh schema during local dev (rebuild on next restart).
             (prisma.violation as any).findMany({
                 where,
-                omit: { actionTakenFileBlob: true },
-                include: {
+                select: {
+                    id: true,
+                    userId: true,
+                    reportedBy: true,
+                    title: true,
+                    description: true,
+                    severity: true,
+                    status: true,
+                    category: true,
+                    actionTaken: true,
+                    actionTakenFileUrl: true,
+                    actionTakenFileName: true,
+                    notes: true,
+                    violationDate: true,
+                    responsiblePersonId: true,
+                    resolvedAt: true,
+                    createdAt: true,
+                    updatedAt: true,
                     user: { select: { id: true, name: true, role: true, profilePictureUrl: true, teamCapsule: true } },
                     reporter: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
                     responsiblePerson: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
