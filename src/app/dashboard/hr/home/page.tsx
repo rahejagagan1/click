@@ -2354,7 +2354,7 @@ export default function HRHomePage() {
                             boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.25), 0 3px 10px -3px rgba(239,68,68,0.6), 0 1px 2px rgba(0,0,0,0.10)",
                           }}
                         >
-                          {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
+                          Confirm Clock-out
                         </button>
                         <button
                           onClick={() => setConfirmingClockOut(false)}
