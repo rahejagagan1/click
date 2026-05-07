@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
+import { writeFile, mkdir } from "node:fs/promises";
+import { resolve, extname } from "node:path";
 import prisma from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -9,6 +12,18 @@ import {
 } from "@/lib/email/templates";
 
 export const dynamic = "force-dynamic";
+// Need the Node runtime for fs (Edge can't write files).
+export const runtime  = "nodejs";
+
+// Action-Taken attachment limits — mirrors the jobs/apply pattern.
+// 10 MB ceiling, doc/image whitelist (HR mostly uploads PDFs of warning
+// letters, screenshots of chats, etc.). Larger ceiling than resumes
+// because a multi-page PDF with screenshots can run > 5 MB.
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const ALLOWED_EXTS = new Set([
+  ".pdf", ".doc", ".docx", ".rtf", ".odt",
+  ".txt", ".md", ".png", ".jpg", ".jpeg", ".webp",
+]);
 
 // Mirrors src/lib/access.ts:isHRAdmin so the API gate matches the UI's
 // canViewViolationLog logic. Previously missed role=admin and
@@ -78,7 +93,13 @@ export async function GET(request: NextRequest) {
     }
 }
 
-// POST: Create a new violation
+// POST: Create a new violation.
+//
+// Now accepts EITHER application/json (legacy callers) or
+// multipart/form-data (the violations form, which can attach a file).
+// The form-data path also pulls an optional PDF/doc out of the
+// `actionTakenFile` field, writes it to /public/uploads/violations/,
+// and stores the URL + original filename on the row.
 export async function POST(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
@@ -87,26 +108,82 @@ export async function POST(request: NextRequest) {
         }
 
         const user = session?.user as any;
-        const body = await request.json();
+        const ctype = request.headers.get("content-type") ?? "";
+
+        // Branch on content-type so the JSON callers (curl, integration
+        // tests, edits) keep working — only the form upload path touches fs.
+        let body: any = {};
+        let actionTakenFileUrl:  string | null = null;
+        let actionTakenFileName: string | null = null;
+
+        if (ctype.includes("multipart/form-data")) {
+            const form = await request.formData();
+            const get = (k: string) => {
+                const v = form.get(k);
+                return typeof v === "string" ? v : null;
+            };
+            body = {
+                userId:               Number(get("userId")) || 0,
+                severity:             get("severity"),
+                status:               get("status"),
+                category:             get("category"),
+                actionTaken:          get("actionTaken"),
+                notes:                get("notes"),
+                violationDate:        get("violationDate"),
+                responsiblePersonId:  get("responsiblePersonId") ? Number(get("responsiblePersonId")) : null,
+            };
+
+            const file = form.get("actionTakenFile");
+            if (file instanceof File && file.size > 0) {
+                if (file.size > MAX_FILE_BYTES) {
+                    return NextResponse.json({ error: "File must be 10 MB or smaller" }, { status: 400 });
+                }
+                const ext = extname(file.name).toLowerCase();
+                if (!ALLOWED_EXTS.has(ext)) {
+                    return NextResponse.json({ error: "File must be a PDF, Word, RTF, ODT, TXT, or image" }, { status: 400 });
+                }
+                const safeBase = file.name
+                    .replace(/\.[^.]+$/, "")
+                    .replace(/[^A-Za-z0-9._-]+/g, "_")
+                    .slice(0, 60) || "action";
+                const stamped = `${randomUUID()}-${safeBase}${ext}`;
+                const dir     = resolve(process.cwd(), "public", "uploads", "violations");
+                await mkdir(dir, { recursive: true });
+                const buf     = Buffer.from(await file.arrayBuffer());
+                await writeFile(resolve(dir, stamped), buf);
+                actionTakenFileUrl  = `/uploads/violations/${stamped}`;
+                actionTakenFileName = file.name;
+            }
+        } else {
+            body = await request.json();
+        }
 
         const title = body.title || (body.category
             ? body.category.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()) + " Violation"
             : "Violation Report");
 
+        // `data: any` so TypeScript doesn't fight the new attachment
+        // columns until the next clean `prisma generate` runs (the
+        // typed client may lag; same workaround used in the PATCH
+        // handler for lastReminderAt).
+        const data: any = {
+            userId: body.userId,
+            reportedBy: user.dbId,
+            title,
+            description: body.description || null,
+            severity: body.severity || "medium",
+            status: body.status || "open",
+            category: body.category || null,
+            actionTaken: body.actionTaken || null,
+            actionTakenFileUrl,
+            actionTakenFileName,
+            notes: body.notes || null,
+            violationDate: body.violationDate ? new Date(body.violationDate) : null,
+            responsiblePersonId: body.responsiblePersonId || null,
+        };
+
         const violation = await prisma.violation.create({
-            data: {
-                userId: body.userId,
-                reportedBy: user.dbId,
-                title,
-                description: body.description || null,
-                severity: body.severity || "medium",
-                status: body.status || "open",
-                category: body.category || null,
-                actionTaken: body.actionTaken || null,
-                notes: body.notes || null,
-                violationDate: body.violationDate ? new Date(body.violationDate) : null,
-                responsiblePersonId: body.responsiblePersonId || null,
-            },
+            data,
             include: {
                 user: { select: { id: true, name: true, email: true, role: true, profilePictureUrl: true, teamCapsule: true } },
                 reporter: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
