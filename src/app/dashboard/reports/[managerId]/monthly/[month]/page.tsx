@@ -214,16 +214,29 @@ function RichTextField({
 
 /** Andrew table cell — module-level so React doesn't remount inputs inside it */
 function ATd({ children, className = "" }: { children?: React.ReactNode; className?: string }) {
-    // Padding moves onto the input/textarea itself (px-2 py-2) so the
-    // input fills the entire cell — clicking anywhere in the cell
-    // lands inside the input rather than on dead cell padding. Non-
-    // input children (Month label, computed diff) wrap themselves
-    // with their own padding to preserve the visual layout.
-    // `cursor-text` on the cell so the I-beam shows over the whole
-    // cell area, including any 1-pixel border gap the input doesn't
-    // physically cover.
+    // Click anywhere in the cell → focus the first input/textarea/select
+    // inside it. This is the only reliable way to make the WHOLE cell
+    // a focus target: <label> + h-full doesn't physically fill the cell
+    // when the row is stretched by a sibling textarea (label sizes to
+    // content, not row height), and absolute-positioning a label inside
+    // a <td> is unreliable across browsers. An onClick on the cell
+    // works regardless of layout.
+    const handleClick = (e: React.MouseEvent<HTMLTableCellElement>) => {
+        // Skip if the click already landed on the input (its own focus
+        // handling does the right thing — re-firing would move the caret
+        // unexpectedly). Also skip clicks on buttons inside the cell.
+        const t = e.target as HTMLElement;
+        if (t.matches("input, textarea, select, button, a")) return;
+        const target = e.currentTarget.querySelector(
+            "input:not([disabled]), textarea:not([disabled]), select:not([disabled])"
+        ) as HTMLElement | null;
+        target?.focus();
+    };
     return (
-        <td className={`p-0 border border-slate-200 dark:border-white/10 bg-white dark:bg-[#32324a] text-[13px] align-top text-slate-800 dark:text-slate-200 cursor-text ${className}`}>
+        <td
+            onClick={handleClick}
+            className={`p-0 border border-slate-200 dark:border-white/10 bg-white dark:bg-[#32324a] text-[13px] align-top text-slate-800 dark:text-slate-200 cursor-text ${className}`}
+        >
             {children}
         </td>
     );
@@ -231,71 +244,65 @@ function ATd({ children, className = "" }: { children?: React.ReactNode; classNa
 
 /** Nishant table cell — module-level so React doesn't remount inputs inside it */
 function NCell({ children, bold, center, colored }: { children?: React.ReactNode; bold?: boolean; center?: boolean; colored?: string }) {
-    // Padding intentionally lives on NInput now (px-3 py-2) so the
-    // input fills the whole cell — clicking anywhere in the cell
-    // lands inside the input rather than on dead cell padding.
-    // `cursor-text` on the cell so the I-beam shows over the whole
-    // cell area, not just the input's own bounding box.
+    // Same focus-on-cell-click pattern as ATd — see the comment there
+    // for the rationale (label / h-full doesn't reliably fill a td
+    // when the row height is driven by a sibling cell).
+    const handleClick = (e: React.MouseEvent<HTMLTableCellElement>) => {
+        const t = e.target as HTMLElement;
+        if (t.matches("input, textarea, select, button, a")) return;
+        const target = e.currentTarget.querySelector(
+            "input:not([disabled]), textarea:not([disabled]), select:not([disabled])"
+        ) as HTMLElement | null;
+        target?.focus();
+    };
     return (
-        <td className={`p-0 border border-slate-300 dark:border-white/10 text-[13px] align-middle cursor-text ${bold ? "font-semibold" : ""} ${center ? "text-center" : ""} ${colored || "text-slate-800 dark:text-slate-200 bg-white dark:bg-[#32324a]"}`}>
+        <td
+            onClick={handleClick}
+            className={`p-0 border border-slate-300 dark:border-white/10 text-[13px] align-middle cursor-text ${bold ? "font-semibold" : ""} ${center ? "text-center" : ""} ${colored || "text-slate-800 dark:text-slate-200 bg-white dark:bg-[#32324a]"}`}
+        >
             {children}
         </td>
     );
 }
 
-/** Nishant report input — module-level so React doesn't remount on every render.
- *
- *  Wrapped in a `<label>` so clicking ANYWHERE in the cell focuses
- *  the input — including the dead vertical space at the bottom of
- *  rows where another column has a tall textarea. The HTML <label>
- *  → contained-input relationship is what gives us click-anywhere
- *  focus without an onClick handler; the label also carries the
- *  padding (px-3 py-2) and cursor-text so the I-beam shows over
- *  the entire cell area, not just the input's own bounding box. */
+/** Nishant report input — module-level so React doesn't remount on every
+ *  render. Click-anywhere-to-focus behaviour lives on NCell's onClick
+ *  handler (see there). This component just paints the field. */
 function NInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
     return (
-        <label className="block w-full h-full px-3 py-2 cursor-text">
-            <input
-                type="text"
-                value={value}
-                onChange={e => onChange(e.target.value)}
-                placeholder={placeholder ?? "Type here…"}
-                className="block w-full text-[13px] text-slate-800 dark:text-slate-200 focus:outline-none cursor-text bg-transparent placeholder:text-slate-300 dark:placeholder:text-slate-500"
-            />
-        </label>
+        <input
+            type="text"
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            placeholder={placeholder ?? "Type here…"}
+            className="block w-full text-[13px] text-slate-800 dark:text-slate-200 focus:outline-none cursor-text bg-transparent px-3 py-2 placeholder:text-slate-300 dark:placeholder:text-slate-500"
+        />
     );
 }
 
-/** Andrew report input — module-level so React doesn't remount on every render.
- *  Wrapped in a `<label>` so clicking anywhere in the cell focuses
- *  the input (including dead vertical space when another column in
- *  the same row has a tall textarea). The label carries padding +
- *  cursor-text; the input has no padding/cursor of its own. */
+/** Andrew report input — click-anywhere-to-focus is handled by ATd's
+ *  onClick. This component just paints the field with cell-matching
+ *  padding (px-2 py-2). */
 function AInput({ value, onChange, placeholder = "", disabled = false }: {
     value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean;
 }) {
     return (
-        <label className={`block w-full h-full px-2 py-2 ${disabled ? "cursor-default" : "cursor-text"}`}>
-            <input type="text" value={value} onChange={e => onChange(e.target.value)}
-                placeholder={placeholder} disabled={disabled}
-                className={`block w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none ${disabled ? "opacity-60 cursor-default" : "cursor-text"}`} />
-        </label>
+        <input type="text" value={value} onChange={e => onChange(e.target.value)}
+            placeholder={placeholder} disabled={disabled}
+            className={`block w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none px-2 py-2 ${disabled ? "opacity-60 cursor-default" : "cursor-text"}`} />
     );
 }
 
-/** Andrew report textarea — module-level so React doesn't remount on every render.
- *  Same `<label>`-wrap pattern as AInput. min-h keeps the row
- *  visually consistent and makes sure the entire row height is
- *  click-focusable for sibling input cells too. */
+/** Andrew report textarea — sibling of AInput. min-h keeps the cell
+ *  tall enough to drag the resize handle. Click-anywhere-to-focus is
+ *  on ATd. */
 function ATextarea({ value, onChange, placeholder = "", disabled = false }: {
     value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean;
 }) {
     return (
-        <label className={`block w-full h-full px-2 py-2 min-h-[60px] ${disabled ? "cursor-default" : "cursor-text"}`}>
-            <textarea value={value} onChange={e => onChange(e.target.value)}
-                placeholder={placeholder} disabled={disabled} rows={3}
-                className={`block w-full h-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none resize-y ${disabled ? "cursor-default" : "cursor-text"}`} />
-        </label>
+        <textarea value={value} onChange={e => onChange(e.target.value)}
+            placeholder={placeholder} disabled={disabled} rows={3}
+            className={`block w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none resize-y px-2 py-2 min-h-[60px] ${disabled ? "cursor-default" : "cursor-text"}`} />
     );
 }
 
