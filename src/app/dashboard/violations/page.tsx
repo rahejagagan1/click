@@ -98,8 +98,14 @@ export default function ViolationsPage() {
     // note; null when no file is selected. `notes` is now surfaced as
     // "Description" in the UI and is mandatory (see Submit disabled
     // state + handleCreate guard).
+    // Severity defaults to "low" (L0) — HR explicitly asked for the
+    // form to start at the lowest tier so it's never auto-escalated;
+    // they pick the actual tier manually based on what happened. The
+    // form has zero auto-severity logic anywhere (no useEffect, no
+    // category→severity mapping); leaving it on "low" by default is
+    // the only way it lands.
     const [newViolation, setNewViolation] = useState({
-        userId: 0, severity: "medium", category: "",
+        userId: 0, severity: "low", category: "",
         customCategory: "",
         violationDate: new Date().toISOString().split("T")[0],
         actionTaken: "", status: "open", notes: "",
@@ -215,7 +221,7 @@ export default function ViolationsPage() {
             }
             setShowNewForm(false);
             setNewViolation({
-                userId: 0, severity: "medium", category: "",
+                userId: 0, severity: "low", category: "",
                 customCategory: "",
                 violationDate: new Date().toISOString().split("T")[0],
                 actionTaken: "", status: "open", notes: "",
