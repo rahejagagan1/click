@@ -1498,11 +1498,18 @@ export default function MonthlyReportPage() {
                     </div>
                 )}
 
-                {/* Title banner */}
+                {/* Title banner — soft slate (Tailwind slate-700).
+                    Calm, low-saturation, eye-friendly. The bg uses a
+                    Tailwind class (not inline style) on purpose: a
+                    global rule in globals.css forces `.text-white` →
+                    near-black in light mode unless the element ALSO
+                    has a `bg-{color}-{shade}` class, so an inline-bg
+                    header would render its title text invisibly dark.
+                    Children use opacity- classes for the de-emphasised
+                    secondary lines, which inherit the parent's white. */}
                 <div className="rounded-t-xl overflow-hidden shadow-md">
-                    <div className="bg-[#0d2137] px-6 pt-1 pb-2 text-left">
-                        <h1 className="text-lg font-bold text-white">Nishant's Monthly Report for the month of {monthName}</h1>
-                        <p className="text-xl font-semibold text-white/80 mt-0.5">Monthly Report of Researchers <span className="text-base font-normal text-white/60">— {monthName} {year}</span></p>
+                    <div className="bg-slate-700 text-white px-6 py-4 text-left">
+                        <h1 className="text-xl font-semibold">Monthly Report of Researchers <span className="text-base font-normal opacity-75">— {monthName} {year}</span></h1>
                     </div>
                     <div className="bg-[#e87722] px-6 py-3 text-center">
                         <p className="text-[12px] text-white font-medium leading-snug">
