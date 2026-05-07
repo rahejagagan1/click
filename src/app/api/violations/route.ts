@@ -131,6 +131,7 @@ export async function POST(request: NextRequest) {
                 notes:                get("notes"),
                 violationDate:        get("violationDate"),
                 responsiblePersonId:  get("responsiblePersonId") ? Number(get("responsiblePersonId")) : null,
+                reportedById:         get("reportedById") ? Number(get("reportedById")) : null,
             };
 
             const file = form.get("actionTakenFile");
@@ -162,13 +163,38 @@ export async function POST(request: NextRequest) {
             ? body.category.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()) + " Violation"
             : "Violation Report");
 
+        // The reporter defaults to the logged-in user (preserves the
+        // legacy behaviour) but the form now lets HR pick someone else
+        // — e.g. logging a violation on a manager's behalf. We validate
+        // the picked user exists and is in the manager / admin tier so
+        // a tampered request can't pin a violation on a random member.
+        let reportedBy = user.dbId as number;
+        if (body.reportedById && Number(body.reportedById) !== user.dbId) {
+            const candidate = await prisma.user.findUnique({
+                where: { id: Number(body.reportedById) },
+                select: { id: true, role: true, orgLevel: true },
+            });
+            const eligible = !!candidate && (
+                candidate.orgLevel === "ceo" ||
+                candidate.orgLevel === "special_access" ||
+                candidate.orgLevel === "hod" ||
+                candidate.orgLevel === "manager" ||
+                candidate.role === "admin" ||
+                candidate.role === "manager" ||
+                candidate.role === "production_manager" ||
+                candidate.role === "researcher_manager" ||
+                candidate.role === "hr_manager"
+            );
+            if (eligible) reportedBy = candidate!.id;
+        }
+
         // `data: any` so TypeScript doesn't fight the new attachment
         // columns until the next clean `prisma generate` runs (the
         // typed client may lag; same workaround used in the PATCH
         // handler for lastReminderAt).
         const data: any = {
             userId: body.userId,
-            reportedBy: user.dbId,
+            reportedBy,
             title,
             description: body.description || null,
             severity: body.severity || "medium",

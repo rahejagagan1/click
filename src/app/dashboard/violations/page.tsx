@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import UserAvatar from "@/components/ui/user-avatar";
 import SearchableSelect from "@/components/ui/searchable-select";
+import { isPickableAsManager } from "@/lib/access";
 
 interface ViolationUser {
     id: number;
     name: string;
     role: string;
+    orgLevel?: string | null;
     profilePictureUrl: string | null;
     teamCapsule?: string | null;
     managerId?: number | null;
@@ -103,10 +105,51 @@ export default function ViolationsPage() {
         violationDate: new Date().toISOString().split("T")[0],
         actionTaken: "", status: "open", notes: "",
         responsiblePersonId: 0,
+        reportedById: 0,
     });
     const [actionTakenFile, setActionTakenFile] = useState<File | null>(null);
 
     const selectedEmployee = users.find(u => u.id === newViolation.userId);
+
+    // Reporter picker — managers (incl. HoDs / HR Manager) plus the admin
+    // tier (CEO, special_access, role=admin). Mirrors the access-tier
+    // helpers in src/lib/access.ts so the eligible list stays in sync
+    // with the rest of the app.
+    const reporterOptions = useMemo(
+        () =>
+            users
+                .filter(
+                    u =>
+                        isPickableAsManager(u) ||
+                        u.orgLevel === "ceo" ||
+                        u.orgLevel === "special_access" ||
+                        u.role === "admin",
+                )
+                .map(u => ({
+                    value: u.id,
+                    label: u.name,
+                    sublabel:
+                        u.orgLevel === "ceo"            ? "CEO" :
+                        u.orgLevel === "special_access" ? "Admin" :
+                        u.role     === "admin"          ? "Admin" :
+                        u.role     === "hr_manager"     ? "HR Manager" :
+                        u.role,
+                })),
+        [users],
+    );
+
+    // Default the reporter to the logged-in user once the user list
+    // arrives — only if they're actually in the eligible pool. Skip if
+    // the form is mid-edit (userId already touched) so we don't stomp
+    // an explicit pick.
+    useEffect(() => {
+        const me = Number(sessionUser?.dbId);
+        if (!me) return;
+        if (newViolation.reportedById) return;
+        if (reporterOptions.some(o => o.value === me)) {
+            setNewViolation(p => ({ ...p, reportedById: me }));
+        }
+    }, [reporterOptions, sessionUser?.dbId, newViolation.reportedById]);
 
     // Auto-fill responsible person when employee changes
     useEffect(() => {
@@ -165,6 +208,7 @@ export default function ViolationsPage() {
             fd.set("notes",               newViolation.notes);
             fd.set("violationDate",       newViolation.violationDate);
             fd.set("responsiblePersonId", String(newViolation.responsiblePersonId || ""));
+            fd.set("reportedById",        String(newViolation.reportedById || ""));
             if (actionTakenFile) fd.set("actionTakenFile", actionTakenFile);
 
             const res = await fetch("/api/violations", {
@@ -184,6 +228,12 @@ export default function ViolationsPage() {
                 violationDate: new Date().toISOString().split("T")[0],
                 actionTaken: "", status: "open", notes: "",
                 responsiblePersonId: 0,
+                // Re-prime to the logged-in user if they're in the
+                // eligible reporter pool; otherwise leave blank and the
+                // mount-time effect will fill it in.
+                reportedById: reporterOptions.some(o => o.value === Number(sessionUser?.dbId))
+                    ? Number(sessionUser?.dbId) || 0
+                    : 0,
             });
             setActionTakenFile(null);
             fetchData();
@@ -776,6 +826,20 @@ export default function ViolationsPage() {
                             </span>
                         </div>
                     )}
+
+                    {/* Reported By — managers, HoDs, HR Manager, CEO and
+                        admin-tier users only. Defaults to the logged-in
+                        reporter so the common case is one click; HR can
+                        override when filing on someone else's behalf. */}
+                    <div>
+                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Reported By</label>
+                        <SearchableSelect
+                            value={newViolation.reportedById || null}
+                            onChange={(v) => setNewViolation(p => ({ ...p, reportedById: Number(v) }))}
+                            options={reporterOptions}
+                            placeholder="Select reporter…"
+                        />
+                    </div>
 
                     {/* Row: Severity + Status */}
                     <div className="grid grid-cols-2 gap-4">
