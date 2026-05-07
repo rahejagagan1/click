@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import UserAvatar from "@/components/ui/user-avatar";
 import SearchableSelect from "@/components/ui/searchable-select";
-import { isPickableAsManager } from "@/lib/access";
 
 interface ViolationUser {
     id: number;
@@ -111,30 +110,23 @@ export default function ViolationsPage() {
 
     const selectedEmployee = users.find(u => u.id === newViolation.userId);
 
-    // Reporter picker — managers (incl. HoDs / HR Manager) plus the admin
-    // tier (CEO, special_access, role=admin). Mirrors the access-tier
-    // helpers in src/lib/access.ts so the eligible list stays in sync
-    // with the rest of the app.
+    // Reporter picker — every employee. HR specifically asked for
+    // the full directory here so they can log violations on behalf
+    // of anyone who flagged something internally (e.g. a peer who
+    // observed late attendance but isn't HR-tier). Tier label is
+    // shown in the sublabel as a hint, but doesn't gate the option.
     const reporterOptions = useMemo(
         () =>
-            users
-                .filter(
-                    u =>
-                        isPickableAsManager(u) ||
-                        u.orgLevel === "ceo" ||
-                        u.orgLevel === "special_access" ||
-                        u.role === "admin",
-                )
-                .map(u => ({
-                    value: u.id,
-                    label: u.name,
-                    sublabel:
-                        u.orgLevel === "ceo"            ? "CEO" :
-                        u.orgLevel === "special_access" ? "Admin" :
-                        u.role     === "admin"          ? "Admin" :
-                        u.role     === "hr_manager"     ? "HR Manager" :
-                        u.role,
-                })),
+            users.map(u => ({
+                value: u.id,
+                label: u.name,
+                sublabel:
+                    u.orgLevel === "ceo"            ? "CEO" :
+                    u.orgLevel === "special_access" ? "Admin" :
+                    u.role     === "admin"          ? "Admin" :
+                    u.role     === "hr_manager"     ? "HR Manager" :
+                    u.role,
+            })),
         [users],
     );
 
@@ -693,11 +685,9 @@ export default function ViolationsPage() {
                                             <div className="mb-3">
                                                 <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Action Taken</p>
                                                 <p className="text-sm text-slate-700 dark:text-slate-300">{v.actionTaken}</p>
-                                                {v.actionTakenFileUrl && (
+                                                {(v.actionTakenFileName || v.actionTakenFileUrl) && (
                                                     <a
-                                                        href={v.actionTakenFileUrl}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
+                                                        href={`/api/violations/${v.id}/file`}
                                                         className="mt-1.5 inline-flex items-center gap-1.5 text-[12px] font-medium text-violet-600 dark:text-violet-400 hover:underline"
                                                     >
                                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -708,13 +698,11 @@ export default function ViolationsPage() {
                                                 )}
                                             </div>
                                         )}
-                                        {!v.actionTaken && v.actionTakenFileUrl && (
+                                        {!v.actionTaken && (v.actionTakenFileName || v.actionTakenFileUrl) && (
                                             <div className="mb-3">
                                                 <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Action Taken</p>
                                                 <a
-                                                    href={v.actionTakenFileUrl}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
+                                                    href={`/api/violations/${v.id}/file`}
                                                     className="inline-flex items-center gap-1.5 text-[13px] font-medium text-violet-600 dark:text-violet-400 hover:underline"
                                                 >
                                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
