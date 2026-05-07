@@ -810,10 +810,17 @@ model Violation {
   category            String?            // violation type: "attendance", "misconduct", "policy_breach", etc.
   actionTaken         String?            @db.Text
   /// Optional PDF / doc uploaded by the reporter as evidence of the
-  /// action taken. File lives under /public/uploads/violations/;
-  /// `actionTakenFileName` preserves the original filename for display.
+  /// action taken. The bytes live in `actionTakenFileBlob` (BYTEA)
+  /// so they survive redeploys — the legacy `actionTakenFileUrl`
+  /// pointed at /public/uploads/, which got wiped on every deploy.
+  /// `actionTakenFileName` preserves the original filename for the
+  /// Content-Disposition header on download. `actionTakenFileMime`
+  /// drives Content-Type. The legacy URL column is kept (nullable)
+  /// for one transition release; new uploads write only the blob.
   actionTakenFileUrl  String?
   actionTakenFileName String?
+  actionTakenFileBlob Bytes?
+  actionTakenFileMime String?
   notes               String?            @db.Text
   violationDate       DateTime?
   responsiblePersonId Int?
