@@ -1957,6 +1957,16 @@ export default function HRHomePage() {
   // the browser is busy asking the OS for coordinates (first-time GPS/Wi-Fi
   // lookup on Windows can take 10–15s).
   const [clockingIn, setClockingIn] = useState(false);
+  // Two-step Clock-Out confirmation (Keka pattern). First click on
+  // the red Web Clock-Out button flips this to true and the button
+  // splits into a Clock-out / Cancel pair so a stray click doesn't
+  // close the day. Auto-cancels after 6s if the user walks away.
+  const [confirmingClockOut, setConfirmingClockOut] = useState(false);
+  useEffect(() => {
+    if (!confirmingClockOut) return;
+    const t = setTimeout(() => setConfirmingClockOut(false), 6000);
+    return () => clearTimeout(t);
+  }, [confirmingClockOut]);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.permissions?.query) {
@@ -2330,17 +2340,45 @@ export default function HRHomePage() {
                       {clockingIn ? "Getting location…" : isRemoteMode ? "Remote Clock-in" : "Clock-in"}
                     </button>
                   ) : !todayRec?.clockOut ? (
-                    // Clock-out → red, same gradient/halo treatment.
-                    <button
-                      onClick={clockOut}
-                      className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold bg-red-600 text-white transition-all duration-150 hover:brightness-110"
-                      style={{
-                        background:  "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
-                        boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.25), 0 3px 10px -3px rgba(239,68,68,0.6), 0 1px 2px rgba(0,0,0,0.10)",
-                      }}
-                    >
-                      {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
-                    </button>
+                    // Two-step Clock-Out confirmation (Keka pattern).
+                    // First click flips the single Clock-out button
+                    // into a red Confirm + dark Cancel pair so a stray
+                    // click can't end the day. Auto-cancels after 6s.
+                    confirmingClockOut ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => { setConfirmingClockOut(false); clockOut(); }}
+                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3 text-[11px] font-semibold bg-red-600 text-white transition-all duration-150 hover:brightness-110"
+                          style={{
+                            background:  "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
+                            boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.25), 0 3px 10px -3px rgba(239,68,68,0.6), 0 1px 2px rgba(0,0,0,0.10)",
+                          }}
+                        >
+                          {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
+                        </button>
+                        <button
+                          onClick={() => setConfirmingClockOut(false)}
+                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3 text-[11px] font-semibold bg-slate-700 text-white transition-all duration-150 hover:brightness-110"
+                          style={{
+                            background:  "linear-gradient(180deg, #334155 0%, #1e293b 100%)",
+                            boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.12), 0 1px 2px rgba(0,0,0,0.10)",
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmingClockOut(true)}
+                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold bg-red-600 text-white transition-all duration-150 hover:brightness-110"
+                        style={{
+                          background:  "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
+                          boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.25), 0 3px 10px -3px rgba(239,68,68,0.6), 0 1px 2px rgba(0,0,0,0.10)",
+                        }}
+                      >
+                        {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
+                      </button>
+                    )
                   ) : (
                     // Already clocked out, but the day isn't a hard
                     // terminal state — multi-session is supported, so
