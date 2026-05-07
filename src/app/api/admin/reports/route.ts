@@ -12,7 +12,10 @@ function canSeeReports(u: any): boolean {
         u?.isDeveloper === true ||
         u?.orgLevel === "special_access" ||
         u?.role === "admin" ||
-        u?.orgLevel === "hr_manager" ||
+        // role=hr_manager (not orgLevel) — see src/lib/access.ts for
+        // the rationale. Gating on orgLevel=hr_manager would let every
+        // HR employee (including plain Members) see all reports.
+        u?.role === "hr_manager" ||
         u?.orgLevel === "manager" ||
         u?.orgLevel === "hod"
     );

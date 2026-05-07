@@ -809,6 +809,11 @@ model Violation {
   status        ViolationStatus    @default(open)
   category            String?            // violation type: "attendance", "misconduct", "policy_breach", etc.
   actionTaken         String?            @db.Text
+  /// Optional PDF / doc uploaded by the reporter as evidence of the
+  /// action taken. File lives under /public/uploads/violations/;
+  /// `actionTakenFileName` preserves the original filename for display.
+  actionTakenFileUrl  String?
+  actionTakenFileName String?
   notes               String?            @db.Text
   violationDate       DateTime?
   responsiblePersonId Int?
