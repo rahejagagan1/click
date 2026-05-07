@@ -125,7 +125,7 @@ function RowMenu({ onRegularize, onWFH, onOnDuty, onLeave, disableRegularize, di
 // Shows whatever location was captured at clock-in. Location is mandatory at
 // clock-in (enforced client + server), so new rows will always have coords.
 // Older rows created before that rule may have no location — we just say so.
-function LocationPin({ raw }: { raw?: string | null }) {
+function LocationPin({ raw, kind = "in", tintOverride }: { raw?: string | null; kind?: "in" | "out"; tintOverride?: string }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -133,9 +133,17 @@ function LocationPin({ raw }: { raw?: string | null }) {
   const hasAddress = !!info.address;
   const hasCoords  = typeof info.lat === "number" && typeof info.lng === "number";
   const has        = hasAddress || hasCoords;
-  const tint = has
-    ? (info.mode === "remote" ? "#008CFF" : "#10b981")
-    : "#94a3b8";
+  // Tint priority: explicit override > out-default red > in-default
+  // green/blue (blue for remote, green for office). The override is
+  // how the timeline row pins both ends (green start, red end) so
+  // they read as "in" / "out" regardless of mode.
+  const tint = tintOverride
+    ? tintOverride
+    : !has
+      ? "#94a3b8"
+      : kind === "out"
+        ? "#ef4444"
+        : (info.mode === "remote" ? "#008CFF" : "#10b981");
 
   useEffect(() => {
     if (!open) return;
@@ -183,7 +191,9 @@ function LocationPin({ raw }: { raw?: string | null }) {
           <div className="flex items-center gap-1.5 mb-1.5">
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: tint }} />
             <span className="text-[10px] uppercase tracking-widest font-bold" style={{ color: tint }}>
-              {info.mode === "remote" ? "Remote Clock-in" : info.mode === "office" ? "Office Clock-in" : "Clock-in"}
+              {kind === "out"
+                ? "Clock-out"
+                : info.mode === "remote" ? "Remote Clock-in" : info.mode === "office" ? "Office Clock-in" : "Clock-in"}
             </span>
           </div>
 
@@ -213,20 +223,186 @@ function LocationPin({ raw }: { raw?: string | null }) {
   );
 }
 
+// One pin per row that opens a popover with BOTH clock-in AND
+// clock-out locations stacked. Replaces the previous "green pin
+// flanking the bar on the left + red pin on the right" layout —
+// less visual noise, single click to see the whole day's geo.
+function DayLocationPin({ inRaw, outRaw }: { inRaw?: string | null; outRaw?: string | null }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const inInfo  = parseAttLoc(inRaw);
+  const outInfo = parseAttLoc(outRaw);
+  const hasIn   = !!inInfo.address  || (typeof inInfo.lat  === "number" && typeof inInfo.lng  === "number");
+  const hasOut  = !!outInfo.address || (typeof outInfo.lat === "number" && typeof outInfo.lng === "number");
+  // Pin colour signals state at a glance:
+  //   • both in + out   → emerald (full day captured)
+  //   • only in         → blue    (still active / no clock-out yet)
+  //   • neither         → slate   (no geo recorded)
+  const tint = hasIn && hasOut ? "#10b981" : hasIn ? "#008CFF" : "#94a3b8";
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t))   return;
+      if (panelRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  const rect = btnRef.current?.getBoundingClientRect() ?? null;
+  // Auto-flip: if there's not enough room below the trigger for the
+  // popover, anchor it to grow UPWARD from just above the pin instead.
+  // Using CSS `bottom` (rather than computing `top` from a max height
+  // estimate) means the popover's bottom edge sits flush with the
+  // trigger no matter how tall the actual content renders — no more
+  // popovers floating multiple rows above the clicked pin.
+  const PANEL_H_ESTIMATE = 280;
+  const PANEL_W = 280;
+  const viewportH = typeof window !== "undefined" ? window.innerHeight : 800;
+  const flipUp = rect ? (viewportH - rect.bottom) < PANEL_H_ESTIMATE : false;
+  const popoverLeft = rect ? Math.min(rect.left, (typeof window !== "undefined" ? window.innerWidth - PANEL_W - 8 : 0)) : 0;
+
+  // Renders a single labelled section inside the popover. Pulled out
+  // so the in / out sections render identically modulo colour + label.
+  const Section = ({ label, info, color }: { label: string; info: ReturnType<typeof parseAttLoc>; color: string }) => {
+    const has = !!info.address || (typeof info.lat === "number" && typeof info.lng === "number");
+    return (
+      <div>
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+          <span className="text-[10px] uppercase tracking-widest font-bold" style={{ color }}>{label}</span>
+        </div>
+        {!has ? (
+          <p className="text-[11.5px] text-slate-400 leading-snug">No location recorded.</p>
+        ) : (
+          <>
+            {info.address && (
+              <p className="text-[12px] text-slate-700 dark:text-slate-200 leading-snug mb-0.5">{info.address}</p>
+            )}
+            {typeof info.lat === "number" && typeof info.lng === "number" && (
+              <>
+                <p className="text-[10.5px] text-slate-400 font-mono">{info.lat.toFixed(5)}, {info.lng.toFixed(5)}</p>
+                <a
+                  href={`https://www.google.com/maps?q=${info.lat},${info.lng}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="text-[11px] text-[#008CFF] hover:underline mt-0.5 inline-block"
+                >Open in Maps ↗</a>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={
+          hasIn && hasOut ? "Clock-in + Clock-out locations"
+          : hasIn        ? "Clock-in location"
+          : "No location recorded for this entry"
+        }
+        className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full cursor-pointer transition-all hover:scale-105 focus:outline-none focus:ring-2"
+        style={{ color: tint, borderColor: `${tint}33`, background: `${tint}14`, border: `1px solid ${tint}33` }}
+        aria-label="Day location"
+      >
+        <MapPin size={14} strokeWidth={2} />
+      </button>
+      {open && typeof document !== "undefined" && createPortal(
+        <div
+          ref={panelRef}
+          style={{
+            position: "fixed",
+            // Flip-up anchors the popover's BOTTOM edge 6px above the
+            // trigger's TOP edge. Flip-down anchors its TOP edge 6px
+            // below the trigger's BOTTOM edge. Either way the popover
+            // sits flush against the pin regardless of its real height.
+            ...(flipUp
+              ? { bottom: viewportH - (rect?.top ?? 0) + 6 }
+              : { top: (rect?.bottom ?? 0) + 6 }),
+            left:   popoverLeft,
+            zIndex: 10000,
+          }}
+          className="w-[280px] bg-white dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg shadow-2xl p-3 space-y-3"
+        >
+          <Section label="Clock-In"  info={inInfo}  color="#10b981" />
+          <div className="border-t border-slate-100 dark:border-white/5" />
+          <Section label="Clock-Out" info={outInfo} color="#ef4444" />
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 // ── Timeline bar (same proportional grid as Keka) ────────────────────────────
 // Shift-progress bar: fills from 0 → 100% of a 9h shift based on elapsed minutes.
 // Orange < 50% · blue < 100% · green once the full 9h is met.
-function TimelineBar({ liveMins }: { liveMins: number }) {
+function TimelineBar({ liveMins, firstIn, lastOut, isOpen }: {
+  liveMins: number;
+  firstIn?: Date | null;
+  lastOut?: Date | null;
+  isOpen?: boolean; // true when there's still an open session (no final clock-out yet)
+}) {
   if (!liveMins || liveMins <= 0) return <span className="text-[11px] text-slate-400">—</span>;
   const SHIFT_LEN = 540; // 9h in minutes
   const pct = Math.min((liveMins / SHIFT_LEN) * 100, 100);
-  const color = pct >= 100 ? "bg-emerald-400" : pct >= 50 ? "bg-[#008CFF]" : "bg-orange-400";
+  const color    = pct >= 100 ? "bg-emerald-400" : pct >= 50 ? "bg-[#008CFF]" : "bg-orange-400";
+  const dotColor = pct >= 100 ? "bg-emerald-400" : pct >= 50 ? "bg-[#008CFF]" : "bg-orange-400";
+
+  // Tooltip text — Keka shows "Logged In 8:13 AM - 5:18 PM" on hover.
+  // Mirror that: first session's clock-in to last session's clock-out
+  // (or "now" if still active).
+  const fmt = (d: Date) =>
+    d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true })
+      .replace(/^0/, "")  // strip leading zero on hour ("08:00" → "8:00")
+      .toLowerCase();
+  const inLabel  = firstIn ? fmt(firstIn) : null;
+  const outLabel = lastOut ? fmt(lastOut) : (isOpen ? "now" : null);
+  const tooltip  = inLabel && outLabel ? `Logged In ${inLabel} – ${outLabel}` : null;
+
   return (
-    <div className="relative w-full max-w-[280px] h-2 bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
-      <div
-        className={`h-full ${color} rounded-full transition-[width] duration-500`}
-        style={{ width: `${pct}%` }}
-      />
+    <div className="group relative flex-1 min-w-[200px] max-w-[420px]">
+      {/* The bar itself — same look as before. */}
+      <div className="relative h-2 bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
+        <div
+          className={`h-full ${color} rounded-full transition-[width] duration-500`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      {/* Hover tooltip — themed to match the rest of the dashboard:
+          white card, soft shadow, slate text, coloured status dot.
+          Positioned above the bar, centred horizontally. Pointer-events
+          are disabled so it never blocks clicks on the bar / pin. */}
+      {tooltip && (
+        <div
+          role="tooltip"
+          className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-20 whitespace-nowrap rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0a1526] px-2.5 py-1.5 text-[11.5px] font-medium text-slate-700 dark:text-slate-200 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+        >
+          <div className="flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
+            <span>Logged In <span className="font-semibold tabular-nums">{inLabel}</span> <span className="opacity-50">–</span> <span className="font-semibold tabular-nums">{outLabel}</span></span>
+          </div>
+          {/* Little notch pointing down at the bar. Two stacked
+              elements give it a border so it matches the card's edge. */}
+          <span className="absolute left-1/2 -translate-x-1/2 -bottom-[5px] w-2.5 h-2.5 rotate-45 bg-white dark:bg-[#0a1526] border-r border-b border-slate-200 dark:border-white/10" />
+        </div>
+      )}
     </div>
   );
 }
@@ -653,7 +829,24 @@ export default function AttendancePage() {
       setClockingIn(false);
     }
   };
-  const clockOut = async () => { const res = await fetch("/api/hr/attendance/clock-out", { method: "POST" }); const d = await res.json(); if (!res.ok) return alert(d.error); mutate(`/api/hr/attendance?${attendanceQs}`); };
+  const clockOut = async () => {
+    // Best-effort geo on clock-out so each AttendanceSession row gets
+    // a clockOutLocation alongside the existing clockInLocation. If
+    // the browser blocks location we still send the request without
+    // coords — server accepts a missing/empty body and stores NULL,
+    // so the user isn't stranded with an open session.
+    let body: Record<string, unknown> = {};
+    const geo = await captureClockInGeo();
+    if (geo.ok) body = { lat: geo.lat, lng: geo.lng, address: geo.address };
+    const res = await fetch("/api/hr/attendance/clock-out", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await res.json();
+    if (!res.ok) return alert(d.error);
+    mutate(`/api/hr/attendance?${attendanceQs}`);
+  };
 
   const todayRec  = myData?.todayRecord;
   const summary   = myData?.summary || {};
@@ -1029,27 +1222,57 @@ export default function AttendancePage() {
               {/* Button — multi-session aware:
                   · Not clocked in yet         → "Web Clock-In"
                   · Currently clocked in       → "Web Clock-Out"
-                  · Clocked out, on break      → "Resume Clock-In" (always
-                    available; total may already be 9h+ for overtime).
+                  · Clocked out, on break      → "Web Clock-In" (same
+                    label — was "Resume Clock-In" but that wording felt
+                    wrong on a half-day where the employee isn't really
+                    "resuming" anything; treat every new session as a
+                    plain clock-in regardless of prior sessions).
                   Day Complete is shown as an adjacent badge when 9h has
                   been accumulated, NOT as a terminal state — the rule is
                   employees can keep punching in/out throughout the day. */}
+              {/* Color = action affordance: green for any clock-IN
+                  (start / resume), red for clock-OUT. Same scheme as
+                  the home Quick-Access tile.
+                  Look: vertical gradient (lit-from-above), inset
+                  white sheen at top so the button reads as raised,
+                  and a soft outer halo in the button's own colour
+                  that grows on hover (subtle "press to act" feel
+                  without animation gimmicks). */}
+              {/* `bg-green-600` / `bg-red-600` are kept on these buttons
+                  (in addition to the inline gradient) only because
+                  globals.css forces `.text-white` → near-black in light
+                  mode UNLESS the element also has a `bg-*color*-*`
+                  class. The class is visually overridden by the
+                  inline gradient — its only job is to trigger the
+                  "preserve white text" rule. Don't remove. */}
               {!todayRec?.clockIn ? (
                 <button onClick={clockIn}
                   disabled={clockingIn}
-                  className="h-9 px-5 bg-[#ff4a5c] hover:bg-[#ff3045] text-white rounded-lg text-[13px] font-bold transition-colors shadow-sm whitespace-nowrap w-fit disabled:opacity-70 disabled:cursor-wait">
+                  style={{
+                    background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
+                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
+                  }}
+                  className="h-9 px-5 bg-green-600 text-white rounded-lg text-[13px] font-bold tracking-tight whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
                   {clockingIn ? "Getting location…" : "Web Clock-In"}
                 </button>
               ) : !todayRec?.clockOut ? (
                 <button onClick={clockOut}
-                  className="h-9 px-5 bg-[#ff4a5c] hover:bg-[#ff3045] text-white rounded-lg text-[13px] font-bold transition-colors shadow-sm whitespace-nowrap w-fit">
+                  style={{
+                    background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
+                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
+                  }}
+                  className="h-9 px-5 bg-red-600 text-white rounded-lg text-[13px] font-bold tracking-tight whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px">
                   Web Clock-Out
                 </button>
               ) : (
                 <div className="flex flex-col gap-1.5 w-fit">
                   <button onClick={clockIn} disabled={clockingIn}
-                    className="h-9 px-5 bg-[#ff4a5c] hover:bg-[#ff3045] text-white rounded-lg text-[13px] font-bold transition-colors shadow-sm whitespace-nowrap w-fit disabled:opacity-70 disabled:cursor-wait">
-                    {clockingIn ? "Getting location…" : "Resume Clock-In"}
+                    style={{
+                      background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
+                    }}
+                    className="h-9 px-5 bg-green-600 text-white rounded-lg text-[13px] font-bold tracking-tight whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
+                    {clockingIn ? "Getting location…" : "Web Clock-In"}
                   </button>
                   {(todayRec.totalMinutes ?? 0) >= 540 && (
                     <span className="h-7 px-3 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 rounded-md text-[11.5px] font-bold flex items-center whitespace-nowrap w-fit">
@@ -1187,7 +1410,17 @@ export default function AttendancePage() {
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/[0.06] bg-slate-50/60 dark:bg-white/[0.02]">
                     {["DATE","TIMELINE","EFFECTIVE","GROSS","LOG",""].map((h) => (
-                      <th key={h || "actions"} className="px-5 py-3 text-left text-[10.5px] uppercase tracking-[0.14em] font-bold text-slate-500 dark:text-slate-400">{h}</th>
+                      <th
+                        key={h || "actions"}
+                        // DATE stays left (conventional for a row's
+                        // anchor/identifier column). Everything else is
+                        // centred — both the header label AND the cell
+                        // content below — so each column reads as one
+                        // visually-aligned stack from header → row.
+                        className={`px-5 py-3 ${h === "DATE" ? "text-left" : "text-center"} text-[10.5px] uppercase tracking-[0.14em] font-bold text-slate-500 dark:text-slate-400`}
+                      >
+                        {h}
+                      </th>
                     ))}
                   </tr>
                 </thead>
@@ -1283,10 +1516,13 @@ export default function AttendancePage() {
                     // Sessions list (one entry per (in, out) pair). Older
                     // backends may not yet ship `sessions`; fall back to a
                     // synthetic single-session list so the UI keeps working.
-                    const sessions: Array<{ clockIn: string; clockOut: string | null }> =
+                    // clockInLocation / clockOutLocation are JSON-stringified
+                    // geo blobs (or null when the punch had no geo).
+                    type Sess = { clockIn: string; clockOut: string | null; clockInLocation?: string | null; clockOutLocation?: string | null };
+                    const sessions: Sess[] =
                       Array.isArray(rec.sessions) && rec.sessions.length > 0
                         ? rec.sessions
-                        : (rec.clockIn ? [{ clockIn: rec.clockIn, clockOut: rec.clockOut ?? null }] : []);
+                        : (rec.clockIn ? [{ clockIn: rec.clockIn, clockOut: rec.clockOut ?? null, clockInLocation: rec.location ?? null, clockOutLocation: null }] : []);
                     const openSession = sessions.find((s) => !s.clockOut);
                     const isCurrentlyClockedIn = isTodayRow && !!openSession;
                     const isOnBreak = isTodayRow && !openSession && sessions.some((s) => s.clockOut) && !rec.isRegularized
@@ -1372,9 +1608,12 @@ export default function AttendancePage() {
                           </div>
                         </td>
 
-                        {/* ATTENDANCE VISUAL — centered text labels for non-clocked rows
-                            (matches the admin profile's attendance tab format). */}
-                        <td className="px-5 py-3">
+                        {/* ATTENDANCE VISUAL — centred text labels for non-clocked rows
+                            (matches the admin profile's attendance tab format). The
+                            TD is text-center + the flex content gets items-center
+                            so spans, the bar+pins row, and the session-pills row
+                            all sit aligned under the centred TIMELINE header. */}
+                        <td className="px-5 py-3 text-center">
                           {hasPendingAny ? (
                             <span className="text-[12px] font-medium text-amber-600 dark:text-amber-400">
                               {pendingKind === "regularization" && pendingRegRow
@@ -1392,30 +1631,91 @@ export default function AttendancePage() {
                               Missed clock-out — regularize to log hours
                             </span>
                           ) : hasClock ? (
-                            <div className="flex flex-col gap-1.5">
+                            // Centered to align under the centred
+                            // TIMELINE header. items-center on the
+                            // flex-col centres the bar row + pills row;
+                            // the bar itself stays at its bounded width
+                            // so it doesn't stretch absurdly wide.
+                            <div className="flex flex-col items-center gap-1.5">
                               <div className="flex items-center gap-3">
-                                <TimelineBar liveMins={liveMins} />
-                                <LocationPin raw={rec.location} />
+                                {/* Single pin that opens a popover with BOTH
+                                    clock-in and clock-out locations stacked
+                                    inside (replaces the previous green +
+                                    red flank pair — less visual noise). */}
+                                <TimelineBar
+                                  liveMins={liveMins}
+                                  firstIn={sessions[0]?.clockIn ? new Date(sessions[0].clockIn) : null}
+                                  lastOut={(() => {
+                                    // Last CLOSED session's clockOut. If the
+                                    // tail session is open the tooltip shows
+                                    // "now" via isOpen below.
+                                    for (let i = sessions.length - 1; i >= 0; i--) {
+                                      if (sessions[i]?.clockOut) return new Date(sessions[i].clockOut!);
+                                    }
+                                    return null;
+                                  })()}
+                                  isOpen={!!sessions.find((s) => !s.clockOut)}
+                                />
+                                <DayLocationPin
+                                  inRaw={sessions[0]?.clockInLocation ?? rec.location}
+                                  outRaw={(() => {
+                                    // Walk backwards from the last session and
+                                    // grab the first one that has a clock-out
+                                    // location. While the day is still active
+                                    // (open session) this is null and the popover
+                                    // shows "No location recorded" for that side.
+                                    for (let i = sessions.length - 1; i >= 0; i--) {
+                                      if (sessions[i]?.clockOutLocation) return sessions[i].clockOutLocation;
+                                    }
+                                    return null;
+                                  })()}
+                                />
                               </div>
                               {/* Multi-session days: render every (in → out)
-                                  pair as a small chip so the user sees the
-                                  full punch history at a glance. Single-
-                                  session days fall back to a compact pair. */}
+                                  pair as a clean pill so the user sees the
+                                  full punch history at a glance. Each pill
+                                  has a status dot (pulsing for the live
+                                  session), tabular time range, and a
+                                  duration badge. */}
                               {sessions.length > 1 && (
-                                <div className="flex flex-wrap items-center gap-1">
-                                  {sessions.map((s, i) => (
-                                    <span
-                                      key={i}
-                                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums ${
-                                        s.clockOut
-                                          ? "bg-slate-100 text-slate-600 dark:bg-white/[0.05] dark:text-slate-300"
-                                          : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
-                                      }`}
-                                      title={`Session ${i + 1}`}
-                                    >
-                                      {fmtT(s.clockIn)} <span className="opacity-60">→</span> {s.clockOut ? fmtT(s.clockOut) : "now"}
-                                    </span>
-                                  ))}
+                                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                                  {sessions.map((s, i) => {
+                                    const open = !s.clockOut;
+                                    const startMs = new Date(s.clockIn).getTime();
+                                    const endMs   = s.clockOut
+                                      ? new Date(s.clockOut).getTime()
+                                      : (clock?.getTime() ?? Date.now());
+                                    const mins = Math.max(0, Math.round((endMs - startMs) / 60000));
+                                    const dur = mins >= 60
+                                      ? `${Math.floor(mins / 60)}h ${mins % 60}m`
+                                      : `${mins}m`;
+                                    return (
+                                      <span
+                                        key={i}
+                                        title={`Session ${i + 1} · ${dur}${open ? " (live)" : ""}`}
+                                        className={`inline-flex items-center gap-1.5 rounded-full pl-1.5 pr-1.5 py-[3px] text-[11px] font-medium tabular-nums ring-1 ring-inset ${
+                                          open
+                                            ? "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20"
+                                            : "bg-slate-50 text-slate-600 ring-slate-200 dark:bg-white/[0.04] dark:text-slate-300 dark:ring-white/10"
+                                        }`}
+                                      >
+                                        <span className="relative inline-flex h-1.5 w-1.5 shrink-0">
+                                          {open && (
+                                            <span className="absolute inset-0 rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                                          )}
+                                          <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${open ? "bg-emerald-500" : "bg-slate-400 dark:bg-slate-500"}`} />
+                                        </span>
+                                        <span className="inline-flex items-center gap-1">
+                                          {fmtT(s.clockIn)}
+                                          <span className="mx-1 opacity-50">–</span>
+                                          {s.clockOut ? fmtT(s.clockOut) : <span className="font-semibold">now</span>}
+                                        </span>
+                                        <span className={`ml-0.5 text-[10px] font-semibold ${open ? "text-emerald-600/80 dark:text-emerald-400/80" : "text-slate-400 dark:text-slate-500"}`}>
+                                          · {dur}
+                                        </span>
+                                      </span>
+                                    );
+                                  })}
                                 </div>
                               )}
                             </div>
@@ -1436,12 +1736,12 @@ export default function AttendancePage() {
                           )}
                         </td>
 
-                        {/* EFFECTIVE HOURS */}
-                        <td className="px-5 py-3">
+                        {/* EFFECTIVE HOURS — centered to match its centred header. */}
+                        <td className="px-5 py-3 text-center">
                           {missedClockOut ? (
                             <span className="text-[12px] text-slate-400">—</span>
                           ) : liveMins > 0 ? (
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center justify-center gap-2">
                               <span className={`w-2 h-2 rounded-full shrink-0 ${pct >= 90 ? "bg-emerald-400" : pct >= 50 ? "bg-[#008CFF]" : "bg-orange-400"}`} />
                               <span className="text-[13px] text-slate-800 dark:text-white">{hrs}</span>
                               {pct < 90 && <span className="text-[11px] text-slate-400">+</span>}
@@ -1451,8 +1751,8 @@ export default function AttendancePage() {
                           ) : null}
                         </td>
 
-                        {/* GROSS HOURS */}
-                        <td className="px-5 py-3 text-[13px] text-slate-700 dark:text-slate-300">
+                        {/* GROSS HOURS — centered to match its centred header. */}
+                        <td className="px-5 py-3 text-center text-[13px] text-slate-700 dark:text-slate-300">
                           {missedClockOut
                             ? <span className="text-slate-400">—</span>
                             : liveMins > 0
@@ -1467,8 +1767,9 @@ export default function AttendancePage() {
                             row state (e.g. "Present | Missing Swipe(s)" for a
                             partial day, "On Leave · Sick Leave" when leave
                             covers the date). Replaces the old status pill so
-                            the row stays compact. */}
-                        <td className="px-5 py-3">
+                            the row stays compact. Centred to align under
+                            the centred LOG header. */}
+                        <td className="px-5 py-3 text-center">
                           {(() => {
                             type Cell = { label: string; Icon: typeof CheckCircle2; tone: string };
                             let c: Cell;
