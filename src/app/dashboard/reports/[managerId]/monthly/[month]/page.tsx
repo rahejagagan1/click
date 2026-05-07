@@ -697,17 +697,11 @@ export default function MonthlyReportPage() {
     const [hrFeedbackRows, setHrFeedbackRows] = useState([{ id: "fs-1", methodOfSurvey: "", topicCovered: "", keyInsights: "", actionTaken: "" }]);
     const [hrGrievanceRows, setHrGrievanceRows] = useState([{ id: "g-1", employeeName: "", issueType: "", briefDescription: "", actionTaken: "", status: "" }]);
 
-    // Auto-fill Section B thumbnail counts from DB
-    const { data: thumbnailData } = useSWR(
-        isQaReport ? `/api/reports/${managerId}/monthly/${monthIndex}/andrew-thumbnail-cases?year=${year}` : null,
-        fetcher
-    );
-
-    // Auto-fill Section C capsule views from DB
-    const { data: capsuleViewsData } = useSWR(
-        isQaReport ? `/api/reports/${managerId}/monthly/${monthIndex}/capsule-views?year=${year}` : null,
-        fetcher
-    );
+    // QA report is fully manual now — Section B (thumbnails) and
+    // Section C (capsule views) used to auto-fetch counts from the
+    // DB; they're entered by the manager directly. The endpoints
+    // (/andrew-thumbnail-cases, /capsule-views) stay around in case
+    // we ever bring back an "Auto-fill from DB" button.
 
     // Auto-fill Production Monthly Section 4 — videos published in the prior
     // month by the PM's capsule, ranked by first-30-day views.
@@ -753,13 +747,6 @@ export default function MonthlyReportPage() {
     // concurrent POSTs. A ref is checked synchronously in postReport
     // before the await, so the second click is dropped immediately.
     const submitInFlight = React.useRef(false);
-    // Auto-fill guards. Each section's auto-fill must run AT MOST once
-    // per page load. Without these refs, an SWR revalidation (window
-    // focus, network reconnect, …) can briefly flip isLoading → true →
-    // false, which re-triggers the auto-fill useEffects and overwrites
-    // user edits in memory that haven't been saved as a draft yet.
-    const hasAutoFilledQaSectionA = React.useRef(false);
-    const hasAutoFilledThumbnails = React.useRef(false);
     const [submitError,       setSubmitError]       = useState<string | null>(null);
     const [statusLoaded,      setStatusLoaded]      = useState(false);
     const [showConfirm,       setShowConfirm]       = useState(false);
@@ -835,122 +822,13 @@ export default function MonthlyReportPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [managerId, monthIndex, year]);
 
-    // ── Andrew monthly auto-fill ──
-    const fetchAndFillAndrewMonthly = useCallback(() => {
-        if (!isQaReport) return;
-        fetch(`/api/reports/${managerId}/monthly/${monthIndex}/andrew-cases?year=${year}`)
-            .then(r => r.json()).then(d => {
-                const cases: any[] = d.andrewCases ?? [];
-                if (!cases.length) return;
-                setAndrewA1Rows(cases.map((c, i) => ({
-                    id: `ma1-${i}-${Date.now()}`,
-                    caseName: c.caseName, capsuleName: c.capsuleName,
-                    caseRating: c.caseRating, caseType: c.caseType,
-                    writer: c.writerName, qaScriptStartDate: c.qaScriptStartDate,
-                    ratingByQATeam: c.scriptQualityRating,
-                    reasonForRating: "", writerQualityScore: c.writerQualityScore,
-                    structuralChanges: "", autoFilled: true,
-                })));
-            }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [managerId, monthIndex, year, isQaReport]);
-
-    const fetchAndFillAbhishekMonthly = useCallback(() => {
-        if (!isQaReport) return;
-        fetch(`/api/reports/${managerId}/monthly/${monthIndex}/andrew-video-cases?year=${year}`)
-            .then(r => r.json()).then(d => {
-                const cases: any[] = d.videoCases ?? [];
-                if (!cases.length) return;
-                setAndrewA2Rows(cases.map((c, i) => ({
-                    id: `ma2-${i}-${Date.now()}`,
-                    caseName: c.caseName, capsuleName: c.capsuleName,
-                    caseRating: c.caseRating, caseType: c.caseType,
-                    writer: c.writerName, writerQualityScore: c.writerQualityScore,
-                    editor: c.editorName, qaVideoStartDate: c.qaVideoStartDate,
-                    ratingByAbhishek: c.videoQualityRating,
-                    reasonForRating: "", editorQualityScore: c.editorQualityScore,
-                    structuralChanges: "", autoFilled: true,
-                })));
-            }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [managerId, monthIndex, year, isQaReport]);
-
-    // Trigger auto-fill on load when no draft exists
-    useEffect(() => {
-        if (!statusLoaded || !isQaReport) return;
-        if (isLocked || isSubmitted || isDraftSaved) return;
-        if (hasAutoFilledQaSectionA.current) return;
-        hasAutoFilledQaSectionA.current = true;
-        fetchAndFillAndrewMonthly();
-        fetchAndFillAbhishekMonthly();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [statusLoaded, isQaReport, managerId, monthIndex, year]);
-
-    // Auto-fill Section B thumbnail counts from API.
-    // Same guards as Section A: don't overwrite a saved/locked report,
-    // and don't fire twice (an SWR refetch could otherwise blow away
-    // edited counts that haven't been saved yet).
-    useEffect(() => {
-        if (!thumbnailData?.thumbnailData?.length) return;
-        if (isLocked || isSubmitted || isDraftSaved) return;
-        if (hasAutoFilledThumbnails.current) return;
-        hasAutoFilledThumbnails.current = true;
-        setAndrewSBRows(prev => prev.map(row => {
-            const match = thumbnailData.thumbnailData.find(
-                (t: any) => t.person?.toLowerCase() === row.person?.toLowerCase()
-            );
-            if (!match) return row;
-            return { ...row, thumbnailsDone: match.thumbnailsDone, autoFilled: true };
-        }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [thumbnailData]);
-
-    // Auto-fill Section C monthly views from DB (only when no draft exists)
-    useEffect(() => {
-        if (!capsuleViewsData?.views?.length) return;
-        if (isLocked || isSubmitted || isDraftSaved) return;
-        const rows: AndrewSCRow[] = capsuleViewsData.views.map((v: any, i: number) => ({
-            id:                `sc-auto-${i}-${Date.now()}`,
-            capsule:           v.capsule           ?? "",
-            currentMonthViews: v.currentMonthViews ?? "",
-            lastMonthViews:    v.lastMonthViews    ?? "",
-            remark:            "",
-            autoFilled:        true,
-        }));
-        // Pad with at least one empty row if data is sparse
-        if (rows.length === 0) rows.push(mkSCRow("sc-1"));
-        setAndrewSCRows(rows);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [capsuleViewsData]);
-
-    // Auto-compute Section B from A1/A2 data
-    useEffect(() => {
-        if (!isQaReport || isLocked || isSubmitted || isDraftSaved) return;
-        const andrewCount = andrewA1Rows.filter(r => r.caseName && r.caseName !== "N/A").length;
-        const abhishekCount = andrewA2Rows.filter(r => r.caseName && r.caseName !== "N/A").length;
-        const andrewRatings = andrewA1Rows.map(r => parseFloat(r.ratingByQATeam)).filter(n => !isNaN(n));
-        const abhishekRatings = andrewA2Rows.map(r => parseFloat(r.ratingByAbhishek)).filter(n => !isNaN(n));
-        const andrewAvg = andrewRatings.length ? (andrewRatings.reduce((s,n)=>s+n,0)/andrewRatings.length).toFixed(2) : "";
-        const abhishekAvg = abhishekRatings.length ? (abhishekRatings.reduce((s,n)=>s+n,0)/abhishekRatings.length).toFixed(2) : "";
-        const andrewWQS = andrewA1Rows.map(r => parseFloat(r.writerQualityScore)).filter(n => !isNaN(n));
-        const abhishekEQS = andrewA2Rows.map(r => parseFloat(r.editorQualityScore)).filter(n => !isNaN(n));
-        const andrewAvgQS = andrewWQS.length ? (andrewWQS.reduce((s,n)=>s+n,0)/andrewWQS.length).toFixed(1) : "";
-        const abhishekAvgQS = abhishekEQS.length ? (abhishekEQS.reduce((s,n)=>s+n,0)/abhishekEQS.length).toFixed(1) : "";
-        setAndrewBRows(prev => prev.map(row => {
-            if (row.reviewer === "Andrew") return { ...row,
-                totalReviewsDone: andrewCount > 0 ? String(andrewCount) : row.totalReviewsDone,
-                avgRating: andrewAvg || row.avgRating,
-                avgWriterEditorQaScore: andrewAvgQS || row.avgWriterEditorQaScore,
-            };
-            if (row.reviewer === "Abhishek") return { ...row,
-                totalReviewsDone: abhishekCount > 0 ? String(abhishekCount) : row.totalReviewsDone,
-                avgRating: abhishekAvg || row.avgRating,
-                avgWriterEditorQaScore: abhishekAvgQS || row.avgWriterEditorQaScore,
-            };
-            return row;
-        }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [andrewA1Rows, andrewA2Rows, isQaReport]);
+    // (QA report is fully manual now — there's no Andrew/Abhishek
+    //  auto-fetch from /andrew-cases or /andrew-video-cases, no
+    //  thumbnail or capsule-views auto-fill, and no auto-aggregation
+    //  of the reviewer summary from A1/A2 case rows. Every numeric
+    //  cell in Section A / B / C is typed by the manager. The
+    //  endpoints stay live so a future "Auto-fill" button can wire
+    //  back into them, and saved drafts still load exactly as saved.)
 
     // (Researcher report intentionally has no ClickUp auto-merge —
     //  every numeric column is manual entry.)
@@ -1150,9 +1028,16 @@ export default function MonthlyReportPage() {
         // stable across re-renders and the ResizableTh tree isn't unmounted
         // on every keystroke. Don't declare it inline here.
 
-        // Pre-compute disabled helpers for Andrew inputs
-        const aDisabled  = isLocked && !isAdmin;   // manually-filled columns: editable unless report is locked (admins can always edit)
-        const aAutoLock  = true;                   // auto-filled columns (Month, Reviewer, Target, Total Reviews, Avg QA Score, Avg Rating): always read-only for everyone
+        // Pre-compute disabled helpers for Andrew inputs.
+        // Every column is manually-filled now — `aAutoLock` used to
+        // pin the four "computed" columns (Target, Total Reviews,
+        // Avg QA Score, Avg Rating) read-only because they were
+        // populated from A1/A2 aggregation. With auto-fill removed,
+        // they have no value unless the manager types one — so they
+        // need to be editable. `aAutoLock` stays as an alias of
+        // `aDisabled` to keep the existing JSX call sites unchanged.
+        const aDisabled  = isLocked && !isAdmin;
+        const aAutoLock  = aDisabled;
 
         return (
             <div className="max-w-7xl mx-auto flex flex-col gap-3 px-2 pt-2 pb-6" style={{minHeight:"calc(100vh - 80px)"}}>
