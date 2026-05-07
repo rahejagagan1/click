@@ -2069,7 +2069,19 @@ export default function HRHomePage() {
     }
   };
   const clockOut = async () => {
-    const res = await fetch("/api/hr/attendance/clock-out", { method: "POST" });
+    // Try to capture geo so the AttendanceSession row gets a
+    // clockOutLocation alongside clockInLocation. Best-effort: if
+    // the browser denies / can't fix a position, we still POST so
+    // the user isn't trapped with an open session — the server
+    // accepts a body without coords and just stores NULL.
+    let body: Record<string, unknown> = {};
+    const geo = await captureClockInGeo();
+    if (geo.ok) body = { lat: geo.lat, lng: geo.lng, address: geo.address };
+    const res = await fetch("/api/hr/attendance/clock-out", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
     const d = await res.json();
     if (!res.ok) return alert(d.error);
     mutate(`/api/hr/attendance?month=${monthKey}`);
@@ -2299,26 +2311,54 @@ export default function HRHomePage() {
 
                 <div className="flex items-center gap-1.5">
                   {!todayRec?.clockIn ? (
+                    // Clock-in is the GO action → green. Gradient +
+                    // inner sheen + soft halo so the button reads as
+                    // raised against the purple Quick-Access widget.
+                    // `bg-green-600` is a stub class needed so the
+                    // global "preserve white text" rule in globals.css
+                    // matches — without it, .text-white gets forced
+                    // dark in light mode and the label is unreadable.
                     <button
                       onClick={clockIn}
                       disabled={clockingIn}
-                      className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-70 disabled:cursor-wait"
-                      style={{ background: isRemoteMode ? "#008CFF" : "#ff6a63" }}
+                      className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold bg-green-600 text-white transition-all duration-150 hover:brightness-110 disabled:opacity-70 disabled:cursor-wait"
+                      style={{
+                        background:  "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
+                        boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.25), 0 3px 10px -3px rgba(34,197,94,0.6), 0 1px 2px rgba(0,0,0,0.10)",
+                      }}
                     >
                       {clockingIn ? "Getting location…" : isRemoteMode ? "Remote Clock-in" : "Clock-in"}
                     </button>
                   ) : !todayRec?.clockOut ? (
+                    // Clock-out → red, same gradient/halo treatment.
                     <button
                       onClick={clockOut}
-                      className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95"
-                      style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a63" }}
+                      className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold bg-red-600 text-white transition-all duration-150 hover:brightness-110"
+                      style={{
+                        background:  "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
+                        boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.25), 0 3px 10px -3px rgba(239,68,68,0.6), 0 1px 2px rgba(0,0,0,0.10)",
+                      }}
                     >
                       {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
                     </button>
                   ) : (
-                    <span className="flex h-[24px] items-center rounded-[3px] bg-white/15 px-3.5 text-[11px] font-semibold text-white/90">
-                      Done
-                    </span>
+                    // Already clocked out, but the day isn't a hard
+                    // terminal state — multi-session is supported, so
+                    // give the user the Clock-In affordance back
+                    // instead of a non-actionable "Done" pill. Behaves
+                    // identically to the first branch (just appears
+                    // after a prior clock-out).
+                    <button
+                      onClick={clockIn}
+                      disabled={clockingIn}
+                      className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold bg-green-600 text-white transition-all duration-150 hover:brightness-110 disabled:opacity-70 disabled:cursor-wait"
+                      style={{
+                        background:  "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
+                        boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.25), 0 3px 10px -3px rgba(34,197,94,0.6), 0 1px 2px rgba(0,0,0,0.10)",
+                      }}
+                    >
+                      {clockingIn ? "Getting location…" : isRemoteMode ? "Remote Clock-in" : "Clock-in"}
+                    </button>
                   )}
                   <OtherActionsMenu onSelect={(kind) => setOtherForm(kind)} />
                 </div>

@@ -42,7 +42,13 @@ export function canSeeReports(user: ClientUser): boolean {
     isAdmin(user) ||
     user?.orgLevel === "manager" ||
     user?.orgLevel === "hod" ||
-    user?.orgLevel === "hr_manager"
+    // Use role=hr_manager (not orgLevel) — see isPickableAsManager
+    // for the why: orgLevel=hr_manager is set on every HR employee
+    // including plain Members, so gating on it would let HR Members
+    // see all reports. role=hr_manager is the actual HR-Manager-only
+    // marker (e.g. Tanvi), which matches the rule "only HR Manager
+    // sees reports, not normal HR staff".
+    user?.role === "hr_manager"
   );
 }
 
@@ -102,12 +108,20 @@ export function isFullHRAdmin(user: ClientUser): boolean {
  */
 export function isPickableAsManager(user: ClientUser): boolean {
   if (!user) return false;
-  if (user.orgLevel === "ceo")            return true;
-  if (user.orgLevel === "special_access") return true;
+  // Report-OWNERS only (people who actually submit reports).
+  // CEO / special_access / role=admin / developer can SEE everyone's
+  // reports but they don't OWN any, so their names must NOT appear in
+  // the manager list / picker / reports sidebar.
+  //
+  // Subtle gotcha for the HR side: every HR person — including
+  // Members — is saved with `orgLevel: hr_manager` (the org-tree
+  // dropdown's "HR" option maps to that single orgLevel). So we
+  // canNOT use orgLevel=hr_manager as the manager test or every HR
+  // employee shows up as a manager. The actual HR-Manager (e.g.
+  // Tanvi) is identified by `role === "hr_manager"`; that's what
+  // we gate on here.
   if (user.orgLevel === "hod")            return true;
   if (user.orgLevel === "manager")        return true;
-  if (user.orgLevel === "hr_manager")     return true;
-  if (user.role === "admin")              return true;
   if (user.role === "manager")            return true;
   if (user.role === "production_manager") return true;
   if (user.role === "researcher_manager") return true;
