@@ -9,20 +9,26 @@ export async function GET() {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-        // True managers only — used by the "Manager Reports" sidebar
-        // and the Reporting/Inline-Manager dropdowns. Past tweaks
-        // widened this to include anyone with team members under them
-        // (because bulk imports left writers/editors with stale
-        // managerId references) and to leads/sub_leads, which polluted
-        // the list with regular employees. Lock back down to the
-        // explicit manager-tier roles + manager-flavoured orgLevels.
+        // True report-OWNERS only — used by the "Manager Reports"
+        // sidebar and the Reporting/Inline-Manager dropdowns.
+        //
+        // Excluded on purpose:
+        //   • orgLevel "ceo" / "special_access" — they VIEW reports
+        //     but don't submit any, so their names must not appear in
+        //     the picker.
+        //   • role "admin" — same reason.
+        //   • orgLevel "hr_manager" — the org-tree dropdown's "HR"
+        //     option maps every HR employee (including Members) to this
+        //     orgLevel, so it would pollute the list with non-managers.
+        //     The real HR Manager (Tanvi) is matched via role=hr_manager
+        //     below instead.
+        // Mirrors src/lib/access.ts:isPickableAsManager.
         const managers = await prisma.user.findMany({
             where: {
                 isActive: true,
                 OR: [
-                    { orgLevel: { in: ["ceo", "special_access", "hod", "manager", "hr_manager"] } },
+                    { orgLevel: { in: ["hod", "manager"] } },
                     { role: { in: [
-                        "admin",
                         "manager",
                         "production_manager",
                         "researcher_manager",
