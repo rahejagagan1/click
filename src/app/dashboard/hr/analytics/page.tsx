@@ -198,6 +198,16 @@ export default function HRHomePage() {
   const [bTab, setBTab]   = useState<"birthday"|"anniversary"|"joinees">("birthday");
   const [postText, setPost] = useState("");
   const [orgTab, setOrgTab] = useState<"org"|"team">("org");
+  // Two-step Clock-Out confirmation (matches home + attendance pages).
+  // First click on the red Clock-out button flips this flag; the
+  // button splits into a Confirm + Cancel pair so a stray click can't
+  // end the day. Auto-collapses after 6s if the user walks away.
+  const [confirmingClockOut, setConfirmingClockOut] = useState(false);
+  useEffect(() => {
+    if (!confirmingClockOut) return;
+    const t = setTimeout(() => setConfirmingClockOut(false), 6000);
+    return () => clearTimeout(t);
+  }, [confirmingClockOut]);
 
   useEffect(() => {
     const tick = () => {
@@ -322,11 +332,36 @@ export default function HRHomePage() {
                     {isRemoteMode ? "Remote Clock-in" : "Clock-in"}
                   </button>
                 ) : !todayRec?.clockOut ? (
-                  <button onClick={clockOut}
-                    className="h-7 px-4 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
-                    style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a6a" }}>
-                    {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
-                  </button>
+                  // Two-step confirmation. Same pattern as home + attendance —
+                  // first click opens Confirm + Cancel, only Confirm fires
+                  // clockOut(). Prevents accidental end-of-day from a
+                  // misclick on this analytics tile.
+                  confirmingClockOut ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => { setConfirmingClockOut(false); clockOut(); }}
+                        className="h-7 px-3 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
+                        style={{ background: "#dc2626" }}
+                      >
+                        Confirm Web Clock-Out
+                      </button>
+                      <button
+                        onClick={() => setConfirmingClockOut(false)}
+                        className="h-7 px-3 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
+                        style={{ background: "#475569" }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmingClockOut(true)}
+                      className="h-7 px-4 rounded-md text-[12px] font-semibold text-white transition-all hover:brightness-95 active:scale-95"
+                      style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a6a" }}
+                    >
+                      {todayLoc.mode === "remote" ? "Remote Clock-out" : "Web Clock-Out"}
+                    </button>
+                  )
                 ) : (
                   <span className="h-7 px-4 rounded-md text-[12px] font-semibold flex items-center text-white/90"
                         style={{ background: "rgba(255,255,255,0.18)" }}>
