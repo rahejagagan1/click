@@ -1030,25 +1030,28 @@ function TimelineBar({
   const widthPct = Math.max(0, endPct - startPct);
   const hasBar   = !!(clockIn && clockOut);
 
+  // Lowercase, no leading-zero formatting — matches the attendance
+  // page's "Logged In 8:00 am" tooltip wording.
   const fmt = (d: Date | null) => d
-    ? d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" })
-    : "—";
-  const title = clockIn
-    ? `${fmt(new Date(clockIn))} → ${fmt(clockOut ? new Date(clockOut) : null)}${
-        tone === "pending"  ? " · Regularization pending"  :
-        tone === "approved" ? " · Regularization approved" : ""}`
-    : undefined;
+    ? d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" })
+        .replace(/^0/, "").toLowerCase()
+    : null;
+  const inLabel  = clockIn  ? fmt(new Date(clockIn))  : null;
+  const outLabel = clockOut ? fmt(new Date(clockOut)) : null;
+  const toneSuffix = tone === "pending"  ? " · Regularization pending"
+                   : tone === "approved" ? " · Regularization approved"
+                   : "";
 
   // Tone palette: default (sky), pending (amber-striped), approved (emerald)
   const toneCls =
     tone === "pending"
-      ? { fill: "from-[#fbbf24] to-[#f59e0b]", glow: "0 2px 5px rgba(245,158,11,0.35)", ring: "#f59e0b" }
+      ? { fill: "from-[#fbbf24] to-[#f59e0b]", glow: "0 2px 5px rgba(245,158,11,0.35)", ring: "#f59e0b", dot: "bg-[#f59e0b]" }
       : tone === "approved"
-        ? { fill: "from-[#34d399] to-[#10b981]", glow: "0 2px 5px rgba(16,185,129,0.35)", ring: "#10b981" }
-        : { fill: "from-[#38bdf8] to-[#0ea5e9]", glow: "0 2px 5px rgba(14,165,233,0.35)", ring: "#0ea5e9" };
+        ? { fill: "from-[#34d399] to-[#10b981]", glow: "0 2px 5px rgba(16,185,129,0.35)", ring: "#10b981", dot: "bg-[#10b981]" }
+        : { fill: "from-[#38bdf8] to-[#0ea5e9]", glow: "0 2px 5px rgba(14,165,233,0.35)", ring: "#0ea5e9", dot: "bg-[#0ea5e9]" };
 
   return (
-    <div className="group relative h-5 w-full" title={title}>
+    <div className="group relative h-5 w-full">
       {/* Track */}
       <div className="absolute inset-x-0 top-1/2 h-[8px] -translate-y-1/2 rounded-full bg-slate-100 ring-1 ring-inset ring-slate-200/60" />
 
@@ -1083,6 +1086,28 @@ function TimelineBar({
           />
         </>
       ) : null}
+
+      {/* Themed hover tooltip — same look as the attendance-page bar.
+          Pointer-events disabled so it never swallows clicks on the
+          row's other interactive children (regularize, on-behalf
+          actions, etc.). Hidden when there's no clock-in to show. */}
+      {inLabel && (
+        <div
+          role="tooltip"
+          className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-20 whitespace-nowrap rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0a1526] px-2.5 py-1.5 text-[11.5px] font-medium text-slate-700 dark:text-slate-200 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+        >
+          <div className="flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full ${toneCls.dot}`} />
+            <span>
+              Logged In <span className="font-semibold tabular-nums">{inLabel}</span>{" "}
+              <span className="opacity-50">–</span>{" "}
+              <span className="font-semibold tabular-nums">{outLabel ?? "now"}</span>
+              {toneSuffix && <span className="ml-1 text-slate-500 dark:text-slate-400">{toneSuffix}</span>}
+            </span>
+          </div>
+          <span className="absolute left-1/2 -translate-x-1/2 -bottom-[5px] w-2.5 h-2.5 rotate-45 bg-white dark:bg-[#0a1526] border-r border-b border-slate-200 dark:border-white/10" />
+        </div>
+      )}
     </div>
   );
 }
