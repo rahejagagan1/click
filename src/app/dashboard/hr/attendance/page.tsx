@@ -731,11 +731,18 @@ export default function AttendancePage() {
   // so a stray click doesn't end the day. Auto-cancels after 6s if the
   // user walks away. Mirrors the home Quick-Access tile's behaviour.
   const [confirmingClockOut, setConfirmingClockOut] = useState(false);
+  // True while the async clockOut() call is in flight. Keeps the
+  // Confirm/Cancel pair visible until the API resolves (otherwise
+  // the synchronous state reset reverts the button to "Web Clock-
+  // Out" before todayRec.clockOut updates → looks like nothing
+  // happened) and disables the Confirm button to prevent a
+  // double-click double-POST.
+  const [clockingOut, setClockingOut] = useState(false);
   useEffect(() => {
-    if (!confirmingClockOut) return;
+    if (!confirmingClockOut || clockingOut) return;
     const t = setTimeout(() => setConfirmingClockOut(false), 6000);
     return () => clearTimeout(t);
-  }, [confirmingClockOut]);
+  }, [confirmingClockOut, clockingOut]);
 
   useEffect(() => {
     setClock(new Date());
@@ -1272,22 +1279,33 @@ export default function AttendancePage() {
                 confirmingClockOut ? (
                   <div className="flex items-center gap-1.5 w-fit">
                     <button
-                      onClick={() => { setConfirmingClockOut(false); clockOut(); }}
+                      onClick={async () => {
+                        if (clockingOut) return;
+                        setClockingOut(true);
+                        try {
+                          await clockOut();
+                        } finally {
+                          setClockingOut(false);
+                          setConfirmingClockOut(false);
+                        }
+                      }}
+                      disabled={clockingOut}
                       style={{
                         background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
                         boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
                       }}
-                      className="h-8 px-4 bg-red-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap transition-all duration-150 hover:brightness-110 hover:-translate-y-px"
+                      className="h-8 px-4 bg-red-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0"
                     >
-                      Confirm Web Clock-Out
+                      {clockingOut ? "Clocking out…" : "Confirm Web Clock-Out"}
                     </button>
                     <button
                       onClick={() => setConfirmingClockOut(false)}
+                      disabled={clockingOut}
                       style={{
                         background: "linear-gradient(180deg, #334155 0%, #1e293b 100%)",
                         boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.12), 0 1px 2px rgba(0,0,0,0.10)",
                       }}
-                      className="h-8 px-4 bg-slate-700 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap transition-all duration-150 hover:brightness-110"
+                      className="h-8 px-4 bg-slate-700 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap transition-all duration-150 hover:brightness-110 disabled:opacity-70 disabled:cursor-not-allowed"
                     >
                       Cancel
                     </button>
