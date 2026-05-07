@@ -223,14 +223,26 @@ function ATd({ children, className = "" }: { children?: React.ReactNode; classNa
 
 /** Nishant table cell — module-level so React doesn't remount inputs inside it */
 function NCell({ children, bold, center, colored }: { children?: React.ReactNode; bold?: boolean; center?: boolean; colored?: string }) {
+    // Padding intentionally lives on NInput now (px-3 py-2) so the
+    // input fills the whole cell — clicking anywhere in the cell
+    // lands inside the input rather than on dead cell padding.
     return (
-        <td className={`px-3 py-2 border border-slate-300 dark:border-white/10 text-[13px] align-middle ${bold ? "font-semibold" : ""} ${center ? "text-center" : ""} ${colored || "text-slate-800 dark:text-slate-200 bg-white dark:bg-[#32324a]"}`}>
+        <td className={`p-0 border border-slate-300 dark:border-white/10 text-[13px] align-middle ${bold ? "font-semibold" : ""} ${center ? "text-center" : ""} ${colored || "text-slate-800 dark:text-slate-200 bg-white dark:bg-[#32324a]"}`}>
             {children}
         </td>
     );
 }
 
-/** Nishant report input — module-level so React doesn't remount on every render */
+/** Nishant report input — module-level so React doesn't remount on every render.
+ *
+ *  Visual chrome was previously a rounded "pill" — `rounded`, plus
+ *  `hover:bg-emerald-50` and `focus:bg-white` painted a distinct chip
+ *  inside the coloured cell. Managers complained that the cell looked
+ *  half-editable when the input was actually narrower than the cell.
+ *  Stripped down to a flat field: the input fills the whole cell
+ *  (block + h-full) and we zero out NCell's padding so clicking
+ *  anywhere in the cell lands inside the input. Caret is the only
+ *  affordance — no rounded corners, no hover/focus tint, no ring. */
 function NInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
     return (
         <input
@@ -238,7 +250,7 @@ function NInput({ value, onChange, placeholder }: { value: string; onChange: (v:
             value={value}
             onChange={e => onChange(e.target.value)}
             placeholder={placeholder ?? "Type here…"}
-            className="w-full text-[13px] text-slate-800 dark:text-slate-200 focus:outline-none rounded px-1 cursor-text bg-transparent hover:bg-emerald-50 dark:hover:bg-emerald-900/20 focus:bg-white dark:focus:bg-white/10 focus:ring-1 focus:ring-emerald-400/50 placeholder:text-slate-300 dark:placeholder:text-slate-500 transition-colors"
+            className="block w-full h-full text-[13px] text-slate-800 dark:text-slate-200 focus:outline-none cursor-text bg-transparent px-3 py-2 placeholder:text-slate-300 dark:placeholder:text-slate-500"
         />
     );
 }
@@ -551,11 +563,11 @@ export default function MonthlyReportPage() {
     const isQaReport = !isLoading && reportFmt === "qa";
     const isHrReport = !isLoading && reportFmt === "hr";
 
-    // Researcher stats from ClickUp (approved RTC count + avg rating per researcher)
-    const { data: statsData } = useSWR(
-        isResearcherReport ? `/api/reports/${managerId}/monthly/${monthIndex}/researcher-stats?year=${year}` : null,
-        fetcher
-    );
+    // Researcher report is fully manual now — HR fills in approved
+    // cases, avg rating, FOIA columns, etc. by hand. The
+    // /researcher-stats endpoint stays around (untouched) in case we
+    // ever bring back a "Auto-fill from ClickUp" button, but the
+    // page no longer fetches or merges it.
 
     // Contributor stats — casesCompleted per editor/writer from MonthlyRating
     const { data: contributorData } = useSWR(
@@ -940,25 +952,8 @@ export default function MonthlyReportPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [andrewA1Rows, andrewA2Rows, isQaReport]);
 
-    // Merge ClickUp-derived stats into rows whenever they load
-    useEffect(() => {
-        if (!statsData?.stats?.length) return;
-        setNishantRows(prev => {
-            const rows = prev ?? defaultNishantRows;
-            return rows.map(row => {
-                const match = statsData.stats.find(
-                    (s: any) => row.researcher && s.name?.toLowerCase().trim() === row.researcher.toLowerCase().trim()
-                );
-                if (!match) return row;
-                return {
-                    ...row,
-                    approvedCasesRTC: String(match.approvedCasesRTC ?? row.approvedCasesRTC),
-                    avgRating: match.avgRating ?? row.avgRating,
-                };
-            });
-        });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [statsData]);
+    // (Researcher report intentionally has no ClickUp auto-merge —
+    //  every numeric column is manual entry.)
 
     const validateRequired = (): string | null => {
         // Andrew: validate Section A rows
@@ -1544,15 +1539,17 @@ export default function MonthlyReportPage() {
                             {nRows.map((row, idx) => (
                                 <tr key={row.id} className="group hover:bg-emerald-50/40 dark:hover:bg-emerald-900/20 transition-colors">
                                     <NCell colored="bg-slate-50 dark:bg-[#2a2a42] text-slate-700 dark:text-slate-300 font-medium"><NInput value={row.researcher} onChange={v => setNR(idx, "researcher", v)} placeholder="Name" /></NCell>
+                                    {/* Approved Cases (RTC) + Avg Rating used to render
+                                        as read-only spans with an italic "auto" stub
+                                        because the page auto-merged ClickUp stats into
+                                        these columns. The report is fully manual now,
+                                        so they need to be inputs the manager can type
+                                        into — same NInput shape as the FOIA columns. */}
                                     <NCell center colored="bg-emerald-50 dark:bg-emerald-900/20 text-slate-800 dark:text-slate-200">
-                                        <span className="text-[13px] font-medium">
-                                            {row.approvedCasesRTC || <span className="text-slate-400 dark:text-slate-500 italic text-[12px]">auto</span>}
-                                        </span>
+                                        <NInput value={row.approvedCasesRTC} onChange={v => setNR(idx, "approvedCasesRTC", v)} placeholder="" />
                                     </NCell>
                                     <NCell center colored="bg-emerald-50 dark:bg-emerald-900/20 text-slate-800 dark:text-slate-200">
-                                        <span className="text-[13px] font-medium">
-                                            {row.avgRating || <span className="text-slate-400 dark:text-slate-500 italic text-[12px]">auto</span>}
-                                        </span>
+                                        <NInput value={row.avgRating} onChange={v => setNR(idx, "avgRating", v)} placeholder="" />
                                     </NCell>
                                     <NCell center colored={`bg-white dark:bg-[#32324a] ${row.approvedCasesFOIA && !isNaN(Number(row.approvedCasesFOIA)) && Number(row.approvedCasesFOIA) > 20 ? "text-red-600 font-semibold" : "text-slate-800 dark:text-slate-200"}`}><NInput value={row.approvedCasesFOIA} onChange={v => setNR(idx, "approvedCasesFOIA", v)} placeholder="N/A" /></NCell>
                                     <NCell center><NInput value={row.expectedTargetRTC} onChange={v => setNR(idx, "expectedTargetRTC", v)} placeholder="" /></NCell>
