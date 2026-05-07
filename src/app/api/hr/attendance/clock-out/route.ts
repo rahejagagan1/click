@@ -1,9 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
+import { parseBody } from "@/lib/validate";
+import { stringifyAttLoc } from "@/lib/attendance-location";
 import { istTodayDateOnly } from "@/lib/ist-date";
 
-export async function POST(_req: NextRequest) {
+// Same shape as the clock-in body. Optional here because legacy
+// callers (cron sweeper, integration tests, anyone POSTing an empty
+// body) still need to work — clock-out without location is allowed,
+// the field just stays NULL on the session row.
+const ClockOutBody = z.object({
+  lat: z.number().finite().min(-90).max(90),
+  lng: z.number().finite().min(-180).max(180),
+  address: z.string().trim().max(240).optional(),
+}).partial();
+
+export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
 
@@ -17,6 +30,25 @@ export async function POST(_req: NextRequest) {
     if (!userId) return NextResponse.json({ error: "User not found" }, { status: 404 });
     const now = new Date();
     const today = istTodayDateOnly();
+
+    // Try to parse a location body. If absent / invalid we still
+    // proceed with a NULL clockOutLocation rather than rejecting —
+    // forcing geolocation on clock-out would strand users with an
+    // open session if their browser permission lapsed mid-day.
+    let clockOutLocation: string | null = null;
+    try {
+      const parsed = await parseBody(req, ClockOutBody);
+      if (parsed.ok && parsed.data.lat != null && parsed.data.lng != null) {
+        clockOutLocation = stringifyAttLoc({
+          mode: null,
+          lat: parsed.data.lat,
+          lng: parsed.data.lng,
+          address: parsed.data.address,
+        });
+      }
+    } catch {
+      // Empty body or non-JSON body — that's fine, just no location.
+    }
 
     // ── Multi-session clock-out ─────────────────────────────────────────
     // Find today's row + currently-open session, close that session, then
@@ -46,10 +78,12 @@ export async function POST(_req: NextRequest) {
       }
       const openSession = open[0];
 
-      // Close the open session.
+      // Close the open session — also stamp clockOutLocation if the
+      // client captured geolocation for this punch. Null is fine
+      // (legacy clients / browsers without geo permission).
       await tx.$executeRawUnsafe(
-        `UPDATE "AttendanceSession" SET "clockOut" = $1 WHERE id = $2`,
-        now, openSession.id,
+        `UPDATE "AttendanceSession" SET "clockOut" = $1, "clockOutLocation" = $2 WHERE id = $3`,
+        now, clockOutLocation, openSession.id,
       );
 
       // Recompute total from ALL closed sessions (including the one we
