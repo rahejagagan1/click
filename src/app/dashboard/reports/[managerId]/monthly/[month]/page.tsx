@@ -214,8 +214,13 @@ function RichTextField({
 
 /** Andrew table cell — module-level so React doesn't remount inputs inside it */
 function ATd({ children, className = "" }: { children?: React.ReactNode; className?: string }) {
+    // Padding moves onto the input/textarea itself (px-2 py-2) so the
+    // input fills the entire cell — clicking anywhere in the cell
+    // lands inside the input rather than on dead cell padding. Non-
+    // input children (Month label, computed diff) wrap themselves
+    // with their own padding to preserve the visual layout.
     return (
-        <td className={`px-2 py-2 border border-slate-200 dark:border-white/10 bg-white dark:bg-[#32324a] text-[13px] align-top text-slate-800 dark:text-slate-200 ${className}`}>
+        <td className={`p-0 border border-slate-200 dark:border-white/10 bg-white dark:bg-[#32324a] text-[13px] align-top text-slate-800 dark:text-slate-200 ${className}`}>
             {children}
         </td>
     );
@@ -255,25 +260,30 @@ function NInput({ value, onChange, placeholder }: { value: string; onChange: (v:
     );
 }
 
-/** Andrew report input — module-level so React doesn't remount on every render */
+/** Andrew report input — module-level so React doesn't remount on every render.
+ *  Padding lives on the input (px-2 py-2) and matches what ATd used
+ *  to apply, so the input fills the entire cell and a click anywhere
+ *  in the cell lands inside it. */
 function AInput({ value, onChange, placeholder = "", disabled = false }: {
     value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean;
 }) {
     return (
         <input type="text" value={value} onChange={e => onChange(e.target.value)}
             placeholder={placeholder} disabled={disabled}
-            className={`w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none ${disabled ? "opacity-60 cursor-default" : ""}`} />
+            className={`block w-full h-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none px-2 py-2 ${disabled ? "opacity-60 cursor-default" : ""}`} />
     );
 }
 
-/** Andrew report textarea — module-level so React doesn't remount on every render */
+/** Andrew report textarea — module-level so React doesn't remount on every render.
+ *  Same full-cell padding pattern as AInput. min-h keeps the row
+ *  visually consistent with rows whose textareas are empty. */
 function ATextarea({ value, onChange, placeholder = "", disabled = false }: {
     value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean;
 }) {
     return (
         <textarea value={value} onChange={e => onChange(e.target.value)}
             placeholder={placeholder} disabled={disabled} rows={3}
-            className="w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none resize-y" />
+            className="block w-full h-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none resize-y px-2 py-2 min-h-[60px]" />
     );
 }
 
@@ -1092,9 +1102,9 @@ export default function MonthlyReportPage() {
                                     <tbody>
                                         {andrewBRows.map((row,idx) => (
                                             <tr key={row.id} className="hover:bg-amber-50/40">
-                                                <ATd><span className="font-medium text-slate-600 text-[12px]">{idx===0 ? monthName : ""}</span></ATd>
+                                                <ATd><span className="block px-2 py-2 font-medium text-slate-600 text-[12px]">{idx===0 ? monthName : ""}</span></ATd>
                                                 <ATd>
-                                                    <select value={row.reviewer} onChange={e=>setAB(idx,"reviewer",e.target.value)} disabled={!isAdmin} className={`w-full bg-transparent text-[13px] focus:outline-none appearance-none ${!isAdmin ? "opacity-60 cursor-default" : ""}`}>
+                                                    <select value={row.reviewer} onChange={e=>setAB(idx,"reviewer",e.target.value)} disabled={!isAdmin} className={`block w-full h-full bg-transparent text-[13px] focus:outline-none appearance-none px-2 py-2 ${!isAdmin ? "opacity-60 cursor-default" : ""}`}>
                                                         <option value="">—</option>
                                                         <option>Andrew</option><option>Abhishek</option><option>Andrew/Diya</option>
                                                     </select>
@@ -1154,12 +1164,16 @@ export default function MonthlyReportPage() {
                                     <tbody>
                                         {andrewSBRows.map((row,idx) => (
                                             <tr key={row.id} className="hover:bg-amber-50/40">
-                                                <ATd><span className="font-medium text-slate-600 text-[12px]">{idx===0 ? monthName : ""}</span></ATd>
+                                                <ATd><span className="block px-2 py-2 font-medium text-slate-600 text-[12px]">{idx===0 ? monthName : ""}</span></ATd>
                                                 <ATd>
-                                                    <span className="text-[13px] text-slate-800 dark:text-slate-200">{row.person || "—"}</span>
+                                                    {/* Person + Thumbnails Done were read-only spans
+                                                        (auto-filled from /andrew-thumbnail-cases).
+                                                        QA report is fully manual now — they're
+                                                        editable inputs the manager types into. */}
+                                                    <AInput value={row.person} onChange={v=>setSBR(idx,"person",v)} placeholder="Name" disabled={aDisabled} />
                                                 </ATd>
                                                 <ATd>
-                                                    <span className="text-[13px] text-slate-800 dark:text-slate-200">{row.thumbnailsDone || "—"}</span>
+                                                    <AInput value={row.thumbnailsDone} onChange={v=>setSBR(idx,"thumbnailsDone",v)} placeholder="" disabled={aDisabled} />
                                                 </ATd>
                                                 <ATd>
                                                     <ATextarea value={row.avgCtr} onChange={v=>setSBR(idx,"avgCtr",v)} placeholder="e.g. M7cs -9.7 and M7 - 8.1" disabled={aDisabled} />
@@ -1221,9 +1235,14 @@ export default function MonthlyReportPage() {
                                                         <AInput value={row.lastMonthViews} onChange={v=>setSCR(idx,"lastMonthViews",v)} placeholder="e.g. 45000" disabled={aDisabled} />
                                                     </ATd>
                                                     <ATd>
-                                                        {diff !== null
-                                                            ? <span className={`text-[13px] font-semibold ${diff >= 0 ? "text-emerald-600" : "text-red-500"}`}>{diff >= 0 ? "↑" : "↓"} {Math.abs(diff).toLocaleString()}</span>
-                                                            : <span className="text-slate-300 text-[12px] italic">auto</span>}
+                                                        {/* Diff is the only column still computed —
+                                                            current minus previous. Wrapper carries
+                                                            the cell padding now that ATd is p-0. */}
+                                                        <span className="block px-2 py-2 text-center">
+                                                            {diff !== null
+                                                                ? <span className={`text-[13px] font-semibold ${diff >= 0 ? "text-emerald-600" : "text-red-500"}`}>{diff >= 0 ? "↑" : "↓"} {Math.abs(diff).toLocaleString()}</span>
+                                                                : <span className="text-slate-300 text-[12px] italic">auto</span>}
+                                                        </span>
                                                     </ATd>
                                                     <ATd><ATextarea value={row.remark} onChange={v=>setSCR(idx,"remark",v)} placeholder="Remark…" disabled={aDisabled} /></ATd>
                                                     <td className="px-2 py-2 border border-slate-200 bg-white text-center">
