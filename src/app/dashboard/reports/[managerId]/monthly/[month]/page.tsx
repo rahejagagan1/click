@@ -245,50 +245,57 @@ function NCell({ children, bold, center, colored }: { children?: React.ReactNode
 
 /** Nishant report input — module-level so React doesn't remount on every render.
  *
- *  Visual chrome was previously a rounded "pill" — `rounded`, plus
- *  `hover:bg-emerald-50` and `focus:bg-white` painted a distinct chip
- *  inside the coloured cell. Managers complained that the cell looked
- *  half-editable when the input was actually narrower than the cell.
- *  Stripped down to a flat field: the input fills the whole cell
- *  (block + h-full) and we zero out NCell's padding so clicking
- *  anywhere in the cell lands inside the input. Caret is the only
- *  affordance — no rounded corners, no hover/focus tint, no ring. */
+ *  Wrapped in a `<label>` so clicking ANYWHERE in the cell focuses
+ *  the input — including the dead vertical space at the bottom of
+ *  rows where another column has a tall textarea. The HTML <label>
+ *  → contained-input relationship is what gives us click-anywhere
+ *  focus without an onClick handler; the label also carries the
+ *  padding (px-3 py-2) and cursor-text so the I-beam shows over
+ *  the entire cell area, not just the input's own bounding box. */
 function NInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
     return (
-        <input
-            type="text"
-            value={value}
-            onChange={e => onChange(e.target.value)}
-            placeholder={placeholder ?? "Type here…"}
-            className="block w-full h-full text-[13px] text-slate-800 dark:text-slate-200 focus:outline-none cursor-text bg-transparent px-3 py-2 placeholder:text-slate-300 dark:placeholder:text-slate-500"
-        />
+        <label className="block w-full h-full px-3 py-2 cursor-text">
+            <input
+                type="text"
+                value={value}
+                onChange={e => onChange(e.target.value)}
+                placeholder={placeholder ?? "Type here…"}
+                className="block w-full text-[13px] text-slate-800 dark:text-slate-200 focus:outline-none cursor-text bg-transparent placeholder:text-slate-300 dark:placeholder:text-slate-500"
+            />
+        </label>
     );
 }
 
 /** Andrew report input — module-level so React doesn't remount on every render.
- *  Padding lives on the input (px-2 py-2) and matches what ATd used
- *  to apply, so the input fills the entire cell and a click anywhere
- *  in the cell lands inside it. */
+ *  Wrapped in a `<label>` so clicking anywhere in the cell focuses
+ *  the input (including dead vertical space when another column in
+ *  the same row has a tall textarea). The label carries padding +
+ *  cursor-text; the input has no padding/cursor of its own. */
 function AInput({ value, onChange, placeholder = "", disabled = false }: {
     value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean;
 }) {
     return (
-        <input type="text" value={value} onChange={e => onChange(e.target.value)}
-            placeholder={placeholder} disabled={disabled}
-            className={`block w-full h-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none px-2 py-2 ${disabled ? "opacity-60 cursor-default" : "cursor-text"}`} />
+        <label className={`block w-full h-full px-2 py-2 ${disabled ? "cursor-default" : "cursor-text"}`}>
+            <input type="text" value={value} onChange={e => onChange(e.target.value)}
+                placeholder={placeholder} disabled={disabled}
+                className={`block w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none ${disabled ? "opacity-60 cursor-default" : "cursor-text"}`} />
+        </label>
     );
 }
 
 /** Andrew report textarea — module-level so React doesn't remount on every render.
- *  Same full-cell padding pattern as AInput. min-h keeps the row
- *  visually consistent with rows whose textareas are empty. */
+ *  Same `<label>`-wrap pattern as AInput. min-h keeps the row
+ *  visually consistent and makes sure the entire row height is
+ *  click-focusable for sibling input cells too. */
 function ATextarea({ value, onChange, placeholder = "", disabled = false }: {
     value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean;
 }) {
     return (
-        <textarea value={value} onChange={e => onChange(e.target.value)}
-            placeholder={placeholder} disabled={disabled} rows={3}
-            className="block w-full h-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none resize-y cursor-text px-2 py-2 min-h-[60px]" />
+        <label className={`block w-full h-full px-2 py-2 min-h-[60px] ${disabled ? "cursor-default" : "cursor-text"}`}>
+            <textarea value={value} onChange={e => onChange(e.target.value)}
+                placeholder={placeholder} disabled={disabled} rows={3}
+                className={`block w-full h-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none resize-y ${disabled ? "cursor-default" : "cursor-text"}`} />
+        </label>
     );
 }
 
