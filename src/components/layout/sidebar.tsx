@@ -179,6 +179,23 @@ export default function Sidebar() {
     const [reportY, setReportY] = useState(0);
     const reportTriggerRef = useRef<HTMLDivElement | null>(null);
 
+    // Close every sidebar flyout / hover menu whenever the route
+    // changes. Without this, clicking a link inside a flyout (e.g.
+    // "Attendance" inside the Me / My Space menu) would navigate but
+    // leave the menu hanging open over the new page. One useEffect
+    // covers ALL flyouts uniformly — Me, My Team, Finances, MyPay
+    // sub-flyout, Dept hover, Feedback hover, Report hover — so we
+    // don't have to add an onClick handler to every Link.
+    useEffect(() => {
+      setHrMeOpen(false);
+      setHrTeamOpen(false);
+      setFinancesOpen(false);
+      setMyPaySubOpen(false);
+      setDeptHovered(false);
+      setFeedbackHovered(false);
+      setReportHovered(false);
+    }, [pathname]);
+
     // Helper: pick a flyout Y based on where the trigger sits in the viewport.
     //   Trigger in top third    → anchor top-of-flyout to top-of-trigger (drops down)
     //   Trigger in middle third → vertically centre flyout with trigger
