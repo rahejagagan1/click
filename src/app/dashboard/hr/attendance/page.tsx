@@ -1262,7 +1262,7 @@ export default function AttendancePage() {
                     background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
                     boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
                   }}
-                  className="h-9 px-5 bg-green-600 text-white rounded-lg text-[13px] font-bold tracking-tight whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
+                  className="h-8 px-4 bg-green-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
                   {clockingIn ? "Getting location…" : "Web Clock-In"}
                 </button>
               ) : !todayRec?.clockOut ? (
@@ -1277,9 +1277,9 @@ export default function AttendancePage() {
                         background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
                         boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
                       }}
-                      className="h-9 px-4 bg-red-600 text-white rounded-lg text-[13px] font-bold tracking-tight whitespace-nowrap transition-all duration-150 hover:brightness-110 hover:-translate-y-px"
+                      className="h-8 px-4 bg-red-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap transition-all duration-150 hover:brightness-110 hover:-translate-y-px"
                     >
-                      Web Clock-Out
+                      Confirm Clock-Out
                     </button>
                     <button
                       onClick={() => setConfirmingClockOut(false)}
@@ -1287,7 +1287,7 @@ export default function AttendancePage() {
                         background: "linear-gradient(180deg, #334155 0%, #1e293b 100%)",
                         boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.12), 0 1px 2px rgba(0,0,0,0.10)",
                       }}
-                      className="h-9 px-4 bg-slate-700 text-white rounded-lg text-[13px] font-bold tracking-tight whitespace-nowrap transition-all duration-150 hover:brightness-110"
+                      className="h-8 px-4 bg-slate-700 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap transition-all duration-150 hover:brightness-110"
                     >
                       Cancel
                     </button>
@@ -1298,7 +1298,7 @@ export default function AttendancePage() {
                       background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
                       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
                     }}
-                    className="h-9 px-5 bg-red-600 text-white rounded-lg text-[13px] font-bold tracking-tight whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px">
+                    className="h-8 px-4 bg-red-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px">
                     Web Clock-Out
                   </button>
                 )
@@ -1309,7 +1309,7 @@ export default function AttendancePage() {
                       background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
                       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
                     }}
-                    className="h-9 px-5 bg-green-600 text-white rounded-lg text-[13px] font-bold tracking-tight whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
+                    className="h-8 px-4 bg-green-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
                     {clockingIn ? "Getting location…" : "Web Clock-In"}
                   </button>
                   {(todayRec.totalMinutes ?? 0) >= 540 && (
