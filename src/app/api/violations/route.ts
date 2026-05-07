@@ -265,7 +265,16 @@ export async function POST(request: NextRequest) {
     }
 }
 
-// PATCH: Update violation status/action
+// PATCH: Update violation status/action.
+//
+// Accepts EITHER application/json (status flips, simple text edits)
+// or multipart/form-data (the edit panel, when HR re-uploads or
+// removes the action document). The form-data path mirrors POST: a
+// fresh file goes straight into the `actionTakenFileBlob` BYTEA
+// column with mime + filename; an explicit `clearActionTakenFile=1`
+// flag nulls the trio out (used for "Remove" without replacement).
+// Edits that don't touch the attachment stay on the JSON path so we
+// don't pay the multipart parsing cost on every status change.
 export async function PATCH(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
@@ -273,8 +282,65 @@ export async function PATCH(request: NextRequest) {
             return NextResponse.json({ error: "Access denied" }, { status: 403 });
         }
 
-        const body = await request.json();
-        const { id, status, actionTaken, severity, notes, responsiblePersonId } = body;
+        const ctype = request.headers.get("content-type") ?? "";
+        let id:                  number | undefined;
+        let status:              string | undefined;
+        let actionTaken:         string | undefined;
+        let severity:            string | undefined;
+        let notes:               string | undefined;
+        let responsiblePersonId: number | null | undefined;
+        let newFileBlob:         Buffer | null = null;
+        let newFileName:         string | null = null;
+        let newFileMime:         string | null = null;
+        let clearFile = false;
+
+        if (ctype.includes("multipart/form-data")) {
+            const form = await request.formData();
+            const get = (k: string) => {
+                const v = form.get(k);
+                return typeof v === "string" ? v : null;
+            };
+            id                  = Number(get("id")) || undefined;
+            status              = get("status")     || undefined;
+            actionTaken         = get("actionTaken") ?? undefined;
+            severity            = get("severity")   || undefined;
+            notes               = get("notes")      ?? undefined;
+            const rp            = get("responsiblePersonId");
+            responsiblePersonId = rp === null ? undefined : (rp ? Number(rp) : null);
+            clearFile           = get("clearActionTakenFile") === "1";
+
+            const file = form.get("actionTakenFile");
+            if (file instanceof File && file.size > 0) {
+                if (file.size > MAX_FILE_BYTES) {
+                    return NextResponse.json({ error: "File must be 10 MB or smaller" }, { status: 400 });
+                }
+                const ext = extname(file.name).toLowerCase();
+                if (!ALLOWED_EXTS.has(ext)) {
+                    return NextResponse.json({ error: "File must be a PDF, Word, RTF, ODT, TXT, or image" }, { status: 400 });
+                }
+                newFileBlob = Buffer.from(await file.arrayBuffer());
+                newFileName = file.name;
+                newFileMime = file.type && file.type !== "application/octet-stream"
+                    ? file.type
+                    : MIME_BY_EXT[ext] ?? "application/octet-stream";
+                // A fresh upload always wins over a stale clear flag —
+                // the UI also resets clearEditFile when a file is
+                // picked, but we re-enforce it here for safety.
+                clearFile = false;
+            }
+        } else {
+            const body = await request.json();
+            id                  = body.id;
+            status              = body.status;
+            actionTaken         = body.actionTaken;
+            severity            = body.severity;
+            notes               = body.notes;
+            responsiblePersonId = body.responsiblePersonId;
+        }
+
+        if (!id) {
+            return NextResponse.json({ error: "id is required" }, { status: 400 });
+        }
 
         // Snapshot the row first so we can detect a status change AFTER
         // the update and know what to email about.
@@ -287,6 +353,21 @@ export async function PATCH(request: NextRequest) {
         if (severity) data.severity = severity;
         if (responsiblePersonId !== undefined) data.responsiblePersonId = responsiblePersonId || null;
         if (status === "closed") data.resolvedAt = new Date();
+        // Attachment branches: a fresh upload writes all three
+        // columns AND clears the legacy URL fallback so the row
+        // doesn't try to render two attachments. An explicit clear
+        // nulls everything out.
+        if (newFileBlob) {
+            data.actionTakenFileBlob = newFileBlob;
+            data.actionTakenFileName = newFileName;
+            data.actionTakenFileMime = newFileMime;
+            data.actionTakenFileUrl  = null;
+        } else if (clearFile) {
+            data.actionTakenFileBlob = null;
+            data.actionTakenFileName = null;
+            data.actionTakenFileMime = null;
+            data.actionTakenFileUrl  = null;
+        }
         // (lastReminderAt reset is handled via raw SQL after the typed
         //  update below — the typed client may not know about the new
         //  column on a stale `prisma generate` cache.)
