@@ -219,8 +219,11 @@ function ATd({ children, className = "" }: { children?: React.ReactNode; classNa
     // lands inside the input rather than on dead cell padding. Non-
     // input children (Month label, computed diff) wrap themselves
     // with their own padding to preserve the visual layout.
+    // `cursor-text` on the cell so the I-beam shows over the whole
+    // cell area, including any 1-pixel border gap the input doesn't
+    // physically cover.
     return (
-        <td className={`p-0 border border-slate-200 dark:border-white/10 bg-white dark:bg-[#32324a] text-[13px] align-top text-slate-800 dark:text-slate-200 ${className}`}>
+        <td className={`p-0 border border-slate-200 dark:border-white/10 bg-white dark:bg-[#32324a] text-[13px] align-top text-slate-800 dark:text-slate-200 cursor-text ${className}`}>
             {children}
         </td>
     );
@@ -231,8 +234,10 @@ function NCell({ children, bold, center, colored }: { children?: React.ReactNode
     // Padding intentionally lives on NInput now (px-3 py-2) so the
     // input fills the whole cell — clicking anywhere in the cell
     // lands inside the input rather than on dead cell padding.
+    // `cursor-text` on the cell so the I-beam shows over the whole
+    // cell area, not just the input's own bounding box.
     return (
-        <td className={`p-0 border border-slate-300 dark:border-white/10 text-[13px] align-middle ${bold ? "font-semibold" : ""} ${center ? "text-center" : ""} ${colored || "text-slate-800 dark:text-slate-200 bg-white dark:bg-[#32324a]"}`}>
+        <td className={`p-0 border border-slate-300 dark:border-white/10 text-[13px] align-middle cursor-text ${bold ? "font-semibold" : ""} ${center ? "text-center" : ""} ${colored || "text-slate-800 dark:text-slate-200 bg-white dark:bg-[#32324a]"}`}>
             {children}
         </td>
     );
@@ -270,7 +275,7 @@ function AInput({ value, onChange, placeholder = "", disabled = false }: {
     return (
         <input type="text" value={value} onChange={e => onChange(e.target.value)}
             placeholder={placeholder} disabled={disabled}
-            className={`block w-full h-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none px-2 py-2 ${disabled ? "opacity-60 cursor-default" : ""}`} />
+            className={`block w-full h-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none px-2 py-2 ${disabled ? "opacity-60 cursor-default" : "cursor-text"}`} />
     );
 }
 
@@ -283,7 +288,7 @@ function ATextarea({ value, onChange, placeholder = "", disabled = false }: {
     return (
         <textarea value={value} onChange={e => onChange(e.target.value)}
             placeholder={placeholder} disabled={disabled} rows={3}
-            className="block w-full h-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none resize-y px-2 py-2 min-h-[60px]" />
+            className="block w-full h-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none resize-y cursor-text px-2 py-2 min-h-[60px]" />
     );
 }
 
