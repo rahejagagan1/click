@@ -125,8 +125,8 @@ async function main() {
   console.log(`  Excluded-list emails (env)           : ${excluded.size}`);
   console.log(``);
   console.log(`── Reminder candidates ─────────────────────────────────────────`);
-  console.log(`  → Clock-IN  candidates (10:15 IST)   : ${clockInCandidates.length}`);
-  console.log(`  → Clock-OUT candidates (20:00 IST)   : ${clockOutCandidates.length}`);
+  console.log(`  → Clock-IN  candidates (10:00 IST)   : ${clockInCandidates.length}`);
+  console.log(`  → Clock-OUT candidates (19:00 IST)   : ${clockOutCandidates.length}`);
   console.log(``);
 
   // ─── tests ─────────────────────────────────────────────────────
