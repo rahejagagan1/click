@@ -243,7 +243,12 @@ export async function POST(request: NextRequest) {
                     const claimed = bumped.nextNumber - 1;
                     employeeId = `${bumped.prefix}${claimed}`;
                 }
-                const profileData = {
+                // `as any` so the typed Prisma client doesn't fight the
+                // recently-added Keka-parity columns (homePhone /
+                // physicallyHandicapped / addressLine2 / etc.) — same
+                // workaround used elsewhere in the codebase when the
+                // generated client lags behind a fresh migration.
+                const profileData: any = {
                     employeeId,
                     firstName,
                     lastName,
@@ -257,6 +262,7 @@ export async function POST(request: NextRequest) {
                     phone:            profile.phone            ?? null,
                     dateOfBirth:      profile.dateOfBirth      ? new Date(profile.dateOfBirth) : null,
                     gender:           profile.gender           ?? null,
+                    maritalStatus:    profile.maritalStatus    ?? null,
                     bloodGroup:       profile.bloodGroup       ?? null,
                     emergencyContact: profile.emergencyContact ?? null,
                     emergencyPhone:   profile.emergencyPhone   ?? null,
@@ -264,6 +270,39 @@ export async function POST(request: NextRequest) {
                     city:             profile.city             ?? null,
                     state:            profile.state            ?? null,
                     noticePeriodDays: Number.isFinite(profile.noticePeriodDays) ? profile.noticePeriodDays : 30,
+                    // ── Keka-parity additions ──
+                    workPhone:               profile.workPhone               ?? null,
+                    homePhone:               profile.homePhone               ?? null,
+                    personalEmail:           profile.personalEmail           ?? null,
+                    physicallyHandicapped:   profile.physicallyHandicapped   ?? null,
+                    parentName:              profile.parentName              ?? null,
+                    motherName:              profile.motherName              ?? null,
+                    spouseName:              profile.spouseName              ?? null,
+                    childrenNames:           profile.childrenNames           ?? null,
+                    emergencyRelationship:   profile.emergencyRelationship   ?? null,
+                    addressLine2:            profile.addressLine2            ?? null,
+                    addressPincode:          profile.addressPincode          ?? null,
+                    addressCountry:          profile.addressCountry          ?? null,
+                    permanentLine1:          profile.permanentLine1          ?? null,
+                    permanentLine2:          profile.permanentLine2          ?? null,
+                    permanentCity:           profile.permanentCity           ?? null,
+                    permanentState:          profile.permanentState          ?? null,
+                    permanentPincode:        profile.permanentPincode        ?? null,
+                    permanentCountry:        profile.permanentCountry        ?? null,
+                    attendanceCaptureScheme: profile.attendanceCaptureScheme ?? null,
+                    costCenter:              profile.costCenter              ?? null,
+                    // Convention: Attendance Number == HRM (employeeId).
+                    // If the form supplied a value, honour it; otherwise
+                    // backfill with the freshly-allocated employeeId so
+                    // the two stay identical without HR retyping.
+                    attendanceNumber:        (profile.attendanceNumber && String(profile.attendanceNumber).trim())
+                                              || employeeId
+                                              || null,
+                    panNumber:               profile.panNumber               ?? null,
+                    aadhaarNumber:           profile.aadhaarNumber           ?? null,
+                    pfNumber:                profile.pfNumber                ?? null,
+                    uanNumber:               profile.uanNumber               ?? null,
+                    biometricId:             profile.biometricId             ?? null,
                 };
                 await tx.employeeProfile.upsert({
                     where:  { userId: created.id },
