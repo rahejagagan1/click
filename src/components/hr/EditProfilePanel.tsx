@@ -132,30 +132,55 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
   const p = user.profile || {};
 
   // ── Section: Basic Details ─────────────────────────────────────────
+  // Family (Father / Mother / Spouse / Children) lives in this section
+  // too — it's "personal information about the employee", same surface.
   const [basic, setBasic] = useState({
     displayName:   user.name ?? "",
     dateOfBirth:   dateISO(p.dateOfBirth),
     gender:        p.gender ?? "",
     bloodGroup:    p.bloodGroup ?? "",
     maritalStatus: p.maritalStatus ?? "",
+    physicallyHandicapped: p.physicallyHandicapped ?? "No",
+    // Father Name persists into the existing `parentName` column (Keka
+    // calls it Father Name; the column was originally for the PAN
+    // father's-or-spouse's-name).
+    fatherName:    p.parentName ?? "",
+    motherName:    p.motherName ?? "",
+    spouseName:    p.spouseName ?? "",
+    childrenNames: p.childrenNames ?? "",
   });
   const basicHook = useSaveSection(userId);
 
   // ── Section: Contact ──────────────────────────────────────────────
   const [contact, setContact] = useState({
-    personalEmail:    p.personalEmail ?? "",
-    phone:            p.phone ?? "",
-    workPhone:        p.workPhone ?? "",
-    emergencyContact: p.emergencyContact ?? "",
-    emergencyPhone:   p.emergencyPhone ?? "",
+    personalEmail:         p.personalEmail ?? "",
+    phone:                 p.phone ?? "",
+    workPhone:             p.workPhone ?? "",
+    homePhone:             p.homePhone ?? "",
+    emergencyContact:      p.emergencyContact ?? "",
+    emergencyRelationship: p.emergencyRelationship ?? "",
+    emergencyPhone:        p.emergencyPhone ?? "",
   });
   const contactHook = useSaveSection(userId);
 
   // ── Section: Address ──────────────────────────────────────────────
+  // Holds BOTH current and permanent address now. The legacy `address`
+  // column is treated as Current → Address Line 1; everything else lives
+  // in dedicated columns (addressLine2 / addressPincode / addressCountry
+  // / permanent*).
   const [address, setAddress] = useState({
-    address: p.address ?? "",
-    city:    p.city ?? "",
-    state:   p.state ?? "",
+    address:          p.address ?? "",        // current Line 1
+    addressLine2:     p.addressLine2 ?? "",
+    city:             p.city ?? "",
+    state:            p.state ?? "",
+    addressPincode:   p.addressPincode ?? "",
+    addressCountry:   p.addressCountry ?? "India",
+    permanentLine1:   p.permanentLine1 ?? "",
+    permanentLine2:   p.permanentLine2 ?? "",
+    permanentCity:    p.permanentCity ?? "",
+    permanentState:   p.permanentState ?? "",
+    permanentPincode: p.permanentPincode ?? "",
+    permanentCountry: p.permanentCountry ?? "India",
   });
   const addressHook = useSaveSection(userId);
 
@@ -185,21 +210,28 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
 
   // ── Section: Work Settings (step 3 of the onboarding wizard) ──────
   const [work, setWork] = useState({
-    leavePlan:          p.leavePlan ?? "Regular Leave Plan",
-    holidayList:        p.holidayList ?? "Default Holiday List",
-    weeklyOff:          p.weeklyOff ?? "Standard Weekly Off",
-    attendanceNumber:   p.attendanceNumber ?? "",
-    timeTrackingPolicy: p.timeTrackingPolicy ?? "On-Site Capture",
-    penalizationPolicy: p.penalizationPolicy ?? "Default",
+    leavePlan:               p.leavePlan ?? "Regular Leave Plan",
+    holidayList:             p.holidayList ?? "Default Holiday List",
+    weeklyOff:               p.weeklyOff ?? "Standard Weekly Off",
+    attendanceNumber:        p.attendanceNumber ?? "",
+    timeTrackingPolicy:      p.timeTrackingPolicy ?? "On-Site Capture",
+    penalizationPolicy:      p.penalizationPolicy ?? "Default",
+    attendanceCaptureScheme: p.attendanceCaptureScheme ?? "On-Site",
+    costCenter:              p.costCenter ?? "",
   });
   const workHook = useSaveSection(userId);
 
   // ── Section: Identity (sensitive — empty by default; HR re-enters) ─
+  // PAN / Aadhaar / Aadhaar Enrollment stay empty on load (HR re-enters
+  // to update); PF / UAN / Biometric pre-fill from the DB since they're
+  // less sensitive and HR usually wants to confirm rather than re-type.
   const [identity, setIdentity] = useState({
     panNumber:         "",
     aadhaarNumber:     "",
     aadhaarEnrollment: "",
-    parentName:        p.parentName ?? "",
+    pfNumber:          p.pfNumber ?? "",
+    uanNumber:         p.uanNumber ?? "",
+    biometricId:       p.biometricId ?? "",
   });
   const identityHook = useSaveSection(userId);
 
@@ -212,16 +244,34 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
       gender:        p.gender ?? "",
       bloodGroup:    p.bloodGroup ?? "",
       maritalStatus: p.maritalStatus ?? "",
+      physicallyHandicapped: p.physicallyHandicapped ?? "No",
+      fatherName:    p.parentName ?? "",
+      motherName:    p.motherName ?? "",
+      spouseName:    p.spouseName ?? "",
+      childrenNames: p.childrenNames ?? "",
     });
     setContact({
-      personalEmail:    p.personalEmail ?? "",
-      phone:            p.phone ?? "",
-      workPhone:        p.workPhone ?? "",
-      emergencyContact: p.emergencyContact ?? "",
-      emergencyPhone:   p.emergencyPhone ?? "",
+      personalEmail:         p.personalEmail ?? "",
+      phone:                 p.phone ?? "",
+      workPhone:             p.workPhone ?? "",
+      homePhone:             p.homePhone ?? "",
+      emergencyContact:      p.emergencyContact ?? "",
+      emergencyRelationship: p.emergencyRelationship ?? "",
+      emergencyPhone:        p.emergencyPhone ?? "",
     });
     setAddress({
-      address: p.address ?? "", city: p.city ?? "", state: p.state ?? "",
+      address:          p.address ?? "",
+      addressLine2:     p.addressLine2 ?? "",
+      city:             p.city ?? "",
+      state:            p.state ?? "",
+      addressPincode:   p.addressPincode ?? "",
+      addressCountry:   p.addressCountry ?? "India",
+      permanentLine1:   p.permanentLine1 ?? "",
+      permanentLine2:   p.permanentLine2 ?? "",
+      permanentCity:    p.permanentCity ?? "",
+      permanentState:   p.permanentState ?? "",
+      permanentPincode: p.permanentPincode ?? "",
+      permanentCountry: p.permanentCountry ?? "India",
     });
     setJob({
       designation:        p.designation ?? "",
@@ -245,14 +295,21 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
       teamCapsule:        user.teamCapsule ?? "",
     });
     setWork({
-      leavePlan:          p.leavePlan ?? "Regular Leave Plan",
-      holidayList:        p.holidayList ?? "Default Holiday List",
-      weeklyOff:          p.weeklyOff ?? "Standard Weekly Off",
-      attendanceNumber:   p.attendanceNumber ?? "",
-      timeTrackingPolicy: p.timeTrackingPolicy ?? "On-Site Capture",
-      penalizationPolicy: p.penalizationPolicy ?? "Default",
+      leavePlan:               p.leavePlan ?? "Regular Leave Plan",
+      holidayList:             p.holidayList ?? "Default Holiday List",
+      weeklyOff:               p.weeklyOff ?? "Standard Weekly Off",
+      attendanceNumber:        p.attendanceNumber ?? "",
+      timeTrackingPolicy:      p.timeTrackingPolicy ?? "On-Site Capture",
+      penalizationPolicy:      p.penalizationPolicy ?? "Default",
+      attendanceCaptureScheme: p.attendanceCaptureScheme ?? "On-Site",
+      costCenter:              p.costCenter ?? "",
     });
-    setIdentity((s) => ({ ...s, parentName: p.parentName ?? "" }));
+    setIdentity((s) => ({
+      ...s,
+      pfNumber:    p.pfNumber ?? "",
+      uanNumber:   p.uanNumber ?? "",
+      biometricId: p.biometricId ?? "",
+    }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.id, p.id]);
 
@@ -273,13 +330,31 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
         error={basicHook.error}
         savedAt={basicHook.savedAt}
         onSave={() => basicHook.save({
-          displayName:   basic.displayName.trim(),
-          dateOfBirth:   basic.dateOfBirth || null,
-          gender:        basic.gender || null,
-          bloodGroup:    basic.bloodGroup || null,
-          maritalStatus: basic.maritalStatus || null,
+          displayName:           basic.displayName.trim(),
+          dateOfBirth:           basic.dateOfBirth || null,
+          gender:                basic.gender || null,
+          bloodGroup:            basic.bloodGroup || null,
+          maritalStatus:         basic.maritalStatus || null,
+          physicallyHandicapped: basic.physicallyHandicapped || null,
+          // Father Name persists into the existing parentName column.
+          parentName:            basic.fatherName.trim() || null,
+          motherName:            basic.motherName.trim() || null,
+          spouseName:            basic.spouseName.trim() || null,
+          childrenNames:         basic.childrenNames.trim() || null,
         })}
       >
+        {/* HRM (Employee) Number — read-only chip so HR can see it
+            but can't accidentally edit it (it's auto-allocated from
+            the Number Series). Shown only when one exists. */}
+        {p.employeeId && (
+          <div className="mb-4 flex items-center gap-2">
+            <span className="text-[10.5px] uppercase tracking-wider font-semibold text-slate-500">HRM No.</span>
+            <span className="inline-flex items-center rounded-md bg-slate-100 dark:bg-white/[0.05] px-2 py-1 text-[12.5px] font-mono font-semibold text-slate-700 dark:text-slate-200 ring-1 ring-inset ring-slate-200 dark:ring-white/10">
+              {p.employeeId}
+            </span>
+            <span className="text-[11px] text-slate-400">read-only · also used as Attendance No.</span>
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className={cls.label}>Display Name</label>
@@ -311,7 +386,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
               placeholder="—"
             />
           </div>
-          <div className="sm:col-span-2">
+          <div>
             <label className={cls.label}>Marital Status</label>
             <CustomSelect
               listKey="maritalStatus"
@@ -320,6 +395,40 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
               onChange={(v) => setBasic({ ...basic, maritalStatus: v })}
               placeholder="—"
             />
+          </div>
+          <div>
+            <label className={cls.label}>Physically Handicapped</label>
+            <CustomSelect
+              listKey="physicallyHandicapped"
+              defaults={["No", "Yes"]}
+              value={basic.physicallyHandicapped}
+              onChange={(v) => setBasic({ ...basic, physicallyHandicapped: v })}
+              placeholder="—"
+            />
+          </div>
+          {/* ── Family ── */}
+          <div className="sm:col-span-2 mt-2 pt-3 border-t border-slate-200/70">
+            <p className="text-[10.5px] uppercase tracking-wider font-semibold text-slate-500 mb-2">Family</p>
+          </div>
+          <div>
+            <label className={cls.label}>Father Name</label>
+            <input className={cls.field} value={basic.fatherName}
+              onChange={(e) => setBasic({ ...basic, fatherName: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>Mother Name</label>
+            <input className={cls.field} value={basic.motherName}
+              onChange={(e) => setBasic({ ...basic, motherName: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>Spouse Name</label>
+            <input className={cls.field} value={basic.spouseName}
+              onChange={(e) => setBasic({ ...basic, spouseName: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>Children Names <span className="text-[10px] text-slate-400">(comma-separated)</span></label>
+            <input className={cls.field} value={basic.childrenNames}
+              onChange={(e) => setBasic({ ...basic, childrenNames: e.target.value })} />
           </div>
         </div>
       </Section>
@@ -333,11 +442,13 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
         error={contactHook.error}
         savedAt={contactHook.savedAt}
         onSave={() => contactHook.save({
-          personalEmail:    contact.personalEmail.trim() || null,
-          phone:            contact.phone.trim() || null,
-          workPhone:        contact.workPhone.trim() || null,
-          emergencyContact: contact.emergencyContact.trim() || null,
-          emergencyPhone:   contact.emergencyPhone.trim() || null,
+          personalEmail:         contact.personalEmail.trim() || null,
+          phone:                 contact.phone.trim() || null,
+          workPhone:             contact.workPhone.trim() || null,
+          homePhone:             contact.homePhone.trim() || null,
+          emergencyContact:      contact.emergencyContact.trim() || null,
+          emergencyRelationship: contact.emergencyRelationship.trim() || null,
+          emergencyPhone:        contact.emergencyPhone.trim() || null,
         })}
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -357,11 +468,26 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
               onChange={(e) => setContact({ ...contact, workPhone: e.target.value })} />
           </div>
           <div>
+            <label className={cls.label}>Home Phone</label>
+            <input className={cls.field} value={contact.homePhone}
+              onChange={(e) => setContact({ ...contact, homePhone: e.target.value })} />
+          </div>
+          <div>
             <label className={cls.label}>Emergency Contact</label>
             <input className={cls.field} value={contact.emergencyContact}
               onChange={(e) => setContact({ ...contact, emergencyContact: e.target.value })} />
           </div>
           <div>
+            <label className={cls.label}>Relationship</label>
+            <CustomSelect
+              listKey="emergencyRelationship"
+              defaults={["Father", "Mother", "Spouse", "Sibling", "Friend", "Guardian", "Other"]}
+              value={contact.emergencyRelationship}
+              onChange={(v) => setContact({ ...contact, emergencyRelationship: v })}
+              placeholder="—"
+            />
+          </div>
+          <div className="sm:col-span-2">
             <label className={cls.label}>Emergency Phone</label>
             <input className={cls.field} value={contact.emergencyPhone}
               onChange={(e) => setContact({ ...contact, emergencyPhone: e.target.value })} />
@@ -371,23 +497,41 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
 
       {/* ── Address ── */}
       <Section
-        title="Address"
+        title="Address (Current + Permanent)"
         icon={MapPin}
         accent="#7c3aed"
         saving={addressHook.saving}
         error={addressHook.error}
         savedAt={addressHook.savedAt}
         onSave={() => addressHook.save({
-          address: address.address.trim() || null,
-          city:    address.city.trim() || null,
-          state:   address.state.trim() || null,
+          // Current address
+          address:          address.address.trim() || null,
+          addressLine2:     address.addressLine2.trim() || null,
+          city:             address.city.trim() || null,
+          state:            address.state.trim() || null,
+          addressPincode:   address.addressPincode.trim() || null,
+          addressCountry:   address.addressCountry.trim() || null,
+          // Permanent address
+          permanentLine1:   address.permanentLine1.trim() || null,
+          permanentLine2:   address.permanentLine2.trim() || null,
+          permanentCity:    address.permanentCity.trim() || null,
+          permanentState:   address.permanentState.trim() || null,
+          permanentPincode: address.permanentPincode.trim() || null,
+          permanentCountry: address.permanentCountry.trim() || null,
         })}
       >
+        {/* ── Current address ── */}
+        <p className="text-[10.5px] uppercase tracking-wider font-semibold text-slate-500 mb-2">Current Address</p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
-            <label className={cls.label}>Street Address</label>
+            <label className={cls.label}>Address Line 1</label>
             <textarea rows={2} className={cls.textarea} value={address.address}
               onChange={(e) => setAddress({ ...address, address: e.target.value })} />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={cls.label}>Address Line 2 <span className="text-[10px] text-slate-400">(optional)</span></label>
+            <input className={cls.field} value={address.addressLine2}
+              onChange={(e) => setAddress({ ...address, addressLine2: e.target.value })} />
           </div>
           <div>
             <label className={cls.label}>City</label>
@@ -398,6 +542,51 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
             <label className={cls.label}>State</label>
             <input className={cls.field} value={address.state}
               onChange={(e) => setAddress({ ...address, state: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>Pincode</label>
+            <input className={cls.field} value={address.addressPincode}
+              onChange={(e) => setAddress({ ...address, addressPincode: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>Country</label>
+            <input className={cls.field} value={address.addressCountry}
+              onChange={(e) => setAddress({ ...address, addressCountry: e.target.value })} />
+          </div>
+        </div>
+
+        {/* ── Permanent address ── */}
+        <p className="text-[10.5px] uppercase tracking-wider font-semibold text-slate-500 mt-5 mb-2 pt-3 border-t border-slate-200/70">Permanent Address</p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <label className={cls.label}>Address Line 1</label>
+            <textarea rows={2} className={cls.textarea} value={address.permanentLine1}
+              onChange={(e) => setAddress({ ...address, permanentLine1: e.target.value })} />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={cls.label}>Address Line 2 <span className="text-[10px] text-slate-400">(optional)</span></label>
+            <input className={cls.field} value={address.permanentLine2}
+              onChange={(e) => setAddress({ ...address, permanentLine2: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>City</label>
+            <input className={cls.field} value={address.permanentCity}
+              onChange={(e) => setAddress({ ...address, permanentCity: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>State</label>
+            <input className={cls.field} value={address.permanentState}
+              onChange={(e) => setAddress({ ...address, permanentState: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>Pincode</label>
+            <input className={cls.field} value={address.permanentPincode}
+              onChange={(e) => setAddress({ ...address, permanentPincode: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>Country</label>
+            <input className={cls.field} value={address.permanentCountry}
+              onChange={(e) => setAddress({ ...address, permanentCountry: e.target.value })} />
           </div>
         </div>
       </Section>
@@ -597,12 +786,14 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
         error={workHook.error}
         savedAt={workHook.savedAt}
         onSave={() => workHook.save({
-          leavePlan:          work.leavePlan.trim()          || null,
-          holidayList:        work.holidayList.trim()        || null,
-          weeklyOff:          work.weeklyOff.trim()          || null,
-          attendanceNumber:   work.attendanceNumber.trim()   || null,
-          timeTrackingPolicy: work.timeTrackingPolicy.trim() || null,
-          penalizationPolicy: work.penalizationPolicy.trim() || null,
+          leavePlan:               work.leavePlan.trim()          || null,
+          holidayList:             work.holidayList.trim()        || null,
+          weeklyOff:               work.weeklyOff.trim()          || null,
+          attendanceNumber:        work.attendanceNumber.trim()   || null,
+          timeTrackingPolicy:      work.timeTrackingPolicy.trim() || null,
+          penalizationPolicy:      work.penalizationPolicy.trim() || null,
+          attendanceCaptureScheme: work.attendanceCaptureScheme.trim() || null,
+          costCenter:              work.costCenter.trim()              || null,
         })}
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -637,7 +828,11 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
             <label className={cls.label}>Attendance Number</label>
             <input className={cls.field} value={work.attendanceNumber}
               onChange={(e) => setWork({ ...work, attendanceNumber: e.target.value })}
-              placeholder="e.g. HRM-69" />
+              placeholder="Defaults to HRM No." />
+            <p className="mt-1 text-[10.5px] text-slate-400">
+              Convention: Attendance Number = HRM No. (e.g. <span className="font-mono">{p.employeeId || "HRM104"}</span>).
+              Leave blank to inherit; otherwise enter a custom number.
+            </p>
           </div>
           <div>
             <label className={cls.label}>Time Tracking Policy</label>
@@ -657,6 +852,21 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
               onChange={(v) => setWork({ ...work, penalizationPolicy: v })}
             />
           </div>
+          <div>
+            <label className={cls.label}>Attendance Capture Scheme</label>
+            <CustomSelect
+              listKey="attendanceCaptureScheme"
+              defaults={["On-Site", "Remote", "Hybrid"]}
+              value={work.attendanceCaptureScheme}
+              onChange={(v) => setWork({ ...work, attendanceCaptureScheme: v })}
+            />
+          </div>
+          <div>
+            <label className={cls.label}>Cost Center</label>
+            <input className={cls.field} value={work.costCenter}
+              onChange={(e) => setWork({ ...work, costCenter: e.target.value })}
+              placeholder="e.g. NB Media" />
+          </div>
         </div>
       </Section>
 
@@ -669,10 +879,16 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
         error={identityHook.error}
         savedAt={identityHook.savedAt}
         onSave={() => {
-          const patch: Record<string, unknown> = { parentName: identity.parentName.trim() || null };
-          // Sensitive fields are write-only — only sent when HR has typed
-          // a value. Empty strings are skipped so saving the section
+          // PF / UAN / Biometric are pre-loaded into state, so they're
+          // safe to send blank (a blank means "clear this value"). PAN /
+          // Aadhaar / Aadhaar Enrollment are sensitive write-only —
+          // only sent when HR has typed a value, so saving the section
           // doesn't accidentally clear an existing PAN/Aadhaar.
+          const patch: Record<string, unknown> = {
+            pfNumber:    identity.pfNumber.trim()    || null,
+            uanNumber:   identity.uanNumber.trim()   || null,
+            biometricId: identity.biometricId.trim() || null,
+          };
           if (identity.panNumber.trim())         patch.panNumber         = identity.panNumber.trim();
           if (identity.aadhaarNumber.trim())     patch.aadhaarNumber     = identity.aadhaarNumber.trim();
           if (identity.aadhaarEnrollment.trim()) patch.aadhaarEnrollment = identity.aadhaarEnrollment.trim();
@@ -680,18 +896,13 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
         }}
       >
         <p className="rounded-md bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800">
-          PAN and Aadhaar values are write-only: enter a new value to update; leave blank to keep the existing one untouched.
+          PAN and Aadhaar are write-only — enter a new value to update; leave blank to keep the existing one. PF / UAN / Biometric are pre-loaded and editable directly.
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className={cls.label}>PAN Number</label>
             <input className={cls.field} value={identity.panNumber} placeholder="Leave blank to keep existing"
               onChange={(e) => setIdentity({ ...identity, panNumber: e.target.value })} />
-          </div>
-          <div>
-            <label className={cls.label}>Parent's Name</label>
-            <input className={cls.field} value={identity.parentName}
-              onChange={(e) => setIdentity({ ...identity, parentName: e.target.value })} />
           </div>
           <div>
             <label className={cls.label}>Aadhaar Number</label>
@@ -702,6 +913,24 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
             <label className={cls.label}>Aadhaar Enrollment</label>
             <input className={cls.field} value={identity.aadhaarEnrollment} placeholder="Leave blank to keep existing"
               onChange={(e) => setIdentity({ ...identity, aadhaarEnrollment: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>PF Number</label>
+            <input className={cls.field} value={identity.pfNumber}
+              onChange={(e) => setIdentity({ ...identity, pfNumber: e.target.value })}
+              placeholder="Provident Fund number" />
+          </div>
+          <div>
+            <label className={cls.label}>UAN Number</label>
+            <input className={cls.field} value={identity.uanNumber}
+              onChange={(e) => setIdentity({ ...identity, uanNumber: e.target.value })}
+              placeholder="Universal Account Number" />
+          </div>
+          <div>
+            <label className={cls.label}>Biometric ID</label>
+            <input className={cls.field} value={identity.biometricId}
+              onChange={(e) => setIdentity({ ...identity, biometricId: e.target.value })}
+              placeholder="As assigned by office system" />
           </div>
         </div>
       </Section>
