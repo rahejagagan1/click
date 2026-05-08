@@ -73,7 +73,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
                 "probationPolicy", "internshipEndDate",
                 "leavePlan", "holidayList", "weeklyOff",
                 "attendanceNumber", "timeTrackingPolicy", "penalizationPolicy",
-                "workCountry", "nationality"
+                "workCountry", "nationality",
+                -- Keka-parity additions
+                "homePhone", "physicallyHandicapped",
+                "addressLine2", "addressPincode", "addressCountry",
+                "permanentLine1", "permanentLine2", "permanentCity",
+                "permanentState", "permanentPincode", "permanentCountry",
+                "motherName", "spouseName", "childrenNames",
+                "emergencyRelationship",
+                "attendanceCaptureScheme", "costCenter",
+                "pfNumber", "uanNumber", "biometricId"
            FROM "EmployeeProfile"
           WHERE "userId" = $1`,
         id,
@@ -134,6 +143,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       workCountry, nationality,
       secondaryJobTitle, legalEntity, jobLocation, probationPolicy, internshipEndDate,
       leavePlan, holidayList, weeklyOff, attendanceNumber, timeTrackingPolicy, penalizationPolicy,
+      // ── Keka-parity additions (extended profile) ──
+      homePhone, physicallyHandicapped,
+      addressLine2, addressPincode, addressCountry,
+      permanentLine1, permanentLine2, permanentCity, permanentState, permanentPincode, permanentCountry,
+      motherName, spouseName, childrenNames,
+      emergencyRelationship,
+      attendanceCaptureScheme, costCenter,
+      pfNumber, uanNumber, biometricId,
       // User row fields — role / orgLevel / manager / team membership.
       role: newRole, orgLevel, managerId, inlineManagerId, teamCapsule,
     } = body;
@@ -227,9 +244,36 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (leavePlan          !== undefined) { setParts.push(`"leavePlan" = $${i++}`);          args.push(leavePlan          || null); }
       if (holidayList        !== undefined) { setParts.push(`"holidayList" = $${i++}`);        args.push(holidayList        || null); }
       if (weeklyOff          !== undefined) { setParts.push(`"weeklyOff" = $${i++}`);          args.push(weeklyOff          || null); }
-      if (attendanceNumber   !== undefined) { setParts.push(`"attendanceNumber" = $${i++}`);   args.push(attendanceNumber   || null); }
+      // Convention: Attendance Number == HRM (employeeId). When HR
+      // submits the field empty we backfill with employeeId so the
+      // two stay in sync without forcing them to retype it.
+      if (attendanceNumber   !== undefined) {
+        const an = (attendanceNumber && String(attendanceNumber).trim()) || existing?.employeeId || null;
+        setParts.push(`"attendanceNumber" = $${i++}`); args.push(an);
+      }
       if (timeTrackingPolicy !== undefined) { setParts.push(`"timeTrackingPolicy" = $${i++}`); args.push(timeTrackingPolicy || null); }
       if (penalizationPolicy !== undefined) { setParts.push(`"penalizationPolicy" = $${i++}`); args.push(penalizationPolicy || null); }
+      // ── Keka-parity additions ──
+      if (homePhone               !== undefined) { setParts.push(`"homePhone" = $${i++}`);               args.push(homePhone               || null); }
+      if (physicallyHandicapped   !== undefined) { setParts.push(`"physicallyHandicapped" = $${i++}`);   args.push(physicallyHandicapped   || null); }
+      if (addressLine2            !== undefined) { setParts.push(`"addressLine2" = $${i++}`);            args.push(addressLine2            || null); }
+      if (addressPincode          !== undefined) { setParts.push(`"addressPincode" = $${i++}`);          args.push(addressPincode          || null); }
+      if (addressCountry          !== undefined) { setParts.push(`"addressCountry" = $${i++}`);          args.push(addressCountry          || null); }
+      if (permanentLine1          !== undefined) { setParts.push(`"permanentLine1" = $${i++}`);          args.push(permanentLine1          || null); }
+      if (permanentLine2          !== undefined) { setParts.push(`"permanentLine2" = $${i++}`);          args.push(permanentLine2          || null); }
+      if (permanentCity           !== undefined) { setParts.push(`"permanentCity" = $${i++}`);           args.push(permanentCity           || null); }
+      if (permanentState          !== undefined) { setParts.push(`"permanentState" = $${i++}`);          args.push(permanentState          || null); }
+      if (permanentPincode        !== undefined) { setParts.push(`"permanentPincode" = $${i++}`);        args.push(permanentPincode        || null); }
+      if (permanentCountry        !== undefined) { setParts.push(`"permanentCountry" = $${i++}`);        args.push(permanentCountry        || null); }
+      if (motherName              !== undefined) { setParts.push(`"motherName" = $${i++}`);              args.push(motherName              || null); }
+      if (spouseName              !== undefined) { setParts.push(`"spouseName" = $${i++}`);              args.push(spouseName              || null); }
+      if (childrenNames           !== undefined) { setParts.push(`"childrenNames" = $${i++}`);           args.push(childrenNames           || null); }
+      if (emergencyRelationship   !== undefined) { setParts.push(`"emergencyRelationship" = $${i++}`);   args.push(emergencyRelationship   || null); }
+      if (attendanceCaptureScheme !== undefined) { setParts.push(`"attendanceCaptureScheme" = $${i++}`); args.push(attendanceCaptureScheme || null); }
+      if (costCenter              !== undefined) { setParts.push(`"costCenter" = $${i++}`);              args.push(costCenter              || null); }
+      if (pfNumber                !== undefined) { setParts.push(`"pfNumber" = $${i++}`);                args.push(pfNumber                || null); }
+      if (uanNumber               !== undefined) { setParts.push(`"uanNumber" = $${i++}`);               args.push(uanNumber               || null); }
+      if (biometricId             !== undefined) { setParts.push(`"biometricId" = $${i++}`);             args.push(biometricId             || null); }
       if (setParts.length > 0) {
         args.push(id);
         try {
