@@ -7,6 +7,8 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
+import { isHRAdmin } from "@/lib/access";
+import { PageShell } from "@/components/layout";
 import {
   ChevronDown,
   ChevronLeft,
@@ -27,6 +29,9 @@ import {
   Smile,
   X,
   Trash2,
+  Pencil,
+  Link2,
+  Check,
   Paperclip,
   Info,
   Star,
@@ -1207,9 +1212,102 @@ function QuickLinksCard() {
   );
 }
 
-function FeedPostCard({ post }: { post: any }) {
+function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
+  const sessionUserId = sessionUser?.dbId;
+  const isAuthor   = post.author?.id === sessionUserId;
+  const canDelete  = isAuthor || isHRAdmin(sessionUser);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos,  setMenuPos]  = useState<{ top: number; right: number } | null>(null);
+  const [editing,  setEditing]  = useState(false);
+  const [draft,    setDraft]    = useState(post.content);
+  const [saving,   setSaving]   = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const menuBtnRef   = useRef<HTMLButtonElement | null>(null);
+  const menuPanelRef = useRef<HTMLDivElement | null>(null);
+
+  // The home feed is rendered inside cards with their own clipping. Render
+  // the dropdown via a body-level portal at fixed position so the parent
+  // overflow can never crop it (same pattern as the engage card).
+  const openMenu = () => {
+    if (!menuBtnRef.current) return;
+    const r = menuBtnRef.current.getBoundingClientRect();
+    setMenuPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+    setMenuOpen(true);
+  };
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      const insideBtn   = menuBtnRef.current?.contains(e.target as Node);
+      const insidePanel = menuPanelRef.current?.contains(e.target as Node);
+      if (!insideBtn && !insidePanel) setMenuOpen(false);
+    };
+    const onScroll = () => setMenuOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [menuOpen]);
+
+  // The home page uses two SWR keys for posts (org-wide vs team-scoped),
+  // so revalidate any key starting with the posts endpoint after a
+  // mutation rather than only the bare URL.
+  const revalidatePosts = () =>
+    mutate((key: any) => typeof key === "string" && key.startsWith("/api/hr/engage/posts"));
+
+  const saveEdit = async () => {
+    if (!draft.trim() || draft === post.content) { setEditing(false); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/hr/engage/posts/${post.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: draft }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || "Could not save edit"); return; }
+      setEditing(false);
+      revalidatePosts();
+    } finally { setSaving(false); }
+  };
+
+  const deletePost = async () => {
+    if (!confirm("Delete this post? This can't be undone.")) return;
+    const res = await fetch(`/api/hr/engage/posts/${post.id}`, { method: "DELETE" });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || "Could not delete"); return; }
+    revalidatePosts();
+  };
+
+  // No per-post permalink page yet — link into the engage feed and hash
+  // the post id so a future deep-link handler can scroll to the card.
+  const copyLink = async () => {
+    const url = `${window.location.origin}/dashboard/hr/engage#post-${post.id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 1800);
+    } catch {
+      window.prompt("Copy this link:", url);
+    }
+  };
+
+  const COLLAPSE_AT = 280;
+  const tooLong = post.content.length > COLLAPSE_AT || (post.content.match(/\n/g)?.length ?? 0) > 3;
+  const visibleBody = !tooLong || expanded
+    ? post.content
+    : post.content.slice(0, COLLAPSE_AT).trimEnd() + "…";
+
+  const reactionCount = post.reactions?.length || 0;
+  const commentCount  = post.comments?.length  || 0;
+
   return (
-    <article className={`${C.card} overflow-hidden`}>
+    // overflow-visible so the portal-fallback dropdown is never clipped
+    // by the card's rounded corners (matches the engage card).
+    <article id={`post-${post.id}`} className={`${C.card} overflow-visible scroll-mt-24`}>
       <div className="px-4 py-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
@@ -1222,46 +1320,130 @@ function FeedPostCard({ post }: { post: any }) {
               <p className="mt-0.5 text-[11px] text-[#97a4b3]">{timeAgo(post.createdAt)}</p>
             </div>
           </div>
-          <button className="rounded-md p-1 text-[#95a3b1] transition hover:bg-[#f5f7fb] hover:text-[#607284]">
+          <button
+            ref={menuBtnRef}
+            onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
+            aria-label="More options"
+            aria-expanded={menuOpen}
+            className="rounded-md p-1 text-[#95a3b1] transition hover:bg-[#f5f7fb] hover:text-[#607284]"
+          >
             <MoreHorizontal className="h-4 w-4" />
           </button>
+          {menuOpen && menuPos && typeof document !== "undefined" && createPortal(
+            <div
+              ref={menuPanelRef}
+              style={{ position: "fixed", top: menuPos.top, right: menuPos.right, zIndex: 1000 }}
+              className="min-w-[160px] rounded-lg border border-[#e3e9f1] bg-white shadow-lg overflow-hidden"
+            >
+              {isAuthor && (
+                <button
+                  onClick={() => { setMenuOpen(false); setDraft(post.content); setEditing(true); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-[#3b4a5a] hover:bg-[#f5f7fb] transition-colors"
+                >
+                  <Pencil className="w-3.5 h-3.5" /> Edit
+                </button>
+              )}
+              <button
+                onClick={() => { setMenuOpen(false); copyLink(); }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-[#3b4a5a] hover:bg-[#f5f7fb] transition-colors"
+              >
+                {linkCopied
+                  ? (<><Check className="w-3.5 h-3.5 text-emerald-600" /> Link copied</>)
+                  : (<><Link2 className="w-3.5 h-3.5" /> Copy link</>)}
+              </button>
+              {canDelete && (
+                <button
+                  onClick={() => { setMenuOpen(false); deletePost(); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete
+                </button>
+              )}
+            </div>,
+            document.body,
+          )}
         </div>
 
-        <div className="mt-3 text-[13px] leading-6 text-[#526476]">
-          {post.content}
-        </div>
+        {editing ? (
+          <div className="mt-3 space-y-2">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={3}
+              className="w-full resize-none rounded-lg border border-[#e3e9f1] bg-white px-3 py-2 text-[13px] text-[#3b4a5a] focus:outline-none focus:border-[#008CFF]"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setEditing(false); setDraft(post.content); }}
+                disabled={saving}
+                className="h-8 px-3 rounded-lg text-[12px] font-semibold text-[#5f7183] hover:bg-[#f5f7fb] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={saving}
+                className="h-8 px-4 rounded-lg bg-[#008CFF] hover:bg-[#0070d4] text-white text-[12px] font-semibold disabled:opacity-50"
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <p className="mt-3 text-[13px] leading-6 text-[#526476] whitespace-pre-wrap">{visibleBody}</p>
+            {tooLong && (
+              <button
+                onClick={() => setExpanded((p) => !p)}
+                className="mt-1 text-[12.5px] font-semibold text-[#008CFF] hover:text-[#0070d4]"
+              >
+                {expanded ? "View less" : "View more"}
+              </button>
+            )}
+          </>
+        )}
 
         {post.mediaUrl ? (
-          <img
-            src={post.mediaUrl}
-            alt="Post media"
-            className="mt-3 max-h-[360px] w-full rounded-[3px] border border-[#ecf1f5] object-cover"
-          />
+          <div className="mt-3 overflow-hidden rounded-[3px] border border-[#ecf1f5] bg-[#f8fafc]">
+            <img
+              src={post.mediaUrl}
+              alt="Post media"
+              className="block mx-auto max-h-[360px] w-auto max-w-full object-contain"
+            />
+          </div>
         ) : null}
       </div>
 
-      <div className="flex items-center justify-between border-t border-[#eef2f6] px-4 py-2.5 text-[11.5px] text-[#8393a3]">
-        <div className="flex items-center gap-3">
-          <span>{post.reactions?.length || 0} reactions</span>
-          <span>{post.comments?.length || 0} comments</span>
+      {/* Single-row footer: Like / Comment on the left, reaction +
+          comment summary on the right — matches the Keka layout the
+          engage card already uses. Like/Comment stay as Links into the
+          full engage feed (this card is read-only on the home page). */}
+      <div className="flex items-center justify-between border-t border-[#eef2f6] px-2 sm:px-3 py-1.5">
+        <div className="flex items-center">
+          <Link
+            href="/dashboard/hr/engage"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-[#5f7183] hover:bg-[#f5f7fb] transition-colors"
+          >
+            <ThumbsUp className="h-4 w-4" />Like
+          </Link>
+          <Link
+            href="/dashboard/hr/engage"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-[#5f7183] hover:bg-[#f5f7fb] transition-colors"
+          >
+            <MessageSquare className="h-4 w-4" />Comment
+          </Link>
         </div>
-      </div>
-
-      <div className="flex items-center border-t border-[#eef2f6]">
-        <Link
-          href="/dashboard/hr/engage"
-          className="flex flex-1 items-center justify-center gap-2 py-2.5 text-[12px] font-medium text-[#5f7183] transition hover:bg-[#f8fafc]"
-        >
-          <ThumbsUp className="h-4 w-4" />
-          Like
-        </Link>
-        <Link
-          href="/dashboard/hr/engage"
-          className="flex flex-1 items-center justify-center gap-2 border-l border-[#eef2f6] py-2.5 text-[12px] font-medium text-[#5f7183] transition hover:bg-[#f8fafc]"
-        >
-          <MessageSquare className="h-4 w-4" />
-          Comment
-        </Link>
+        <div className="flex items-center gap-1.5 pr-2 text-[12px] text-[#8393a3]">
+          {reactionCount > 0 && (
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-[#008CFF] text-white text-[10px] ring-2 ring-white">👍</span>
+              <span>{reactionCount} {reactionCount === 1 ? "reaction" : "reactions"}</span>
+            </span>
+          )}
+          {commentCount > 0 && (
+            <span>{reactionCount > 0 ? "•" : ""} {commentCount} {commentCount === 1 ? "Comment" : "Comments"}</span>
+          )}
+        </div>
       </div>
     </article>
   );
@@ -1479,7 +1661,7 @@ function HolidaysModal({ initialYear, onClose }: { initialYear: number; onClose:
 export default function HRHomePage() {
   const { data: session } = useSession();
   const user    = session?.user as any;
-  const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper || user?.orgLevel === "hr_manager";
+  const isAdmin = isHRAdmin(user);
 
   const monthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
 
@@ -1737,8 +1919,12 @@ export default function HRHomePage() {
   // attendance page.
   const [otherForm, setOtherForm] = useState<LeaveRequestKind | null>(null);
   const { data: leaveTypesData = [] } = useSWR(`/api/hr/admin/leave-types`, fetcher);
+  // Drop balance-only types (e.g. Carry Over Leave) — they're shown
+  // on the leave-balances grid but mustn't appear in the apply form.
   const otherLeaveTypes: { id: number; name: string }[] = Array.isArray(leaveTypesData)
-    ? leaveTypesData.map((t: any) => ({ id: t.id, name: t.name }))
+    ? leaveTypesData
+        .filter((t: any) => t.applicable !== false)
+        .map((t: any) => ({ id: t.id, name: t.name }))
     : [];
   const otherTitle: Record<LeaveRequestKind, string> = {
     wfh:        "Request Work From Home",
@@ -1765,6 +1951,18 @@ export default function HRHomePage() {
   // the browser is busy asking the OS for coordinates (first-time GPS/Wi-Fi
   // lookup on Windows can take 10–15s).
   const [clockingIn, setClockingIn] = useState(false);
+
+  // Detect mobile devices via User-Agent (covers "Request Desktop Site" mode too).
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
+  useEffect(() => {
+    if (typeof navigator !== "undefined") {
+      setIsMobileDevice(
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+          navigator.userAgent
+        )
+      );
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.permissions?.query) {
@@ -1891,15 +2089,12 @@ export default function HRHomePage() {
   );
   // Split clocked-in employees by their actual location mode (from Attendance.location JSON).
   const clockedIn = (boardData?.board || []).filter((u: any) => u.status === "present" || u.status === "late");
-  // Working Remotely — clocked-in remote users PLUS anyone with an applied
-  // (non-rejected) WFH for today. Same rationale as `onLeave`: the list shows
-  // intent, not just proven clock-ins.
-  const remoteClockedIn = clockedIn.filter((u: any) => parseAttLoc(u.location).mode === "remote");
-  const remoteIds = new Set<number>(remoteClockedIn.map((u: any) => u.id));
-  const remote = [
-    ...remoteClockedIn,
-    ...((boardData?.board || []) as any[]).filter((u: any) => u.wfhToday === true && !remoteIds.has(u.id)),
-  ];
+  // Working Remotely — ONLY employees who explicitly applied for WFH
+  // today. Permanent remote / hybrid folks who clock in from home as
+  // their default mode show up under the "Remote Clock-in" filter on
+  // the attendance dashboard, not here. This card flags exception
+  // cases: office-default people who took WFH for a day.
+  const remote = ((boardData?.board || []) as any[]).filter((u: any) => u.wfhToday === true);
   // Show only leave types the user actually has a quota or in-flight
   // activity for — drop fully-zero rows (no quota AND nothing used or
   // pending) so the card doesn't render six "0 days" tiles for every
@@ -1969,10 +2164,10 @@ export default function HRHomePage() {
   };
 
   return (
-    <div className={`h-[calc(100vh-68px)] overflow-hidden flex flex-col ${C.page}`}>
+    <PageShell className={`h-[calc(100vh-68px)] overflow-hidden flex flex-col ${C.page}`}>
       <div className="relative flex-1 min-h-0 flex flex-col">
         <div
-          className="pointer-events-none absolute inset-y-0 -right-[120px] hidden w-[600px] lg:block"
+          className="pointer-events-none absolute inset-y-0 -right-[120px] hidden w-full max-w-[600px] lg:block"
           style={{
             backgroundImage: "url('/image_1b069270.png')",
             backgroundRepeat: "no-repeat",
@@ -1984,8 +2179,15 @@ export default function HRHomePage() {
         />
         {/* DecorativeTree kept for legacy references but no longer rendered. */}
 
-        <div className="grid w-full flex-1 min-h-0 gap-5 px-4 py-3 xl:grid-cols-[400px,700px] xl:grid-rows-[auto_minmax(0,1fr)] xl:justify-start xl:px-10">
-          <section className="relative hidden h-[72px] w-[1180px] overflow-hidden rounded-[2px] border border-[#2b3440] shadow-[0_1px_2px_rgba(15,23,42,0.14)] xl:col-span-2 xl:block">
+        {/* Grid columns flex with viewport: at our 1280px laptop floor
+            (content area = 1188px after the 92px sidebar) the right
+            column shrinks instead of overflowing. Inner padding scales
+            with breakpoint so we don't burn 80px of horizontal space at
+            the floor. The banner spans both columns and uses
+            max-w instead of a fixed 1180px so it shrinks with the
+            content area on smaller laptops. */}
+        <div className="grid w-full flex-1 min-h-0 gap-5 px-4 py-3 xl:grid-cols-[minmax(0,400px)_minmax(0,1fr)] xl:grid-rows-[auto_minmax(0,1fr)] xl:justify-start xl:px-6 2xl:px-10">
+          <section className="relative hidden h-[72px] w-full max-w-[1180px] overflow-hidden rounded-[2px] border border-[#2b3440] shadow-[0_1px_2px_rgba(15,23,42,0.14)] xl:col-span-2 xl:block">
             <div className="absolute inset-0">
               <BannerArt />
             </div>
@@ -2103,22 +2305,37 @@ export default function HRHomePage() {
 
                 <div className="flex items-center gap-1.5">
                   {!todayRec?.clockIn ? (
-                    <button
-                      onClick={clockIn}
-                      disabled={clockingIn}
-                      className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-70 disabled:cursor-wait"
-                      style={{ background: isRemoteMode ? "#008CFF" : "#ff6a63" }}
-                    >
-                      {clockingIn ? "Getting location…" : isRemoteMode ? "Remote Clock-in" : "Clock-in"}
-                    </button>
+                    <div className="flex flex-col items-center gap-1">
+                      <button
+                        onClick={isMobileDevice ? undefined : clockIn}
+                        disabled={clockingIn || isMobileDevice}
+                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ background: isRemoteMode ? "#008CFF" : "#ff6a63" }}
+                      >
+                        {clockingIn ? "Getting location…" : isRemoteMode ? "Remote Clock-in" : "Clock-in"}
+                      </button>
+                      {isMobileDevice && (
+                        <span className="text-center text-[9.5px] leading-tight text-white/70">
+                          Only accessible on Laptop &amp; Desktop
+                        </span>
+                      )}
+                    </div>
                   ) : !todayRec?.clockOut ? (
-                    <button
-                      onClick={clockOut}
-                      className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95"
-                      style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a63" }}
-                    >
-                      {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
-                    </button>
+                    <div className="flex flex-col items-center gap-1">
+                      <button
+                        onClick={isMobileDevice ? undefined : clockOut}
+                        disabled={isMobileDevice}
+                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a63" }}
+                      >
+                        {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
+                      </button>
+                      {isMobileDevice && (
+                        <span className="text-center text-[9.5px] leading-tight text-white/70">
+                          Only accessible on Laptop &amp; Desktop
+                        </span>
+                      )}
+                    </div>
                   ) : (
                     <span className="flex h-[24px] items-center rounded-[3px] bg-white/15 px-3.5 text-[11px] font-semibold text-white/90">
                       Done
@@ -2892,7 +3109,7 @@ export default function HRHomePage() {
 
               <div className="space-y-3">
                 {posts.length > 0 ? (
-                  posts.slice(0, 4).map((post: any) => <FeedPostCard key={post.id} post={post} />)
+                  posts.slice(0, 4).map((post: any) => <FeedPostCard key={post.id} post={post} sessionUser={user} />)
                 ) : analyticsData ? (
                   <div className={`${C.card} px-5 py-8 text-center`}>
                     <p className="text-[13px] font-semibold text-[#334455]">No posts yet</p>
@@ -2923,6 +3140,6 @@ export default function HRHomePage() {
           onClose={() => setShowHolidaysModal(false)}
         />
       )}
-    </div>
+    </PageShell>
   );
 }

@@ -10,9 +10,26 @@ export const dynamic = 'force-dynamic';
 import { serializeBigInt } from "@/lib/utils";
 import { resolveTeamCapsuleForSave } from "@/lib/capsule-matching";
 
+// CEO + developer only — used for destructive actions (DELETE).
+// Onboarding employees is gated separately by `canCreateUsers` so HR
+// managers / admins / special_access can also onboard.
 function canManageUsers(session: any): boolean {
     const user = session?.user as any;
     return user?.orgLevel === "ceo" || user?.isDeveloper === true;
+}
+
+// HR-admin tier — mirrors src/lib/access.ts:isHRAdmin so the onboarding
+// form (POST /api/users) works for everyone the UI shows the wizard to:
+// CEO / developer / special_access / role=admin / orgLevel=hr_manager.
+function canCreateUsers(session: any): boolean {
+    const user = session?.user as any;
+    return (
+        user?.orgLevel === "ceo" ||
+        user?.isDeveloper === true ||
+        user?.orgLevel === "special_access" ||
+        user?.role === "admin" ||
+        user?.orgLevel === "hr_manager"
+    );
 }
 
 export async function GET(request: Request) {
@@ -21,12 +38,18 @@ export async function GET(request: Request) {
         if (errorResponse) return errorResponse;
 
         const { searchParams } = new URL(request.url);
-        const includeAll = searchParams.get("all") === "true";
+        const includeAll      = searchParams.get("all") === "true";
+        const includeInactive = searchParams.get("includeInactive") === "true";
 
-        const where: any = { isActive: true };
-        if (!includeAll) {
-            where.NOT = { role: "member", orgLevel: "member" };
-        }
+        // Default = active only. `?all=true` widens the role filter so
+        // post-Keka member/member rows are pickable in dropdowns. The
+        // separate `?includeInactive=true` flag is needed for the admin
+        // user table — HR keeps inactive employees visible (with the
+        // "Inactive" badge) for record-keeping but they're still
+        // excluded from rating lists, email reminders, and login.
+        const where: any = {};
+        if (!includeInactive) where.isActive = true;
+        if (!includeAll)      where.NOT = { role: "member", orgLevel: "member" };
 
         const users = await prisma.user.findMany({
             where,
@@ -52,17 +75,18 @@ export async function GET(request: Request) {
     }
 }
 
-// POST: Add new user (CEO / Developer only)
+// POST: Add new user — HR admin tier (CEO / dev / admin / special_access / hr_manager)
 export async function POST(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
-        if (!canManageUsers(session)) {
-            return NextResponse.json({ error: "Only CEO and developers can add users" }, { status: 403 });
+        if (!canCreateUsers(session)) {
+            return NextResponse.json({ error: "Only HR managers and admins can add users" }, { status: 403 });
         }
 
         const body = await request.json();
         const {
             name, email, role, orgLevel, clickupUserId, teamCapsule, managerId,
+            inlineManagerId,            // optional secondary / dotted-line manager
             inviteToLogin,              // boolean: if true, email a welcome / sign-in link
             enableOnboarding,           // boolean: if true, gate first login behind /onboarding
             profile,                    // optional EmployeeProfile payload
@@ -107,20 +131,29 @@ export async function POST(request: NextRequest) {
                 select: { id: true, clickupUserId: true },
             });
 
-            const created = existing
-                ? await tx.user.update({
-                    where: { id: existing.id },
-                    data: {
-                        name,
-                        role: role || undefined,
-                        orgLevel: orgLevel || undefined,
-                        teamCapsule: resolvedCapsule,
-                        managerId: managerId || null,
-                        // Only set the synthetic id when nothing real is stored.
-                        ...(existing.clickupUserId ? {} : { clickupUserId: resolvedClickupId }),
-                    },
-                })
-                : await tx.user.create({
+            // Update branch: ONLY touch role / orgLevel / managerId
+            // when the caller explicitly sent them. This is what
+            // protects the bulk-Keka import from clobbering existing
+            // leads/managers down to "member" — the bulk path now
+            // omits those fields, so existing values are preserved.
+            // Single-employee onboarding still sets role/orgLevel
+            // explicitly (it always sends a value), so its behaviour
+            // is unchanged.
+            let created;
+            if (existing) {
+                const updateData: any = { name };
+                if (resolvedCapsule !== null || teamCapsule !== undefined) updateData.teamCapsule = resolvedCapsule;
+                if (!existing.clickupUserId) updateData.clickupUserId = resolvedClickupId;
+                if (role !== undefined && role !== null && role !== "") updateData.role = role;
+                if (orgLevel !== undefined && orgLevel !== null && orgLevel !== "") updateData.orgLevel = orgLevel;
+                if (managerId !== undefined) {
+                    updateData.managerId = (managerId === null || managerId === "" || managerId === 0)
+                        ? null
+                        : Number(managerId);
+                }
+                created = await tx.user.update({ where: { id: existing.id }, data: updateData });
+            } else {
+                created = await tx.user.create({
                     data: {
                         name,
                         email,
@@ -131,6 +164,7 @@ export async function POST(request: NextRequest) {
                         managerId: managerId || null,
                     },
                 });
+            }
 
             // Mark new hire for first-login wizard if HR opted in. Done via
             // raw SQL so it works before `prisma generate` has picked up the
@@ -140,6 +174,28 @@ export async function POST(request: NextRequest) {
                     `UPDATE "User" SET "onboardingPending" = true WHERE id = $1`,
                     created.id,
                 );
+            }
+
+            // Inline manager — same raw-SQL pattern (typed client may not
+            // know about the column on a stale `prisma generate` cache).
+            // Self-reference guarded: a brand-new user can't pick themselves
+            // anyway, but the explicit check matches the PUT endpoint.
+            if (inlineManagerId !== undefined) {
+                const inlineId = inlineManagerId === null || inlineManagerId === ""
+                    ? null
+                    : Number(inlineManagerId);
+                if (inlineId !== null && inlineId !== created.id) {
+                    await tx.$executeRawUnsafe(
+                        `UPDATE "User" SET "inlineManagerId" = $1 WHERE id = $2`,
+                        inlineId,
+                        created.id,
+                    );
+                } else if (inlineId === null) {
+                    await tx.$executeRawUnsafe(
+                        `UPDATE "User" SET "inlineManagerId" = NULL WHERE id = $1`,
+                        created.id,
+                    );
+                }
             }
 
             if (profile && typeof profile === "object") {
@@ -325,6 +381,26 @@ export async function POST(request: NextRequest) {
             return { user: created, isUpdate: !!existing };
         });
 
+        // Persist businessUnit via raw SQL — keeps things working even
+        // if the typed Prisma client hasn't been regenerated after the
+        // schema change. Same pattern other new columns use here.
+        // Defaults to "NB Media" when caller didn't supply one or sent
+        // a blank — we treat it as a single-business-unit org for now.
+        if (profile && typeof profile === "object") {
+            const bu = (typeof profile.businessUnit === "string" && profile.businessUnit.trim())
+                ? profile.businessUnit.trim()
+                : "NB Media";
+            try {
+                await prisma.$executeRawUnsafe(
+                    `UPDATE "EmployeeProfile" SET "businessUnit" = $1 WHERE "userId" = $2`,
+                    bu,
+                    user.id,
+                );
+            } catch (e) {
+                console.warn("[users POST] businessUnit update failed:", e);
+            }
+        }
+
         // Welcome / sign-in email — fire-and-forget so a transient SMTP
         // failure doesn't roll back the create.
         if (inviteToLogin && email) {
@@ -362,9 +438,30 @@ export async function DELETE(request: NextRequest) {
         }
 
         const { id } = await request.json();
-        await prisma.user.delete({
-            where: { id },
-        });
+
+        // Clean up all related records before deleting the user to avoid FK constraint errors
+        await prisma.notification.deleteMany({ where: { userId: id } });
+        await prisma.userTabPermission.deleteMany({ where: { userId: id } });
+        await prisma.leaveBalance.deleteMany({ where: { userId: id } });
+        await prisma.leaveApplication.deleteMany({ where: { userId: id } });
+        await prisma.attendance.deleteMany({ where: { userId: id } });
+        await prisma.attendanceRegularization.deleteMany({ where: { userId: id } });
+        await prisma.wFHRequest.deleteMany({ where: { userId: id } });
+        await prisma.compOffRequest.deleteMany({ where: { userId: id } });
+        await prisma.userShift.deleteMany({ where: { userId: id } });
+        await prisma.youtubeDashUserQuarterChannel.deleteMany({ where: { userId: id } });
+        await prisma.monthlyRating.deleteMany({ where: { userId: id } });
+        await prisma.monthlyReport.deleteMany({ where: { managerId: id } });
+        await prisma.weeklyReport.deleteMany({ where: { managerId: id } });
+        await prisma.managerRating.deleteMany({ where: { managerId: id } });
+        await prisma.userReportAccess.deleteMany({ where: { userId: id } });
+        await prisma.announcementRead.deleteMany({ where: { userId: id } });
+        await prisma.userFeedback.deleteMany({ where: { userId: id } });
+        await prisma.violation.deleteMany({ where: { OR: [{ userId: id }, { reportedBy: id }] } });
+        await prisma.auditLog.deleteMany({ where: { actorId: id } });
+        await prisma.employeeProfile.deleteMany({ where: { userId: id } });
+
+        await prisma.user.delete({ where: { id } });
 
         return NextResponse.json({ success: true });
     } catch (error: any) {

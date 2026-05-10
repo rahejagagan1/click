@@ -4,6 +4,19 @@ const nextConfig = {
     experimental: {
         optimizePackageImports: ["recharts", "lru-cache"],
     },
+    // Keep these packages as real node_modules imports at runtime instead
+    // of bundling them into Next.js's chunked server output. pdfjs-dist
+    // and pdf-parse both rely on relative imports of their worker files
+    // that break once webpack rewrites the paths into `.next/dev/server/
+    // chunks/...` — leaving them external lets the worker resolve normally.
+    // mammoth + @napi-rs/canvas are heavy native-ish deps that also do
+    // better outside the bundle.
+    serverExternalPackages: [
+        "pdfjs-dist",
+        "pdf-parse",
+        "mammoth",
+        "@napi-rs/canvas",
+    ],
     // Hosts allowed to hit Next.js dev resources (e.g. /_next/webpack-hmr).
     // The dev server blocks cross-origin requests to dev-only routes by
     // default — safe locally but breaks when the dev server is fronted by

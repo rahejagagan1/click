@@ -22,16 +22,18 @@ export type QuarterAnalysisBucket = {
     label: string;
     endDay: string;
     views: number;
+    subscribersGained: number;
     uploads: UploadSnippet[];
 };
 
-export function buildTenDayBuckets(
+export function buildWeeklyBuckets(
     dailies: DailyViewPoint[],
     startStr: string,
     endStr: string,
     uploads: UploadSnippet[]
 ): QuarterAnalysisBucket[] {
-    const dailyMap = new Map(dailies.map((p) => [p.day, p.views]));
+    const viewsMap = new Map(dailies.map((p) => [p.day, p.views]));
+    const subsMap = new Map(dailies.map((p) => [p.day, p.subscribersGained]));
     const start = parseYmdUtc(startStr);
     const end = parseYmdUtc(endStr);
     const buckets: QuarterAnalysisBucket[] = [];
@@ -40,13 +42,15 @@ export function buildTenDayBuckets(
     while (cursor <= end) {
         const bStart = new Date(cursor);
         const bEnd = new Date(cursor);
-        bEnd.setUTCDate(bEnd.getUTCDate() + 9);
+        bEnd.setUTCDate(bEnd.getUTCDate() + 6); // 7-day window
         if (bEnd > end) bEnd.setTime(end.getTime());
 
-        let sum = 0;
+        let viewSum = 0;
+        let subSum = 0;
         for (let t = new Date(bStart); t <= bEnd; t.setUTCDate(t.getUTCDate() + 1)) {
             const key = t.toISOString().slice(0, 10);
-            sum += dailyMap.get(key) ?? 0;
+            viewSum += viewsMap.get(key) ?? 0;
+            subSum += subsMap.get(key) ?? 0;
         }
 
         const b0 = bStart.toISOString().slice(0, 10);
@@ -60,11 +64,12 @@ export function buildTenDayBuckets(
             key: bEnd.toISOString().slice(0, 10),
             label: `${formatShortUtc(bStart)} – ${formatShortUtc(bEnd)}`,
             endDay: bEnd.toISOString().slice(0, 10),
-            views: sum,
+            views: viewSum,
+            subscribersGained: subSum,
             uploads: upsInBucket,
         });
 
-        cursor.setUTCDate(cursor.getUTCDate() + 10);
+        cursor.setUTCDate(cursor.getUTCDate() + 7); // advance by 7 days
     }
 
     return buckets;
@@ -78,7 +83,7 @@ export type StoredChartJson = {
 };
 
 /**
- * Fetches YouTube Analytics daily series + upload list, builds 10-day buckets, persists (cron path).
+ * Fetches YouTube Analytics daily series + upload list, builds 7-day (weekly) buckets, persists (cron path).
  */
 export async function upsertChannelQuarterAnalysisFromApis(
     channel: ChannelConfig,
@@ -93,7 +98,7 @@ export async function upsertChannelQuarterAnalysisFromApis(
             return { ok: false, message: "YouTube Analytics daily series failed" };
         }
         const uploads = await fetchChannelUploadsInRange(channel.channelId, startStr, endStr);
-        const buckets = buildTenDayBuckets(dailies, startStr, endStr, uploads);
+        const buckets = buildWeeklyBuckets(dailies, startStr, endStr, uploads);
         const headlineViews = buckets.length ? buckets[buckets.length - 1].views : 0;
 
         const chartJson: StoredChartJson = {

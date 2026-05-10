@@ -15,6 +15,7 @@ enum UserRole {
   sub_lead
   writer
   editor
+  graphic_designer
   qa
   researcher
   gc
@@ -47,6 +48,11 @@ model User {
   role              UserRole   @default(member)
   orgLevel          OrgLevel   @default(member)
   managerId         Int?
+  /// Day-to-day / dotted-line manager. Independent of the formal
+  /// reporting line in `managerId` — used for org-tree views that need
+  /// to show a secondary supervisor (e.g. a team lead who runs the
+  /// rituals while the head-of-department signs off).
+  inlineManagerId   Int?
   teamCapsule       String?
   /// Monthly case delivery target for CM/PM (denominator for delivery %). Per-manager.
   monthlyDeliveryTargetCases Int?
@@ -62,6 +68,8 @@ model User {
 
   manager           User?      @relation("TeamHierarchy", fields: [managerId], references: [id])
   teamMembers       User[]     @relation("TeamHierarchy")
+  inlineManager     User?      @relation("InlineHierarchy", fields: [inlineManagerId], references: [id])
+  inlineReports     User[]     @relation("InlineHierarchy")
 
   assignedCases     Case[]     @relation("CaseAssignee")
   researchedCases   Case[]     @relation("CaseResearcher")
@@ -69,6 +77,9 @@ model User {
   editedCases       Case[]     @relation("CaseEditor")
   assignedSubtasks  Subtask[]  @relation("SubtaskAssignee")
   caseAssignments   CaseAssignee[]
+  subtaskAssignments SubtaskAssignee[]
+  caseEditorEntries CaseEditorEntry[]
+  caseWriterEntries CaseWriterEntry[]
   monthlyRatings    MonthlyRating[]
   scorecardConfigs  ScorecardConfig[]
   scoreEditsMade    ScoreEditLog[]     @relation("ScoreEditor")
@@ -128,8 +139,11 @@ model User {
   tabPermissions         UserTabPermission[] @relation("UserTabPermsOwner")
   tabPermissionsUpdated  UserTabPermission[] @relation("UserTabPermsUpdater")
   auditLogs              AuditLog[]          @relation("AuditLogActor")
+  employeeExit           EmployeeExit?       @relation("ExitUser")
+  exitsInitiated         EmployeeExit[]      @relation("ExitInitiator")
 
   @@index([managerId])
+  @@index([inlineManagerId])
 }
 
 // ═══════════════════════════════════════════════════════
@@ -258,6 +272,8 @@ model Case {
   editor                  User?     @relation("CaseEditor", fields: [editorUserId], references: [id])
   subtasks                Subtask[]
   assignees               CaseAssignee[]
+  allEditors              CaseEditorEntry[]
+  allWriters              CaseWriterEntry[]
   youtubeStats            YoutubeStats?
 
   @@index([status])
@@ -285,6 +301,28 @@ model CaseAssignee {
   @@index([userId])
 }
 
+model CaseEditorEntry {
+  id            Int     @id @default(autoincrement())
+  caseId        Int
+  userId        Int
+  clickupUserId BigInt?
+  case          Case    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user          User    @relation(fields: [userId], references: [id])
+  @@unique([caseId, userId])
+  @@index([caseId])
+}
+
+model CaseWriterEntry {
+  id            Int     @id @default(autoincrement())
+  caseId        Int
+  userId        Int
+  clickupUserId BigInt?
+  case          Case    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user          User    @relation(fields: [userId], references: [id])
+  @@unique([caseId, userId])
+  @@index([caseId])
+}
+
 model Subtask {
   id                Int       @id @default(autoincrement())
   clickupTaskId     String    @unique
@@ -304,9 +342,24 @@ model Subtask {
 
   case              Case      @relation(fields: [caseId], references: [id], onDelete: Cascade)
   assignee          User?     @relation("SubtaskAssignee", fields: [assigneeUserId], references: [id])
+  assignees         SubtaskAssignee[]
 
   @@index([caseId])
   @@index([assigneeUserId])
+}
+
+model SubtaskAssignee {
+  id              Int     @id @default(autoincrement())
+  subtaskId       Int
+  userId          Int
+  clickupUserId   BigInt
+
+  subtask         Subtask @relation(fields: [subtaskId], references: [id], onDelete: Cascade)
+  user            User    @relation(fields: [userId], references: [id])
+
+  @@unique([subtaskId, userId])
+  @@index([subtaskId])
+  @@index([userId])
 }
 
 model YoutubeStats {
@@ -802,6 +855,10 @@ model Violation {
   violationDate       DateTime?
   responsiblePersonId Int?
   resolvedAt          DateTime?
+  /// Last time the in-progress reminder email was sent. The cron uses
+  /// this to decide whether to fire another reminder (~ every 15 days).
+  /// Null = never reminded yet.
+  lastReminderAt      DateTime?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
@@ -835,6 +892,10 @@ model EmployeeProfile {
   // ── Existing fields ──
   designation       String?
   department        String?
+  /// "Business Unit" the employee belongs to (e.g. "NB Media"). Free-text
+  /// since HR can extend the dropdown via the OptionList table — keep
+  /// nullable so legacy rows survive without backfill.
+  businessUnit      String?
   employmentType    String    @default("fulltime")  // fulltime | parttime | contract | intern
   workLocation      String    @default("office")    // office | remote | hybrid
   joiningDate       DateTime?
@@ -863,6 +924,22 @@ model EmployeeProfile {
   parentName        String?          // father's / spouse's name, as printed on the PAN card
   aadhaarNumber     String?
   aadhaarEnrollment String?
+  // ── Extended onboarding fields (job + work settings) ──
+  // All optional so the column adds don't break legacy rows. The
+  // onboarding wizard captured these in the form already; before this
+  // migration they were thrown away. HR's Edit Profile reads/writes
+  // them now so every onboarding field is cross-checkable.
+  secondaryJobTitle  String?
+  legalEntity        String?
+  jobLocation        String?         // City-level (Mohali / Delhi / Mumbai / Remote) — distinct from workLocation (office/remote/hybrid).
+  probationPolicy    String?
+  internshipEndDate  DateTime?
+  leavePlan          String?
+  holidayList        String?
+  weeklyOff          String?
+  attendanceNumber   String?
+  timeTrackingPolicy String?
+  penalizationPolicy String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -952,6 +1029,12 @@ model LeaveType {
   isPaid              Boolean   @default(true)
   applicableGender    String    @default("all")  // all | male | female
   isActive            Boolean   @default(true)
+  // When false the balance is read-only — shown on the leave-balances
+  // grid for record-keeping but hidden from the apply-leave dropdown.
+  // Used for legacy / encashment-only buckets like Carry Over Leave
+  // that the company doesn't auto-credit anymore but still pays out
+  // at exit for old employees who already have a stored balance.
+  applicable          Boolean   @default(true)
   createdAt           DateTime  @default(now())
 
   balances            LeaveBalance[]
@@ -975,9 +1058,13 @@ model LeaveBalance {
   userId          Int
   leaveTypeId     Int
   year            Int
-  totalDays       Decimal   @default(0)  @db.Decimal(5, 1)
-  usedDays        Decimal   @default(0)  @db.Decimal(5, 1)
-  pendingDays     Decimal   @default(0)  @db.Decimal(5, 1)
+  // Decimal(6,2) so HR-entered values like 1.68 survive intact —
+  // Decimal(5,1) was rounding everything to 1 decimal at storage,
+  // which broke Carry Over Leave (HR enters precise carry-forward
+  // figures that get paid out at exit).
+  totalDays       Decimal   @default(0)  @db.Decimal(6, 2)
+  usedDays        Decimal   @default(0)  @db.Decimal(6, 2)
+  pendingDays     Decimal   @default(0)  @db.Decimal(6, 2)
   /// Last YYYY-MM in which monthly accrual ran for this row. Used to
   /// keep Sick Leave's "+1 day per month" idempotent — re-runs in the
   /// same month are no-ops.
@@ -1578,4 +1665,115 @@ model AuditLog {
   @@index([action])
   @@index([entityType, entityId])
   @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════════════════
+// HR MODULE — Employee exits / offboarding
+// ═══════════════════════════════════════════════════════
+
+/// One row per employee who has left (or is leaving) the company.
+/// Linked 1:1 with the User row — flipping User.isActive to false is
+/// the canonical "they're gone" signal; this row stores the *why* /
+/// *when* / clearance state.
+model EmployeeExit {
+  id              Int       @id @default(autoincrement())
+  userId          Int       @unique
+  user            User      @relation("ExitUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// resignation | termination | contract_end | retirement | other
+  exitType        String    @default("resignation")
+  resignationDate DateTime  @db.Date
+  lastWorkingDay  DateTime  @db.Date
+  noticePeriodDays Int      @default(30)
+
+  reason          String?   @db.Text
+  notes           String?   @db.Text
+
+  /// notice_period | cleared | offboarded
+  status          String    @default("notice_period")
+
+  // Clearance checklist — ticked off as HR processes the exit.
+  assetsReturned      Boolean @default(false)
+  documentsHandled    Boolean @default(false)
+  finalSettlementDone Boolean @default(false)
+  exitInterviewDone   Boolean @default(false)
+
+  initiatedById   Int?
+  initiatedBy     User?     @relation("ExitInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status])
+  @@index([lastWorkingDay])
+}
+
+// ═══════════════════════════════════════════════════════
+// HR MODULE — Hiring (job openings + public applications)
+// ═══════════════════════════════════════════════════════
+
+/// A role HR is currently or previously hiring for. Only `isOpen=true`
+/// titles appear in the public application form's job dropdown.
+model JobOpening {
+  id          Int      @id @default(autoincrement())
+  title       String   @unique
+  department  String?
+  location    String?
+  description String?  @db.Text
+  isOpen      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  applications JobApplication[]
+
+  @@index([isOpen])
+}
+
+/// One row per submission from the public job-application form.
+model JobApplication {
+  id              Int        @id @default(autoincrement())
+  jobOpeningId    Int
+  jobOpening      JobOpening @relation(fields: [jobOpeningId], references: [id], onDelete: Restrict)
+
+  fullName        String
+  email           String
+  phone           String?
+  coverLetter     String?    @db.Text
+  linkedinUrl     String?
+  portfolioUrl    String?
+  experienceYears Int?
+  currentCompany  String?
+  noticePeriod    String?
+
+  resumeFileName  String?
+  /// Public URL the resume is served from (e.g. /uploads/resumes/<uuid>.pdf).
+  resumeUrl       String?
+
+  /// HR-side workflow state: new | reviewed | shortlisted | interviewing | rejected | hired
+  status          String     @default("new")
+  hrNotes         String?    @db.Text
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([jobOpeningId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// Per-field visibility/required toggles for the public application form.
+/// Seeded once with the canonical field set; HR can flip visibility/required
+/// from the Hiring → Form Settings tab. Name / email / job opening / resume
+/// are conceptually mandatory; they're seeded with isRequired=true and
+/// isVisible=true and HR shouldn't disable them.
+model JobApplicationFormField {
+  id          Int     @id @default(autoincrement())
+  fieldKey    String  @unique     // "phone" | "coverLetter" | "linkedinUrl" | …
+  label       String
+  fieldType   String              // "text" | "tel" | "email" | "textarea" | "url" | "number"
+  isVisible   Boolean @default(true)
+  isRequired  Boolean @default(false)
+  sortOrder   Int     @default(0)
+  isMandatory Boolean @default(false)  // System-locked — HR can't hide these (name/email/etc.)
+  updatedAt   DateTime @updatedAt
 }

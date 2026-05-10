@@ -2,6 +2,10 @@
 
 import { getStatusColor, formatDate, calcBusinessDaysTat, formatTatDays } from "@/lib/utils";
 
+interface SubtaskAssigneeEntry {
+    user: { id: number; name: string; profilePictureUrl?: string | null };
+}
+
 interface SubtaskData {
     id: number;
     name: string;
@@ -10,8 +14,9 @@ interface SubtaskData {
     startDate?: string | null;
     dueDate?: string | null;
     dateDone?: string | null;
-    tat?: number | string | null; // stored value from DB (post-sync)
+    tat?: number | string | null;
     assignee?: { name: string; profilePictureUrl?: string | null } | null;
+    assignees?: SubtaskAssigneeEntry[] | null;
 }
 
 function resolveTat(subtask: SubtaskData): string | null {
@@ -61,18 +66,23 @@ export default function SubtaskTimeline({ subtasks }: { subtasks: SubtaskData[] 
                             </div>
 
                             <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                                {subtask.assignee && (
-                                    <span className="flex items-center gap-1 text-[11px] text-slate-500">
-                                        {subtask.assignee.profilePictureUrl ? (
-                                            <img src={subtask.assignee.profilePictureUrl} alt="" className="w-4 h-4 rounded-full object-cover" />
-                                        ) : (
-                                            <span className="w-4 h-4 rounded-full bg-violet-500/30 flex items-center justify-center text-[8px] text-violet-300">
-                                                {subtask.assignee.name.charAt(0)}
-                                            </span>
-                                        )}
-                                        {subtask.assignee.name}
-                                    </span>
-                                )}
+                                {(() => {
+                                    const people = subtask.assignees && subtask.assignees.length > 0
+                                        ? subtask.assignees.map(a => a.user)
+                                        : subtask.assignee ? [subtask.assignee] : [];
+                                    return people.map((person, idx) => (
+                                        <span key={idx} className="flex items-center gap-1 text-[11px] text-slate-500">
+                                            {person.profilePictureUrl ? (
+                                                <img src={person.profilePictureUrl} alt="" className="w-4 h-4 rounded-full object-cover" />
+                                            ) : (
+                                                <span className="w-4 h-4 rounded-full bg-violet-500/30 flex items-center justify-center text-[8px] text-violet-300">
+                                                    {person.name.charAt(0)}
+                                                </span>
+                                            )}
+                                            {person.name}
+                                        </span>
+                                    ));
+                                })()}
                                 {subtask.startDate && (
                                     <span className="text-[11px] text-slate-500">
                                         <span className="text-slate-600">Start:</span> {formatDate(subtask.startDate)}
