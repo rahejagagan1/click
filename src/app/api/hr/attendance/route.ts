@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, serverError } from "@/lib/api-auth";
+import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 import { istTodayDateOnly } from "@/lib/ist-date";
 
 // GET /api/hr/attendance?userId=X&month=2026-04
@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   try {
     const self = session!.user as any;
     const { searchParams } = new URL(req.url);
-    const isAdmin = self.orgLevel === "ceo" || self.isDeveloper || self.orgLevel === "hr_manager";
+    const isAdmin = isHRAdmin(self);
 
     // Resolve dbId — fallback to DB lookup by email if session doesn't have it
     let myDbId = self.dbId;
@@ -48,6 +48,30 @@ export async function GET(req: NextRequest) {
       orderBy: { date: "asc" },
     });
 
+    // Attach the sessions[] array to each record so the UI can render
+    // multi-session days. One round-trip — fetch all sessions for the
+    // page's records in a single query, then bucket by attendanceId.
+    const recordIds = records.map((r) => r.id);
+    type SessRow = { id: number; attendanceId: number; clockIn: Date; clockOut: Date | null };
+    const sessions = recordIds.length
+      ? await prisma.$queryRawUnsafe<SessRow[]>(
+          `SELECT id, "attendanceId", "clockIn", "clockOut"
+             FROM "AttendanceSession"
+            WHERE "attendanceId" = ANY($1::int[])
+            ORDER BY "clockIn" ASC`,
+          recordIds,
+        )
+      : [];
+    const sessionsByAttendance = new Map<number, SessRow[]>();
+    for (const s of sessions) {
+      if (!sessionsByAttendance.has(s.attendanceId)) sessionsByAttendance.set(s.attendanceId, []);
+      sessionsByAttendance.get(s.attendanceId)!.push(s);
+    }
+    const recordsWithSessions = records.map((r) => ({
+      ...r,
+      sessions: sessionsByAttendance.get(r.id) ?? [],
+    }));
+
     const summary = { present: 0, absent: 0, late: 0, halfDay: 0, onLeave: 0, totalOvertimeMinutes: 0 };
     for (const r of records) {
       if (r.status === "present") summary.present++;
@@ -62,8 +86,21 @@ export async function GET(req: NextRequest) {
     const todayRecord = await prisma.attendance.findUnique({
       where: { userId_date: { userId: targetUserId, date: today } },
     });
+    let todayRecordWithSessions: any = todayRecord;
+    if (todayRecord) {
+      // Today's record may not be in the requested range (e.g. when the
+      // user is browsing a past month) so fetch its sessions separately.
+      const todaySessions = await prisma.$queryRawUnsafe<SessRow[]>(
+        `SELECT id, "attendanceId", "clockIn", "clockOut"
+           FROM "AttendanceSession"
+          WHERE "attendanceId" = $1
+          ORDER BY "clockIn" ASC`,
+        todayRecord.id,
+      );
+      todayRecordWithSessions = { ...todayRecord, sessions: todaySessions };
+    }
 
-    return NextResponse.json({ records, summary, todayRecord });
+    return NextResponse.json({ records: recordsWithSessions, summary, todayRecord: todayRecordWithSessions });
   } catch (e) {
     return serverError(e, "GET /api/hr/attendance");
   }

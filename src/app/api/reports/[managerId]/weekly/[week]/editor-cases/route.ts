@@ -143,12 +143,17 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
                 c.name?.toLowerCase().includes("hero")
             );
 
+            const subtaskName =
+                (editInWeek && editingSub?.name)  ||
+                (revInWeek  && revisionSub?.name) || "";
+
             return {
                 editorId:   c.editor?.id   ?? null,
                 editorName: c.editor?.name ?? "",
                 caseName:   c.name,
                 caseStatus: c.status ?? "",
                 heroCase:   isHero ? "yes" : "no",
+                subtaskName,
                 tatEditing,
                 tatRevision,
                 qualityScore:

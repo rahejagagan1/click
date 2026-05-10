@@ -5,16 +5,43 @@ import { writeAuditLog } from "@/lib/audit-log";
 
 export const dynamic = "force-dynamic";
 
+// Mirrors src/lib/access.ts:isHRAdmin so the server gate matches the
+// client. CEO / developer / special_access / role=admin / hr_manager
+// can read any user's structure and write structures.
+function isHRAdmin(u: any): boolean {
+  return (
+    u?.orgLevel === "ceo" ||
+    u?.isDeveloper === true ||
+    u?.orgLevel === "special_access" ||
+    u?.role === "admin" ||
+    u?.orgLevel === "hr_manager"
+  );
+}
+
 export async function GET(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
-  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
+  const admin = isHRAdmin(user);
 
   const { searchParams } = new URL(req.url);
-  const userId = isAdmin && searchParams.get("userId")
-    ? parseInt(searchParams.get("userId")!)
-    : user.dbId;
+  // Admins can target any userId; everyone else only their own. If a
+  // non-admin asks for someone else's structure they get 403 — better
+  // than silently swapping to their own (would mask UI bugs).
+  let userId: number;
+  const requested = searchParams.get("userId");
+  if (requested) {
+    const n = parseInt(requested);
+    if (!Number.isFinite(n)) {
+      return NextResponse.json({ error: "Bad userId" }, { status: 400 });
+    }
+    if (!admin && n !== user.dbId) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    userId = n;
+  } else {
+    userId = user.dbId;
+  }
 
   try {
     const structure = await prisma.salaryStructure.findUnique({
@@ -29,36 +56,43 @@ export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
-  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
-  if (!isAdmin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!isHRAdmin(user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
     const body = await req.json();
-    const { userId, ctc, basic, hra, specialAllowance, pfEmployee, pfEmployer, esiEmployee, esiEmployer, tds, professionalTax, effectiveFrom } = body;
-    if (!userId || !ctc || !basic || !hra || !effectiveFrom)
-      return NextResponse.json({ error: "userId, ctc, basic, hra, effectiveFrom required" }, { status: 400 });
+    const {
+      userId, ctc, basic, hra,
+      specialAllowance, pfEmployee, pfEmployer, esiEmployee, esiEmployer,
+      tds, professionalTax, effectiveFrom,
+      // Extended fields from the onboarding compensation step:
+      salaryType, payGroup, bonusIncluded, taxRegime, structureType, pfEligible,
+    } = body;
+    if (!userId || ctc == null || basic == null || !effectiveFrom) {
+      return NextResponse.json({ error: "userId, ctc, basic, effectiveFrom required" }, { status: 400 });
+    }
 
     // Capture the previous structure (if any) for the audit trail.
     const before = await prisma.salaryStructure.findUnique({ where: { userId: parseInt(userId) } });
 
+    const data = {
+      ctc, basic, hra: hra ?? 0,
+      specialAllowance: specialAllowance ?? 0,
+      pfEmployee: pfEmployee ?? 0, pfEmployer: pfEmployer ?? 0,
+      esiEmployee: esiEmployee ?? 0, esiEmployer: esiEmployer ?? 0,
+      tds: tds ?? 0, professionalTax: professionalTax ?? 0,
+      effectiveFrom: new Date(effectiveFrom),
+      salaryType:    salaryType    ?? "regular",
+      payGroup:      payGroup      ?? null,
+      bonusIncluded: bonusIncluded ?? false,
+      taxRegime:     taxRegime     ?? null,
+      structureType: structureType ?? null,
+      pfEligible:    pfEligible    ?? false,
+    };
+
     const structure = await prisma.salaryStructure.upsert({
       where: { userId: parseInt(userId) },
-      create: {
-        userId: parseInt(userId), ctc, basic, hra,
-        specialAllowance: specialAllowance || 0,
-        pfEmployee: pfEmployee || 0, pfEmployer: pfEmployer || 0,
-        esiEmployee: esiEmployee || 0, esiEmployer: esiEmployer || 0,
-        tds: tds || 0, professionalTax: professionalTax || 0,
-        effectiveFrom: new Date(effectiveFrom),
-      },
-      update: {
-        ctc, basic, hra,
-        specialAllowance: specialAllowance || 0,
-        pfEmployee: pfEmployee || 0, pfEmployer: pfEmployer || 0,
-        esiEmployee: esiEmployee || 0, esiEmployer: esiEmployer || 0,
-        tds: tds || 0, professionalTax: professionalTax || 0,
-        effectiveFrom: new Date(effectiveFrom),
-      },
+      create: { userId: parseInt(userId), ...data },
+      update: data,
       include: { user: { select: { id: true, name: true } } },
     });
 

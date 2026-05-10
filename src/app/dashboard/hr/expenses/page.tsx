@@ -5,6 +5,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { Receipt, Plus, Plane, Utensils, Monitor, Phone, Car, Package, X, CheckCircle2, XCircle, Clock, IndianRupee } from "lucide-react";
+import { isHRAdmin } from "@/lib/access";
 
 const TOP_TABS = [
   { key: "home",        label: "HOME",              href: "/dashboard/hr/home"  },
@@ -165,7 +166,8 @@ function NewTravelModal({ onClose, onSave }: { onClose: () => void; onSave: (d: 
 export default function ExpensesPage() {
   const { data: session } = useSession();
   const user = session?.user as any;
-  const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper || user?.orgLevel === "hr_manager";
+  // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access + role=admin.
+  const isAdmin = isHRAdmin(user);
 
   const [view, setView] = useState<"my" | "team">("my");
   const [mainTab, setMainTab] = useState<"expenses" | "travel">("expenses");

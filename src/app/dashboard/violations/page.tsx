@@ -41,10 +41,12 @@ interface Summary {
 }
 
 const SEVERITY_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
-    low: { label: "Low", color: "bg-slate-100 dark:bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-500/20", dot: "bg-slate-400" },
-    medium: { label: "Medium", color: "bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/20", dot: "bg-amber-400" },
-    high: { label: "High", color: "bg-orange-100 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-500/20", dot: "bg-orange-500" },
-    critical: { label: "Critical", color: "bg-rose-100 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-500/20", dot: "bg-rose-500" },
+    // Severity labels are L0–L3 in the UI; DB still stores
+    // low/medium/high/critical so existing rows keep working.
+    low:      { label: "L0", color: "bg-slate-100 dark:bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-500/20", dot: "bg-slate-400" },
+    medium:   { label: "L1", color: "bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/20", dot: "bg-amber-400" },
+    high:     { label: "L2", color: "bg-orange-100 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-500/20", dot: "bg-orange-500" },
+    critical: { label: "L3", color: "bg-rose-100 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-500/20", dot: "bg-rose-500" },
 };
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
@@ -64,7 +66,15 @@ const VIOLATION_TYPE_OPTIONS = [
 export default function ViolationsPage() {
     const { data: session } = useSession();
     const sessionUser = session?.user as any;
-    const canDelete = sessionUser?.orgLevel === "ceo" || sessionUser?.isDeveloper === true;
+    // Mirrors the DELETE gate in /api/violations: admin tier only
+    // (CEO / dev / special_access / role=admin). Was narrower before —
+    // role=admin and special_access users couldn't see the delete
+    // button even though they're admins.
+    const canDelete =
+        sessionUser?.orgLevel === "ceo" ||
+        sessionUser?.orgLevel === "special_access" ||
+        sessionUser?.role === "admin" ||
+        sessionUser?.isDeveloper === true;
 
     const [violations, setViolations] = useState<Violation[]>([]);
     const [summary, setSummary] = useState<Summary>({ total: 0, open: 0, inProgress: 0, closed: 0, highCritical: 0 });
@@ -101,7 +111,8 @@ export default function ViolationsPage() {
         setLoading(true);
         const params = new URLSearchParams();
         if (filterStatus) params.set("status", filterStatus);
-        if (filterSeverity) params.set("severity", filterSeverity);
+        // Severity filter is applied client-side now so the L0-L3 tab
+        // strip can show accurate per-tier counts without re-fetching.
         fetch(`/api/violations?${params}`)
             .then(r => r.json())
             .then(d => {
@@ -110,12 +121,15 @@ export default function ViolationsPage() {
             })
             .catch(() => { })
             .finally(() => setLoading(false));
-    }, [filterStatus, filterSeverity]);
+    }, [filterStatus]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
     useEffect(() => {
-        fetch("/api/users").then(r => r.json()).then(d => {
+        // ?all=true so the dropdown includes plain members (default
+        // role/orgLevel after a Keka bulk import) — otherwise newly
+        // onboarded employees can't be picked as the affected user.
+        fetch("/api/users?all=true").then(r => r.json()).then(d => {
             if (Array.isArray(d)) setUsers(d);
         }).catch(() => { });
     }, []);
@@ -218,13 +232,31 @@ export default function ViolationsPage() {
         }
     };
 
-    const filteredViolations = filterMonth
+    // Two-stage filter: month is applied first (used everywhere
+    // including the per-tier counts on the tab strip), then severity
+    // narrows it down for the actual list. This way the tab counts
+    // reflect the month filter but ignore the active tier so HR can
+    // see "if I cleared this tab, how many would there be?".
+    const monthFilteredViolations = filterMonth
         ? violations.filter(v => {
             const d = v.violationDate ? new Date(v.violationDate) : new Date(v.createdAt);
             const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
             return ym === filterMonth;
         })
         : violations;
+    const filteredViolations = filterSeverity
+        ? monthFilteredViolations.filter(v => v.severity === filterSeverity)
+        : monthFilteredViolations;
+    // Per-tier counts shown on the tab badges. Computed off
+    // monthFilteredViolations so the strip always reflects the
+    // current month/status scope.
+    const tierCounts = {
+        all:      monthFilteredViolations.length,
+        low:      monthFilteredViolations.filter(v => v.severity === "low").length,
+        medium:   monthFilteredViolations.filter(v => v.severity === "medium").length,
+        high:     monthFilteredViolations.filter(v => v.severity === "high").length,
+        critical: monthFilteredViolations.filter(v => v.severity === "critical").length,
+    };
 
     const toggleStatusDropdown = (e: React.MouseEvent, id: number) => {
         e.stopPropagation();
@@ -232,95 +264,166 @@ export default function ViolationsPage() {
     };
 
     return (
-        <div className="max-w-6xl mx-auto space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900 dark:text-white">System Violation Log</h1>
-                    <p className="text-sm text-slate-500 mt-1">Track and manage policy violations across the organization</p>
+        <div className="max-w-6xl mx-auto space-y-5 p-1">
+            {/* ── Header ── */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 className="text-[22px] font-bold tracking-tight text-slate-800 dark:text-white">System Violation Log</h1>
+                        <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">Track and manage policy violations across the organization</p>
+                    </div>
                 </div>
                 <button
                     onClick={() => setShowNewForm(true)}
-                    className="px-4 py-2.5 bg-rose-500 hover:bg-rose-600 text-white text-sm font-semibold rounded-xl transition-colors flex items-center gap-2 shadow-sm"
+                    className="self-start inline-flex items-center gap-2 px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white text-[13px] font-semibold rounded-lg transition-colors shadow-sm"
                 >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
                     </svg>
                     Report Violation
                 </button>
             </div>
 
-            {/* ═══ Summary Cards ═══ */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {/* ── Summary Cards ── pastel tints + dark text, matches the
+                KPI department-breakdown style for a consistent look. */}
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
                 {[
-                    { label: "Total Violations", value: summary.total, icon: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z", color: "from-slate-500 to-slate-600", bg: "bg-slate-50 dark:bg-slate-500/5", border: "border-slate-200 dark:border-slate-500/10" },
-                    { label: "Open Cases", value: summary.open, icon: "M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636", color: "from-red-500 to-red-600", bg: "bg-red-50 dark:bg-red-500/5", border: "border-red-200 dark:border-red-500/10" },
-                    { label: "In Progress", value: summary.inProgress, icon: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15", color: "from-blue-500 to-blue-600", bg: "bg-blue-50 dark:bg-blue-500/5", border: "border-blue-200 dark:border-blue-500/10" },
-                    { label: "Closed Cases", value: summary.closed, icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z", color: "from-emerald-500 to-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-500/5", border: "border-emerald-200 dark:border-emerald-500/10" },
-                    { label: "High / Critical", value: summary.highCritical, icon: "M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z", color: "from-orange-500 to-rose-600", bg: "bg-orange-50 dark:bg-orange-500/5", border: "border-orange-200 dark:border-orange-500/10" },
+                    { label: "Total",           value: summary.total,        tint: "#64748b", iconPath: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" },
+                    { label: "Open Cases",      value: summary.open,         tint: "#dc2626", iconPath: "M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636" },
+                    { label: "In Progress",     value: summary.inProgress,   tint: "#0284c7", iconPath: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" },
+                    { label: "Closed Cases",    value: summary.closed,       tint: "#059669", iconPath: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
+                    { label: "L2 / L3",         value: summary.highCritical, tint: "#d97706", iconPath: "M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" },
                 ].map((card) => (
-                    <div key={card.label} className={`rounded-2xl ${card.bg} border ${card.border} p-5 transition-all hover:shadow-md`}>
-                        <div className="flex items-center justify-between mb-3">
-                            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${card.color} flex items-center justify-center shadow-sm`}>
-                                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={card.icon} />
+                    <div
+                        key={card.label}
+                        className="relative overflow-hidden rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#0d1b2e] p-4 transition-shadow hover:shadow-[0_4px_18px_rgba(15,23,42,0.06)]"
+                    >
+                        <span aria-hidden className="absolute inset-x-0 top-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${card.tint}, ${card.tint}80 65%, transparent)` }} />
+                        <div className="flex items-start gap-3">
+                            <span
+                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1"
+                                style={{ background: `${card.tint}14`, color: card.tint, boxShadow: `inset 0 0 0 1px ${card.tint}33` }}
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={card.iconPath} />
                                 </svg>
+                            </span>
+                            <div className="min-w-0">
+                                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">{card.label}</p>
+                                <p className="mt-1 text-[22px] font-bold leading-none text-slate-800 dark:text-white tabular-nums">{card.value}</p>
                             </div>
                         </div>
-                        <p className="text-3xl font-bold text-slate-900 dark:text-white">{card.value}</p>
-                        <p className="text-xs text-slate-500 font-medium mt-1 uppercase tracking-wider">{card.label}</p>
                     </div>
                 ))}
             </div>
 
-            {/* ═══ Filters ═══ */}
-            <div className="flex items-center gap-3 flex-wrap">
+            {/* ── Filters bar — wrapped in a card so it visually anchors. */}
+            <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#0d1b2e] px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+                <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400 mr-1">Filter</span>
                 <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-                    className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
+                    className="h-9 px-2.5 text-[12.5px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-500/15">
                     <option value="">All Status</option>
                     <option value="open">Open</option>
                     <option value="in_progress">In Progress</option>
                     <option value="closed">Closed</option>
                 </select>
-                <select value={filterSeverity} onChange={e => setFilterSeverity(e.target.value)}
-                    className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
-                    <option value="">All Severity</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="critical">Critical</option>
-                </select>
+                {/* Severity filter is now driven by the L0–L3 tab strip
+                    above the records list — no dropdown duplicate. */}
                 <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
-                    className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30 cursor-pointer"
+                    className="h-9 px-2.5 text-[12.5px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-500/15 cursor-pointer"
                     onClick={e => (e.target as HTMLInputElement).showPicker()} />
-                {filterMonth && (
-                    <button onClick={() => setFilterMonth("")} className="text-xs text-slate-500 hover:text-rose-500 transition-colors">Clear</button>
+                {(filterStatus || filterSeverity || filterMonth) && (
+                    <button onClick={() => { setFilterStatus(""); setFilterSeverity(""); setFilterMonth(""); }}
+                        className="h-9 px-2.5 text-[11.5px] font-semibold text-slate-500 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors">
+                        Clear all
+                    </button>
                 )}
-                <span className="text-xs text-slate-500 ml-auto">{filteredViolations.length} record{filteredViolations.length !== 1 ? "s" : ""}</span>
+                <span className="ml-auto text-[11.5px] text-slate-500 tabular-nums">
+                    {filteredViolations.length} record{filteredViolations.length !== 1 ? "s" : ""}
+                </span>
             </div>
 
-            {/* ═══ Records Table ═══ */}
-            <div className="rounded-2xl bg-white dark:bg-[#12122a] border border-slate-200 dark:border-white/5 shadow-sm">
-                <div className="px-6 py-4 border-b border-slate-100 dark:border-white/5">
-                    <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                        <svg className="w-4 h-4 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                        </svg>
-                        Violation Records
-                    </h2>
+            {/* ── Records Card ── */}
+            <div className="rounded-xl bg-white dark:bg-[#0d1b2e] border border-slate-200 dark:border-white/[0.06] shadow-[0_1px_2px_rgba(15,23,42,0.04)] overflow-hidden">
+                <div className="px-5 py-3 border-b border-slate-100 dark:border-white/[0.05] flex items-center gap-2">
+                    <svg className="w-4 h-4 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    <h2 className="text-[13px] font-bold text-slate-800 dark:text-white">Violation Records</h2>
+                    <span className="ml-auto text-[11px] text-slate-400 tabular-nums">
+                        {filteredViolations.length} {filteredViolations.length === 1 ? "entry" : "entries"}
+                    </span>
+                </div>
+
+                {/* L0–L3 tab strip — replaces the old severity dropdown.
+                    Each tab shows the count for its tier in the current
+                    month/status scope; clicking it narrows the list.
+                    Tailwind class strings are spelled out per-tint so
+                    JIT picks them up (dynamic `bg-${tint}-100` would
+                    not be detected at build time). */}
+                <div className="flex items-center gap-1 border-b border-slate-100 dark:border-white/[0.05] px-3 py-2 overflow-x-auto">
+                    {([
+                        { key: "",         label: "All", count: tierCounts.all,
+                          activeCls: "bg-slate-100 text-slate-800 ring-1 ring-inset ring-slate-300 dark:bg-white/10 dark:text-slate-200" },
+                        { key: "low",      label: "L0",  count: tierCounts.low,
+                          activeCls: "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-300 dark:bg-slate-500/15 dark:text-slate-300" },
+                        { key: "medium",   label: "L1",  count: tierCounts.medium,
+                          activeCls: "bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-300 dark:bg-amber-500/15 dark:text-amber-300" },
+                        { key: "high",     label: "L2",  count: tierCounts.high,
+                          activeCls: "bg-orange-100 text-orange-700 ring-1 ring-inset ring-orange-300 dark:bg-orange-500/15 dark:text-orange-300" },
+                        { key: "critical", label: "L3",  count: tierCounts.critical,
+                          activeCls: "bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-300 dark:bg-rose-500/15 dark:text-rose-300" },
+                    ] as const).map((t) => {
+                        const active = filterSeverity === t.key;
+                        return (
+                            <button
+                                key={t.key || "all"}
+                                type="button"
+                                onClick={() => setFilterSeverity(t.key)}
+                                className={
+                                    "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-colors whitespace-nowrap " +
+                                    (active
+                                        ? t.activeCls
+                                        : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/5")
+                                }
+                            >
+                                {t.label}
+                                <span className={
+                                    "inline-flex items-center justify-center min-w-[20px] rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums " +
+                                    (active
+                                        ? "bg-white/70 dark:bg-white/10"
+                                        : "bg-slate-200 text-slate-600 dark:bg-white/10 dark:text-slate-400")
+                                }>
+                                    {t.count}
+                                </span>
+                            </button>
+                        );
+                    })}
                 </div>
 
                 {loading ? (
-
-                    <div className="p-10 text-center text-sm text-slate-500">Loading violations...</div>
+                    <div className="p-12 text-center">
+                        <div className="inline-block w-7 h-7 rounded-full border-2 border-rose-200 border-t-rose-500 animate-spin" />
+                        <p className="mt-3 text-[12.5px] text-slate-500">Loading violations…</p>
+                    </div>
                 ) : filteredViolations.length === 0 ? (
-                    <div className="p-10 text-center">
-                        <div className="w-16 h-16 rounded-2xl bg-emerald-50 dark:bg-emerald-500/5 flex items-center justify-center mx-auto mb-3">
-                            <svg className="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="px-6 py-14 text-center">
+                        <div className="w-14 h-14 rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center mx-auto mb-3">
+                            <svg className="w-7 h-7 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                         </div>
-                        <p className="text-sm text-slate-500">No violations found</p>
+                        <p className="text-[14px] font-semibold text-slate-700 dark:text-slate-200">No violations found</p>
+                        <p className="mt-1 text-[12px] text-slate-500">
+                            {filterStatus || filterSeverity || filterMonth
+                                ? "Try clearing the filters above."
+                                : "All clear — no policy violations have been logged."}
+                        </p>
                     </div>
                 ) : (
                     <div className="divide-y divide-slate-50 dark:divide-white/[0.03]">
@@ -412,10 +515,10 @@ export default function ViolationsPage() {
                                         <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Severity</label>
                                         <select value={editData.severity} onChange={e => setEditData(p => ({ ...p, severity: e.target.value }))}
                                             className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
-                                            <option value="low">Low</option>
-                                            <option value="medium">Medium</option>
-                                            <option value="high">High</option>
-                                            <option value="critical">Critical</option>
+                                            <option value="low">L0</option>
+                                            <option value="medium">L1</option>
+                                            <option value="high">L2</option>
+                                            <option value="critical">L3</option>
                                         </select>
                                     </div>
                                     <div>
@@ -428,7 +531,7 @@ export default function ViolationsPage() {
                                         </select>
                                     </div>
                                     <div>
-                                        <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Responsible Person</label>
+                                        <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Manager</label>
                                         <select value={editData.responsiblePersonId} onChange={e => setEditData(p => ({ ...p, responsiblePersonId: Number(e.target.value) }))}
                                             className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
                                             <option value={0}>Select...</option>
@@ -503,7 +606,7 @@ export default function ViolationsPage() {
                                         </div>
                                         {v.responsiblePerson && (
                                             <div className="mb-3">
-                                                <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Responsible Person</p>
+                                                <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Manager</p>
                                                 <div className="flex items-center gap-2">
                                                     <UserAvatar name={v.responsiblePerson.name} src={v.responsiblePerson.profilePictureUrl} size="sm" />
                                                     <span className="text-sm text-slate-700 dark:text-slate-300">{v.responsiblePerson.name}</span>
@@ -541,12 +644,11 @@ export default function ViolationsPage() {
         </div>
     )
 }
-            </div >
+            </div>
 
-    {/* ═══ New Violation Modal ═══ */ }
-{
-    showNewForm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowNewForm(false)}>
+            {/* ── New Violation Modal ── */}
+            {showNewForm && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowNewForm(false)}>
             <div className="bg-white dark:bg-[#1a1a35] rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-white/10 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-slate-100 dark:border-white/5 flex items-center justify-between shrink-0">
                     <h3 className="text-base font-bold text-slate-900 dark:text-white">Report New Violation</h3>
@@ -575,7 +677,7 @@ export default function ViolationsPage() {
                         </div>
                     </div>
 
-                    {/* Row: Violation Type + Responsible Person */}
+                    {/* Row: Violation Type + Manager */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Violation Type</label>
@@ -586,7 +688,7 @@ export default function ViolationsPage() {
                             </select>
                         </div>
                         <div>
-                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Responsible Person</label>
+                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Manager</label>
                             <select value={newViolation.responsiblePersonId} onChange={e => setNewViolation(p => ({ ...p, responsiblePersonId: Number(e.target.value) }))}
                                 className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
                                 <option value={0}>Select...</option>
@@ -623,10 +725,10 @@ export default function ViolationsPage() {
                             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Severity</label>
                             <select value={newViolation.severity} onChange={e => setNewViolation(p => ({ ...p, severity: e.target.value }))}
                                 className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                                <option value="critical">Critical</option>
+                                <option value="low">L0</option>
+                                <option value="medium">L1</option>
+                                <option value="high">L2</option>
+                                <option value="critical">L3</option>
                             </select>
                         </div>
                         <div>
@@ -670,8 +772,7 @@ export default function ViolationsPage() {
                 </div>
             </div>
         </div>
-    )
-}
-        </div >
+            )}
+        </div>
     );
 }

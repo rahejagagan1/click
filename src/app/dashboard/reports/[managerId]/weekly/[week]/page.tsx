@@ -32,6 +32,7 @@ interface WriterRow {
     id: string;
     writerName: string;
     caseName: string;
+    subtaskName: string;
     caseStatus: string;
     heroCase: "yes" | "no" | "";
     tatFirstDraft: string;
@@ -87,6 +88,7 @@ interface ClickUpRow {
     id: string;
     editorName: string;
     caseName: string;
+    subtaskName: string;
     caseStatus: string;
     heroCase: "yes" | "no" | "";
     tatFirstDraft: string;
@@ -99,7 +101,7 @@ interface ClickUpRow {
 }
 
 const mkWriter = (id: string, name = ""): WriterRow => ({
-    id, writerName: name, caseName: "", caseStatus: "", heroCase: "",
+    id, writerName: name, caseName: "", subtaskName: "", caseStatus: "", heroCase: "",
     tatFirstDraft: "", tatRevision: "", reasonTatExceeding: "", actionTaken: "", qualityScore: "", remark: "",
 });
 const mkEditor = (id: string, name = ""): EditorRow => ({
@@ -117,7 +119,7 @@ const mkResearcher = (id: string, name = ""): ResearcherRow => ({
 });
 
 const mkClickUp = (id: string, name = ""): ClickUpRow => ({
-    id, editorName: name, caseName: "", caseStatus: "", heroCase: "",
+    id, editorName: name, caseName: "", subtaskName: "", caseStatus: "", heroCase: "",
     tatFirstDraft: "", tatRevision: "", reasonTatExceeding: "", actionTaken: "", qualityScore: "", remark: "",
 });
 
@@ -398,7 +400,8 @@ function Td({ children, muted, highlight }: { children?: React.ReactNode; muted?
     );
 }
 
-function EditInput({ value, onChange, placeholder, disabled }: { value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean }) {
+function EditInput({ value, onChange, placeholder, disabled, manual }: { value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean; manual?: boolean }) {
+    const isManualFilled = manual && value && value.trim().length > 0;
     return (
         <input
             type="text"
@@ -408,6 +411,7 @@ function EditInput({ value, onChange, placeholder, disabled }: { value: string; 
             disabled={disabled}
             className={[
                 "w-full min-w-0 bg-transparent text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-300 dark:placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-300 rounded",
+                isManualFilled ? "manual-entry" : "",
                 disabled ? "cursor-not-allowed opacity-60 select-none" : "",
             ].join(" ")}
         />
@@ -743,6 +747,7 @@ export default function WeeklyReportPage() {
     const [deletingDraft,     setDeletingDraft]     = useState(false);
     const [refreshingWriters, setRefreshingWriters] = useState(false);
     const [refreshingEditors, setRefreshingEditors] = useState(false);
+    const autoFillDoneRef = React.useRef(false);
 
     // Fetch submission status on mount
     useEffect(() => {
@@ -756,14 +761,14 @@ export default function WeeklyReportPage() {
                     setIsLocked(d.locked);
                     // Pre-fill form with saved data
                     const saved = d.data as any;
-                    if (saved?.writerRows)      setWriterRows(saved.writerRows);
+                    if (saved?.writerRows)      setWriterRows(saved.writerRows.map((r: any) => ({ subtaskName: "", ...r })));
                     if (saved?.writerRows)      setAndrewRows(saved.writerRows);    // Andrew reuses writerRows column
                     if (saved?.editorRows)      setAbhishekRows(saved.editorRows);  // Abhishek reuses editorRows column
                     if (saved?.overviewRows)    setSectionBRows(saved.overviewRows);   // Andrew Section B
                     if (saved?.researcherRows)  setSectionCRows(saved.researcherRows); // Andrew Section C
                     if (saved?.viewsRows)       setSectionDRows(saved.viewsRows);       // Andrew Section D
-                    if (saved?.editorRows)      setClickUpRows(saved.editorRows);  // API returns editorRows
-                    else if (saved?.clickUpRows) setClickUpRows(saved.clickUpRows); // legacy key
+                    if (saved?.editorRows)      setClickUpRows(saved.editorRows.map((r: any) => ({ subtaskName: "", ...r })));  // API returns editorRows
+                    else if (saved?.clickUpRows) setClickUpRows(saved.clickUpRows.map((r: any) => ({ subtaskName: "", ...r }))); // legacy key
                     if (saved?.overviewRows)    setOverviewRows(saved.overviewRows);
                     if (saved?.researcherRows)  setResearcherRows(saved.researcherRows);
                 }
@@ -774,7 +779,7 @@ export default function WeeklyReportPage() {
     }, [managerId, week, monthIndex, year, weekInvalid]);
 
     // Shared helper — fetch writer cases from DB and populate rows
-    const fetchAndFillWriterCases = useCallback(() => {
+    const fetchAndFillWriterCases = useCallback((merge = false) => {
         if (isQaReport || isResearcherReport) return;
         setRefreshingWriters(true);
         fetch(`/api/reports/${managerId}/weekly/${week}/writer-cases?month=${monthIndex}&year=${year}`)
@@ -782,7 +787,6 @@ export default function WeeklyReportPage() {
             .then(d => {
                 const writerCases: any[] = d.writerCases ?? [];
 
-                // Group cases by writerId
                 const casesByWriter = new Map<number, any[]>();
                 for (const c of writerCases) {
                     if (c.writerId == null) continue;
@@ -790,8 +794,6 @@ export default function WeeklyReportPage() {
                     casesByWriter.get(c.writerId)!.push(c);
                 }
 
-                // Build rows: one row per case. Prefer team list order; also include any writer
-                // returned by the API who is missing from defaults (e.g. placeholder w-1 ids before team loaded).
                 const rows: WriterRow[] = [];
                 const coveredWriterIds = new Set<number>();
                 for (const dw of defaultWriters) {
@@ -804,6 +806,7 @@ export default function WeeklyReportPage() {
                             id: `w-${c.writerId}-${ci}-${Date.now()}`,
                             writerName:         c.writerName,
                             caseName:           c.caseName,
+                            subtaskName:        c.subtaskName ?? "",
                             caseStatus:         c.caseStatus ?? "",
                             heroCase:           c.heroCase as "yes" | "no" | "",
                             tatFirstDraft:      c.tatFirstDraft,
@@ -823,6 +826,7 @@ export default function WeeklyReportPage() {
                             id: `w-${c.writerId}-${ci}-${Date.now()}`,
                             writerName:         c.writerName,
                             caseName:           c.caseName,
+                            subtaskName:        c.subtaskName ?? "",
                             caseStatus:         c.caseStatus ?? "",
                             heroCase:           c.heroCase as "yes" | "no" | "",
                             tatFirstDraft:      c.tatFirstDraft,
@@ -836,7 +840,21 @@ export default function WeeklyReportPage() {
                     });
                 }
 
-                setWriterRows(rows);
+                if (merge) {
+                    // Keep saved rows intact; only append cases whose caseName is new
+                    setWriterRows(prev => {
+                        const existing = prev ?? defaultWriters;
+                        const savedNames = new Set(
+                            existing.map(r => (r.caseName ?? "").toLowerCase().trim()).filter(Boolean)
+                        );
+                        const newRows = rows.filter(
+                            r => !savedNames.has((r.caseName ?? "").toLowerCase().trim())
+                        );
+                        return newRows.length > 0 ? [...existing, ...newRows] : existing;
+                    });
+                } else {
+                    setWriterRows(rows);
+                }
                 setTimeout(() => setWMeasureTrigger(t => t + 1), 200);
             })
             .catch(() => {})
@@ -845,7 +863,7 @@ export default function WeeklyReportPage() {
     }, [managerId, week, monthIndex, year, isQaReport, isResearcherReport, defaultWriters]);
 
     // Fetch editor cases and auto-fill Section A2
-    const fetchAndFillEditorCases = useCallback(() => {
+    const fetchAndFillEditorCases = useCallback((merge = false) => {
         if (isQaReport || isResearcherReport) return;
         setRefreshingEditors(true);
         fetch(`/api/reports/${managerId}/weekly/${week}/editor-cases?month=${monthIndex}&year=${year}`)
@@ -870,6 +888,7 @@ export default function WeeklyReportPage() {
                             id:                 `e-${c.editorId}-${ci}-${Date.now()}`,
                             editorName:         c.editorName,
                             caseName:           c.caseName,
+                            subtaskName:        c.subtaskName ?? "",
                             caseStatus:         c.caseStatus ?? "",
                             heroCase:           c.heroCase as "yes" | "no" | "",
                             tatFirstDraft:      c.tatEditing,
@@ -889,6 +908,7 @@ export default function WeeklyReportPage() {
                             id:                 `e-${c.editorId}-${ci}-${Date.now()}`,
                             editorName:         c.editorName,
                             caseName:           c.caseName,
+                            subtaskName:        c.subtaskName ?? "",
                             caseStatus:         c.caseStatus ?? "",
                             heroCase:           c.heroCase as "yes" | "no" | "",
                             tatFirstDraft:      c.tatEditing,
@@ -901,7 +921,21 @@ export default function WeeklyReportPage() {
                         });
                     });
                 }
-                setClickUpRows(rows);
+                if (merge) {
+                    // Keep saved rows intact; only append cases whose caseName is new
+                    setClickUpRows(prev => {
+                        const existing = prev ?? defaultClickUp;
+                        const savedNames = new Set(
+                            existing.map(r => (r.caseName ?? "").toLowerCase().trim()).filter(Boolean)
+                        );
+                        const newRows = rows.filter(
+                            r => !savedNames.has((r.caseName ?? "").toLowerCase().trim())
+                        );
+                        return newRows.length > 0 ? [...existing, ...newRows] : existing;
+                    });
+                } else {
+                    setClickUpRows(rows);
+                }
             })
             .catch(() => {})
             .finally(() => setRefreshingEditors(false));
@@ -996,10 +1030,13 @@ export default function WeeklyReportPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [managerId, week, monthIndex, year, isQaReport]);
 
-    // Auto-fill on load (only when no draft/submission already exists)
+    // Auto-fill on load — always refresh from DB on open, unless locked.
+    // Uses a ref to fire only once per page load (ignores SWR revalidations).
     useEffect(() => {
         if (weekInvalid || !statusLoaded || isLoading || teamLoadError || data == null) return;
-        if (isLocked || isSubmitted || isDraftSaved) return;
+        if (isLocked || isSubmitted) return;
+        if (autoFillDoneRef.current) return;
+        autoFillDoneRef.current = true;
         if (isQaReport) {
             fetchAndFillAndrewCases();
             fetchAndFillAbhishekCases();
@@ -1007,8 +1044,8 @@ export default function WeeklyReportPage() {
             return;
         }
         if (isResearcherReport) return;
-        fetchAndFillWriterCases();
-        fetchAndFillEditorCases();
+        fetchAndFillWriterCases(isDraftSaved);
+        fetchAndFillEditorCases(isDraftSaved);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
         statusLoaded,
@@ -1018,6 +1055,7 @@ export default function WeeklyReportPage() {
         isQaReport,
         isResearcherReport,
         weekInvalid,
+        isDraftSaved,
         managerId,
         week,
         monthIndex,
@@ -1194,7 +1232,7 @@ export default function WeeklyReportPage() {
                 <span className="text-[11px] text-amber-100 font-medium">Fields marked <span className="text-white font-bold">*</span> are required</span>
                 {isAdmin && !isLocked && !isQaReport && !isResearcherReport && (
                     <button
-                        onClick={fetchAndFillWriterCases}
+                        onClick={() => fetchAndFillWriterCases()}
                         disabled={refreshingWriters}
                         title="Re-fetch latest data from database"
                         className="ml-auto flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-semibold bg-white/20 hover:bg-white/30 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1207,10 +1245,11 @@ export default function WeeklyReportPage() {
                 )}
             </div>
             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 dark:border-white/10 shadow-sm">
-                <table ref={wTableRef} className="border-collapse" style={{ width: "100%", tableLayout: "auto", minWidth: 1500 }}>
+                <table ref={wTableRef} className="border-collapse" style={{ width: "100%", tableLayout: "auto", minWidth: 1600 }}>
                     <colgroup>
                         <col style={{ minWidth: 160 }} />
                         <col style={{ minWidth: 70  }} />
+                        <col style={{ minWidth: 140 }} />
                         <col style={{ minWidth: 140 }} />
                         <col style={{ minWidth: 160 }} />
                         <col style={{ minWidth: 90  }} />
@@ -1224,10 +1263,11 @@ export default function WeeklyReportPage() {
                     </colgroup>
                     <thead>
                         <tr>
-                            <ResizableTh colIndex={0} widths={wColWidths} setWidths={setWColWidths} tableRef={wTableRef} colCount={10} measureTrigger={wMeasureTrigger}>Month</ResizableTh>
+                            <ResizableTh colIndex={0} widths={wColWidths} setWidths={setWColWidths} tableRef={wTableRef} colCount={11} measureTrigger={wMeasureTrigger}>Month</ResizableTh>
                             <ResizableTh colIndex={1} widths={wColWidths} setWidths={setWColWidths}>Name of the Writer <span className="text-red-300">*</span></ResizableTh>
                             <ResizableTh colIndex={2} widths={wColWidths} setWidths={setWColWidths}>Case Name <span className="text-red-300">*</span></ResizableTh>
-                            {!isResearcherReport && <ResizableTh colIndex={3} widths={wColWidths} setWidths={setWColWidths}>Case Status</ResizableTh>}
+                            <ResizableTh colIndex={3} widths={wColWidths} setWidths={setWColWidths}>Subtask Name</ResizableTh>
+                            {!isResearcherReport && <ResizableTh colIndex={4} widths={wColWidths} setWidths={setWColWidths}>Case Status</ResizableTh>}
                             <ResizableTh colIndex={4} widths={wColWidths} setWidths={setWColWidths}>Hero Case? <span className="text-red-300">*</span></ResizableTh>
                             <ResizableTh colIndex={4} widths={wColWidths} setWidths={setWColWidths}>TAT — First Draft <span className="text-red-300">*</span></ResizableTh>
                             <ResizableTh colIndex={5} widths={wColWidths} setWidths={setWColWidths}>TAT — Revision <span className="text-red-400">*</span></ResizableTh>
@@ -1246,16 +1286,17 @@ export default function WeeklyReportPage() {
                                         {idx === 0 ? periodLabel : ""}
                                     </span>
                                 </Td>
-                                <Td><EditInput value={row.writerName} onChange={(v) => setW(idx, "writerName", v)} placeholder="Writer name" disabled={isLocked || viewOnly || !!row.autoFilled} /></Td>
-                                <Td highlight><EditInput value={row.caseName} onChange={(v) => setW(idx, "caseName", v)} placeholder="Case name" disabled={isLocked || viewOnly || !!row.autoFilled} /></Td>
+                                <Td><EditInput value={row.writerName} onChange={(v) => setW(idx, "writerName", v)} placeholder="Writer name" disabled={isLocked || viewOnly || !!row.autoFilled} manual={!row.autoFilled} /></Td>
+                                <Td highlight><EditInput value={row.caseName} onChange={(v) => setW(idx, "caseName", v)} placeholder="Case name" disabled={isLocked || viewOnly || !!row.autoFilled} manual={!row.autoFilled} /></Td>
+                                <Td><EditInput value={row.subtaskName ?? ""} onChange={(v) => setW(idx, "subtaskName", v)} placeholder="Subtask name" disabled={isLocked || viewOnly || !!row.autoFilled} manual={!row.autoFilled} /></Td>
                                 {!isResearcherReport && <Td><span className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium ${getStatusColor(row.caseStatus)}`}>{row.caseStatus || "—"}</span></Td>}
                                 <Td><YNSelect value={row.heroCase} onChange={(v) => setW(idx, "heroCase", v)} disabled={isLocked || viewOnly || !!row.autoFilled} /></Td>
-                                <Td><EditInput value={row.tatFirstDraft} onChange={(v) => setW(idx, "tatFirstDraft", v)} placeholder="e.g. 4 days" disabled={isLocked || viewOnly || !!row.autoFilled} /></Td>
-                                <Td><EditInput value={row.tatRevision} onChange={(v) => setW(idx, "tatRevision", v)} placeholder="e.g. 1 day" disabled={isLocked || viewOnly || !!row.autoFilled} /></Td>
-                                <Td><EditInput value={row.reasonTatExceeding} onChange={(v) => setW(idx, "reasonTatExceeding", v)} placeholder="Reason if exceeded" disabled={isLocked || viewOnly} /></Td>
-                                <Td><EditInput value={row.actionTaken} onChange={(v) => setW(idx, "actionTaken", v)} placeholder="Action taken" disabled={isLocked || viewOnly} /></Td>
-                                <Td><EditInput value={row.qualityScore} onChange={(v) => setW(idx, "qualityScore", v)} placeholder="e.g. 45 / 50" disabled={isLocked || viewOnly || !!row.autoFilled} /></Td>
-                                <Td><EditInput value={row.remark} onChange={(v) => setW(idx, "remark", v)} placeholder="Optional remark…" disabled={isLocked || viewOnly} /></Td>
+                                <Td><EditInput value={row.tatFirstDraft} onChange={(v) => setW(idx, "tatFirstDraft", v)} placeholder="e.g. 4 days" disabled={isLocked || viewOnly || !!row.autoFilled} manual={!row.autoFilled} /></Td>
+                                <Td><EditInput value={row.tatRevision} onChange={(v) => setW(idx, "tatRevision", v)} placeholder="e.g. 1 day" disabled={isLocked || viewOnly || !!row.autoFilled} manual={!row.autoFilled} /></Td>
+                                <Td><EditInput value={row.reasonTatExceeding} onChange={(v) => setW(idx, "reasonTatExceeding", v)} placeholder="Reason if exceeded" disabled={isLocked || viewOnly} manual /></Td>
+                                <Td><EditInput value={row.actionTaken} onChange={(v) => setW(idx, "actionTaken", v)} placeholder="Action taken" disabled={isLocked || viewOnly} manual /></Td>
+                                <Td><EditInput value={row.qualityScore} onChange={(v) => setW(idx, "qualityScore", v)} placeholder="e.g. 45 / 50" disabled={isLocked || viewOnly || !!row.autoFilled} manual={!row.autoFilled} /></Td>
+                                <Td><EditInput value={row.remark} onChange={(v) => setW(idx, "remark", v)} placeholder="Optional remark…" disabled={isLocked || viewOnly} manual /></Td>
                                 <td className="px-2 py-2 border border-slate-200 dark:border-white/10 bg-white dark:bg-[#32324a] text-center align-middle">
                                     {wRows.length > 1 && !isLocked && !viewOnly && <RemoveBtn onClick={() => removeW(idx)} />}
                                 </td>
@@ -1283,7 +1324,7 @@ export default function WeeklyReportPage() {
                 <span className="text-[11px] text-amber-100 font-medium">Fields marked <span className="text-white font-bold">*</span> are required</span>
                 {!isLocked && !viewOnly && !isQaReport && !isResearcherReport && (
                     <button
-                        onClick={fetchAndFillEditorCases}
+                        onClick={() => fetchAndFillEditorCases()}
                         disabled={refreshingEditors}
                         title="Re-fetch latest data from database"
                         className="ml-auto flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-semibold bg-white/20 hover:bg-white/30 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1296,10 +1337,11 @@ export default function WeeklyReportPage() {
                 )}
             </div>
             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 dark:border-white/10 shadow-sm">
-                <table ref={cTableRef} className="border-collapse" style={{ width: "100%", tableLayout: "auto", minWidth: 1500 }}>
+                <table ref={cTableRef} className="border-collapse" style={{ width: "100%", tableLayout: "auto", minWidth: 1600 }}>
                     <colgroup>
                         <col style={{ minWidth: 160 }} />
                         <col style={{ minWidth: 70  }} />
+                        <col style={{ minWidth: 140 }} />
                         <col style={{ minWidth: 140 }} />
                         <col style={{ minWidth: 160 }} />
                         <col style={{ minWidth: 90  }} />
@@ -1313,10 +1355,11 @@ export default function WeeklyReportPage() {
                     </colgroup>
                     <thead>
                         <tr>
-                            <ResizableTh colIndex={0} widths={cColWidths} setWidths={setCColWidths} tableRef={cTableRef} colCount={10}>Month</ResizableTh>
+                            <ResizableTh colIndex={0} widths={cColWidths} setWidths={setCColWidths} tableRef={cTableRef} colCount={11}>Month</ResizableTh>
                             <ResizableTh colIndex={1} widths={cColWidths} setWidths={setCColWidths}>Name of the Editor <span className="text-red-300">*</span></ResizableTh>
                             <ResizableTh colIndex={2} widths={cColWidths} setWidths={setCColWidths}>Case Name <span className="text-red-300">*</span></ResizableTh>
-                            {!isResearcherReport && <ResizableTh colIndex={3} widths={cColWidths} setWidths={setCColWidths}>Case Status</ResizableTh>}
+                            <ResizableTh colIndex={3} widths={cColWidths} setWidths={setCColWidths}>Subtask Name</ResizableTh>
+                            {!isResearcherReport && <ResizableTh colIndex={4} widths={cColWidths} setWidths={setCColWidths}>Case Status</ResizableTh>}
                             <ResizableTh colIndex={4} widths={cColWidths} setWidths={setCColWidths}>Hero Case? <span className="text-red-300">*</span></ResizableTh>
                             <ResizableTh colIndex={4} widths={cColWidths} setWidths={setCColWidths}>TAT for the First Draft <span className="text-red-300">*</span></ResizableTh>
                             <ResizableTh colIndex={5} widths={cColWidths} setWidths={setCColWidths}>TAT for Revision <span className="text-red-400">*</span></ResizableTh>
@@ -1335,16 +1378,17 @@ export default function WeeklyReportPage() {
                                         {idx === 0 ? periodLabel : ""}
                                     </span>
                                 </Td>
-                                <Td><EditInput value={row.editorName} onChange={(v) => setC(idx, "editorName", v)} placeholder="Editor name" disabled={isLocked || viewOnly || !!row.autoFilled} /></Td>
-                                <Td highlight><EditInput value={row.caseName} onChange={(v) => setC(idx, "caseName", v)} placeholder="Case name" disabled={isLocked || viewOnly || !!row.autoFilled} /></Td>
+                                <Td><EditInput value={row.editorName} onChange={(v) => setC(idx, "editorName", v)} placeholder="Editor name" disabled={isLocked || viewOnly || !!row.autoFilled} manual={!row.autoFilled} /></Td>
+                                <Td highlight><EditInput value={row.caseName} onChange={(v) => setC(idx, "caseName", v)} placeholder="Case name" disabled={isLocked || viewOnly || !!row.autoFilled} manual={!row.autoFilled} /></Td>
+                                <Td><EditInput value={row.subtaskName} onChange={(v) => setC(idx, "subtaskName", v)} placeholder="Subtask name" disabled={isLocked || viewOnly || !!row.autoFilled} manual={!row.autoFilled} /></Td>
                                 {!isResearcherReport && <Td><span className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium ${getStatusColor(row.caseStatus)}`}>{row.caseStatus || "—"}</span></Td>}
                                 <Td><YNSelect value={row.heroCase} onChange={(v) => setC(idx, "heroCase", v)} disabled={isLocked || viewOnly || !!row.autoFilled} /></Td>
-                                <Td><EditInput value={row.tatFirstDraft} onChange={(v) => setC(idx, "tatFirstDraft", v)} placeholder="e.g. 4 days" disabled={isLocked || viewOnly || !!row.autoFilled} /></Td>
-                                <Td><EditInput value={row.tatRevision} onChange={(v) => setC(idx, "tatRevision", v)} placeholder="e.g. 1 day" disabled={isLocked || viewOnly || !!row.autoFilled} /></Td>
-                                <Td><EditInput value={row.reasonTatExceeding} onChange={(v) => setC(idx, "reasonTatExceeding", v)} placeholder="Reason if exceeded" disabled={isLocked || viewOnly} /></Td>
-                                <Td><EditInput value={row.actionTaken} onChange={(v) => setC(idx, "actionTaken", v)} placeholder="Action taken" disabled={isLocked || viewOnly} /></Td>
-                                <Td><EditInput value={row.qualityScore} onChange={(v) => setC(idx, "qualityScore", v)} placeholder="e.g. 45 / 50" disabled={isLocked || viewOnly || !!row.autoFilled} /></Td>
-                                <Td><EditInput value={row.remark} onChange={(v) => setC(idx, "remark", v)} placeholder="Optional remark…" disabled={isLocked || viewOnly} /></Td>
+                                <Td><EditInput value={row.tatFirstDraft} onChange={(v) => setC(idx, "tatFirstDraft", v)} placeholder="e.g. 4 days" disabled={isLocked || viewOnly || !!row.autoFilled} manual={!row.autoFilled} /></Td>
+                                <Td><EditInput value={row.tatRevision} onChange={(v) => setC(idx, "tatRevision", v)} placeholder="e.g. 1 day" disabled={isLocked || viewOnly || !!row.autoFilled} manual={!row.autoFilled} /></Td>
+                                <Td><EditInput value={row.reasonTatExceeding} onChange={(v) => setC(idx, "reasonTatExceeding", v)} placeholder="Reason if exceeded" disabled={isLocked || viewOnly} manual /></Td>
+                                <Td><EditInput value={row.actionTaken} onChange={(v) => setC(idx, "actionTaken", v)} placeholder="Action taken" disabled={isLocked || viewOnly} manual /></Td>
+                                <Td><EditInput value={row.qualityScore} onChange={(v) => setC(idx, "qualityScore", v)} placeholder="e.g. 45 / 50" disabled={isLocked || viewOnly || !!row.autoFilled} manual={!row.autoFilled} /></Td>
+                                <Td><EditInput value={row.remark} onChange={(v) => setC(idx, "remark", v)} placeholder="Optional remark…" disabled={isLocked || viewOnly} manual /></Td>
                                 <td className="px-2 py-2 border border-slate-200 dark:border-white/10 bg-white dark:bg-[#32324a] text-center align-middle">
                                     {cRows.length > 1 && !isLocked && !viewOnly && <RemoveBtn onClick={() => removeC(idx)} />}
                                 </td>
@@ -2105,8 +2149,13 @@ export default function WeeklyReportPage() {
             </div>
         ) : (
         <>
+        <style>{`
+          .weekly-report-page input.manual-entry:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+            color: #ef4444 !important;
+          }
+        `}</style>
         <div
-            className="mx-auto flex flex-col overflow-hidden"
+            className="weekly-report-page mx-auto flex flex-col overflow-hidden"
             style={{ maxWidth: 1240, height: "calc(100vh - 128px)", padding: "0 8px" }}
         >
             {/* Back */}

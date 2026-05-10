@@ -2,15 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { sendEmail } from "@/lib/email/sender";
+import {
+  violationCreatedEmail,
+  violationStatusChangedEmail,
+} from "@/lib/email/templates";
 
 export const dynamic = "force-dynamic";
 
+// Mirrors src/lib/access.ts:isHRAdmin so the API gate matches the UI's
+// canViewViolationLog logic. Previously missed role=admin and
+// orgLevel=hr_manager, locking out HR managers + admins.
 function hasViolationAccess(session: any): boolean {
     const user = session?.user as any;
     return (
         user?.orgLevel === "ceo" ||
         user?.orgLevel === "special_access" ||
+        user?.orgLevel === "hr_manager" ||
         user?.role === "hr_manager" ||
+        user?.role === "admin" ||
         user?.isDeveloper === true
     );
 }
@@ -98,11 +108,31 @@ export async function POST(request: NextRequest) {
                 responsiblePersonId: body.responsiblePersonId || null,
             },
             include: {
-                user: { select: { id: true, name: true, role: true, profilePictureUrl: true, teamCapsule: true } },
+                user: { select: { id: true, name: true, email: true, role: true, profilePictureUrl: true, teamCapsule: true } },
                 reporter: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
                 responsiblePerson: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
             },
         });
+
+        // Notify the affected employee. Fire-and-forget so a transient
+        // SMTP failure doesn't block the create from returning.
+        if (violation.user?.email) {
+            void sendEmail({
+                to: violation.user.email,
+                content: violationCreatedEmail({
+                    userName:      violation.user.name || "there",
+                    title:         violation.title,
+                    description:   violation.description,
+                    severity:      violation.severity,
+                    status:        violation.status,
+                    category:      violation.category,
+                    actionTaken:   violation.actionTaken,
+                    notes:         violation.notes,
+                    reporterName:  violation.reporter?.name ?? null,
+                    violationDate: violation.violationDate,
+                }),
+            });
+        }
 
         return NextResponse.json(violation);
     } catch (error: any) {
@@ -121,6 +151,10 @@ export async function PATCH(request: NextRequest) {
         const body = await request.json();
         const { id, status, actionTaken, severity, notes, responsiblePersonId } = body;
 
+        // Snapshot the row first so we can detect a status change AFTER
+        // the update and know what to email about.
+        const before = await prisma.violation.findUnique({ where: { id }, select: { status: true } });
+
         const data: any = {};
         if (status) data.status = status;
         if (actionTaken !== undefined) data.actionTaken = actionTaken;
@@ -128,16 +162,50 @@ export async function PATCH(request: NextRequest) {
         if (severity) data.severity = severity;
         if (responsiblePersonId !== undefined) data.responsiblePersonId = responsiblePersonId || null;
         if (status === "closed") data.resolvedAt = new Date();
+        // (lastReminderAt reset is handled via raw SQL after the typed
+        //  update below — the typed client may not know about the new
+        //  column on a stale `prisma generate` cache.)
 
         const violation = await prisma.violation.update({
             where: { id },
             data,
             include: {
-                user: { select: { id: true, name: true, role: true, profilePictureUrl: true, teamCapsule: true } },
+                user: { select: { id: true, name: true, email: true, role: true, profilePictureUrl: true, teamCapsule: true } },
                 reporter: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
                 responsiblePerson: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
             },
         });
+
+        // Email the affected employee if the status actually changed.
+        // Same fire-and-forget pattern as the create path.
+        if (status && before?.status && status !== before.status && violation.user?.email) {
+            const session2 = session;
+            const changedByName = (session2?.user as any)?.name || null;
+            void sendEmail({
+                to: violation.user.email,
+                content: violationStatusChangedEmail({
+                    userName:      violation.user.name || "there",
+                    title:         violation.title,
+                    oldStatus:     before.status,
+                    newStatus:     status,
+                    actionTaken:   violation.actionTaken,
+                    notes:         violation.notes,
+                    changedByName,
+                }),
+            });
+            // Reset the reminder clock so the cron starts the new
+            // "still in progress" countdown from this status change,
+            // not from when the violation was first logged. Raw SQL
+            // bypasses any typed-client lag on the new column.
+            try {
+                await prisma.$executeRawUnsafe(
+                    `UPDATE "Violation" SET "lastReminderAt" = NULL WHERE id = $1`,
+                    id,
+                );
+            } catch (e) {
+                console.warn("[violations PATCH] lastReminderAt reset failed:", e);
+            }
+        }
 
         return NextResponse.json(violation);
     } catch (error: any) {
@@ -145,14 +213,20 @@ export async function PATCH(request: NextRequest) {
     }
 }
 
-// DELETE: Only CEO and Developer can delete
+// DELETE: admin tier (CEO / dev / special_access / role=admin). HR
+// Manager intentionally NOT included — destructive log delete should
+// stay above HR's normal write access.
 export async function DELETE(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
         const user = session?.user as any;
-        const canDelete = user?.orgLevel === "ceo" || user?.isDeveloper === true;
+        const canDelete =
+            user?.orgLevel === "ceo" ||
+            user?.orgLevel === "special_access" ||
+            user?.role === "admin" ||
+            user?.isDeveloper === true;
         if (!canDelete) {
-            return NextResponse.json({ error: "Only CEO and developers can delete violations" }, { status: 403 });
+            return NextResponse.json({ error: "Only admins can delete violations" }, { status: 403 });
         }
 
         const { id } = await request.json();

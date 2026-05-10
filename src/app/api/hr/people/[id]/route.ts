@@ -5,14 +5,15 @@ import { serializeBigInt } from "@/lib/utils";
 import { encryptPII } from "@/lib/pii-crypto";
 
 // Editing other employees' profiles is reserved for HR ops + admins.
-// (`requireHRAdmin` would work but we also want to permit role=admin, which
-// some admins are flagged as instead of having orgLevel=ceo.)
+// Mirrors src/lib/access.ts:isHRAdmin so the server gate matches the UI:
+// CEO / developer / special_access / role=admin / hr_manager.
 function canEditOthers(session: any): boolean {
   const u = session?.user;
   if (!u) return false;
   return (
     u.orgLevel === "ceo" ||
     u.orgLevel === "hr_manager" ||
+    u.orgLevel === "special_access" ||
     u.role === "admin" ||
     u.isDeveloper === true
   );
@@ -44,15 +45,54 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     });
     if (!user) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+    // Inline manager — fetched via raw SQL so the route works even when
+    // `prisma generate` hasn't picked up the new column yet (same
+    // pattern we use for businessUnit / lastReminderAt).
+    let inlineManager: { id: number; name: string; profilePictureUrl: string | null; role: string } | null = null;
+    try {
+      const rows = await prisma.$queryRawUnsafe<Array<{ id: number; name: string; profilePictureUrl: string | null; role: string }>>(
+        `SELECT m.id, m.name, m."profilePictureUrl", m.role::text AS role
+           FROM "User" u
+           LEFT JOIN "User" m ON m.id = u."inlineManagerId"
+          WHERE u.id = $1 AND m.id IS NOT NULL`,
+        id,
+      );
+      inlineManager = rows[0] ?? null;
+    } catch (e) {
+      console.warn("[people GET] inlineManager lookup failed:", e);
+    }
+
+    // Extended onboarding fields — fetched via raw SQL so the GET
+    // returns them even when `prisma generate` is stale on the VPS.
+    // Merged onto profile below so EditProfilePanel can read them
+    // through the same `user.profile.foo` shape it uses for everything.
+    let extended: Record<string, unknown> = {};
+    try {
+      const erows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+        `SELECT "secondaryJobTitle", "legalEntity", "jobLocation",
+                "probationPolicy", "internshipEndDate",
+                "leavePlan", "holidayList", "weeklyOff",
+                "attendanceNumber", "timeTrackingPolicy", "penalizationPolicy",
+                "workCountry", "nationality"
+           FROM "EmployeeProfile"
+          WHERE "userId" = $1`,
+        id,
+      );
+      extended = erows[0] ?? {};
+    } catch (e) {
+      console.warn("[people GET] extended fields lookup failed:", e);
+    }
+
     // Reshape to what the detail page reads.
     const { employeeProfile, heldAssets, ownedDocuments, teamMembers, userShift, ...rest } = user;
     const payload = {
       ...rest,
-      profile:       employeeProfile,
+      profile:       employeeProfile ? { ...employeeProfile, ...extended } : null,
       documents:     ownedDocuments,
       assets:        heldAssets.map((a) => ({ ...a.asset, assignedAt: a.assignedAt })),
       directReports: teamMembers,
       shift:         userShift?.shift ?? null,
+      inlineManager,
     };
     return NextResponse.json(serializeBigInt(payload));
   } catch (e) {
@@ -87,6 +127,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       address, city, state, profilePictureUrl,
       // Sensitive — encrypted at rest before save.
       panNumber, parentName, aadhaarNumber, aadhaarEnrollment,
+      // Job + work details (Edit Profile → Job & Work section).
+      designation, department, businessUnit, employmentType, workLocation, joiningDate,
+      noticePeriodDays,
+      // Extended onboarding fields — every wizard input is now editable.
+      workCountry, nationality,
+      secondaryJobTitle, legalEntity, jobLocation, probationPolicy, internshipEndDate,
+      leavePlan, holidayList, weeklyOff, attendanceNumber, timeTrackingPolicy, penalizationPolicy,
+      // User row fields — role / orgLevel / manager / team membership.
+      role: newRole, orgLevel, managerId, inlineManagerId, teamCapsule,
     } = body;
 
     const target = await prisma.user.findUnique({ where: { id }, select: { id: true } });
@@ -94,11 +143,29 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const existing = await prisma.employeeProfile.findUnique({ where: { userId: id } });
 
     // Build the EmployeeProfile patch using only the typed columns.
-    const profileData: Record<string, unknown> = {
-      phone, gender, bloodGroup,
-      dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
-      emergencyContact, emergencyPhone, address, city, state, parentName,
-    };
+    // Each field is only included when explicitly sent (not undefined) so
+    // partial section saves don't overwrite untouched fields with null.
+    const profileData: Record<string, unknown> = {};
+    if (phone             !== undefined) profileData.phone             = phone;
+    if (gender            !== undefined) profileData.gender            = gender;
+    if (bloodGroup        !== undefined) profileData.bloodGroup        = bloodGroup;
+    if (dateOfBirth       !== undefined) profileData.dateOfBirth       = dateOfBirth ? new Date(dateOfBirth) : null;
+    if (emergencyContact  !== undefined) profileData.emergencyContact  = emergencyContact;
+    if (emergencyPhone    !== undefined) profileData.emergencyPhone    = emergencyPhone;
+    if (address           !== undefined) profileData.address           = address;
+    if (city              !== undefined) profileData.city              = city;
+    if (state             !== undefined) profileData.state             = state;
+    if (parentName        !== undefined) profileData.parentName        = parentName;
+    if (designation       !== undefined) profileData.designation       = designation || null;
+    if (department        !== undefined) profileData.department        = department || null;
+    if (employmentType    !== undefined) profileData.employmentType    = employmentType || "fulltime";
+    if (workLocation      !== undefined) profileData.workLocation      = workLocation || "office";
+    if (joiningDate       !== undefined) profileData.joiningDate       = joiningDate ? new Date(joiningDate) : null;
+    if (noticePeriodDays  !== undefined) profileData.noticePeriodDays  = noticePeriodDays === null || noticePeriodDays === ""
+                                                                          ? 30
+                                                                          : Math.max(0, parseInt(String(noticePeriodDays), 10) || 0);
+    if (workCountry       !== undefined) profileData.workCountry       = workCountry || "India";
+    if (nationality       !== undefined) profileData.nationality       = nationality || "India";
     if (panNumber         !== undefined) profileData.panNumber         = encryptPII(panNumber);
     if (aadhaarNumber     !== undefined) profileData.aadhaarNumber     = encryptPII(aadhaarNumber);
     if (aadhaarEnrollment !== undefined) profileData.aadhaarEnrollment = encryptPII(aadhaarEnrollment);
@@ -108,6 +175,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (typeof displayName === "string" && displayName.trim().length > 0) {
       userPatch.name = displayName.trim().slice(0, 120);
     }
+    if (newRole   !== undefined) userPatch.role     = newRole;
+    if (orgLevel  !== undefined) userPatch.orgLevel = orgLevel;
+    if (managerId !== undefined) {
+      userPatch.managerId = managerId === null || managerId === "" ? null : parseInt(String(managerId), 10);
+    }
+    if (teamCapsule !== undefined) userPatch.teamCapsule = teamCapsule || null;
 
     const txOps: any[] = [];
     if (Object.keys(userPatch).length > 0) {
@@ -139,6 +212,24 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (workPhone     !== undefined) { setParts.push(`"workPhone" = $${i++}`);     args.push(workPhone     || null); }
       if (personalEmail !== undefined) { setParts.push(`"personalEmail" = $${i++}`); args.push(personalEmail || null); }
       if (maritalStatus !== undefined) { setParts.push(`"maritalStatus" = $${i++}`); args.push(maritalStatus || null); }
+      if (businessUnit  !== undefined) { setParts.push(`"businessUnit" = $${i++}`);  args.push(businessUnit  || "NB Media"); }
+      // ── Extended onboarding fields — written via raw SQL so the
+      //    route doesn't need a fresh `prisma generate` cycle on the
+      //    VPS to start accepting edits to these columns. ──
+      if (secondaryJobTitle  !== undefined) { setParts.push(`"secondaryJobTitle" = $${i++}`);  args.push(secondaryJobTitle  || null); }
+      if (legalEntity        !== undefined) { setParts.push(`"legalEntity" = $${i++}`);        args.push(legalEntity        || null); }
+      if (jobLocation        !== undefined) { setParts.push(`"jobLocation" = $${i++}`);        args.push(jobLocation        || null); }
+      if (probationPolicy    !== undefined) { setParts.push(`"probationPolicy" = $${i++}`);    args.push(probationPolicy    || null); }
+      if (internshipEndDate  !== undefined) {
+        setParts.push(`"internshipEndDate" = $${i++}`);
+        args.push(internshipEndDate ? new Date(internshipEndDate) : null);
+      }
+      if (leavePlan          !== undefined) { setParts.push(`"leavePlan" = $${i++}`);          args.push(leavePlan          || null); }
+      if (holidayList        !== undefined) { setParts.push(`"holidayList" = $${i++}`);        args.push(holidayList        || null); }
+      if (weeklyOff          !== undefined) { setParts.push(`"weeklyOff" = $${i++}`);          args.push(weeklyOff          || null); }
+      if (attendanceNumber   !== undefined) { setParts.push(`"attendanceNumber" = $${i++}`);   args.push(attendanceNumber   || null); }
+      if (timeTrackingPolicy !== undefined) { setParts.push(`"timeTrackingPolicy" = $${i++}`); args.push(timeTrackingPolicy || null); }
+      if (penalizationPolicy !== undefined) { setParts.push(`"penalizationPolicy" = $${i++}`); args.push(penalizationPolicy || null); }
       if (setParts.length > 0) {
         args.push(id);
         try {
@@ -149,6 +240,30 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         } catch (e) {
           console.warn("[people PUT] new-column raw update failed:", e);
         }
+      }
+    }
+
+    // inlineManagerId lives on User, not EmployeeProfile, and the typed
+    // client may not know about it yet. Raw SQL keeps this independent
+    // of `prisma generate` cache state on dev/VPS.
+    if (inlineManagerId !== undefined) {
+      const newInlineId = inlineManagerId === null || inlineManagerId === ""
+        ? null
+        : parseInt(String(inlineManagerId), 10);
+      if (newInlineId !== null && newInlineId === id) {
+        return NextResponse.json(
+          { error: "Inline manager cannot be the same person." },
+          { status: 400 },
+        );
+      }
+      try {
+        await prisma.$executeRawUnsafe(
+          `UPDATE "User" SET "inlineManagerId" = $1 WHERE id = $2`,
+          newInlineId,
+          id,
+        );
+      } catch (e) {
+        console.warn("[people PUT] inlineManagerId update failed:", e);
       }
     }
 
