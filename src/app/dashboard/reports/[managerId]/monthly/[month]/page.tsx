@@ -75,13 +75,16 @@ function EditableField({
     rows = 2,
     className = "",
     readOnly = false,
+    manual = false,
 }: {
     value: string;
     onChange: (v: string) => void;
     rows?: number;
     className?: string;
     readOnly?: boolean;
+    manual?: boolean;
 }) {
+    const isManualFilled = manual && value && value.trim().length > 0;
     return (
         <textarea
             value={value}
@@ -89,7 +92,7 @@ function EditableField({
             placeholder={readOnly ? "" : "Type here"}
             rows={rows}
             readOnly={readOnly}
-            className={`w-full bg-slate-50 dark:bg-[#1a1a32] border border-slate-200 dark:border-white/20 rounded-md px-3 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500/80 placeholder:italic focus:outline-none focus:ring-1 focus:ring-violet-500/40 focus:border-violet-400 dark:focus:border-violet-500/50 resize-y transition-all ${readOnly ? "opacity-75 cursor-default" : ""} ${className}`}
+            className={`w-full bg-slate-50 dark:bg-[#1a1a32] border border-slate-200 dark:border-white/20 rounded-md px-3 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500/80 placeholder:italic focus:outline-none focus:ring-1 focus:ring-violet-500/40 focus:border-violet-400 dark:focus:border-violet-500/50 resize-y transition-all ${readOnly ? "opacity-75 cursor-default" : ""} ${isManualFilled ? "manual-entry" : ""} ${className}`}
         />
     );
 }
@@ -99,12 +102,15 @@ function EditableCell({
     onChange,
     className = "",
     readOnly = false,
+    manual = false,
 }: {
     value: string;
     onChange: (v: string) => void;
     className?: string;
     readOnly?: boolean;
+    manual?: boolean;
 }) {
+    const isManualFilled = manual && value && value.trim().length > 0;
     return (
         <input
             type="text"
@@ -112,7 +118,7 @@ function EditableCell({
             onChange={(e) => onChange(e.target.value)}
             placeholder={readOnly ? "" : "Type here"}
             readOnly={readOnly}
-            className={`w-full bg-transparent border-0 border-b border-dashed border-slate-300 dark:border-white/30 px-1 py-0.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500/80 placeholder:italic focus:outline-none focus:border-violet-400 dark:focus:border-violet-500/50 transition-all ${readOnly ? "opacity-75 cursor-default" : ""} ${className}`}
+            className={`w-full bg-transparent border-0 border-b border-dashed border-slate-300 dark:border-white/30 px-1 py-0.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500/80 placeholder:italic focus:outline-none focus:border-violet-400 dark:focus:border-violet-500/50 transition-all ${readOnly ? "opacity-75 cursor-default" : ""} ${isManualFilled ? "manual-entry" : ""} ${className}`}
         />
     );
 }
@@ -183,11 +189,13 @@ function RichTextField({
     onChange,
     placeholder = "Type here...",
     className = "",
+    manual = false,
 }: {
     value: string;
     onChange: (v: string) => void;
     placeholder?: string;
     className?: string;
+    manual?: boolean;
 }) {
     const modules = {
         toolbar: [
@@ -199,8 +207,10 @@ function RichTextField({
         ],
     };
 
+    const hasContent = manual && value && value !== "<p><br></p>" && value.trim().length > 0;
+
     return (
-        <div className={`quill-editor ${className}`}>
+        <div className={`quill-editor ${hasContent ? "manual-rich-text" : ""} ${className}`}>
             <ReactQuill
                 theme="snow"
                 value={value}
@@ -307,8 +317,32 @@ const mkAB = (id: string, reviewer = ""): AndrewBRow => ({ id, reviewer, targetF
 interface AndrewSBRow { id: string; person: string; thumbnailsDone: string; avgCtr: string; remark: string; autoFilled?: boolean; }
 const mkSBRow = (id: string, person = ""): AndrewSBRow => ({ id, person, thumbnailsDone: "", avgCtr: "", remark: "" });
 
-interface AndrewSCRow { id: string; capsule: string; currentMonthViews: string; lastMonthViews: string; remark: string; autoFilled?: boolean; }
-const mkSCRow = (id: string, capsule = ""): AndrewSCRow => ({ id, capsule, currentMonthViews: "", lastMonthViews: "", remark: "" });
+interface AndrewSCRow {
+    id: string;
+    capsule: string;
+    currentMonthViews: string;
+    // Mirrors the Section D spreadsheet HR shared on 2026-05-04 — these
+    // four columns sit between the current-month views and previous-
+    // month views so the table reads left-to-right as a single month
+    // snapshot before the comparison.
+    viewsNotCountingShorts: string;
+    subscriberCount: string;
+    videosUploaded: string;
+    titlesThumbnailsChanged: string;
+    lastMonthViews: string;
+    remark: string;
+    autoFilled?: boolean;
+}
+const mkSCRow = (id: string, capsule = ""): AndrewSCRow => ({
+    id, capsule,
+    currentMonthViews:        "",
+    viewsNotCountingShorts:   "",
+    subscriberCount:          "",
+    videosUploaded:           "",
+    titlesThumbnailsChanged:  "",
+    lastMonthViews:           "",
+    remark:                   "",
+});
 
 const mkNishantRow = (id: string, name = ""): NishantResearcherRow => ({
     id, researcher: name, approvedCasesRTC: "", avgRating: "",
@@ -406,6 +440,8 @@ export default function MonthlyReportPage() {
     const sessionUser = session?.user as any;
     const isAdmin      = sessionUser?.isDeveloper === true || sessionUser?.orgLevel === "special_access";
     const isCeo        = sessionUser?.orgLevel === "ceo" && !isAdmin;
+    // Only developer and CEO can override auto-computed actuals; special_access cannot.
+    const canOverrideActuals = sessionUser?.isDeveloper === true || sessionUser?.orgLevel === "ceo";
     const isOwner      = sessionUser?.dbId && String(sessionUser.dbId) === String(managerId);
 
     // Explicit per-manager access granted by admin
@@ -424,7 +460,7 @@ export default function MonthlyReportPage() {
 
     // Data Fetching
     const fetcher = (url: string) => fetch(url).then((res) => res.json());
-    const { data, error, isLoading } = useSWR(`/api/reports/${managerId}`, fetcher);
+    const { data, isLoading } = useSWR(`/api/reports/${managerId}`, fetcher);
 
     const manager = data?.manager;
     const reportFmt = (manager?.reportFormat ?? "production") as ManagerReportFormat;
@@ -468,16 +504,20 @@ export default function MonthlyReportPage() {
     // ── Editable state for all manager fields ──────────────
     const [executiveSummary, setExecutiveSummary] = useState("");
     const [shortfallSummary, setShortfallSummary] = useState("");
-    // Production Volume: Target is free-form (manager input). Actual is auto-computed
-    // from qualified Video QA1 cases unless a CEO/developer has overridden it.
+    // Production Volume: Target is developer-set (only canOverrideActuals users can edit).
+    // Actual ClickUp is auto-computed from qualified Video QA1 cases unless overridden.
+    // Target Achieved is a free-form manual entry by the manager.
     const [totalVideoTarget, setTotalVideoTarget] = useState("");
     const [totalVideoActual, setTotalVideoActual] = useState("");
+    const [totalVideoTargetAchieved, setTotalVideoTargetAchieved] = useState("");
     const [totalVideoVariance, setTotalVideoVariance] = useState("");
     const [heroContentTarget, setHeroContentTarget] = useState("");
     const [heroContentActual, setHeroContentActual] = useState("");
+    const [heroContentTargetAchieved, setHeroContentTargetAchieved] = useState("");
     const [heroContentVariance, setHeroContentVariance] = useState("");
     const [videosPublishedTarget, setVideosPublishedTarget] = useState("");
     const [videosPublishedActual, setVideosPublishedActual] = useState("");
+    const [videosPublishedTargetAchieved, setVideosPublishedTargetAchieved] = useState("");
     const [videosPublishedVariance, setVideosPublishedVariance] = useState("");
     const [totalVideoActualOverridden, setTotalVideoActualOverridden]   = useState(false);
     const [heroContentActualOverridden, setHeroContentActualOverridden] = useState(false);
@@ -528,7 +568,7 @@ export default function MonthlyReportPage() {
     const [nColWidths, setNColWidths] = React.useState<Record<number, number>>({});
     const [nOvColWidths, setNOvColWidths] = React.useState<Record<number, number>>({});
     const nResTableRef = React.useRef<HTMLTableElement>(null);
-    const nOvTableRef  = React.useRef<HTMLTableElement>(null);
+
 
     // ── Andrew James monthly state ──
     const [andrewA1Rows, setAndrewA1Rows] = useState<any[]>([]);
@@ -605,8 +645,7 @@ export default function MonthlyReportPage() {
     const setNR = useCallback((idx: number, f: keyof NishantResearcherRow, v: string) =>
         setNishantRows(p => (p ?? defaultNishantRows).map((r, i) => i === idx ? { ...r, [f]: v } : r)),
     [defaultNishantRows]);
-    const setNO = (f: keyof NishantOverview, v: string) =>
-        setNishantOverview(p => ({ ...p, [f]: v }));
+
     const addNR    = () => setNishantRows(p => [...(p ?? defaultNishantRows), mkNishantRow(`nr-${Date.now()}`)]);
     const removeNR = (idx: number) => setNishantRows(p => (p ?? defaultNishantRows).filter((_, i) => i !== idx));
 
@@ -630,15 +669,18 @@ export default function MonthlyReportPage() {
                 // Production Volume actuals are auto-computed on GET — load them
                 // even for unsubmitted reports so the table is pre-filled.
                 const saved = d.data as any;
-                if (saved?.totalVideoTarget)    setTotalVideoTarget(saved.totalVideoTarget);
-                if (saved?.totalVideoActual)    setTotalVideoActual(saved.totalVideoActual);
-                if (saved?.totalVideoVariance)  setTotalVideoVariance(saved.totalVideoVariance);
-                if (saved?.heroContentTarget)   setHeroContentTarget(saved.heroContentTarget);
-                if (saved?.heroContentActual)   setHeroContentActual(saved.heroContentActual);
-                if (saved?.heroContentVariance) setHeroContentVariance(saved.heroContentVariance);
-                if (saved?.videosPublishedTarget)   setVideosPublishedTarget(saved.videosPublishedTarget);
-                if (saved?.videosPublishedActual)   setVideosPublishedActual(saved.videosPublishedActual);
-                if (saved?.videosPublishedVariance) setVideosPublishedVariance(saved.videosPublishedVariance);
+                if (saved?.totalVideoTarget)          setTotalVideoTarget(saved.totalVideoTarget);
+                if (saved?.totalVideoActual)          setTotalVideoActual(saved.totalVideoActual);
+                if (saved?.totalVideoTargetAchieved)  setTotalVideoTargetAchieved(saved.totalVideoTargetAchieved);
+                if (saved?.totalVideoVariance)        setTotalVideoVariance(saved.totalVideoVariance);
+                if (saved?.heroContentTarget)         setHeroContentTarget(saved.heroContentTarget);
+                if (saved?.heroContentActual)         setHeroContentActual(saved.heroContentActual);
+                if (saved?.heroContentTargetAchieved) setHeroContentTargetAchieved(saved.heroContentTargetAchieved);
+                if (saved?.heroContentVariance)       setHeroContentVariance(saved.heroContentVariance);
+                if (saved?.videosPublishedTarget)          setVideosPublishedTarget(saved.videosPublishedTarget);
+                if (saved?.videosPublishedActual)          setVideosPublishedActual(saved.videosPublishedActual);
+                if (saved?.videosPublishedTargetAchieved)  setVideosPublishedTargetAchieved(saved.videosPublishedTargetAchieved);
+                if (saved?.videosPublishedVariance)        setVideosPublishedVariance(saved.videosPublishedVariance);
                 setTotalVideoActualOverridden(!!saved?.totalVideoActualOverridden);
                 setHeroContentActualOverridden(!!saved?.heroContentActualOverridden);
                 setVideosPublishedActualOverridden(!!saved?.videosPublishedActualOverridden);
@@ -661,7 +703,7 @@ export default function MonthlyReportPage() {
                     if (saved?.risksAttention)     setRisksAttention(saved.risksAttention);
                     if (saved?.behavioralConcerns) setBehavioralConcerns(saved.behavioralConcerns);
                     if (saved?.remark)             setRemark(saved.remark);
-                    if (saved?.nishantResearcherRows) setNishantRows(saved.nishantResearcherRows);
+                    if (saved?.nishantResearcherRows?.length) setNishantRows(saved.nishantResearcherRows);
                     if (saved?.nishantOverview)       setNishantOverview(saved.nishantOverview);
                     if (saved?.andrewA1Rows?.length)  setAndrewA1Rows(saved.andrewA1Rows);
                     if (saved?.andrewA2Rows?.length)  setAndrewA2Rows(saved.andrewA2Rows);
@@ -744,7 +786,11 @@ export default function MonthlyReportPage() {
         if (!thumbnailData?.thumbnailData?.length) return;
         setAndrewSBRows(prev => prev.map(row => {
             const match = thumbnailData.thumbnailData.find(
-                (t: any) => t.person?.toLowerCase() === row.person?.toLowerCase()
+                (t: any) => {
+                    const tp = t.person?.toLowerCase() ?? "";
+                    const rp = row.person?.toLowerCase() ?? "";
+                    return tp === rp || tp.includes(rp) || rp.includes(tp);
+                }
             );
             if (!match) return row;
             return { ...row, thumbnailsDone: match.thumbnailsDone, autoFilled: true };
@@ -757,12 +803,18 @@ export default function MonthlyReportPage() {
         if (!capsuleViewsData?.views?.length) return;
         if (isLocked || isSubmitted || isDraftSaved) return;
         const rows: AndrewSCRow[] = capsuleViewsData.views.map((v: any, i: number) => ({
-            id:                `sc-auto-${i}-${Date.now()}`,
-            capsule:           v.capsule           ?? "",
-            currentMonthViews: v.currentMonthViews ?? "",
-            lastMonthViews:    v.lastMonthViews    ?? "",
-            remark:            "",
-            autoFilled:        true,
+            id:                       `sc-auto-${i}-${Date.now()}`,
+            capsule:                  v.capsule           ?? "",
+            currentMonthViews:        v.currentMonthViews ?? "",
+            // The four Section-D columns aren't in the capsule-views API
+            // yet — leave blank so HR/Andrew can fill them by hand.
+            viewsNotCountingShorts:   "",
+            subscriberCount:          "",
+            videosUploaded:           "",
+            titlesThumbnailsChanged:  "",
+            lastMonthViews:           v.lastMonthViews    ?? "",
+            remark:                   "",
+            autoFilled:               true,
         }));
         // Pad with at least one empty row if data is sparse
         if (rows.length === 0) rows.push(mkSCRow("sc-1"));
@@ -878,12 +930,15 @@ export default function MonthlyReportPage() {
                     shortfallSummary,
                     totalVideoTarget,
                     totalVideoActual,
+                    totalVideoTargetAchieved,
                     totalVideoVariance,
                     heroContentTarget,
                     heroContentActual,
+                    heroContentTargetAchieved,
                     heroContentVariance,
                     videosPublishedTarget,
                     videosPublishedActual,
+                    videosPublishedTargetAchieved,
                     videosPublishedVariance,
                     totalVideoActualOverridden,
                     heroContentActualOverridden,
@@ -1165,14 +1220,18 @@ export default function MonthlyReportPage() {
                                 <p className="text-[11px] text-amber-100 mt-0.5">Compare current month ({monthName} {year}) vs previous month views</p>
                             </div>
                             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 shadow-sm">
-                                <table ref={scTableRef as any} className="border-collapse w-full" style={{minWidth:800}}>
+                                <table ref={scTableRef as any} className="border-collapse w-full" style={{minWidth:1200}}>
                                     <thead>
                                         <tr>
-                                            <ATh colIndex={0} widths={scColWidths} setWidths={setScColWidths} tableRef={scTableRef as any} colCount={5}>Capsule / Channel <span style={{color:"#fca5a5"}}>*</span></ATh>
+                                            <ATh colIndex={0} widths={scColWidths} setWidths={setScColWidths} tableRef={scTableRef as any} colCount={9}>Capsule / Channel <span style={{color:"#fca5a5"}}>*</span></ATh>
                                             <ATh colIndex={1} widths={scColWidths} setWidths={setScColWidths}>{monthName} {year} Views <span style={{color:"#fca5a5"}}>*</span></ATh>
-                                            <ATh colIndex={2} widths={scColWidths} setWidths={setScColWidths}>Previous Month Views <span style={{color:"#fca5a5"}}>*</span></ATh>
-                                            <ATh colIndex={3} widths={scColWidths} setWidths={setScColWidths}>Difference (↑ / ↓)</ATh>
-                                            <ATh colIndex={4} widths={scColWidths} setWidths={setScColWidths}><span style={{color:"#fde68a",fontStyle:"italic",fontSize:"10px",fontWeight:400}}>Remark (optional)</span></ATh>
+                                            <ATh colIndex={2} widths={scColWidths} setWidths={setScColWidths}>Views (Not Counting Shorts)</ATh>
+                                            <ATh colIndex={3} widths={scColWidths} setWidths={setScColWidths}>Subscriber Count</ATh>
+                                            <ATh colIndex={4} widths={scColWidths} setWidths={setScColWidths}>Videos Uploaded</ATh>
+                                            <ATh colIndex={5} widths={scColWidths} setWidths={setScColWidths}>Titles &amp; Thumbnails Changed</ATh>
+                                            <ATh colIndex={6} widths={scColWidths} setWidths={setScColWidths}>Previous Month Views <span style={{color:"#fca5a5"}}>*</span></ATh>
+                                            <ATh colIndex={7} widths={scColWidths} setWidths={setScColWidths}>Difference (↑ / ↓)</ATh>
+                                            <ATh colIndex={8} widths={scColWidths} setWidths={setScColWidths}><span style={{color:"#fde68a",fontStyle:"italic",fontSize:"10px",fontWeight:400}}>Remark (optional)</span></ATh>
                                             <th className="px-2 py-2 bg-[#1e3a5f] border border-[#2a4a6f] w-8"></th>
                                         </tr>
                                     </thead>
@@ -1188,6 +1247,18 @@ export default function MonthlyReportPage() {
                                                     </ATd>
                                                     <ATd>
                                                         <AInput value={row.currentMonthViews} onChange={v=>setSCR(idx,"currentMonthViews",v)} placeholder="e.g. 50000" disabled={aDisabled} />
+                                                    </ATd>
+                                                    <ATd>
+                                                        <AInput value={row.viewsNotCountingShorts} onChange={v=>setSCR(idx,"viewsNotCountingShorts",v)} placeholder="e.g. 45000" disabled={aDisabled} />
+                                                    </ATd>
+                                                    <ATd>
+                                                        <AInput value={row.subscriberCount} onChange={v=>setSCR(idx,"subscriberCount",v)} placeholder="e.g. 12.1k" disabled={aDisabled} />
+                                                    </ATd>
+                                                    <ATd>
+                                                        <AInput value={row.videosUploaded} onChange={v=>setSCR(idx,"videosUploaded",v)} placeholder="e.g. 10 + 6 shorts" disabled={aDisabled} />
+                                                    </ATd>
+                                                    <ATd>
+                                                        <ATextarea value={row.titlesThumbnailsChanged} onChange={v=>setSCR(idx,"titlesThumbnailsChanged",v)} placeholder="e.g. 1 - <title>" disabled={aDisabled} />
                                                     </ATd>
                                                     <ATd>
                                                         <AInput value={row.lastMonthViews} onChange={v=>setSCR(idx,"lastMonthViews",v)} placeholder="e.g. 45000" disabled={aDisabled} />
@@ -1334,7 +1405,13 @@ export default function MonthlyReportPage() {
 
         return (
             <>
-            <div className="max-w-5xl mx-auto pb-16 space-y-6 px-2">
+            <style>{`
+              .monthly-report-page input.manual-entry:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+              .monthly-report-page textarea.manual-entry {
+                color: #ef4444 !important;
+              }
+            `}</style>
+            <div className="monthly-report-page max-w-5xl mx-auto pb-16 space-y-6 px-2">
                 {/* Back */}
                 <button onClick={() => router.back()} className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-900 transition-colors group mt-2">
                     <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1937,12 +2014,12 @@ export default function MonthlyReportPage() {
                                 )}
                             </div>
                             <div className="flex items-center gap-2.5">
-                                <button onClick={() => postReport(true)} disabled={submitting || !statusLoaded}
+                                <button onClick={() => postReport(true)} disabled={submitting || !statusLoaded || isLoading}
                                     className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-300 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 text-[13px] font-medium shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                                     <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>
                                     Save Draft
                                 </button>
-                                <button onClick={() => setShowConfirm(true)} disabled={submitting || !statusLoaded}
+                                <button onClick={() => setShowConfirm(true)} disabled={submitting || !statusLoaded || isLoading}
                                     className="flex items-center gap-1.5 px-5 py-2 rounded-lg bg-[#1e3a5f] hover:bg-[#1a3356] text-[13px] font-semibold shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed" style={{ color: "#ffffff" }}>
                                     {submitting
                                         ? <><svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Submitting…</>
@@ -2004,7 +2081,13 @@ export default function MonthlyReportPage() {
 
     return (
         <>
-        <div className="max-w-4xl mx-auto space-y-8 pb-16">
+        <style>{`
+          .monthly-report-page input.manual-entry:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+          .monthly-report-page textarea.manual-entry {
+            color: #ef4444 !important;
+          }
+        `}</style>
+        <div className="monthly-report-page max-w-4xl mx-auto space-y-8 pb-16">
             <style jsx global>{`
                 .quill-editor .ql-toolbar {
                     border-color: rgba(0, 0, 0, 0.1) !important;
@@ -2056,6 +2139,14 @@ export default function MonthlyReportPage() {
                 .quill-editor .ql-snow .ql-picker.ql-font .ql-picker-label,
                 .quill-editor .ql-snow .ql-picker.ql-font .ql-picker-item {
                     white-space: nowrap !important;
+                }
+                /* Manual entry red text for rich text fields */
+                .monthly-report-page .manual-rich-text .ql-editor p,
+                .monthly-report-page .manual-rich-text .ql-editor li,
+                .monthly-report-page .manual-rich-text .ql-editor h1,
+                .monthly-report-page .manual-rich-text .ql-editor h2,
+                .monthly-report-page .manual-rich-text .ql-editor h3 {
+                    color: #ef4444;
                 }
             `}</style>
             {/* ── Back button ──────────────────────────────── */}
@@ -2127,7 +2218,7 @@ export default function MonthlyReportPage() {
 
                         {/* Executive Summary Rich Text */}
                         <div className="mb-6">
-                            <RichTextField value={executiveSummary} onChange={viewOnly ? () => {} : setExecutiveSummary} placeholder="Write achievements here..." />
+                            <RichTextField value={executiveSummary} onChange={viewOnly ? () => {} : setExecutiveSummary} placeholder="Write achievements here..." manual />
                         </div>
 
                         {/* Shortfall sub-section */}
@@ -2136,7 +2227,7 @@ export default function MonthlyReportPage() {
                                 Shortfall <span className="text-red-500 ml-0.5">*</span>
                             </h3>
                             <div>
-                                <RichTextField value={shortfallSummary} onChange={viewOnly ? () => {} : setShortfallSummary} placeholder="Write shortfalls here..." />
+                                <RichTextField value={shortfallSummary} onChange={viewOnly ? () => {} : setShortfallSummary} placeholder="Write shortfalls here..." manual />
                             </div>
                         </div>
                     </section>
@@ -2153,59 +2244,69 @@ export default function MonthlyReportPage() {
                                 <thead>
                                     <tr className="border-b border-slate-200 dark:border-white/10">
                                         <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Metric</th>
-                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Target</th>
-                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Actual</th>
-                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Variance</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Actual Targets</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Actual Targets (picked from ClickUp)</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Target Achieved</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Reason</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {/* Actual columns auto-fill from qualified Video QA1 cases; only CEO/developer/special_access can override. */}
+                                    {/* Target: developer-set, only canOverrideActuals users can edit. Actual ClickUp auto-fills from qualified Video QA1 cases. Target Achieved is manager manual entry. */}
                                     <tr className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
                                         <td className="py-2 px-3 text-slate-700 dark:text-slate-300 font-medium">Total Video Completed</td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={totalVideoTarget} onChange={setTotalVideoTarget} readOnly={viewOnly} />
+                                            <EditableCell value={totalVideoTarget} onChange={setTotalVideoTarget} readOnly={viewOnly || !canOverrideActuals} manual />
                                         </td>
                                         <td className="py-2 px-3">
                                             <EditableCell
                                                 value={totalVideoActual}
                                                 onChange={(v) => { setTotalVideoActual(v); setTotalVideoActualOverridden(true); }}
-                                                readOnly={viewOnly || !(isCeo || isAdmin)}
+                                                readOnly={viewOnly || !canOverrideActuals}
                                             />
                                         </td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={totalVideoVariance} onChange={setTotalVideoVariance} readOnly={viewOnly} />
+                                            <EditableCell value={totalVideoTargetAchieved} onChange={setTotalVideoTargetAchieved} readOnly={viewOnly} manual />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell value={totalVideoVariance} onChange={setTotalVideoVariance} readOnly={viewOnly} manual />
                                         </td>
                                     </tr>
                                     <tr className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
                                         <td className="py-2 px-3 text-slate-700 dark:text-slate-300 font-medium">Hero Content Completed</td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={heroContentTarget} onChange={setHeroContentTarget} readOnly={viewOnly} />
+                                            <EditableCell value={heroContentTarget} onChange={setHeroContentTarget} readOnly={viewOnly || !canOverrideActuals} manual />
                                         </td>
                                         <td className="py-2 px-3">
                                             <EditableCell
                                                 value={heroContentActual}
                                                 onChange={(v) => { setHeroContentActual(v); setHeroContentActualOverridden(true); }}
-                                                readOnly={viewOnly || !(isCeo || isAdmin)}
+                                                readOnly={viewOnly || !canOverrideActuals}
                                             />
                                         </td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={heroContentVariance} onChange={setHeroContentVariance} readOnly={viewOnly} />
+                                            <EditableCell value={heroContentTargetAchieved} onChange={setHeroContentTargetAchieved} readOnly={viewOnly} manual />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell value={heroContentVariance} onChange={setHeroContentVariance} readOnly={viewOnly} manual />
                                         </td>
                                     </tr>
                                     <tr className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
                                         <td className="py-2 px-3 text-slate-700 dark:text-slate-300 font-medium">Videos Published</td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={videosPublishedTarget} onChange={setVideosPublishedTarget} readOnly={viewOnly} />
+                                            <EditableCell value={videosPublishedTarget} onChange={setVideosPublishedTarget} readOnly={viewOnly || !canOverrideActuals} manual />
                                         </td>
                                         <td className="py-2 px-3">
                                             <EditableCell
                                                 value={videosPublishedActual}
                                                 onChange={(v) => { setVideosPublishedActual(v); setVideosPublishedActualOverridden(true); }}
-                                                readOnly={viewOnly || !(isCeo || isAdmin)}
+                                                readOnly={viewOnly || !canOverrideActuals}
                                             />
                                         </td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={videosPublishedVariance} onChange={setVideosPublishedVariance} readOnly={viewOnly} />
+                                            <EditableCell value={videosPublishedTargetAchieved} onChange={setVideosPublishedTargetAchieved} readOnly={viewOnly} manual />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell value={videosPublishedVariance} onChange={setVideosPublishedVariance} readOnly={viewOnly} manual />
                                         </td>
                                     </tr>
                                 </tbody>
@@ -2305,7 +2406,7 @@ export default function MonthlyReportPage() {
                                                 </td>
                                                 <td className="py-2 px-3 align-top">
                                                     <div className="flex flex-col gap-1">
-                                                        <EditableCell value={editorNotes[editor.id] || ""} onChange={(v) => handleEditorNoteChange(editor.id, v)} readOnly={viewOnly} />
+                                                        <EditableCell value={editorNotes[editor.id] || ""} onChange={(v) => handleEditorNoteChange(editor.id, v)} readOnly={viewOnly} manual />
                                                     </div>
                                                 </td>
                                             </tr>
@@ -2401,7 +2502,7 @@ export default function MonthlyReportPage() {
                                                 </td>
                                                 <td className="py-2 px-3 align-top">
                                                     <div className="flex flex-col gap-1">
-                                                        <EditableCell value={writerNotes[writer.id] || ""} onChange={(v) => handleWriterNoteChange(writer.id, v)} readOnly={viewOnly} />
+                                                        <EditableCell value={writerNotes[writer.id] || ""} onChange={(v) => handleWriterNoteChange(writer.id, v)} readOnly={viewOnly} manual />
                                                     </div>
                                                 </td>
                                             </tr>
@@ -2419,7 +2520,7 @@ export default function MonthlyReportPage() {
                         <p className="text-xs text-slate-500 mb-3">
                             Highlight 1–2 top individual achievements or reliable contributors for the month, and note any individuals needing additional support/mentoring.
                         </p>
-                        <RichTextField value={teamRecognition} onChange={viewOnly ? () => {} : setTeamRecognition} />
+                        <RichTextField value={teamRecognition} onChange={viewOnly ? () => {} : setTeamRecognition} manual />
                     </section>
 
                     <hr className="border-slate-200 dark:border-white/5" />
@@ -2518,15 +2619,15 @@ export default function MonthlyReportPage() {
                         <div className="space-y-3">
                             <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2">
                                 <span className="text-sm text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap mt-1">1. What Worked Well (Content/Format/Hook): <span className="text-red-400">*</span></span>
-                                <EditableField value={keyLearnings[0]} onChange={(v) => updateArrayItem(setKeyLearnings, 0, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} />
+                                <EditableField value={keyLearnings[0]} onChange={(v) => updateArrayItem(setKeyLearnings, 0, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} manual />
                             </div>
                             <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2">
                                 <span className="text-sm text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap mt-1">2. What Did Not Work (Content/Topic/Process): <span className="text-red-400">*</span></span>
-                                <EditableField value={keyLearnings[1]} onChange={(v) => updateArrayItem(setKeyLearnings, 1, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} />
+                                <EditableField value={keyLearnings[1]} onChange={(v) => updateArrayItem(setKeyLearnings, 1, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} manual />
                             </div>
                             <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2">
                                 <span className="text-sm text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap mt-1">3. Improvements Adapted for {monthName}: <span className="text-red-400">*</span></span>
-                                <EditableField value={keyLearnings[2]} onChange={(v) => updateArrayItem(setKeyLearnings, 2, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} />
+                                <EditableField value={keyLearnings[2]} onChange={(v) => updateArrayItem(setKeyLearnings, 2, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} manual />
                             </div>
                         </div>
 
@@ -2536,7 +2637,7 @@ export default function MonthlyReportPage() {
                         <p className="text-xs text-slate-500 italic mb-3">
                             Identify potential risks (e.g., resource overload, content fatigue, technical issues) and any process or communication issues requiring CEO awareness/intervention.
                         </p>
-                        <EditableField value={risksAttention} onChange={setRisksAttention} rows={3} readOnly={viewOnly} />
+                        <EditableField value={risksAttention} onChange={setRisksAttention} rows={3} readOnly={viewOnly} manual />
                     </section>
 
                     <hr className="border-slate-200 dark:border-white/5" />
@@ -2550,7 +2651,7 @@ export default function MonthlyReportPage() {
                         <p className="text-xs text-slate-500 italic mb-3">
                             If applicable, detail any observed inappropriate behavioral patterns from a capsule manager or team member that requires executive attention or HR intervention.
                         </p>
-                        <EditableField value={behavioralConcerns} onChange={setBehavioralConcerns} rows={3} readOnly={viewOnly} />
+                        <EditableField value={behavioralConcerns} onChange={setBehavioralConcerns} rows={3} readOnly={viewOnly} manual />
                     </section>
 
                     <hr className="border-slate-200 dark:border-white/5" />
@@ -2564,7 +2665,7 @@ export default function MonthlyReportPage() {
                         <p className="text-xs text-slate-500 italic mb-3">
                             Any additional notes, observations, or comments you would like to include with this report.
                         </p>
-                        <EditableField value={remark} onChange={setRemark} rows={3} readOnly={viewOnly} />
+                        <EditableField value={remark} onChange={setRemark} rows={3} readOnly={viewOnly} manual />
                     </section>
                 </div>
 
@@ -2642,7 +2743,7 @@ export default function MonthlyReportPage() {
                                 {/* Save as Draft */}
                                 <button
                                     onClick={handleSaveDraft}
-                                    disabled={submitting || !statusLoaded}
+                                    disabled={submitting || !statusLoaded || isLoading}
                                     className="flex items-center gap-1.5 px-3.5 py-[7px] rounded-lg border border-slate-300 bg-white hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600 text-[13px] font-medium shadow-sm transition-colors"
                                 >
                                     <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2654,7 +2755,7 @@ export default function MonthlyReportPage() {
                                 {/* Send to CEO */}
                                 <button
                                     onClick={() => setShowConfirm(true)}
-                                    disabled={submitting || !statusLoaded}
+                                    disabled={submitting || !statusLoaded || isLoading}
                                     className="flex items-center gap-1.5 px-4 py-[7px] rounded-lg bg-violet-600 hover:bg-violet-700 active:bg-violet-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[13px] font-semibold shadow-sm transition-colors"
                                 >
                                     {submitting ? (

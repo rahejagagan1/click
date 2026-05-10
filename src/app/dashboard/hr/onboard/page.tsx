@@ -5,6 +5,12 @@ import { fetcher } from "@/lib/swr";
 import { useRouter } from "next/navigation";
 import { User as UserIcon, Briefcase, Settings as SettingsIcon, IndianRupee, Check, X } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
+import { JOB_TITLES } from "@/lib/job-titles";
+import { DEPARTMENTS } from "@/lib/departments";
+import CustomSelect from "@/components/ui/CustomSelect";
+import KekaImportModal from "@/components/hr/KekaImportModal";
+import type { KekaRow, KekaFormPatch } from "@/lib/keka-import";
+import { Upload as UploadIcon } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LocalStorage key for the draft. Bump the suffix if the Form shape changes
@@ -34,36 +40,6 @@ const C = {
   t2:      "text-slate-600 dark:text-slate-300",
   t3:      "text-slate-400 dark:text-slate-500",
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Canonical roster of job titles HR can pick from. Deduped + alphabetised.
-// Fixes obvious typos (Acqusition → Acquisition; "Brand Face and strategist"
-// case) and keeps "AI" as a distinct role separate from the intern variant.
-// ─────────────────────────────────────────────────────────────────────────────
-const JOB_TITLES = [
-  "AI",
-  "Artificial Intelligence Intern",
-  "Associate Script Writer",
-  "Associate Video Editor",
-  "Brand Face and Strategist",
-  "Content Quality Assurance Specialist",
-  "Content Researcher",
-  "Content Strategist",
-  "Content Team Lead",
-  "Executive Assistant",
-  "Graphic Designer",
-  "HR Manager",
-  "Head - Quality Assurance",
-  "IT Security Intern",
-  "Script Quality Assurance Specialist",
-  "Script Writer",
-  "Sr. Content Researcher",
-  "Sr. Graphic Designer & Content Strategist",
-  "Sr. Script Writer",
-  "Sr. Video Editor",
-  "Talent Acquisition Specialist",
-  "Video Editor",
-];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Form state shape — one place, flat, easy to scan.
@@ -133,7 +109,7 @@ const EMPTY: Form = {
   mobileCountry: "+91", mobileNumber: "",
   joiningDate: new Date().toISOString().slice(0, 10),
   jobTitle: "", secondaryJobTitle: "", timeType: "Full Time",
-  legalEntity: "NB Media Productions", businessUnit: "", department: "",
+  legalEntity: "NB Media Productions", businessUnit: "NB Media", department: "",
   location: "Mohali", workerType: "Regular Employee",
   reportingManagerId: "", dottedLineManagerId: "",
   probationPolicy: "Regular Employees", noticePeriodDays: "30",
@@ -162,12 +138,43 @@ export default function OnboardEmployeePage() {
   const [error, setError]     = useState("");
   const [success, setSuccess] = useState("");
 
+  // Keka import state — modal visibility + a small banner telling HR
+  // which row was just pulled in. The set of HRM IDs already onboarded
+  // in this session keeps the modal from offering "Pre-fill" twice for
+  // the same employee after a save.
+  const [importOpen, setImportOpen] = useState(false);
+  const [importedFrom, setImportedFrom] = useState<{ hrm: string; name: string } | null>(null);
+  const [importDoneIds, setImportDoneIds] = useState<Set<string>>(() => new Set());
+
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm(f => ({ ...f, [k]: v }));
 
-  const { data: opts } = useSWR("/api/hr/onboard/options", fetcher);
+  const { data: opts, mutate: refreshOpts } = useSWR("/api/hr/onboard/options", fetcher);
   const shifts    = opts?.shifts    ?? [];
   const leaveTypes = opts?.leaveTypes ?? [];
   const managers  = opts?.managers  ?? [];
+  const allUsers: Array<{ id: number; name: string }> = opts?.allUsers ?? [];
+
+  // Union of the server-side existing employee IDs and any IDs created
+  // in this session — what the modal uses to grey out "already
+  // onboarded" rows.
+  const mergedOnboardedIds = useMemo(() => {
+    const s = new Set<string>(importDoneIds);
+    for (const id of (opts?.existingEmployeeIds ?? [])) s.add(id);
+    return s;
+  }, [importDoneIds, opts?.existingEmployeeIds]);
+
+  // Auto-pick the regular 9 am – 6 pm shift once the shifts list loads.
+  // HR can still change the selection manually; we only set it when the
+  // form has no shift chosen yet, so we don't clobber an explicit pick.
+  useEffect(() => {
+    if (form.shiftId) return;
+    if (!Array.isArray(shifts) || shifts.length === 0) return;
+    const regular = shifts.find(
+      (s: any) => s.startTime === "09:00" && s.endTime === "18:00",
+    );
+    if (regular) setForm((f) => ({ ...f, shiftId: String(regular.id) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shifts.length]);
 
   // Auto-keep display name in sync unless the user edits it themselves.
   const [displayTouched, setDisplayTouched] = useState(false);
@@ -181,6 +188,42 @@ export default function OnboardEmployeePage() {
   // "HRM" for HRM47). HR can still override it manually — once they type,
   // we stop overwriting.
   const [attendanceTouched, setAttendanceTouched] = useState(false);
+
+  // Handle a row pick from the Keka import modal. Spreads the mapped
+  // patch onto the form, marks displayName as touched (so the
+  // first/middle/last useEffect doesn't immediately overwrite it), and
+  // remembers the HRM ID so the modal won't re-offer the same row.
+  const handleImportPick = (row: KekaRow, patch: KekaFormPatch) => {
+    setForm((f) => ({
+      ...f,
+      firstName:           patch.firstName,
+      middleName:          patch.middleName,
+      lastName:            patch.lastName,
+      displayName:         patch.displayName,
+      workEmail:           patch.workEmail,
+      gender:              patch.gender,
+      dateOfBirth:         patch.dateOfBirth,
+      mobileCountry:       patch.mobileCountry,
+      mobileNumber:        patch.mobileNumber,
+      employeeNumber:      patch.employeeNumber,
+      joiningDate:         patch.joiningDate,
+      jobTitle:            patch.jobTitle,
+      department:          patch.department,
+      workerType:          patch.workerType,
+      timeType:            patch.timeType,
+      location:            patch.location,
+      jobLocation:         patch.jobLocation,
+      noticePeriodDays:    patch.noticePeriodDays,
+      internshipEndDate:   patch.internshipEndDate,
+      leavePlan:           patch.leavePlan,
+      reportingManagerId:  patch.reportingManagerId,
+      // Salary tab is left untouched on purpose — HR enters it.
+    }));
+    setDisplayTouched(true);
+    setAttendanceTouched(false);  // attendance auto-derive will re-fire from the new HRM id
+    setImportedFrom({ hrm: row.employeeNumber, name: row.displayName });
+    setStep(1);                   // always start the review at the first step
+  };
 
   // ── Existing-user lookup by Work Email ────────────────────────────
   // Type a name or email — the dropdown suggests matching User rows so
@@ -362,13 +405,19 @@ export default function OnboardEmployeePage() {
         email: form.workEmail,
         role:  form.role,
         orgLevel: form.orgLevel,
-        managerId: form.reportingManagerId ? Number(form.reportingManagerId) : undefined,
+        // Send null (not undefined) when HR cleared the dropdown so
+        // the API actually clears the existing link. The API now
+        // distinguishes undefined ("don't touch") from null ("set to
+        // none") for these fields.
+        managerId: form.reportingManagerId ? Number(form.reportingManagerId) : null,
+        inlineManagerId: form.dottedLineManagerId ? Number(form.dottedLineManagerId) : null,
         inviteToLogin:    form.inviteToLogin,
         enableOnboarding: form.enableOnboarding,
         profile: {
           employeeId: form.employeeNumber || undefined,
           designation: form.jobTitle || undefined,
           department:  form.department || undefined,
+          businessUnit: form.businessUnit || "NB Media",
           employmentType:
             form.workerType === "Intern"     ? "intern"
             : form.timeType === "Part Time"  ? "parttime"
@@ -420,9 +469,17 @@ export default function OnboardEmployeePage() {
           ? `${data.name}'s existing account was linked and onboarding details saved.`
           : `${data.name} onboarded successfully.`
       );
+      // Mark this HRM ID as done so the import modal dims it on the
+      // next file-pick. State is intentionally session-only — a fresh
+      // page load resets it, matching how the draft is wiped below.
+      if (form.employeeNumber) {
+        setImportDoneIds((s) => new Set(s).add(form.employeeNumber));
+      }
       // Wipe the draft so the next visit starts clean.
       try { localStorage.removeItem(DRAFT_KEY); } catch {}
-      setTimeout(() => router.push("/dashboard/hr/people"), 1400);
+      // Bounce back to HR Admin so HR can either pick the next employee
+      // from the same Keka import or jump elsewhere in the dashboard.
+      setTimeout(() => router.push("/dashboard/hr/admin"), 1400);
     } catch (e: any) {
       setError(e?.message || "Failed to onboard");
     } finally {
@@ -541,11 +598,44 @@ export default function OnboardEmployeePage() {
 
       {/* ── Body ── */}
       <div className="p-6 max-w-5xl mx-auto">
+        {/* Import-from-Keka entry point. Sits above the form so HR sees
+            it before they start typing. The "Imported …" pill below
+            confirms which row was just pulled in. */}
+        {step === 1 && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-white/10 dark:bg-white/[0.02]">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#008CFF]/10 text-[#008CFF]">
+                <UploadIcon size={16} />
+              </div>
+              <div>
+                <p className="text-[13px] font-semibold text-slate-800 dark:text-white">Import from Keka</p>
+                <p className="text-[11.5px] text-slate-500 dark:text-slate-400">
+                  Upload a Keka CSV / Excel export once — pre-fill steps 1, 2, 3 for each employee in seconds.
+                </p>
+                {importedFrom && (
+                  <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                    Imported {importedFrom.hrm} · {importedFrom.name}
+                  </p>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setImportOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-[#008CFF]/30 bg-[#008CFF]/5 px-3.5 py-2 text-[12.5px] font-semibold text-[#008CFF] transition-colors hover:bg-[#008CFF]/10 hover:border-[#008CFF]/50"
+            >
+              <UploadIcon size={13} />
+              {importedFrom ? "Pick another row" : "Upload & pick row"}
+            </button>
+          </div>
+        )}
+
         {step === 1 && (
           <StepCard title="Employee Details">
             <Grid cols={1}>
               <Field label="Work Country">
-                <Select v={form.workCountry} set={v => set("workCountry", v)} opts={["India", "USA", "UK", "UAE", "Singapore"]} />
+                <CustomSelect listKey="workCountry" defaults={["India", "USA", "UK", "UAE", "Singapore"]}
+                  value={form.workCountry} onChange={v => set("workCountry", v)} />
               </Field>
             </Grid>
             <Grid>
@@ -562,13 +652,15 @@ export default function OnboardEmployeePage() {
                 <Input v={form.displayName} set={v => { set("displayName", v); setDisplayTouched(true); }} />
               </Field>
               <Field label="Gender" required>
-                <Select v={form.gender} set={v => set("gender", v)} opts={["male", "female", "other"]} />
+                <CustomSelect listKey="gender" defaults={["male", "female", "other"]}
+                  value={form.gender} onChange={v => set("gender", v)} required />
               </Field>
               <Field label="Date of Birth" required>
                 <DatePicker value={form.dateOfBirth} onChange={(v) => set("dateOfBirth", v)} />
               </Field>
               <Field label="Nationality">
-                <Select v={form.nationality} set={v => set("nationality", v)} opts={["India", "USA", "UK", "Other"]} />
+                <CustomSelect listKey="nationality" defaults={["India", "USA", "UK", "Other"]}
+                  value={form.nationality} onChange={v => set("nationality", v)} />
               </Field>
               <Field label="Number Series">
                 <Select v={form.numberSeries} set={v => set("numberSeries", v)} opts={["NB Media series"]} />
@@ -666,10 +758,16 @@ export default function OnboardEmployeePage() {
                 <DatePicker value={form.joiningDate} onChange={v => set("joiningDate", v)} futureYears={2} />
               </Field>
               <Field label="Job Title" required>
-                <Select
-                  v={form.jobTitle}
-                  set={v => set("jobTitle", v)}
-                  opts={[{ value: "", label: "Select job title" }, ...JOB_TITLES]}
+                {/* CustomSelect: keeps the canonical JOB_TITLES list as
+                    non-deletable defaults, plus surfaces "+ Add custom"
+                    so HR can extend the list without a code deploy. */}
+                <CustomSelect
+                  listKey="jobTitle"
+                  defaults={JOB_TITLES}
+                  value={form.jobTitle}
+                  onChange={v => set("jobTitle", v)}
+                  placeholder="Select job title"
+                  required
                 />
               </Field>
               <Field label="Secondary Job Title">
@@ -680,7 +778,8 @@ export default function OnboardEmployeePage() {
                 />
               </Field>
               <Field label="Time Type" required>
-                <Select v={form.timeType} set={v => set("timeType", v)} opts={["Full Time", "Part Time"]} />
+                <CustomSelect listKey="timeType" defaults={["Full Time", "Part Time"]}
+                  value={form.timeType} onChange={v => set("timeType", v)} required />
               </Field>
             </Grid>
 
@@ -690,13 +789,26 @@ export default function OnboardEmployeePage() {
                 <Input v={form.legalEntity} set={v => set("legalEntity", v)} />
               </Field>
               <Field label="Business Unit">
-                <Input v={form.businessUnit} set={v => set("businessUnit", v)} />
+                <CustomSelect listKey="businessUnit" defaults={["NB Media"]}
+                  value={form.businessUnit} onChange={v => set("businessUnit", v)} />
               </Field>
               <Field label="Department" required>
-                <Input v={form.department} set={v => set("department", v)} placeholder="Write department" />
+                {/* CustomSelect: defaults are the seven core departments
+                    (non-deletable); HR can append more via "+ Add
+                    custom". Persisted in OptionList so they show up for
+                    everyone, not just one browser. */}
+                <CustomSelect
+                  listKey="department"
+                  defaults={DEPARTMENTS}
+                  value={form.department}
+                  onChange={v => set("department", v)}
+                  placeholder="Select a department"
+                  required
+                />
               </Field>
               <Field label="Location" required>
-                <Select v={form.location} set={v => set("location", v)} opts={["Mohali", "Remote", "Hybrid"]} />
+                <CustomSelect listKey="location" defaults={["Mohali", "Remote", "Hybrid"]}
+                  value={form.location} onChange={v => set("location", v)} required />
               </Field>
               <Field label="Worker Type" required>
                 <Select v={form.workerType} set={v => set("workerType", v)} opts={["Regular Employee", "Intern"]} />
@@ -708,7 +820,7 @@ export default function OnboardEmployeePage() {
                   opts={[{ value: "", label: "— Select —" }, ...managers.map((m: any) => ({ value: String(m.id), label: `${m.name} · ${m.orgLevel}` }))]}
                 />
               </Field>
-              <Field label="Dotted Line Manager">
+              <Field label="Inline Manager">
                 <Select
                   v={form.dottedLineManagerId}
                   set={v => set("dottedLineManagerId", v)}
@@ -720,15 +832,19 @@ export default function OnboardEmployeePage() {
             <SectionTitle>Employment Terms</SectionTitle>
             <Grid>
               <Field label="Probation Policy" required>
-                <Select v={form.probationPolicy} set={v => set("probationPolicy", v)} opts={[
-                  "Interns (3 Months)", "Interns (6 Months)", "Interns (12 Months)", "Regular Employees",
-                ]} />
+                <CustomSelect
+                  listKey="probationPolicy"
+                  defaults={["Interns (3 Months)", "Interns (6 Months)", "Interns (12 Months)", "Regular Employees"]}
+                  value={form.probationPolicy} onChange={v => set("probationPolicy", v)}
+                  required
+                />
               </Field>
               <Field label="Notice Period (days)" required>
                 <Input type="number" v={form.noticePeriodDays} set={v => set("noticePeriodDays", v)} placeholder="30" />
               </Field>
               <Field label="Job Location" required>
-                <Select v={form.jobLocation} set={v => set("jobLocation", v)} opts={["Mohali", "Delhi", "Mumbai", "Remote"]} />
+                <CustomSelect listKey="jobLocation" defaults={["Mohali", "Delhi", "Mumbai", "Remote"]}
+                  value={form.jobLocation} onChange={v => set("jobLocation", v)} required />
               </Field>
               {form.workerType === "Intern" && (
                 <Field label="Internship End Date">
@@ -760,7 +876,7 @@ export default function OnboardEmployeePage() {
             <Grid>
               <Field label="Org Level">
                 <Select v={form.orgLevel} set={v => set("orgLevel", v)} opts={[
-                  "member", "production_team", "sub_lead", "lead",
+                  "member", "sub_lead", "lead",
                   "manager", "hr_manager", "hod", "special_access", "ceo",
                 ]} />
               </Field>
@@ -772,10 +888,12 @@ export default function OnboardEmployeePage() {
             <SectionTitle>Leave Settings</SectionTitle>
             <Grid>
               <Field label="Leave Plan">
-                <Select v={form.leavePlan} set={v => set("leavePlan", v)} opts={["Regular Leave Plan", "Intern Leave Plan"]} />
+                <CustomSelect listKey="leavePlan" defaults={["Regular Leave Plan", "Intern Leave Plan"]}
+                  value={form.leavePlan} onChange={v => set("leavePlan", v)} />
               </Field>
               <Field label="Holiday List">
-                <Select v={form.holidayList} set={v => set("holidayList", v)} opts={["Default Holiday List"]} />
+                <CustomSelect listKey="holidayList" defaults={["Default Holiday List"]}
+                  value={form.holidayList} onChange={v => set("holidayList", v)} />
               </Field>
             </Grid>
             {leaveTypes.length > 0 && (
@@ -800,7 +918,8 @@ export default function OnboardEmployeePage() {
                 />
               </Field>
               <Field label="Weekly Off">
-                <Select v={form.weeklyOff} set={v => set("weeklyOff", v)} opts={["Standard Weekly Off", "Saturday Off Alt"]} />
+                <CustomSelect listKey="weeklyOff" defaults={["Standard Weekly Off", "Saturday Off Alt"]}
+                  value={form.weeklyOff} onChange={v => set("weeklyOff", v)} />
               </Field>
               <Field label="Attendance Number">
                 <Input
@@ -810,10 +929,12 @@ export default function OnboardEmployeePage() {
                 />
               </Field>
               <Field label="Time Tracking Policy">
-                <Select v={form.timeTrackingPolicy} set={v => set("timeTrackingPolicy", v)} opts={["On-Site Capture", "Remote Capture", "Hybrid"]} />
+                <CustomSelect listKey="timeTrackingPolicy" defaults={["On-Site Capture", "Remote Capture", "Hybrid"]}
+                  value={form.timeTrackingPolicy} onChange={v => set("timeTrackingPolicy", v)} />
               </Field>
               <Field label="Penalization Policy">
-                <Select v={form.penalizationPolicy} set={v => set("penalizationPolicy", v)} opts={["Default", "Strict", "Lenient"]} />
+                <CustomSelect listKey="penalizationPolicy" defaults={["Default", "Strict", "Lenient"]}
+                  value={form.penalizationPolicy} onChange={v => set("penalizationPolicy", v)} />
               </Field>
             </Grid>
           </StepCard>
@@ -829,12 +950,12 @@ export default function OnboardEmployeePage() {
               </Grid>
 
               {form.salaryType === "Intern" ? (
-                // Interns are paid a flat basic / stipend — no PF, bonus, tax
-                // regime, structure, etc. Keep the surface area tiny on
-                // purpose so HR doesn't accidentally fill in fields that
-                // don't apply to a stipend.
+                // Interns are paid a flat monthly stipend — no PF, bonus,
+                // tax regime, structure, etc. Keep the surface area tiny
+                // on purpose so HR doesn't accidentally fill in fields
+                // that don't apply to a stipend.
                 <Grid>
-                  <Field label="Basic Pay (INR / month)" required>
+                  <Field label="Monthly Stipend (INR / month)" required>
                     <Input type="number" v={form.basicPay} set={v => set("basicPay", v)} placeholder="Enter monthly stipend" />
                   </Field>
                 </Grid>
@@ -842,7 +963,8 @@ export default function OnboardEmployeePage() {
                 <>
                   <Grid>
                     <Field label="Pay Group">
-                      <Select v={form.payGroup} set={v => set("payGroup", v)} opts={["NB Media", "Contractor"]} />
+                      <CustomSelect listKey="payGroup" defaults={["NB Media", "Contractor"]}
+                        value={form.payGroup} onChange={v => set("payGroup", v)} />
                     </Field>
                     <Field label="Annual Salary (INR)">
                       <Input type="number" v={form.annualSalary} set={v => set("annualSalary", v)} placeholder="Enter annual salary" />
@@ -867,10 +989,12 @@ export default function OnboardEmployeePage() {
 
                   <Grid>
                     <Field label="Salary Structure Type">
-                      <Select v={form.salaryStructure} set={v => set("salaryStructure", v)} opts={["Range Based", "Fixed"]} />
+                      <CustomSelect listKey="salaryStructure" defaults={["Range Based", "Fixed"]}
+                        value={form.salaryStructure} onChange={v => set("salaryStructure", v)} />
                     </Field>
                     <Field label="Tax Regime">
-                      <Select v={form.taxRegime} set={v => set("taxRegime", v)} opts={["New Regime (Section 115BAC)", "Old Regime"]} />
+                      <CustomSelect listKey="taxRegime" defaults={["New Regime (Section 115BAC)", "Old Regime"]}
+                        value={form.taxRegime} onChange={v => set("taxRegime", v)} />
                     </Field>
                   </Grid>
                 </>
@@ -891,7 +1015,7 @@ export default function OnboardEmployeePage() {
               {form.salaryType === "Intern" ? (
                 <div className="mt-5 pt-3 border-t border-slate-200 dark:border-white/[0.06]">
                   <div className="flex items-center justify-between text-[12.5px] font-semibold">
-                    <span className={C.t1}>Basic Pay</span>
+                    <span className={C.t1}>Monthly Stipend</span>
                     <span className={`${C.t1} font-mono`}>
                       {Number(form.basicPay || 0).toLocaleString("en-IN")} / mo
                     </span>
@@ -942,6 +1066,26 @@ export default function OnboardEmployeePage() {
           </div>
         )}
       </div>
+
+      <KekaImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onPick={handleImportPick}
+        managers={managers}
+        allUsers={allUsers}
+        onboardedIds={mergedOnboardedIds}
+        onBulkComplete={(createdHrmIds) => {
+          // Add bulk-created IDs to the session set so re-opening the
+          // modal greys them immediately, then refresh the canonical
+          // list from the server (picks up the freshly-created rows).
+          setImportDoneIds((s) => {
+            const next = new Set(s);
+            createdHrmIds.forEach((id) => next.add(id));
+            return next;
+          });
+          refreshOpts();
+        }}
+      />
     </div>
   );
 }

@@ -5,7 +5,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { Search, Sparkles, Plus, Minus, X } from "lucide-react";
 
-type LeaveTypeRow = { id: number; name: string; code: string; daysPerYear: number };
+type LeaveTypeRow = { id: number; name: string; code: string; daysPerYear: number; applicable?: boolean };
 type Bal          = { id: number | null; total: number; used: number; pending: number };
 type EmpRow       = {
   id: number; name: string; email: string;
@@ -94,8 +94,15 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
   // ── Bulk action: seed every employee's TOTAL for one type to its policy. ──
   const [bulkBusy, setBulkBusy] = useState(false);
   const seedDefaults = async (typeId: number | "all") => {
-    const targets = typeId === "all" ? leaveTypes : leaveTypes.filter((t) => t.id === typeId);
-    if (targets.length === 0) return;
+    // Skip balance-only types (e.g. Carry Over Leave). HR enters those
+    // manually per-employee and the value must NEVER be overwritten by
+    // policy defaults — old employees rely on it for exit encashment.
+    const pool = leaveTypes.filter((t) => t.applicable !== false);
+    const targets = typeId === "all" ? pool : pool.filter((t) => t.id === typeId);
+    if (targets.length === 0) {
+      alert("This leave type is balance-only — policy defaults don't apply. Edit each employee's value manually.");
+      return;
+    }
     const summary = targets.map((t) => `• ${t.name} → ${t.daysPerYear} day(s)`).join("\n");
     if (!confirm(
       `Apply the policy entitlement to every active employee for ${year}?\n\n${summary}\n\nUsed / pending days are preserved; only TOTAL changes.`
@@ -184,14 +191,27 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                 <th key={lt.id} className="px-3 py-3 text-left align-bottom min-w-[120px]">
                   <div className="flex flex-col gap-0.5">
                     <span className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-700">{lt.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => seedDefaults(lt.id)}
-                      title={`Reset every employee's ${lt.name} entitlement to ${lt.daysPerYear} day(s)`}
-                      className="self-start rounded bg-slate-100 px-1.5 py-0.5 text-[9.5px] font-semibold normal-case tracking-normal text-slate-600 transition hover:bg-[#e8f1fc] hover:text-[#0f4e93]"
-                    >
-                      Policy: {lt.daysPerYear}d ↻
-                    </button>
+                    {lt.applicable === false ? (
+                      // Balance-only (e.g. Carry Over Leave) — value is HR-set
+                      // per employee and stays exactly as entered. No policy
+                      // reset button so a misclick can't wipe the carry-over
+                      // balance an old employee will be paid out at exit.
+                      <span
+                        title="Balance-only — value stays as HR enters it; no policy default applies."
+                        className="self-start rounded bg-amber-50 px-1.5 py-0.5 text-[9.5px] font-semibold normal-case tracking-normal text-amber-700"
+                      >
+                        Balance only
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => seedDefaults(lt.id)}
+                        title={`Reset every employee's ${lt.name} entitlement to ${lt.daysPerYear} day(s)`}
+                        className="self-start rounded bg-slate-100 px-1.5 py-0.5 text-[9.5px] font-semibold normal-case tracking-normal text-slate-600 transition hover:bg-[#e8f1fc] hover:text-[#0f4e93]"
+                      >
+                        Policy: {lt.daysPerYear}d ↻
+                      </button>
+                    )}
                   </div>
                 </th>
               ))}
@@ -282,7 +302,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                   <input
                     ref={totalInputRef}
                     type="number"
-                    step="0.5"
+                    step="0.01"
                     min="0"
                     value={form.total}
                     onChange={(e) => setForm((f) => ({ ...f, total: e.target.value }))}
@@ -312,7 +332,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                   <div>
                     <label className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Used</label>
                     <input
-                      type="number" step="0.5" min="0"
+                      type="number" step="0.01" min="0"
                       value={form.used}
                       onChange={(e) => setForm((f) => ({ ...f, used: e.target.value }))}
                       className="mt-1 w-full rounded border border-slate-200 bg-white px-2.5 py-1.5 text-center text-[13px] tabular-nums text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30"
@@ -321,7 +341,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                   <div>
                     <label className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Pending</label>
                     <input
-                      type="number" step="0.5" min="0"
+                      type="number" step="0.01" min="0"
                       value={form.pending}
                       onChange={(e) => setForm((f) => ({ ...f, pending: e.target.value }))}
                       className="mt-1 w-full rounded border border-slate-200 bg-white px-2.5 py-1.5 text-center text-[13px] tabular-nums text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30"

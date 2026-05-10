@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
-import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench } from "lucide-react";
+import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench, Target } from "lucide-react";
 
 // Consistent Keka-style icon: thin outline, fixed size / stroke.
 const icon = (Cmp: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>) => (
@@ -25,7 +25,7 @@ interface Manager {
 }
 
 const NAV_ITEMS = [
-    { label: "Dashboard", href: "/dashboard",         icon: icon(LayoutDashboard),                             ceoOnly: true                },
+    { label: "Dashboard", href: "/dashboard",         icon: icon(LayoutDashboard),                             developerOnly: true          },
     { label: "Cases",     href: "/cases",              icon: icon(FileText),       adminOnly: true                                           },
     { label: "Company",   href: "/dashboard/company",  icon: icon(Building2),      adminOnly: true                                           },
     { label: "Scores",    href: "/dashboard/scores",   icon: icon(Star),                                        managersOnly: true           },
@@ -43,10 +43,23 @@ export default function Sidebar() {
     const { data: session } = useSession();
     const user = session?.user as any;
 
-    const isAdmin = user?.orgLevel === "ceo" || user?.isDeveloper;
+    // `special_access` and `role === "admin"` both qualify as admin —
+    // per the auth.ts session callback comment "Full visibility but NOT
+    // CEO". Include both so they see Cases / Company / Admin / HR
+    // Dashboard / Reports / Scores like ceo + developers do.
+    const isAdmin =
+      user?.orgLevel === "ceo" ||
+      user?.isDeveloper === true ||
+      user?.orgLevel === "special_access" ||
+      user?.role === "admin";
     const isHRAdmin = isAdmin || user?.orgLevel === "hr_manager";
+    // CEO-only items stay restricted to the actual CEO + developers — `Dashboard`
+    // for instance is the org-wide CEO console, not appropriate for special_access.
     const isCeo = user?.orgLevel === "ceo" || user?.isDeveloper === true;
-    const canSeeReports = isAdmin || user?.orgLevel === "manager" || user?.orgLevel === "hod";
+    const canSeeReports = isAdmin
+        || user?.orgLevel === "manager"
+        || user?.orgLevel === "hod"
+        || user?.orgLevel === "hr_manager";
     const canSeeViolationLog = isAdmin || user?.orgLevel === "special_access" || user?.role === "hr_manager";
     const showFeedbackSubmenu = canViewFeedbackInbox(user);
 
@@ -62,21 +75,35 @@ export default function Sidebar() {
     const tabAllowed = (key: string) => (perms?.permissions?.[key] ?? true);
 
     const visibleItems = NAV_ITEMS.filter((item) => {
+        const label = (item as any).label as string;
+        // Items that ARE in the Tab Permissions catalog let the per-user
+        // permission win — that's what makes the Permissions UI actually
+        // grant access. tabPermissionsForUser() already incorporates role
+        // defaults, so a Member with no explicit row still gets `false`
+        // for admin tabs; an admin granting `cases: true` to that Member
+        // now actually unlocks Cases.
+        const keyMap: Record<string, string> = {
+            // "Dashboard" intentionally omitted — it is developer-only and
+            // must NOT be unlockable via the per-user Tab Permissions UI.
+            // "Admin" intentionally omitted — admin/CEO/dev only.
+            "Cases": "cases", "Company": "company",
+            "Scores": "scores", "YouTube": "youtube", "Feedback": "feedback",
+            "Tools": "tools",
+        };
+        const k = keyMap[label];
+        if (k) {
+            // YouTube has a separate per-user channel-access check that's
+            // distinct from Tab Permissions — keep it stacked on top.
+            if ((item as any).youtubeDashboardAccess && !userCanAccessYoutubeDashboard(user)) return false;
+            return tabAllowed(k);
+        }
+
+        // Items NOT in the catalog (Tools, Admin) — role gates decide,
+        // since there's no per-user toggle to defer to.
         if ((item as any).ceoOnly && !isCeo) return false;
         if ((item as any).managersOnly && !canSeeReports) return false;
         if ((item as any).adminOnly && !isAdmin) return false;
         if ((item as any).developerOnly && user?.isDeveloper !== true) return false;
-        if ((item as any).youtubeDashboardAccess && !userCanAccessYoutubeDashboard(user)) return false;
-        // Per-user tab permission gates. Label-to-key mapping mirrors TAB_CATALOG.
-        // Note: "Admin" isn't gated via permissions — it's governed by
-        // orgLevel/isDeveloper only, same as before.
-        const label = (item as any).label as string;
-        const keyMap: Record<string, string> = {
-            "Dashboard": "dashboard", "Cases": "cases", "Company": "company",
-            "Scores": "scores", "YouTube": "youtube", "Feedback": "feedback",
-        };
-        const k = keyMap[label];
-        if (k && !tabAllowed(k)) return false;
         return true;
     });
 
@@ -177,14 +204,27 @@ export default function Sidebar() {
         return Math.max(margin, Math.min(y, vh - h - margin));
     }, []);
 
+    // Mirrors the canonical list in src/lib/departments.ts. The flyout
+    // that rendered these entries was retired when KPIs got simplified
+    // to a single page — kept here for `estHeight` math + so any future
+    // reactivation picks up the latest taxonomy without drift.
     const DEPARTMENTS = [
-        { label: "HR Dept.", slug: "hr" },
-        { label: "Researcher Dept.", slug: "researcher" },
-        { label: "QA Dept.", slug: "qa" },
-        { label: "Production Dept.", slug: "production" },
-        { label: "AI Dept.", slug: "ai" },
-        { label: "SocialMedia Dept.", slug: "socialmedia" },
-        { label: "IT Dept.", slug: "it" },
+        { label: "HR Dept.",                         slug: "hr" },
+        { label: "Managers Dept.",                   slug: "managers" },
+        { label: "Researchers Dept.",                slug: "researchers" },
+        { label: "Research Manager Dept.",           slug: "research-manager" },
+        { label: "Writers Dept.",                    slug: "writers" },
+        { label: "Editors Dept.",                    slug: "editors" },
+        { label: "Content Strategist Dept.",            slug: "content-strategist" },
+        { label: "Content Operations Executive Dept.",  slug: "content-operations-executive" },
+        { label: "Video QA Dept.",                   slug: "video-qa" },
+        { label: "Script QA Dept.",                  slug: "script-qa" },
+        { label: "QA Manager Dept.",                 slug: "qa-manager" },
+        { label: "Design Dept.",                     slug: "design" },
+        { label: "AI Team Dept.",                    slug: "ai-team" },
+        { label: "Social Media Dept.",               slug: "social-media" },
+        { label: "Social Media Manager Dept.",       slug: "social-media-manager" },
+        { label: "IT Dept.",                         slug: "it" },
     ];
 
     const handleDeptMouseEnter = () => {
@@ -314,17 +354,21 @@ export default function Sidebar() {
                     const A = "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]";
                     return (
                         <>
-                            <Link href="/dashboard/hr/home"
-                                className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", homeActive ? A : E)}>
-                                <Home size={15} strokeWidth={1.75} className={homeActive ? "text-[#0f6ecd]" : ""} />
-                                Home
-                            </Link>
-                            <div ref={hrMeTrigger} {...meHandlers}
-                                onDoubleClick={() => { setHrMeOpen(false); router.push("/dashboard/hr/attendance"); }}
-                                className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer select-none", isMeActive || hrMeOpen ? A : E)}>
-                                <User size={15} strokeWidth={1.75} className={isMeActive || hrMeOpen ? "text-[#0f6ecd]" : ""} />
-                                Me
-                            </div>
+                            {tabAllowed("hr_home") && (
+                                <Link href="/dashboard/hr/home"
+                                    className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", homeActive ? A : E)}>
+                                    <Home size={15} strokeWidth={1.75} className={homeActive ? "text-[#0f6ecd]" : ""} />
+                                    Home
+                                </Link>
+                            )}
+                            {tabAllowed("hr_me") && (
+                                <div ref={hrMeTrigger} {...meHandlers}
+                                    onDoubleClick={() => { setHrMeOpen(false); router.push("/dashboard/hr/attendance"); }}
+                                    className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer select-none", isMeActive || hrMeOpen ? A : E)}>
+                                    <User size={15} strokeWidth={1.75} className={isMeActive || hrMeOpen ? "text-[#0f6ecd]" : ""} />
+                                    Me
+                                </div>
+                            )}
                             {/* My Finances — pinned tile with a Summary / My Pay / Manage Tax flyout */}
                             {(() => {
                                 const financesHandlers = makeHrHandlers(setFinancesOpen, setFinancesY, financesTrigger, financesTimer);
@@ -443,7 +487,7 @@ export default function Sidebar() {
                 })}
 
                 {/* Report — visible to CEO, developers, managers, HODs only */}
-                {canSeeReports && (!isAdmin ? (
+                {canSeeReports && tabAllowed("reports") && (!isAdmin ? (
                     <Link
                         href={`/dashboard/reports/${user?.dbId}`}
                         className={cn(
@@ -540,80 +584,32 @@ export default function Sidebar() {
                     </div>
                 ))}
 
-                {/* Dept. — visible to admins, hover submenu with department names */}
-                {isAdmin && (() => {
-                    const isDeptActive = pathname.startsWith("/dashboard/departments");
+                {/* KPIs — visible to all users (the page itself scopes the
+                    visible employees by role: self / team / all-departments).
+                    Tab-permission still gates show/hide. */}
+                {tabAllowed("departments") && (() => {
+                    const isKpiActive = pathname.startsWith("/dashboard/kpis");
                     return (
-                        <div
-                            ref={deptTriggerRef}
-                            className="relative"
-                            onMouseEnter={handleDeptMouseEnter}
-                            onMouseLeave={handleDeptMouseLeave}
-                        >
-                            <div
-                                className={cn(
-                                    "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer",
-                                    isDeptActive
-                                        ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
-                                        : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
-                                )}
-                            >
-                                <span className="flex flex-col items-center gap-1">
-                                    <span className={cn(isDeptActive ? "text-[#0f6ecd]" : "")}>
-                                        <Users size={18} strokeWidth={1.5} />
-                                    </span>
-                                    Dept.
-                                </span>
-                                <svg
-                                    className={cn(
-                                        "hidden",
-                                        deptHovered ? "rotate-90" : ""
-                                    )}
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                            </div>
-
-                            {/* Flyout submenu */}
-                            {deptHovered && typeof document !== "undefined" && createPortal(
-                                <div
-                                    style={{ position: "fixed", left: 108, top: deptY, zIndex: 9999, maxHeight: `calc(100vh - ${deptY}px - 16px)` }}
-                                    className="w-52 overflow-y-auto rounded-xl border border-[#cfd8e3] bg-[#eef2f6] py-2 shadow-xl shadow-slate-300/30 scrollbar-thin animate-in fade-in slide-in-from-left-2 duration-200"
-                                    onMouseEnter={handleDeptMouseEnter}
-                                    onMouseLeave={handleDeptMouseLeave}
-                                >
-                                    <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-medium mb-1 px-4 py-1">
-                                        Departments
-                                    </p>
-                                    {DEPARTMENTS.map((dept) => (
-                                        <Link
-                                            key={dept.slug}
-                                            href={`/dashboard/departments/${dept.slug}`}
-                                            className={cn(
-                                                "flex items-center justify-between px-4 py-2 text-sm transition-all duration-150",
-                                                pathname === `/dashboard/departments/${dept.slug}`
-                                                    ? "bg-[#eef4fb] font-medium text-[#1f3b57]"
-                                                    : "text-[#34495e] hover:bg-[#dde4ec] hover:text-[#1f3b57]"
-                                            )}
-                                        >
-                                            <span className="truncate">{dept.label}</span>
-                                            <svg className="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                            </svg>
-                                        </Link>
-                                    ))}
-                                </div>,
-                                document.body
+                        <Link
+                            href="/dashboard/kpis"
+                            className={cn(
+                                "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
+                                isKpiActive
+                                    ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
+                                    : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
                             )}
-                        </div>
+                        >
+                            <span className={cn(isKpiActive ? "text-[#0f6ecd]" : "")}>
+                                <Target size={18} strokeWidth={1.5} />
+                            </span>
+                            KPIs
+                        </Link>
                     );
                 })()}
 
-                {/* System Violation Log — HR, Special Access, CEO, Developer only */}
-                {canSeeViolationLog && (() => {
+                {/* System Violation Log — HR, Special Access, CEO, Developer
+                    AND tab-permission allows it. */}
+                {canSeeViolationLog && tabAllowed("violations") && (() => {
                     const isActive = pathname.startsWith("/dashboard/violations");
                     return (
                         <Link
@@ -676,24 +672,26 @@ export default function Sidebar() {
                         <>
                             <p className="hidden text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mt-5 mb-2 px-1 text-center">HR & People</p>
 
-                            {/* MY TEAM trigger */}
-                            <div ref={hrTeamTrigger} {...teamHandlers}
-                                className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isTeamActive || hrTeamOpen ? A : E)}>
-                                <span className="relative inline-flex">
-                                    <Users size={15} strokeWidth={1.75} className={isTeamActive || hrTeamOpen ? "text-[#0f6ecd]" : ""} />
-                                    {inboxCount > 0 && (
-                                        <span className="absolute -top-1.5 -right-2.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-[#008CFF] px-[3px] text-[9px] font-bold leading-none text-white tabular-nums ring-2 ring-[#f7f9fc]">
-                                            {inboxCount > 99 ? "99+" : inboxCount}
-                                        </span>
-                                    )}
-                                </span>
-                                My Team
-                            </div>
+                            {/* MY TEAM trigger — gated by hr_my_team toggle */}
+                            {tabAllowed("hr_my_team") && (
+                                <div ref={hrTeamTrigger} {...teamHandlers}
+                                    className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isTeamActive || hrTeamOpen ? A : E)}>
+                                    <span className="relative inline-flex">
+                                        <Users size={15} strokeWidth={1.75} className={isTeamActive || hrTeamOpen ? "text-[#0f6ecd]" : ""} />
+                                        {inboxCount > 0 && (
+                                            <span className="absolute -top-1.5 -right-2.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-[#008CFF] px-[3px] text-[9px] font-bold leading-none text-white tabular-nums ring-2 ring-[#f7f9fc]">
+                                                {inboxCount > 99 ? "99+" : inboxCount}
+                                            </span>
+                                        )}
+                                    </span>
+                                    My Team
+                                </div>
+                            )}
 
                             {/* ORGANISATION */}
                             <div className="mx-3 mt-4 mb-1.5 border-t border-[#e4ebf2]" />
                             <p className="hidden text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1.5 px-1 text-center">Organisation</p>
-                            {[
+                            {tabAllowed("hr_people") && [
                                 { href: "/dashboard/hr/people", label: "People", Icon: Users },
                             ].map(({ href, label, Icon }) => {
                                 const active = pathname === href || pathname.startsWith(href + "/");
@@ -706,8 +704,9 @@ export default function Sidebar() {
                                 );
                             })}
 
-                            {/* HR DASHBOARD — direct link to the tabbed hub page */}
-                            {isHRAdmin && (
+                            {/* HR DASHBOARD — direct link to the tabbed hub
+                                page. Role gate AND tab toggle must both pass. */}
+                            {isHRAdmin && tabAllowed("hr_admin") && (
                                 <>
                                     <div className="mx-3 mt-4 mb-1.5 border-t border-[#e4ebf2]" />
                                     <Link href="/dashboard/hr/admin"

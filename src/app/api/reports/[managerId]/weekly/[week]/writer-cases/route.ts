@@ -138,12 +138,17 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
                 c.name?.toLowerCase().includes("hero")
             );
 
+            const subtaskName =
+                (fdInWeek  && firstDraftSub?.name) ||
+                (revInWeek && revisionSub?.name)   || "";
+
             return {
                 writerId:     c.writer?.id ?? null,
                 writerName:   c.writer?.name ?? "",
                 caseName:     c.name,
                 caseStatus:   c.status ?? "",
                 heroCase:     isHero ? "yes" : "no",
+                subtaskName,
                 tatFirstDraft,
                 tatRevision,
                 qualityScore:

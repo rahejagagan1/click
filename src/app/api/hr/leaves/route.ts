@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
 import { notifyUsers } from "@/lib/notifications";
 import { countWorkingDays } from "@/lib/hr/working-days";
 
@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     const myId = await resolveUserId(session);
     if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
     const { searchParams } = new URL(req.url);
-    const isAdmin = self.orgLevel === "ceo" || self.isDeveloper || self.orgLevel === "hr_manager";
+    const isAdmin = isHRAdmin(self);
     const view = searchParams.get("view") || "my";
 
     let where: any = {};
@@ -64,6 +64,16 @@ export async function POST(req: NextRequest) {
 
     const from = new Date(fromDate), to = new Date(toDate);
     if (from > to) return NextResponse.json({ error: "Invalid date range" }, { status: 400 });
+
+    // Block balance-only types (e.g. Carry Over Leave) — the UI hides
+    // them but a hand-crafted POST would otherwise sneak through.
+    const leaveType = await prisma.leaveType.findUnique({ where: { id: Number(leaveTypeId) } });
+    if (!leaveType || !leaveType.isActive) {
+      return NextResponse.json({ error: "Unknown leave type" }, { status: 400 });
+    }
+    if (leaveType.applicable === false) {
+      return NextResponse.json({ error: "This leave type is not applicable — balance is encashed at exit." }, { status: 400 });
+    }
 
     // Half-day requests carry a marker in the reason field — the apply form
     // adds `[Half Day]`, `[First Half]`, or `[Second Half]` so the API

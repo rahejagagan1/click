@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, serverError } from "@/lib/api-auth";
+import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
@@ -12,7 +12,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const id = parseInt(idRaw);
     const body = await request.json();
-    const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
+    const isAdmin = isHRAdmin(user);
 
     const expense = await prisma.expense.findUnique({ where: { id } });
     if (!expense) return NextResponse.json({ error: "Not found" }, { status: 404 });
