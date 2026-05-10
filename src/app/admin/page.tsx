@@ -2,7 +2,10 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useSession } from "next-auth/react";
-import { ChevronRight } from "lucide-react";
+import {
+    ChevronRight, Clock, CheckCircle2, XCircle, Play, Save,
+    PlayCircle, ListTree, Users as UsersIcon, Star, Layers,
+} from "lucide-react";
 import OrgTree from "@/components/admin/org-tree";
 import UserAvatar from "@/components/ui/user-avatar";
 import {
@@ -10,6 +13,7 @@ import {
     teamCapsuleSelectionKeyToName,
 } from "@/lib/team-capsule-catalog-ui";
 import { USER_ROLE_OPTIONS } from "@/lib/user-role-options";
+import { isPickableAsManager } from "@/lib/access";
 
 interface ListItem {
     id: string;
@@ -37,6 +41,29 @@ interface Space {
 }
 
 type AdminTab = "workspaces" | "users" | "ytviews" | "reports" | "crons" | "permissions";
+
+// Per-job icon + short label for the cron sub-tab pills. Falls back to
+// generic Clock + the full name when an unknown job id is added.
+function jobIconFor(id: string) {
+    switch (id) {
+        case "youtube_dashboard": return PlayCircle;
+        case "clickup":           return ListTree;
+        case "users":             return UsersIcon;
+        case "ratings":           return Star;
+        case "all_sync":          return Layers;
+        default:                  return Clock;
+    }
+}
+function jobShortLabel(id: string, fallback: string): string {
+    switch (id) {
+        case "youtube_dashboard": return "YouTube";
+        case "clickup":           return "ClickUp";
+        case "users":             return "Users";
+        case "ratings":           return "Ratings";
+        case "all_sync":          return "Full sync";
+        default:                  return fallback;
+    }
+}
 
 export default function AdminPage() {
     const { data: session } = useSession();
@@ -95,6 +122,9 @@ export default function AdminPage() {
     const [ytVideos, setYtVideos] = useState<any[]>([]);
     const [ytError, setYtError] = useState<string | null>(null);
     const [userView, setUserView] = useState<"tree" | "table">("tree");
+    // Free-text search across the Users table — matches name, email,
+    // and orgLevel/role so admins can quickly jump to a user.
+    const [userSearch, setUserSearch] = useState("");
     const [ytApiMode, setYtApiMode] = useState<"data_api" | "analytics_api">("data_api");
     const [ytChannelCount, setYtChannelCount] = useState(0);
 
@@ -108,23 +138,46 @@ export default function AdminPage() {
     const [expandedPermUserId, setExpandedPermUserId] = useState<number | null>(null);
     const [togglingManagerAccess, setTogglingManagerAccess] = useState<string | null>(null); // "userId-managerId"
 
-    // Crons tab (CEO / Developer)
-    const [cronLoading, setCronLoading] = useState(false);
-    const [cronSaving, setCronSaving] = useState(false);
-    const [cronRunLoading, setCronRunLoading] = useState(false);
-    const [cronBanner, setCronBanner] = useState<{ type: "ok" | "err"; text: string } | null>(null);
-    const [cronServerNote, setCronServerNote] = useState<string | null>(null);
-    const [cronInternalOff, setCronInternalOff] = useState(false);
-    const [youtubeCron, setYoutubeCron] = useState<{
+    // Crons tab (CEO / Developer) — one entry per registered job. Each
+    // job has a server-side state and a per-row draft (so HR can edit
+    // multiple rows and only save the one they're working on).
+    type CronJobRow = {
+        id: string;
         name: string;
         description: string;
         enabled: boolean;
         intervalHours: number;
         lastAutoRunAt: string | null;
         lastManualRunAt: string | null;
-    } | null>(null);
-    const [cronEnabledDraft, setCronEnabledDraft] = useState(false);
-    const [cronHoursDraft, setCronHoursDraft] = useState("5");
+        syncPastQuarters: boolean;
+    };
+    const [cronLoading, setCronLoading] = useState(false);
+    const [cronBanner, setCronBanner] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+    const [cronServerNote, setCronServerNote] = useState<string | null>(null);
+    const [cronInternalOff, setCronInternalOff] = useState(false);
+    const [cronJobs, setCronJobs] = useState<CronJobRow[]>([]);
+    const [cronDrafts, setCronDrafts] = useState<Record<string, { enabled: boolean; hours: string; syncPastQuarters: boolean }>>({});
+    const [cronSavingId, setCronSavingId]   = useState<string | null>(null);
+    const [cronRunningId, setCronRunningId] = useState<string | null>(null);
+    // Active sub-tab inside Crons. Defaults to the first job once jobs load.
+    const [cronActiveJob, setCronActiveJob] = useState<string>("");
+
+    // Poll server every 3s to keep running state accurate across tab switches
+    useEffect(() => {
+        if (!canManageUsers) return;
+        const poll = async () => {
+            try {
+                const res = await fetch("/api/admin/cron-jobs/running");
+                if (res.ok) {
+                    const data = await res.json();
+                    setCronRunningId(data.runningJobId ?? null);
+                }
+            } catch { /* ignore network errors */ }
+        };
+        poll();
+        const interval = setInterval(poll, 3000);
+        return () => clearInterval(interval);
+    }, [canManageUsers]);
 
     useEffect(() => {
         if (!canManageUsers && activeTab === "crons") {
@@ -147,21 +200,26 @@ export default function AdminPage() {
                 }
                 setCronInternalOff(!!data.internalSchedulerDisabled);
                 setCronServerNote(typeof data.serverNote === "string" ? data.serverNote : null);
-                const job = (data.jobs as any[] | undefined)?.find((j) => j?.id === "youtube_dashboard");
-                if (job) {
-                    setYoutubeCron({
-                        name: job.name ?? "YouTube dashboard sync",
-                        description: job.description ?? "",
-                        enabled: !!job.enabled,
-                        intervalHours: Number(job.intervalHours) || 5,
-                        lastAutoRunAt: job.lastAutoRunAt ?? null,
-                        lastManualRunAt: job.lastManualRunAt ?? null,
-                    });
-                    setCronEnabledDraft(!!job.enabled);
-                    setCronHoursDraft(String(Math.min(168, Math.max(1, Math.floor(Number(job.intervalHours)) || 5))));
-                } else {
-                    setYoutubeCron(null);
-                }
+                const rows: CronJobRow[] = Array.isArray(data.jobs)
+                    ? data.jobs.map((j: any) => ({
+                          id: String(j.id),
+                          name: String(j.name ?? j.id),
+                          description: String(j.description ?? ""),
+                          enabled: !!j.enabled,
+                          intervalHours: Math.min(168, Math.max(1, Math.floor(Number(j.intervalHours)) || 6)),
+                          lastAutoRunAt:   j.lastAutoRunAt   ?? null,
+                          lastManualRunAt: j.lastManualRunAt ?? null,
+                          syncPastQuarters: !!j.syncPastQuarters,
+                      }))
+                    : [];
+                setCronJobs(rows);
+                const drafts: Record<string, { enabled: boolean; hours: string; syncPastQuarters: boolean }> = {};
+                for (const r of rows) drafts[r.id] = { enabled: r.enabled, hours: String(r.intervalHours), syncPastQuarters: r.syncPastQuarters };
+                setCronDrafts(drafts);
+                // Pin the first job as the active sub-tab on first load (or
+                // when the previously-active job no longer exists in the
+                // returned list — e.g. after a registry change).
+                setCronActiveJob((cur) => (rows.find((r) => r.id === cur) ? cur : rows[0]?.id ?? ""));
             })
             .catch(() => {
                 if (!cancelled) setCronBanner({ type: "err", text: "Failed to load cron settings" });
@@ -227,7 +285,7 @@ export default function AdminPage() {
     useEffect(() => {
         if (activeTab === "users" && users.length === 0) {
             setUsersLoading(true);
-            fetch("/api/users?all=true")
+            fetch("/api/users?all=true&includeInactive=true")
                 .then(r => r.json())
                 .then(data => { setUsers(Array.isArray(data) ? data : data.users || []); setUsersLoading(false); })
                 .catch(() => setUsersLoading(false));
@@ -259,7 +317,7 @@ export default function AdminPage() {
                 return;
             }
             setUnmatchedClickup(prev => prev.filter(u => u.id !== id));
-            const freshRes = await fetch("/api/users?all=true");
+            const freshRes = await fetch("/api/users?all=true&includeInactive=true");
             const fresh = await freshRes.json();
             if (Array.isArray(fresh)) setUsers(fresh);
         } finally {
@@ -403,7 +461,7 @@ export default function AdminPage() {
             setTimeout(() => setSyncDone(null), 4000);
             // Refresh users list after user sync
             if (type === "users") {
-                const data = await fetch("/api/users?all=true").then(r => r.json());
+                const data = await fetch("/api/users?all=true&includeInactive=true").then(r => r.json());
                 setUsers(Array.isArray(data) ? data : data.users || []);
             }
         } catch { setError("Sync failed"); }
@@ -444,7 +502,7 @@ export default function AdminPage() {
                     managerId: "",
                 });
                 // Refresh users
-                const fresh = await fetch("/api/users?all=true").then(r => r.json());
+                const fresh = await fetch("/api/users?all=true&includeInactive=true").then(r => r.json());
                 setUsers(Array.isArray(fresh) ? fresh : fresh.users || []);
             }
         } catch { alert("Failed to add user"); }
@@ -460,10 +518,15 @@ export default function AdminPage() {
                 body: JSON.stringify({ id: userId }),
             });
             if (res.ok) {
-                const fresh = await fetch("/api/users?all=true").then(r => r.json());
+                const fresh = await fetch("/api/users?all=true&includeInactive=true").then(r => r.json());
                 setUsers(Array.isArray(fresh) ? fresh : fresh.users || []);
+            } else {
+                const err = await res.json().catch(() => ({ error: "Unknown error" }));
+                alert("Failed to delete user: " + (err.error || res.statusText));
             }
-        } catch { }
+        } catch (e: any) {
+            alert("Failed to delete user: " + e.message);
+        }
         setDeletingUserId(null);
         setConfirmDeleteId(null);
     };
@@ -530,18 +593,21 @@ export default function AdminPage() {
                                 { key: "clickup", label: "Sync ClickUp", icon: "📥" },
                                 { key: "youtube", label: "Sync YouTube", icon: "▶️" },
                                 { key: "ratings", label: "Sync Ratings", icon: "⭐" },
-                            ].map(({ key, label, icon }) => (
+                            ].map(({ key, label, icon }) => {
+                                const isRunning = syncing === key || cronRunningId === key;
+                                return (
                                 <div key={key} className="flex flex-col items-center gap-1.5">
-                                    <button onClick={() => runSync(key)} disabled={!!syncing}
-                                        className={`w-full flex items-center gap-2 justify-center px-4 py-2.5 rounded-xl border text-sm text-white transition-all disabled:opacity-50 ${syncDone === key ? "bg-green-600/20 border-green-500/30 text-green-400" : "bg-white/5 hover:bg-violet-600/20 border-white/10 hover:border-violet-500/30"}`}>
-                                        <span>{icon}</span>
-                                        {syncing === key ? "Syncing..." : syncDone === key ? "✓ Done" : label}
+                                    <button onClick={() => runSync(key)} disabled={!!syncing || !!cronRunningId}
+                                        className={`w-full flex items-center gap-2 justify-center px-4 py-2.5 rounded-xl border text-sm text-white transition-all disabled:opacity-50 ${syncDone === key ? "bg-green-600/20 border-green-500/30 text-green-400" : isRunning ? "bg-violet-600/20 border-violet-500/30" : "bg-white/5 hover:bg-violet-600/20 border-white/10 hover:border-violet-500/30"}`}>
+                                        <span>{isRunning ? "⏳" : icon}</span>
+                                        {isRunning ? "Syncing..." : syncDone === key ? "✓ Done" : label}
                                     </button>
                                     {lastSyncs[key] && (
                                         <span className="text-[10px] text-slate-600">{formatSyncTime(lastSyncs[key])}</span>
                                     )}
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
 
@@ -655,14 +721,56 @@ export default function AdminPage() {
                 </div>
             )}
 
-            {activeTab === "users" && (
+            {activeTab === "users" && (() => {
+                // Apply the free-text search filter ONLY for the table
+                // view — the org-tree view manages its own collapse state
+                // and would break if we hid arbitrary nodes mid-tree.
+                const q = userSearch.trim().toLowerCase();
+                const filteredUsers = q
+                    ? users.filter((u: any) => {
+                        const fields = [
+                            u.name, u.email, u.orgLevel, u.role,
+                            u.employeeProfile?.designation,
+                            u.employeeProfile?.department,
+                        ].filter(Boolean) as string[];
+                        return fields.some((f) => String(f).toLowerCase().includes(q));
+                    })
+                    : users;
+                return (
                 <div className="rounded-2xl bg-[#12122a] border border-white/5 overflow-hidden">
-                    <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+                    <div className="flex flex-col gap-3 px-5 py-4 border-b border-white/5 lg:flex-row lg:items-center lg:justify-between">
                         <div>
-                            <h2 className="text-sm font-semibold text-white">Users ({users.length})</h2>
+                            <h2 className="text-sm font-semibold text-white">
+                                Users ({userView === "table" ? `${filteredUsers.length}${q ? ` of ${users.length}` : ""}` : users.length})
+                            </h2>
                             <p className="text-xs text-slate-500 mt-0.5">Manage roles, org levels, and team hierarchy</p>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                            {/* Search — shown for the table view only. */}
+                            {userView === "table" && (
+                                <div className="relative">
+                                    <svg className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 19a8 8 0 110-16 8 8 0 010 16z" />
+                                    </svg>
+                                    <input
+                                        type="search"
+                                        value={userSearch}
+                                        onChange={(e) => setUserSearch(e.target.value)}
+                                        placeholder="Search name, email, role…"
+                                        className="h-9 w-56 rounded-lg bg-white/[0.04] border border-white/10 pl-8 pr-7 text-[12.5px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500/60 focus:ring-2 focus:ring-violet-500/15"
+                                    />
+                                    {userSearch && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setUserSearch("")}
+                                            aria-label="Clear search"
+                                            className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded text-slate-500 hover:bg-white/10 hover:text-slate-200"
+                                        >
+                                            ×
+                                        </button>
+                                    )}
+                                </div>
+                            )}
                             {canManageUsers && userView === "table" && (
                                 <button onClick={() => setShowAddUser(true)}
                                     className="flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all bg-emerald-600 hover:bg-emerald-500 border-emerald-500/30 text-white">
@@ -681,10 +789,10 @@ export default function AdminPage() {
                                 </button>
                             </div>
                             <div className="flex flex-col items-end gap-1">
-                                <button onClick={() => runSync("users")} disabled={!!syncing}
-                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all disabled:opacity-50 ${syncDone === "users" ? "bg-green-600/20 border-green-500/30 text-green-400" : "bg-violet-600 hover:bg-violet-500 border-violet-500/30 text-white"}`}>
-                                    <span>👥</span>
-                                    {syncing === "users" ? "Syncing..." : syncDone === "users" ? "✓ Done" : "Sync ClickUp Users"}
+                                <button onClick={() => runSync("users")} disabled={!!syncing || !!cronRunningId}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all disabled:opacity-50 ${syncDone === "users" ? "bg-green-600/20 border-green-500/30 text-green-400" : (syncing === "users" || cronRunningId === "users") ? "bg-violet-700 border-violet-500/30 text-white" : "bg-violet-600 hover:bg-violet-500 border-violet-500/30 text-white"}`}>
+                                    <span>{(syncing === "users" || cronRunningId === "users") ? "⏳" : "👥"}</span>
+                                    {(syncing === "users" || cronRunningId === "users") ? "Syncing..." : syncDone === "users" ? "✓ Done" : "Sync ClickUp Users"}
                                 </button>
                                 {lastSyncs["users"] && (
                                     <span className="text-[10px] text-slate-600">{formatSyncTime(lastSyncs["users"])}</span>
@@ -707,7 +815,7 @@ export default function AdminPage() {
                                     const err = await patchRes.json().catch(() => ({}));
                                     throw new Error((err as { error?: string }).error || `Save failed (${patchRes.status})`);
                                 }
-                                const res = await fetch("/api/users?all=true");
+                                const res = await fetch("/api/users?all=true&includeInactive=true");
                                 const freshUsers = await res.json();
                                 if (Array.isArray(freshUsers)) setUsers(freshUsers);
                             }}
@@ -727,12 +835,17 @@ export default function AdminPage() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {users.map((user: any) => {
-                                        const managers = users.filter((u: any) =>
-                                            ["ceo", "special_access", "hod", "manager", "hr_manager", "lead", "sub_lead"].includes(u.orgLevel || "member") ||
-                                            u.role === "production_manager" ||
-                                            u.role === "researcher_manager"
-                                        );
+                                    {filteredUsers.length === 0 && q && (
+                                        <tr>
+                                            <td colSpan={7} className="px-5 py-10 text-center text-[12.5px] text-slate-500">
+                                                No users match "{userSearch}".
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {filteredUsers.map((user: any) => {
+                                        // Single source of truth — same list as
+                                        // /api/managers (Manager Reports sidebar).
+                                        const managers = users.filter((u: any) => isPickableAsManager(u));
                                         return (
                                             <tr key={user.id} className="border-b border-white/[0.02] hover:bg-white/[0.02]">
                                                 <td className="px-5 py-3">
@@ -767,7 +880,6 @@ export default function AdminPage() {
                                                         <option value="hr_manager">HR</option>
                                                         <option value="lead">Lead</option>
                                                         <option value="sub_lead">Sub Lead</option>
-                                                        <option value="production_team">Production Team</option>
                                                         <option value="member">Member (No Access)</option>
                                                     </select>
                                                 </td>
@@ -929,7 +1041,8 @@ export default function AdminPage() {
                         </div>
                     )}
                 </div>
-            )}
+                );
+            })()}
 
             {/* Add User Modal */}
             {showAddUser && (
@@ -963,7 +1076,6 @@ export default function AdminPage() {
                                 <select value={newUser.orgLevel} onChange={e => setNewUser(p => ({ ...p, orgLevel: e.target.value }))}
                                     className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-slate-300 focus:outline-none focus:ring-1 focus:ring-violet-500/40">
                                     <option value="member">Member</option>
-                                    <option value="production_team">Production Team</option>
                                     <option value="sub_lead">Sub Lead</option>
                                     <option value="lead">Lead</option>
                                     <option value="hr_manager">HR</option>
@@ -1010,7 +1122,7 @@ export default function AdminPage() {
                                 <select value={newUser.managerId} onChange={e => setNewUser(p => ({ ...p, managerId: e.target.value }))}
                                     className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-slate-300 focus:outline-none focus:ring-1 focus:ring-violet-500/40">
                                     <option value="">No Manager</option>
-                                    {users.filter((u: any) => ["ceo", "special_access", "hod", "manager", "hr_manager", "lead", "sub_lead"].includes(u.orgLevel || "member")).map((m: any) => (
+                                    {users.filter((u: any) => isPickableAsManager(u)).map((m: any) => (
                                         <option key={m.id} value={m.id}>{m.name} ({m.orgLevel})</option>
                                     ))}
                                 </select>
@@ -1277,163 +1389,282 @@ export default function AdminPage() {
             )}
 
             {activeTab === "crons" && canManageUsers && (
-                <div className="max-w-7xl space-y-4">
+                <div className="max-w-5xl space-y-4">
+                    {/* Status / config banners */}
                     {cronInternalOff && (
-                        <div className="rounded-2xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                            Internal scheduler is disabled on this server (<code className="text-xs opacity-90">DISABLE_INTERNAL_CRON_SCHEDULER=true</code>). Stored
-                            settings still apply if you use an external cron calling{" "}
-                            <code className="text-xs bg-black/20 px-1 rounded">/api/cron/youtube-dashboard-sync</code>.
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-800 flex items-start gap-2.5">
+                            <XCircle size={15} className="shrink-0 mt-0.5 text-amber-500" />
+                            <div>
+                                Internal scheduler is <strong>disabled</strong> on this server (<code className="text-[11px] bg-amber-100 px-1 rounded">DISABLE_INTERNAL_CRON_SCHEDULER=true</code>). Manual runs still work; auto runs require an external cron caller.
+                            </div>
                         </div>
                     )}
                     {cronServerNote && (
-                        <p className="text-xs text-slate-500 leading-relaxed max-w-3xl">{cronServerNote}</p>
+                        <p className="text-[11.5px] text-slate-500 leading-relaxed max-w-3xl">{cronServerNote}</p>
                     )}
                     {cronBanner && (
                         <div
-                            className={`rounded-xl px-4 py-2 text-sm ${cronBanner.type === "ok" ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/25" : "bg-red-500/15 text-red-300 border border-red-500/25"}`}
+                            className={`rounded-xl px-4 py-2.5 text-[12.5px] font-medium flex items-start gap-2 ${
+                                cronBanner.type === "ok"
+                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                    : "bg-rose-50 text-rose-700 border border-rose-200"
+                            }`}
                         >
-                            {cronBanner.text}
+                            {cronBanner.type === "ok"
+                                ? <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
+                                : <XCircle    size={14} className="shrink-0 mt-0.5" />}
+                            <span>{cronBanner.text}</span>
                         </div>
                     )}
 
-                    <div className="rounded-2xl bg-[#12122a] border border-white/5 p-5">
-                        {cronLoading ? (
-                            <div className="py-10 text-center text-slate-500 text-sm animate-pulse">Loading cron jobs…</div>
-                        ) : !youtubeCron ? (
-                            <p className="text-slate-500 text-sm">No cron jobs configured.</p>
-                        ) : (
-                            <div className="space-y-5">
-                                <div>
-                                    <h2 className="text-sm font-semibold text-white">{youtubeCron.name}</h2>
-                                    <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed">{youtubeCron.description}</p>
-                                </div>
-
-                                <label className="flex items-center gap-3 cursor-pointer select-none">
-                                    <input
-                                        type="checkbox"
-                                        checked={cronEnabledDraft}
-                                        onChange={(e) => setCronEnabledDraft(e.target.checked)}
-                                        className="accent-violet-500 w-4 h-4 rounded"
-                                    />
-                                    <span className="text-sm text-slate-200">Auto-fetch on interval (when the Node server scheduler is running)</span>
-                                </label>
-
-                                <div className="flex flex-wrap items-end gap-4">
-                                    <div>
-                                        <label className="block text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Every (hours)</label>
-                                        <input
-                                            type="number"
-                                            min={1}
-                                            max={168}
-                                            value={cronHoursDraft}
-                                            onChange={(e) => setCronHoursDraft(e.target.value)}
-                                            className="w-28 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500/40"
-                                        />
-                                        <p className="text-[10px] text-slate-600 mt-1">1–168 hours between automatic runs</p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        disabled={cronSaving}
-                                        onClick={async () => {
-                                            const h = Math.min(168, Math.max(1, Math.floor(Number(cronHoursDraft)) || 5));
-                                            setCronHoursDraft(String(h));
-                                            setCronSaving(true);
-                                            setCronBanner(null);
-                                            try {
-                                                const res = await fetch("/api/admin/cron-jobs", {
-                                                    method: "PATCH",
-                                                    headers: { "Content-Type": "application/json" },
-                                                    body: JSON.stringify({
-                                                        youtube_dashboard: { enabled: cronEnabledDraft, intervalHours: h },
-                                                    }),
-                                                });
-                                                const data = await res.json();
-                                                if (!res.ok) {
-                                                    setCronBanner({ type: "err", text: data.error || "Save failed" });
-                                                    return;
-                                                }
-                                                const y = data.youtube_dashboard;
-                                                if (y) {
-                                                    setYoutubeCron((prev) =>
-                                                        prev
-                                                            ? {
-                                                                  ...prev,
-                                                                  enabled: !!y.enabled,
-                                                                  intervalHours: Number(y.intervalHours) || h,
-                                                                  lastAutoRunAt: y.lastAutoRunAt ?? prev.lastAutoRunAt,
-                                                                  lastManualRunAt: y.lastManualRunAt ?? prev.lastManualRunAt,
-                                                              }
-                                                            : prev,
-                                                    );
-                                                    setCronEnabledDraft(!!y.enabled);
-                                                    setCronHoursDraft(String(Math.min(168, Math.max(1, Math.floor(Number(y.intervalHours)) || h))));
-                                                }
-                                                setCronBanner({ type: "ok", text: "Settings saved." });
-                                                setTimeout(() => setCronBanner(null), 4000);
-                                            } catch {
-                                                setCronBanner({ type: "err", text: "Save failed" });
-                                            } finally {
-                                                setCronSaving(false);
-                                            }
-                                        }}
-                                        className="px-5 py-2 rounded-xl text-sm font-medium bg-violet-600 hover:bg-violet-500 text-white transition-all disabled:opacity-50"
-                                    >
-                                        {cronSaving ? "Saving…" : "Save settings"}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        disabled={cronRunLoading}
-                                        onClick={async () => {
-                                            setCronRunLoading(true);
-                                            setCronBanner(null);
-                                            try {
-                                                const res = await fetch("/api/admin/cron-jobs/youtube-dashboard/run", { method: "POST" });
-                                                const data = await res.json();
-                                                if (!res.ok) {
-                                                    setCronBanner({ type: "err", text: data.error || "Run failed" });
-                                                    return;
-                                                }
-                                                setCronBanner({ type: "ok", text: "YouTube dashboard sync finished." });
-                                                setTimeout(() => setCronBanner(null), 5000);
-                                                const r2 = await fetch("/api/admin/cron-jobs");
-                                                const d2 = await r2.json();
-                                                const job = (d2.jobs as any[] | undefined)?.find((j) => j?.id === "youtube_dashboard");
-                                                if (job) {
-                                                    setYoutubeCron((prev) =>
-                                                        prev
-                                                            ? {
-                                                                  ...prev,
-                                                                  lastManualRunAt: job.lastManualRunAt ?? prev.lastManualRunAt,
-                                                                  lastAutoRunAt: job.lastAutoRunAt ?? prev.lastAutoRunAt,
-                                                              }
-                                                            : prev,
-                                                    );
-                                                }
-                                            } catch {
-                                                setCronBanner({ type: "err", text: "Run failed" });
-                                            } finally {
-                                                setCronRunLoading(false);
-                                            }
-                                        }}
-                                        className="px-5 py-2 rounded-xl text-sm font-medium bg-white/10 hover:bg-white/15 border border-white/10 text-white transition-all disabled:opacity-50"
-                                    >
-                                        {cronRunLoading ? "Running…" : "Run now (manual)"}
-                                    </button>
-                                </div>
-
-                                <div className="flex flex-wrap gap-6 text-xs text-slate-500 pt-2 border-t border-white/[0.06]">
-                                    <span>
-                                        Last auto run:{" "}
-                                        <strong className="text-slate-300">{formatSyncTime(youtubeCron.lastAutoRunAt) ?? "—"}</strong>
-                                    </span>
-                                    <span>
-                                        Last manual run:{" "}
-                                        <strong className="text-slate-300">{formatSyncTime(youtubeCron.lastManualRunAt) ?? "—"}</strong>
-                                    </span>
-                                </div>
+                    {cronLoading ? (
+                        <div className="rounded-2xl bg-white border border-slate-200 p-12 text-center text-slate-400 text-[13px]">
+                            <div className="inline-flex h-7 w-7 items-center justify-center">
+                                <span className="h-5 w-5 rounded-full border-2 border-slate-300 border-t-slate-600 animate-spin" />
                             </div>
-                        )}
-                    </div>
+                            <p className="mt-3">Loading cron jobs…</p>
+                        </div>
+                    ) : cronJobs.length === 0 ? (
+                        <div className="rounded-2xl bg-white border border-dashed border-slate-200 p-12 text-center text-slate-400 text-[13px]">
+                            No cron jobs configured.
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {/* Pill-style sub-tab nav — each job is a chip
+                                with an icon. Active state has solid violet
+                                fill so it reads as the selected option.
+                                Horizontal scroll when many jobs. */}
+                            <div className="flex flex-wrap gap-2">
+                                {cronJobs.map((j) => {
+                                    const active = cronActiveJob === j.id;
+                                    const Icon = jobIconFor(j.id);
+                                    const label = jobShortLabel(j.id, j.name);
+                                    return (
+                                        <button
+                                            key={j.id}
+                                            type="button"
+                                            onClick={() => setCronActiveJob(j.id)}
+                                            className={`inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full text-[12.5px] font-semibold transition-all border ${
+                                                active
+                                                    ? "bg-[#3b82f6] text-white border-[#3b82f6] shadow-[0_1px_2px_rgba(59,130,246,0.25)]"
+                                                    : "bg-white text-slate-600 border-slate-200 hover:border-[#3b82f6]/40 hover:text-[#3b82f6]"
+                                            }`}
+                                        >
+                                            <Icon size={13} />
+                                            {label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Active job panel */}
+                            {(() => {
+                                const job = cronJobs.find((j) => j.id === cronActiveJob);
+                                if (!job) return null;
+                                const draft = cronDrafts[job.id] ?? { enabled: job.enabled, hours: String(job.intervalHours), syncPastQuarters: job.syncPastQuarters };
+                                const setDraft = (patch: Partial<{ enabled: boolean; hours: string; syncPastQuarters: boolean }>) =>
+                                    setCronDrafts((d) => ({ ...d, [job.id]: { ...draft, ...patch } }));
+                                const saving  = cronSavingId  === job.id;
+                                const running = cronRunningId === job.id;
+                                const Icon = jobIconFor(job.id);
+                                const dirty = draft.enabled !== job.enabled || String(draft.hours) !== String(job.intervalHours) || draft.syncPastQuarters !== job.syncPastQuarters;
+
+                                const onSave = async () => {
+                                    const h = Math.min(168, Math.max(1, Math.floor(Number(draft.hours)) || job.intervalHours));
+                                    setDraft({ hours: String(h) });
+                                    setCronSavingId(job.id);
+                                    setCronBanner(null);
+                                    try {
+                                        const res = await fetch("/api/admin/cron-jobs", {
+                                            method: "PATCH",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({ [job.id]: { enabled: draft.enabled, intervalHours: h, syncPastQuarters: draft.syncPastQuarters } }),
+                                        });
+                                        const data = await res.json();
+                                        if (!res.ok) {
+                                            setCronBanner({ type: "err", text: data.error || "Save failed" });
+                                            return;
+                                        }
+                                        const next = data.jobs?.[job.id];
+                                        if (next) {
+                                            setCronJobs((all) =>
+                                                all.map((r) => (r.id === job.id ? {
+                                                    ...r,
+                                                    enabled: !!next.enabled,
+                                                    intervalHours: Number(next.intervalHours) || h,
+                                                    lastAutoRunAt:    next.lastAutoRunAt    ?? r.lastAutoRunAt,
+                                                    lastManualRunAt:  next.lastManualRunAt  ?? r.lastManualRunAt,
+                                                    syncPastQuarters: typeof next.syncPastQuarters === "boolean" ? next.syncPastQuarters : r.syncPastQuarters,
+                                                } : r))
+                                            );
+                                            setDraft({ enabled: !!next.enabled, hours: String(next.intervalHours), syncPastQuarters: !!next.syncPastQuarters });
+                                        }
+                                        setCronBanner({ type: "ok", text: `${job.name} settings saved.` });
+                                        setTimeout(() => setCronBanner(null), 4000);
+                                    } catch {
+                                        setCronBanner({ type: "err", text: "Save failed" });
+                                    } finally {
+                                        setCronSavingId(null);
+                                    }
+                                };
+
+                                const onRun = async () => {
+                                    setCronRunningId(job.id);
+                                    setCronBanner(null);
+                                    try {
+                                        const res = await fetch(`/api/admin/cron-jobs/${encodeURIComponent(job.id)}/run`, { method: "POST" });
+                                        const data = await res.json();
+                                        if (!res.ok) {
+                                            setCronBanner({ type: "err", text: data.error || "Run failed" });
+                                            return;
+                                        }
+                                        setCronBanner({ type: "ok", text: `${job.name} finished.` });
+                                        setTimeout(() => setCronBanner(null), 5000);
+                                        const r2 = await fetch("/api/admin/cron-jobs");
+                                        const d2 = await r2.json();
+                                        const fresh = (d2.jobs as any[] | undefined)?.find((j) => j?.id === job.id);
+                                        if (fresh) {
+                                            setCronJobs((all) =>
+                                                all.map((r) => (r.id === job.id ? {
+                                                    ...r,
+                                                    lastAutoRunAt:   fresh.lastAutoRunAt   ?? r.lastAutoRunAt,
+                                                    lastManualRunAt: fresh.lastManualRunAt ?? r.lastManualRunAt,
+                                                } : r))
+                                            );
+                                        }
+                                    } catch {
+                                        setCronBanner({ type: "err", text: "Run failed" });
+                                    } finally {
+                                        setCronRunningId(null);
+                                    }
+                                };
+
+                                return (
+                                    <div className="rounded-2xl bg-white border border-slate-200 shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-hidden">
+                                        {/* Header: icon + title + status badge */}
+                                        <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-slate-100">
+                                            <div className="flex items-start gap-3 min-w-0">
+                                                <div className="h-10 w-10 rounded-xl bg-[#3b82f6]/10 flex items-center justify-center text-[#3b82f6] shrink-0">
+                                                    <Icon size={18} />
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <h2 className="text-[15px] font-semibold text-slate-800">{job.name}</h2>
+                                                    <p className="mt-1 text-[12.5px] text-slate-500 leading-relaxed">{job.description}</p>
+                                                </div>
+                                            </div>
+                                            <span className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-wider ring-1 ring-inset ${
+                                                job.enabled
+                                                    ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                                                    : "bg-slate-100 text-slate-500 ring-slate-200"
+                                            }`}>
+                                                <span className={`h-1.5 w-1.5 rounded-full ${job.enabled ? "bg-emerald-500" : "bg-slate-400"}`} />
+                                                {job.enabled ? "Active" : "Paused"}
+                                            </span>
+                                        </div>
+
+                                        {/* Last-run cards */}
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 px-6 py-4 bg-slate-50/60">
+                                            <div className="rounded-xl bg-white border border-slate-200 p-3.5">
+                                                <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Last automatic</p>
+                                                <p className="mt-1 text-[13.5px] font-semibold text-slate-800 tabular-nums">
+                                                    {formatSyncTime(job.lastAutoRunAt) ?? "Never"}
+                                                </p>
+                                            </div>
+                                            <div className="rounded-xl bg-white border border-slate-200 p-3.5">
+                                                <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Last manual</p>
+                                                <p className="mt-1 text-[13.5px] font-semibold text-slate-800 tabular-nums">
+                                                    {formatSyncTime(job.lastManualRunAt) ?? "Never"}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {/* Settings */}
+                                        <div className="px-6 py-5 space-y-5">
+                                            <div className="flex items-start justify-between gap-4">
+                                                <div className="min-w-0">
+                                                    <p className="text-[13px] font-semibold text-slate-800">Auto-fetch on interval</p>
+                                                    <p className="mt-0.5 text-[11.5px] text-slate-500">Runs automatically while the Node scheduler is on.</p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    role="switch"
+                                                    aria-checked={draft.enabled}
+                                                    onClick={() => setDraft({ enabled: !draft.enabled })}
+                                                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors ${
+                                                        draft.enabled ? "bg-[#3b82f6]" : "bg-slate-300"
+                                                    }`}
+                                                >
+                                                    <span className={`absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow transition-transform ${
+                                                        draft.enabled ? "translate-x-[23px]" : "translate-x-[3px]"
+                                                    }`} />
+                                                </button>
+                                            </div>
+
+                                            {job.id === "youtube_dashboard" && (
+                                                <div className="flex items-start justify-between gap-4">
+                                                    <div className="min-w-0">
+                                                        <p className="text-[13px] font-semibold text-slate-800">Sync past quarters</p>
+                                                        <p className="mt-0.5 text-[11.5px] text-slate-500">When on, re-syncs the last 5 years of quarters each run. Turn off once historical data is fetched to save API quota.</p>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        role="switch"
+                                                        aria-checked={draft.syncPastQuarters}
+                                                        onClick={() => setDraft({ syncPastQuarters: !draft.syncPastQuarters })}
+                                                        className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors ${
+                                                            draft.syncPastQuarters ? "bg-[#3b82f6]" : "bg-slate-300"
+                                                        }`}
+                                                    >
+                                                        <span className={`absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow transition-transform ${
+                                                            draft.syncPastQuarters ? "translate-x-[23px]" : "translate-x-[3px]"
+                                                        }`} />
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            <div>
+                                                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Run every</label>
+                                                <div className="flex items-center gap-2">
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        max={168}
+                                                        value={draft.hours}
+                                                        onChange={(e) => setDraft({ hours: e.target.value })}
+                                                        className="w-24 h-9 px-3 border border-slate-200 rounded-lg text-[13px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 tabular-nums"
+                                                    />
+                                                    <span className="text-[12.5px] text-slate-500">hours · between 1 and 168</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Footer actions */}
+                                        <div className="flex flex-wrap items-center gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/40">
+                                            <button
+                                                type="button"
+                                                disabled={saving || !dirty}
+                                                onClick={onSave}
+                                                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[12.5px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-[0_1px_2px_rgba(59,130,246,0.25)]"
+                                            >
+                                                <Save size={13} /> {saving ? "Saving…" : dirty ? "Save settings" : "Saved"}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={running}
+                                                onClick={onRun}
+                                                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 hover:border-[#3b82f6]/40 text-slate-700 hover:text-[#3b82f6] text-[12.5px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                            >
+                                                <Play size={12} /> {running ? "Running…" : "Run now"}
+                                            </button>
+                                            <span className="ml-auto inline-flex items-center gap-1 text-[11.5px] text-slate-400">
+                                                <Clock size={11} /> Job id: <code className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{job.id}</code>
+                                            </span>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    )}
                 </div>
             )}
 

@@ -5,6 +5,7 @@ import {
     normalizeTeamCapsuleInput,
     findCapsulesMatchingTeamCapsule,
 } from "@/lib/capsule-matching";
+import { getMonthlyReportWindow } from "@/lib/reports/monthly-window";
 
 export const dynamic = "force-dynamic";
 
@@ -34,9 +35,9 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
             return NextResponse.json({ error: "Invalid parameters" }, { status: 400 });
         }
 
-        // Videos published in the report month itself.
-        const analysisStart = new Date(Date.UTC(year, month, 1));
-        const analysisEnd   = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
+        // Use the same reporting window as Section 2 (day 4 of month → day 3 of next month)
+        // so the video count here matches the Videos Published auto-fill exactly.
+        const { windowStart: analysisStart, windowEnd: analysisEnd } = getMonthlyReportWindow(year, month);
 
         const manager = await prisma.user.findUnique({
             where: { id: managerId },

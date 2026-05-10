@@ -53,20 +53,42 @@ export async function requireAuth() {
 }
 
 /**
- * Checks auth and requires HR admin access (CEO, developer, or HR manager).
- * Use this for all Keka HR module admin routes.
+ * Predicate version of HR-admin gate. Mirrors the client-side
+ * isHRAdmin helper in src/lib/access.ts and the requireHRAdmin
+ * wrapper below. Use this when an API route already has a session
+ * in hand and just needs a true/false check (e.g. inside an
+ * authorisation branch). Keeping a single source of truth here
+ * stops the access-gate drift that crept in across ~25 routes
+ * before this rollup — special_access / role=admin used to be
+ * missed in inline checks.
+ *
+ * Allowed:
+ *   • orgLevel === "ceo"
+ *   • isDeveloper === true
+ *   • orgLevel === "special_access"
+ *   • role     === "admin"
+ *   • orgLevel === "hr_manager"       (HR Manager + "normal HR")
+ */
+export function isHRAdmin(user: any): boolean {
+    return (
+        user?.orgLevel === "ceo" ||
+        user?.isDeveloper === true ||
+        user?.orgLevel === "special_access" ||
+        user?.role === "admin" ||
+        user?.orgLevel === "hr_manager"
+    );
+}
+
+/**
+ * Checks auth and requires HR admin access. Mirrors the client-side
+ * `isHRAdmin` helper in src/lib/access.ts so the server and the UI agree
+ * on who can hit HR admin endpoints (onboarding, employee CRUD, etc.).
  */
 export async function requireHRAdmin() {
     const { session, errorResponse } = await requireAuth();
     if (errorResponse) return { session: null, errorResponse };
 
-    const user = session!.user as any;
-    const isHRAdmin =
-        user.orgLevel === "ceo" ||
-        user.orgLevel === "hr_manager" ||
-        user.isDeveloper === true;
-
-    if (!isHRAdmin) {
+    if (!isHRAdmin(session!.user)) {
         return {
             session: null,
             errorResponse: NextResponse.json(

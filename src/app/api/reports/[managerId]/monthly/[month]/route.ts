@@ -353,8 +353,15 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
             // Section 7: Remark
             remark:              fields.remark              ?? null,
             // Nishant Bhatia researcher monthly format
-            nishantResearcherRows: fields.nishantResearcherRows ?? null,
-            nishantOverview:       fields.nishantOverview       ?? null,
+            // Guard: if the frontend sends `undefined` (race condition where the
+            // production template saved before the manager-format SWR call resolved),
+            // fall back to the existing DB value so saved data is never wiped.
+            nishantResearcherRows: fields.nishantResearcherRows !== undefined
+                ? fields.nishantResearcherRows
+                : ((existing as any)?.nishantResearcherRows ?? null),
+            nishantOverview: fields.nishantOverview !== undefined
+                ? fields.nishantOverview
+                : ((existing as any)?.nishantOverview ?? null),
             // Andrew James monthly sections
             andrewA1Rows: fields.andrewA1Rows ?? null,
             andrewA2Rows: fields.andrewA2Rows ?? null,

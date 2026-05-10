@@ -77,8 +77,8 @@ export default function FeedbackInboxPage() {
             <div className="p-8 max-w-lg">
                 <h1 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Feedback inbox</h1>
                 <p className="text-slate-500 dark:text-slate-400 text-sm">You don&apos;t have access to this page.</p>
-                <Link href="/dashboard" className="text-violet-600 dark:text-violet-400 text-sm mt-4 inline-block hover:underline">
-                    ← Back to Dashboard
+                <Link href="/dashboard/hr/home" className="text-violet-600 dark:text-violet-400 text-sm mt-4 inline-block hover:underline">
+                    ← Back to HR Home
                 </Link>
             </div>
         );

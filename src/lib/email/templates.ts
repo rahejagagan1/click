@@ -336,6 +336,106 @@ export function feedbackEmail(args: {
   return { subject, html, text };
 }
 
+// ── Offboarding ─────────────────────────────────────────────────────────
+// Two flavours from the same data:
+//   employeeFarewellEmail: warm goodbye sent to the leaver themselves.
+//   exitNotificationEmail: heads-up sent to CEO / HR / manager / admins.
+export function employeeFarewellEmail(args: {
+  name: string;
+  lastWorkingDay: string | Date;
+}): EmailContent {
+  const subject = `Wishing you the best — your last day at NB Media`;
+  const html = SHELL("Wishing you the best", `
+    <p style="margin:0 0 12px;font-size:14.5px;color:#1f2937">Hi ${escape(args.name)},</p>
+    <p style="margin:0 0 12px;font-size:13.5px;color:#1f2937;line-height:1.6">
+      Thanks for everything you've contributed at NB Media. Your last working
+      day on record is <strong>${fmtDate(args.lastWorkingDay)}</strong>.
+    </p>
+    <p style="margin:0 0 12px;font-size:13.5px;color:#1f2937;line-height:1.6">
+      HR will be in touch shortly to coordinate handover, asset return, and
+      final settlement. If anything's unclear, just reply to this email.
+    </p>
+    <p style="margin:18px 0 0;font-size:13.5px;color:#1f2937">— The NB Media team</p>
+  `);
+  const text = [
+    `Hi ${args.name},`,
+    "",
+    `Thanks for everything you've contributed at NB Media. Your last working day on record is ${fmtDate(args.lastWorkingDay)}.`,
+    "",
+    `HR will be in touch shortly to coordinate handover, asset return, and final settlement.`,
+    "",
+    `— The NB Media team`,
+  ].join("\n");
+  return { subject, html, text };
+}
+
+export function exitNotificationEmail(args: {
+  name: string;
+  email: string;
+  exitType: string;
+  lastWorkingDay: string | Date;
+  reason?: string | null;
+}): EmailContent {
+  const subject = `Exit recorded — ${args.name}`;
+  const link = `${appUrl()}/dashboard/hr/offboard`;
+  const html = SHELL(subject, `
+    <p style="margin:0 0 12px;font-size:14.5px;color:#1f2937">
+      An employee exit has been recorded.
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%">
+      ${detailRow("Name",            escape(args.name))}
+      ${detailRow("Email",           escape(args.email))}
+      ${detailRow("Type",            escape(args.exitType.replace(/_/g, " ")))}
+      ${detailRow("Last Working Day", fmtDate(args.lastWorkingDay))}
+      ${args.reason ? detailRow("Reason", escape(args.reason)) : ""}
+    </table>
+    ${ctaButton("Open Offboarding", link)}
+  `);
+  const text = [
+    `Exit recorded for ${args.name} (${args.email})`,
+    "",
+    `Type: ${args.exitType.replace(/_/g, " ")}`,
+    `Last working day: ${fmtDate(args.lastWorkingDay)}`,
+    args.reason ? `Reason: ${args.reason}` : "",
+    "",
+    `Open: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html, text };
+}
+
+export function jobApplicationEmail(args: {
+  name: string;
+  email: string;
+  phone: string;
+  role: string;
+  link: string;
+}): EmailContent {
+  const subject = `New application — ${args.role}`;
+  const fullLink = args.link.startsWith("http") ? args.link : `${appUrl()}${args.link}`;
+  const html = SHELL(subject, `
+    <p style="margin:0 0 12px;font-size:14.5px;color:#1f2937">
+      A new candidate just applied through the careers form.
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%">
+      ${detailRow("Role",  escape(args.role))}
+      ${detailRow("Name",  escape(args.name))}
+      ${detailRow("Email", escape(args.email))}
+      ${args.phone ? detailRow("Phone", escape(args.phone)) : ""}
+    </table>
+    ${ctaButton("Open Hiring inbox", fullLink)}
+  `);
+  const text = [
+    `New application for ${args.role}`,
+    "",
+    `Name:  ${args.name}`,
+    `Email: ${args.email}`,
+    args.phone ? `Phone: ${args.phone}` : "",
+    "",
+    `Open: ${fullLink}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html, text };
+}
+
 export function welcomeLoginEmail(args: {
   name: string;
   email: string;
@@ -400,4 +500,246 @@ export function announcementEmail(args: {
     `Open: ${link}`,
   ].join("\n");
   return { subject, html, text };
+}
+
+// ── Violations ────────────────────────────────────────────────────────
+// Sent to the affected employee when a violation is first logged or
+// transitioned, plus a 15-day cron reminder for HR while it's still
+// in_progress. Visual style: tinted alert banner up top to signal the
+// row's severity / state at a glance, then a clean info table, then
+// per-section detail blocks for description / action / notes.
+// UI-side severity labels are L0–L3; DB still stores
+// low/medium/high/critical. Update both this map and the violations
+// page if the user-facing labels ever change again.
+const SEVERITY_LABEL: Record<string, string> = {
+  low: "L0", medium: "L1", high: "L2", critical: "L3",
+};
+const SEVERITY_TINT: Record<string, { bg: string; border: string; text: string }> = {
+  low:      { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569" },
+  medium:   { bg: "#fef3c7", border: "#fcd34d", text: "#92400e" },
+  high:     { bg: "#ffedd5", border: "#fdba74", text: "#9a3412" },
+  critical: { bg: "#fee2e2", border: "#fca5a5", text: "#991b1b" },
+};
+const STATUS_LABEL: Record<string, string> = {
+  open: "Open", in_progress: "In progress", closed: "Closed",
+};
+const STATUS_COLOR: Record<string, string> = {
+  open: "#ef4444", in_progress: "#0284c7", closed: "#10b981",
+};
+
+// Shared section card — used by description / action / notes blocks.
+const sectionCard = (label: string, value: string) => `
+  <div style="margin-top:10px;padding:12px 14px;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px">
+    <p style="margin:0 0 6px;font-size:10.5px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">${escape(label)}</p>
+    <p style="margin:0;font-size:13.5px;color:#1f2937;line-height:1.6;white-space:pre-wrap">${escape(value)}</p>
+  </div>`;
+
+// Shared key/value row inside the violation summary table.
+const vRow = (label: string, valueHtml: string) => `
+  <tr>
+    <td style="padding:8px 14px;font-size:10.5px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;width:130px;vertical-align:middle;border-bottom:1px solid #eef2f7">${escape(label)}</td>
+    <td style="padding:8px 14px;font-size:13.5px;color:#1f2937;vertical-align:middle;border-bottom:1px solid #eef2f7">${valueHtml}</td>
+  </tr>`;
+
+export function violationCreatedEmail(args: {
+  userName: string;
+  title: string;
+  description?: string | null;
+  severity: string;
+  status: string;
+  category?: string | null;
+  actionTaken?: string | null;
+  notes?: string | null;
+  reporterName?: string | null;
+  violationDate?: string | Date | null;
+}): EmailContent {
+  const subject = `A violation has been logged on your record`;
+  const link = `${appUrl()}/dashboard/violations`;
+  const sev   = SEVERITY_LABEL[args.severity] ?? args.severity;
+  const stat  = STATUS_LABEL[args.status] ?? args.status;
+  const statColor = STATUS_COLOR[args.status] ?? "#64748b";
+  const sevTint = SEVERITY_TINT[args.severity] ?? SEVERITY_TINT.medium;
+  const dateLabel = args.violationDate ? fmtDate(args.violationDate) : null;
+
+  // Severity-tinted alert banner — replaces the generic "policy
+  // violation has been recorded" line with a colour-coded callout that
+  // immediately telegraphs how serious the entry is.
+  const banner = `
+    <div style="margin:0 0 16px;padding:14px 16px;background:${sevTint.bg};border:1px solid ${sevTint.border};border-radius:8px">
+      <p style="margin:0;font-size:10.5px;color:${sevTint.text};font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Severity ${escape(sev)} — Violation logged</p>
+      <p style="margin:6px 0 0;font-size:14px;color:#1f2937;font-weight:600;line-height:1.4">${escape(args.title)}</p>
+    </div>`;
+
+  const rows: string[] = [];
+  if (args.category)     rows.push(vRow("Category",  escape(args.category)));
+  rows.push(vRow("Status", `<span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700;background:${statColor}1a;color:${statColor}">${escape(stat)}</span>`));
+  if (dateLabel)         rows.push(vRow("Date",      escape(dateLabel)));
+  if (args.reporterName) rows.push(vRow("Reported by", escape(args.reporterName)));
+
+  const body = `
+    <p style="margin:0 0 14px;font-size:14px;color:#1f2937;line-height:1.6">
+      Hi ${escape(args.userName)},
+    </p>
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      A policy / conduct violation has been recorded on your record. Full details below.
+    </p>
+    ${banner}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      ${rows.join("")}
+    </table>
+    ${args.description ? sectionCard("Description",  args.description)  : ""}
+    ${args.actionTaken ? sectionCard("Action taken", args.actionTaken)  : ""}
+    ${args.notes       ? sectionCard("Notes",        args.notes)        : ""}
+    <p style="margin:20px 0 0;padding:12px 14px;background:#f8fafc;border-left:3px solid #0f6ecd;border-radius:0 6px 6px 0;font-size:12.5px;color:#475569;line-height:1.55">
+      To discuss or appeal this, reach out to HR or your manager directly.
+    </p>
+    ${ctaButton("View on dashboard", link)}
+  `;
+  const text = [
+    `Hi ${args.userName},`,
+    `A violation has been recorded against your name.`,
+    ``,
+    `Title: ${args.title}`,
+    args.category ? `Category: ${args.category}` : null,
+    `Severity: ${sev}`,
+    `Status: ${stat}`,
+    dateLabel ? `Date: ${dateLabel}` : null,
+    args.reporterName ? `Reported by: ${args.reporterName}` : null,
+    args.description ? `\nDescription:\n${args.description}` : null,
+    args.actionTaken ? `\nAction taken:\n${args.actionTaken}` : null,
+    args.notes ? `\nNotes:\n${args.notes}` : null,
+    ``,
+    `Open: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html: SHELL(subject, body), text };
+}
+
+// Sent to the affected employee whenever the status (or action / notes)
+// changes — open → in_progress → closed, etc.
+export function violationStatusChangedEmail(args: {
+  userName: string;
+  title: string;
+  oldStatus: string;
+  newStatus: string;
+  actionTaken?: string | null;
+  notes?: string | null;
+  changedByName?: string | null;
+}): EmailContent {
+  const newStat   = STATUS_LABEL[args.newStatus] ?? args.newStatus;
+  const newColor  = STATUS_COLOR[args.newStatus] ?? "#64748b";
+  const oldStat   = STATUS_LABEL[args.oldStatus] ?? args.oldStatus;
+  const oldColor  = STATUS_COLOR[args.oldStatus] ?? "#94a3b8";
+
+  const subject = `Update on your violation: ${newStat}`;
+  const link = `${appUrl()}/dashboard/violations`;
+
+  // Two-pill status transition — old (greyed) on the left, arrow,
+  // new (coloured + bold) on the right. Renders consistently across
+  // Gmail / Outlook / Apple Mail; tested against the major clients.
+  const transitionPill = `
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px">
+      <tr>
+        <td style="padding:14px 16px;vertical-align:middle">
+          <p style="margin:0 0 6px;font-size:10.5px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Status changed</p>
+          <span style="display:inline-block;padding:4px 12px;border-radius:999px;font-size:11.5px;font-weight:700;background:${oldColor}14;color:${oldColor}">${escape(oldStat)}</span>
+          <span style="font-size:13px;color:#94a3b8;margin:0 6px">→</span>
+          <span style="display:inline-block;padding:4px 12px;border-radius:999px;font-size:12px;font-weight:700;background:${newColor}1f;color:${newColor};box-shadow:inset 0 0 0 1px ${newColor}55">${escape(newStat)}</span>
+          ${args.changedByName ? `<p style="margin:8px 0 0;font-size:11.5px;color:#64748b">Updated by <strong style="color:#475569">${escape(args.changedByName)}</strong></p>` : ""}
+        </td>
+      </tr>
+    </table>`;
+
+  const body = `
+    <p style="margin:0 0 14px;font-size:14px;color:#1f2937;line-height:1.6">
+      Hi ${escape(args.userName)},
+    </p>
+    <p style="margin:0 0 6px;font-size:13.5px;color:#475569;line-height:1.6">
+      The status of your violation has been updated.
+    </p>
+    <p style="margin:0 0 4px;font-size:14.5px;color:#1f2937;font-weight:600;line-height:1.4">
+      ${escape(args.title)}
+    </p>
+    ${transitionPill}
+    ${args.actionTaken ? sectionCard("Action taken", args.actionTaken) : ""}
+    ${args.notes       ? sectionCard("Notes",        args.notes)       : ""}
+    ${ctaButton("View on dashboard", link)}
+  `;
+  const text = [
+    `Hi ${args.userName},`,
+    `The status of the violation "${args.title}" has changed: ${oldStat} → ${newStat}${args.changedByName ? ` (by ${args.changedByName})` : ""}.`,
+    args.actionTaken ? `\nAction taken:\n${args.actionTaken}` : null,
+    args.notes ? `\nNotes:\n${args.notes}` : null,
+    ``,
+    `Open: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html: SHELL(subject, body), text };
+}
+
+// Cron-scheduled gentle nudge to HR / CEO / admins when a violation has
+// been sitting "in progress" for too long. Sent at most every 15 days
+// per violation — throttle is enforced by Violation.lastReminderAt.
+export function violationInProgressReminderEmail(args: {
+  recipientName?: string | null;
+  affectedUserName: string;
+  title: string;
+  daysOpen: number;
+  severity: string;
+  category?: string | null;
+  reporterName?: string | null;
+  actionTaken?: string | null;
+}): EmailContent {
+  const subject = `Reminder: violation for ${args.affectedUserName} is still in progress`;
+  const link = `${appUrl()}/dashboard/violations`;
+  const sev = SEVERITY_LABEL[args.severity] ?? args.severity;
+  const sevTint = SEVERITY_TINT[args.severity] ?? SEVERITY_TINT.medium;
+
+  // Big day-counter callout — turns the central data point ("how long
+  // has this been sitting") into the focal point so the recipient
+  // immediately sees the urgency.
+  const dayCounter = `
+    <div style="margin:0 0 16px;padding:18px 16px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;text-align:center">
+      <p style="margin:0;font-size:10.5px;color:#9a3412;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Open for</p>
+      <p style="margin:6px 0 0;font-size:32px;font-weight:700;color:#9a3412;line-height:1">${args.daysOpen}<span style="font-size:14px;font-weight:600;margin-left:4px">day${args.daysOpen === 1 ? "" : "s"}</span></p>
+      <p style="margin:6px 0 0;font-size:11.5px;color:#9a3412">since the violation was logged · still <strong>in progress</strong></p>
+    </div>`;
+
+  const rows: string[] = [];
+  rows.push(vRow("Employee", escape(args.affectedUserName)));
+  rows.push(vRow("Title",    escape(args.title)));
+  if (args.category)     rows.push(vRow("Category", escape(args.category)));
+  rows.push(vRow("Severity", `<span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700;background:${sevTint.bg};color:${sevTint.text}">${escape(sev)}</span>`));
+  if (args.reporterName) rows.push(vRow("Reported by", escape(args.reporterName)));
+
+  const body = `
+    <p style="margin:0 0 12px;font-size:14px;color:#1f2937;line-height:1.6">
+      ${args.recipientName ? `Hi ${escape(args.recipientName)},` : "Hi,"}
+    </p>
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      A violation marked <strong>in progress</strong> hasn't been closed yet — a quick nudge so it doesn't get lost.
+    </p>
+    ${dayCounter}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      ${rows.join("")}
+    </table>
+    ${args.actionTaken ? sectionCard("Last action taken", args.actionTaken) : ""}
+    <p style="margin:20px 0 0;padding:12px 14px;background:#f8fafc;border-left:3px solid #0f6ecd;border-radius:0 6px 6px 0;font-size:12.5px;color:#475569;line-height:1.55">
+      Once this is resolved, update the status to <strong>Closed</strong> on the dashboard so the reminder stops firing every 15 days.
+    </p>
+    ${ctaButton("Open the violation", link)}
+  `;
+  const text = [
+    args.recipientName ? `Hi ${args.recipientName},` : "Hi,",
+    `A violation marked "in progress" still hasn't been closed.`,
+    ``,
+    `Employee: ${args.affectedUserName}`,
+    `Title: ${args.title}`,
+    args.category ? `Category: ${args.category}` : null,
+    `Severity: ${sev}`,
+    `Open for: ${args.daysOpen} day${args.daysOpen === 1 ? "" : "s"}`,
+    args.reporterName ? `Reported by: ${args.reporterName}` : null,
+    args.actionTaken ? `\nLast action taken:\n${args.actionTaken}` : null,
+    ``,
+    `Open: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html: SHELL(subject, body), text };
 }
