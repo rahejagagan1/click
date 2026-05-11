@@ -25,9 +25,27 @@ function reminderExclusionSet(): Set<string> {
  * is responsible for once-per-day gating via the cron-jobs config.
  *
  * Returns the number of emails actually sent.
+ *
+ * Skip rules (in order — earliest exit wins):
+ *   1. Today is Saturday / Sunday → 0 emails. The org's standard work
+ *      week is Mon–Fri; the previous version forgot this gate and
+ *      blasted every employee with a "you forgot to clock in!" mail
+ *      every weekend. If you ever onboard a 7-day team, swap this for
+ *      a per-user `Shift.workDays` lookup.
+ *   2. Today is in HolidayCalendar → 0 emails.
+ *   3. Per-user filters: already clocked in / on approved leave (incl.
+ *      stage-1 partially_approved — manager already green-lit the
+ *      absence) / approved WFH / approved OD / no email / in
+ *      EMAIL_REMINDER_EXCLUDE_EMAILS.
  */
 export async function sendMissedClockInReminders(): Promise<number> {
   const today = istTodayDateOnly();
+
+  // 0. Weekend gate (Mon–Fri only). UTC day-of-week is identical to
+  //    IST day-of-week here because `today` is UTC-midnight of the
+  //    IST calendar day, so 0 = Sun, 6 = Sat in IST too.
+  const dow = new Date(today).getUTCDay();
+  if (dow === 0 || dow === 6) return 0;
 
   // 1. Active users.
   const users = await prisma.user.findMany({
@@ -39,6 +57,11 @@ export async function sendMissedClockInReminders(): Promise<number> {
   //    in bulk so we don't fire one query per user. The email body
   //    explicitly mentions WFH / OD as valid alternatives — if the
   //    user already filed and got those approved, we mustn't nag.
+  //    Leave filter accepts both "approved" (stage-2 / final) AND
+  //    "partially_approved" (stage-1 manager done, awaiting CEO/HR);
+  //    the employee is de-facto away once their direct manager said
+  //    yes and shouldn't be pinged because the second-stage signoff
+  //    hasn't landed yet.
   const [todays, leaves, wfh, onDuty, holidayHit] = await Promise.all([
     prisma.attendance.findMany({
       where: { date: today, clockIn: { not: null } },
@@ -46,7 +69,7 @@ export async function sendMissedClockInReminders(): Promise<number> {
     }),
     prisma.leaveApplication.findMany({
       where: {
-        status: "approved",
+        status:   { in: ["approved", "partially_approved"] },
         fromDate: { lte: today },
         toDate:   { gte: today },
       },

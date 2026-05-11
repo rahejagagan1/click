@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import UserAvatar from "@/components/ui/user-avatar";
+import SearchableSelect from "@/components/ui/searchable-select";
 
 interface ViolationUser {
     id: number;
     name: string;
     role: string;
+    orgLevel?: string | null;
     profilePictureUrl: string | null;
     teamCapsule?: string | null;
     managerId?: number | null;
@@ -22,6 +24,8 @@ interface Violation {
     status: "open" | "in_progress" | "closed";
     category: string | null;
     actionTaken: string | null;
+    actionTakenFileUrl: string | null;
+    actionTakenFileName: string | null;
     notes: string | null;
     violationDate: string | null;
     responsiblePersonId: number | null;
@@ -89,16 +93,61 @@ export default function ViolationsPage() {
     const [editingId, setEditingId] = useState<number | null>(null);
     const [editData, setEditData] = useState<Record<string, any>>({});
 
-    // New violation form
+    // New violation form. `actionTakenFile` holds the optional PDF /
+    // doc evidence the reporter wants to attach to the action-taken
+    // note; null when no file is selected. `notes` is now surfaced as
+    // "Description" in the UI and is mandatory (see Submit disabled
+    // state + handleCreate guard).
+    // Severity defaults to "low" (L0) — HR explicitly asked for the
+    // form to start at the lowest tier so it's never auto-escalated;
+    // they pick the actual tier manually based on what happened. The
+    // form has zero auto-severity logic anywhere (no useEffect, no
+    // category→severity mapping); leaving it on "low" by default is
+    // the only way it lands.
     const [newViolation, setNewViolation] = useState({
-        userId: 0, severity: "medium", category: "",
+        userId: 0, severity: "low", category: "",
         customCategory: "",
         violationDate: new Date().toISOString().split("T")[0],
         actionTaken: "", status: "open", notes: "",
         responsiblePersonId: 0,
+        reportedById: 0,
     });
+    const [actionTakenFile, setActionTakenFile] = useState<File | null>(null);
 
     const selectedEmployee = users.find(u => u.id === newViolation.userId);
+
+    // Reporter picker — every employee. HR specifically asked for
+    // the full directory here so they can log violations on behalf
+    // of anyone who flagged something internally (e.g. a peer who
+    // observed late attendance but isn't HR-tier). Tier label is
+    // shown in the sublabel as a hint, but doesn't gate the option.
+    const reporterOptions = useMemo(
+        () =>
+            users.map(u => ({
+                value: u.id,
+                label: u.name,
+                sublabel:
+                    u.orgLevel === "ceo"            ? "CEO" :
+                    u.orgLevel === "special_access" ? "Admin" :
+                    u.role     === "admin"          ? "Admin" :
+                    u.role     === "hr_manager"     ? "HR Manager" :
+                    u.role,
+            })),
+        [users],
+    );
+
+    // Default the reporter to the logged-in user once the user list
+    // arrives — only if they're actually in the eligible pool. Skip if
+    // the form is mid-edit (userId already touched) so we don't stomp
+    // an explicit pick.
+    useEffect(() => {
+        const me = Number(sessionUser?.dbId);
+        if (!me) return;
+        if (newViolation.reportedById) return;
+        if (reporterOptions.some(o => o.value === me)) {
+            setNewViolation(p => ({ ...p, reportedById: me }));
+        }
+    }, [reporterOptions, sessionUser?.dbId, newViolation.reportedById]);
 
     // Auto-fill responsible person when employee changes
     useEffect(() => {
@@ -136,17 +185,33 @@ export default function ViolationsPage() {
 
     const handleCreate = async () => {
         if (!newViolation.userId) return;
+        if (!actionTakenFile) return;            // Action Document is now mandatory
+        if (!newViolation.notes.trim()) return;  // Description is mandatory
         setSaving(true);
         try {
-            const payload = {
-                ...newViolation,
-                category: newViolation.category === "other" ? (newViolation.customCategory || "other") : newViolation.category,
-                responsiblePersonId: newViolation.responsiblePersonId || null,
-            };
+            // Switch to multipart/form-data so we can attach the
+            // optional Action-Taken file alongside the form fields.
+            // The route accepts both JSON (legacy callers) and form-
+            // data, branching on Content-Type, so this is a one-sided
+            // change.
+            const fd = new FormData();
+            const category = newViolation.category === "other"
+                ? (newViolation.customCategory || "other")
+                : newViolation.category;
+            fd.set("userId",              String(newViolation.userId));
+            fd.set("severity",            newViolation.severity);
+            fd.set("status",              newViolation.status);
+            fd.set("category",            category);
+            fd.set("actionTaken",         newViolation.actionTaken);
+            fd.set("notes",               newViolation.notes);
+            fd.set("violationDate",       newViolation.violationDate);
+            fd.set("responsiblePersonId", String(newViolation.responsiblePersonId || ""));
+            fd.set("reportedById",        String(newViolation.reportedById || ""));
+            if (actionTakenFile) fd.set("actionTakenFile", actionTakenFile);
+
             const res = await fetch("/api/violations", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
+                body:   fd,
             });
             if (!res.ok) {
                 const err = await res.json();
@@ -156,16 +221,32 @@ export default function ViolationsPage() {
             }
             setShowNewForm(false);
             setNewViolation({
-                userId: 0, severity: "medium", category: "",
+                userId: 0, severity: "low", category: "",
                 customCategory: "",
                 violationDate: new Date().toISOString().split("T")[0],
                 actionTaken: "", status: "open", notes: "",
                 responsiblePersonId: 0,
+                // Re-prime to the logged-in user if they're in the
+                // eligible reporter pool; otherwise leave blank and the
+                // mount-time effect will fill it in.
+                reportedById: reporterOptions.some(o => o.value === Number(sessionUser?.dbId))
+                    ? Number(sessionUser?.dbId) || 0
+                    : 0,
             });
+            setActionTakenFile(null);
             fetchData();
         } catch { }
         setSaving(false);
     };
+
+    // Edit-mode attachment state. `editFile` is a freshly-picked
+    // upload that should replace whatever is on the row; `clearEditFile`
+    // is true when HR deliberately clicked "Remove" to drop the
+    // existing attachment without putting one back. Either action
+    // forces the save path onto multipart/form-data so the bytes (or
+    // the explicit clear flag) reach the API.
+    const [editFile, setEditFile] = useState<File | null>(null);
+    const [clearEditFile, setClearEditFile] = useState(false);
 
     const startEditing = (v: Violation) => {
         setEditingId(v.id);
@@ -175,28 +256,56 @@ export default function ViolationsPage() {
             actionTaken: v.actionTaken || "",
             notes: v.notes || "",
             responsiblePersonId: v.responsiblePerson?.id || 0,
+            // Capture the existing filename so the upload UI can show
+            // "Currently attached: E-1.pdf" without needing a separate
+            // re-fetch when entering edit mode.
+            existingFileName: v.actionTakenFileName || null,
         });
+        setEditFile(null);
+        setClearEditFile(false);
     };
 
     const cancelEditing = () => {
         setEditingId(null);
         setEditData({});
+        setEditFile(null);
+        setClearEditFile(false);
     };
 
     const saveEdit = async (id: number) => {
         setSaving(true);
         try {
-            const res = await fetch("/api/violations", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id, ...editData }),
-            });
+            // Branch on whether the file picker was touched. The JSON
+            // path is the lighter of the two and stays the default for
+            // edits that don't change the attachment (most of them).
+            const hasFileChange = !!editFile || clearEditFile;
+            let res: Response;
+            if (hasFileChange) {
+                const fd = new FormData();
+                fd.set("id",                  String(id));
+                fd.set("severity",            editData.severity ?? "");
+                fd.set("status",              editData.status ?? "");
+                fd.set("actionTaken",         editData.actionTaken ?? "");
+                fd.set("notes",               editData.notes ?? "");
+                fd.set("responsiblePersonId", String(editData.responsiblePersonId || ""));
+                if (editFile) fd.set("actionTakenFile", editFile);
+                if (clearEditFile && !editFile) fd.set("clearActionTakenFile", "1");
+                res = await fetch("/api/violations", { method: "PATCH", body: fd });
+            } else {
+                res = await fetch("/api/violations", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id, ...editData }),
+                });
+            }
             if (!res.ok) {
                 const err = await res.json();
                 alert(`Failed to save: ${err.error || "Unknown error"}`);
             } else {
                 setEditingId(null);
                 setEditData({});
+                setEditFile(null);
+                setClearEditFile(false);
                 fetchData();
             }
         } catch { }
@@ -551,6 +660,72 @@ export default function ViolationsPage() {
                                         rows={2} placeholder="Additional notes..."
                                         className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30 resize-none" />
                                 </div>
+                                {/* Action Document — re-upload / replace.
+                                    Three states packed into one block:
+                                      1. existing file present, no edit  → "Currently attached: foo.pdf" + Replace + Remove
+                                      2. new file picked                 → green chip with new filename + Undo
+                                      3. cleared (Remove pressed)        → "Will remove on save" + Undo
+                                    Re-uploading a file overrides the
+                                    Remove flag automatically. */}
+                                <div>
+                                    <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Action Document</label>
+                                    {editFile ? (
+                                        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/5">
+                                            <svg className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                            </svg>
+                                            <span className="text-[12.5px] font-medium text-emerald-700 dark:text-emerald-300 truncate">{editFile.name}</span>
+                                            <span className="text-[11px] text-emerald-600/70 dark:text-emerald-400/70 ml-auto">New (will replace on save)</span>
+                                            <button type="button" onClick={() => setEditFile(null)}
+                                                className="text-[11px] font-semibold text-rose-500 hover:underline shrink-0">
+                                                Undo
+                                            </button>
+                                        </div>
+                                    ) : clearEditFile ? (
+                                        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-rose-200 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-500/5">
+                                            <svg className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                            <span className="text-[12.5px] font-medium text-rose-700 dark:text-rose-300">Will remove attachment on save</span>
+                                            <button type="button" onClick={() => setClearEditFile(false)}
+                                                className="ml-auto text-[11px] font-semibold text-slate-600 dark:text-slate-400 hover:underline">
+                                                Undo
+                                            </button>
+                                        </div>
+                                    ) : editData.existingFileName ? (
+                                        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03]">
+                                            <span className="text-[12.5px] text-slate-700 dark:text-slate-300 truncate">📎 {editData.existingFileName}</span>
+                                            <span className="ml-auto flex items-center gap-3">
+                                                <label className="text-[11px] font-semibold text-violet-600 dark:text-violet-400 hover:underline cursor-pointer">
+                                                    Replace
+                                                    <input
+                                                        type="file"
+                                                        accept=".pdf,.doc,.docx,.rtf,.odt,.txt,.md,.png,.jpg,.jpeg,.webp"
+                                                        onChange={e => { setEditFile(e.target.files?.[0] ?? null); setClearEditFile(false); }}
+                                                        className="hidden"
+                                                    />
+                                                </label>
+                                                <button type="button" onClick={() => setClearEditFile(true)}
+                                                    className="text-[11px] font-semibold text-rose-500 hover:underline">
+                                                    Remove
+                                                </button>
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <label className="flex items-center justify-center gap-1.5 w-full px-3 py-2.5 rounded-lg border-2 border-dashed border-slate-300 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03] hover:border-violet-400/60 hover:bg-violet-50/40 dark:hover:bg-white/[0.05] cursor-pointer transition-colors">
+                                            <input
+                                                type="file"
+                                                accept=".pdf,.doc,.docx,.rtf,.odt,.txt,.md,.png,.jpg,.jpeg,.webp"
+                                                onChange={e => { setEditFile(e.target.files?.[0] ?? null); setClearEditFile(false); }}
+                                                className="hidden"
+                                            />
+                                            <svg className="h-4 w-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.9 5 5 0 019.9-1A5.5 5.5 0 0118 16M12 12v8m0 0l-3-3m3 3l3-3" />
+                                            </svg>
+                                            <span className="text-[12.5px] text-slate-500 dark:text-slate-400">Click to upload PDF / image (≤10 MB)</span>
+                                        </label>
+                                    )}
+                                </div>
                                 <div className="flex justify-end gap-2">
                                     <button onClick={cancelEditing}
                                         className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors">
@@ -619,11 +794,36 @@ export default function ViolationsPage() {
                                             <div className="mb-3">
                                                 <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Action Taken</p>
                                                 <p className="text-sm text-slate-700 dark:text-slate-300">{v.actionTaken}</p>
+                                                {(v.actionTakenFileName || v.actionTakenFileUrl) && (
+                                                    <a
+                                                        href={`/api/violations/${v.id}/file`}
+                                                        className="mt-1.5 inline-flex items-center gap-1.5 text-[12px] font-medium text-violet-600 dark:text-violet-400 hover:underline"
+                                                    >
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                                        </svg>
+                                                        {v.actionTakenFileName || "Attachment"}
+                                                    </a>
+                                                )}
+                                            </div>
+                                        )}
+                                        {!v.actionTaken && (v.actionTakenFileName || v.actionTakenFileUrl) && (
+                                            <div className="mb-3">
+                                                <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Action Taken</p>
+                                                <a
+                                                    href={`/api/violations/${v.id}/file`}
+                                                    className="inline-flex items-center gap-1.5 text-[13px] font-medium text-violet-600 dark:text-violet-400 hover:underline"
+                                                >
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                                    </svg>
+                                                    {v.actionTakenFileName || "Attachment"}
+                                                </a>
                                             </div>
                                         )}
                                         {v.notes && (
                                             <div className="mb-3">
-                                                <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Notes</p>
+                                                <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Description</p>
                                                 <p className="text-sm text-slate-700 dark:text-slate-300">{v.notes}</p>
                                             </div>
                                         )}
@@ -663,11 +863,15 @@ export default function ViolationsPage() {
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Employee</label>
-                            <select value={newViolation.userId} onChange={e => setNewViolation(p => ({ ...p, userId: Number(e.target.value) }))}
-                                className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
-                                <option value={0}>Select employee...</option>
-                                {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
-                            </select>
+                            {/* Searchable picker — the team list is long enough
+                                that a native <select> required scrolling through
+                                40+ names. Type-to-filter matches by name OR role. */}
+                            <SearchableSelect
+                                value={newViolation.userId || null}
+                                onChange={(v) => setNewViolation(p => ({ ...p, userId: Number(v) }))}
+                                options={users.map(u => ({ value: u.id, label: u.name, sublabel: u.role }))}
+                                placeholder="Select employee…"
+                            />
                         </div>
                         <div>
                             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Date of Violation</label>
@@ -689,11 +893,12 @@ export default function ViolationsPage() {
                         </div>
                         <div>
                             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Manager</label>
-                            <select value={newViolation.responsiblePersonId} onChange={e => setNewViolation(p => ({ ...p, responsiblePersonId: Number(e.target.value) }))}
-                                className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
-                                <option value={0}>Select...</option>
-                                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                            </select>
+                            <SearchableSelect
+                                value={newViolation.responsiblePersonId || null}
+                                onChange={(v) => setNewViolation(p => ({ ...p, responsiblePersonId: Number(v) }))}
+                                options={users.map(u => ({ value: u.id, label: u.name, sublabel: u.role }))}
+                                placeholder="Select…"
+                            />
                         </div>
                     </div>
 
@@ -719,6 +924,20 @@ export default function ViolationsPage() {
                         </div>
                     )}
 
+                    {/* Reported By — managers, HoDs, HR Manager, CEO and
+                        admin-tier users only. Defaults to the logged-in
+                        reporter so the common case is one click; HR can
+                        override when filing on someone else's behalf. */}
+                    <div>
+                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Reported By</label>
+                        <SearchableSelect
+                            value={newViolation.reportedById || null}
+                            onChange={(v) => setNewViolation(p => ({ ...p, reportedById: Number(v) }))}
+                            options={reporterOptions}
+                            placeholder="Select reporter…"
+                        />
+                    </div>
+
                     {/* Row: Severity + Status */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -742,21 +961,66 @@ export default function ViolationsPage() {
                         </div>
                     </div>
 
-                    {/* Action Taken (Required) */}
-                    <div>
-                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">
-                            Action Taken <span className="text-rose-500">*</span>
-                        </label>
-                        <textarea value={newViolation.actionTaken} onChange={e => setNewViolation(p => ({ ...p, actionTaken: e.target.value }))}
-                            rows={2} placeholder="Describe the action taken..."
-                            className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30 resize-none" />
+                    {/* Action Taken (Required) + optional PDF/doc evidence
+                        side-by-side. The textarea is the headline write-up;
+                        the file picker is for HR to attach the actual
+                        warning letter / chat-screenshot / whatever proof
+                        they want stapled to the record. */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">
+                                Action Taken <span className="text-slate-400 normal-case font-normal tracking-normal">(Optional)</span>
+                            </label>
+                            <textarea value={newViolation.actionTaken} onChange={e => setNewViolation(p => ({ ...p, actionTaken: e.target.value }))}
+                                rows={3} placeholder="Describe the action taken..."
+                                className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30 resize-none" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">
+                                Action Document <span className="text-rose-500">*</span>
+                            </label>
+                            <label className="flex flex-col items-center justify-center gap-1.5 w-full h-[88px] px-3 rounded-lg border-2 border-dashed border-slate-300 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03] hover:border-violet-400/60 hover:bg-violet-50/40 dark:hover:bg-white/[0.05] cursor-pointer transition-colors">
+                                <input
+                                    type="file"
+                                    accept=".pdf,.doc,.docx,.rtf,.odt,.txt,.md,.png,.jpg,.jpeg,.webp"
+                                    onChange={e => setActionTakenFile(e.target.files?.[0] ?? null)}
+                                    className="hidden"
+                                />
+                                {actionTakenFile ? (
+                                    <>
+                                        <span className="text-[12.5px] font-medium text-slate-700 dark:text-slate-200 truncate max-w-full">📎 {actionTakenFile.name}</span>
+                                        <span
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={(e) => { e.preventDefault(); setActionTakenFile(null); }}
+                                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActionTakenFile(null); } }}
+                                            className="text-[11px] text-rose-500 hover:underline cursor-pointer"
+                                        >
+                                            Remove
+                                        </span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="h-5 w-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.9 5 5 0 019.9-1A5.5 5.5 0 0118 16M12 12v8m0 0l-3-3m3 3l3-3" />
+                                        </svg>
+                                        <span className="text-[12px] text-slate-500 dark:text-slate-400">Click to upload PDF / image (≤10 MB)</span>
+                                    </>
+                                )}
+                            </label>
+                        </div>
                     </div>
 
-                    {/* Notes */}
+                    {/* Description (mandatory) — was previously labelled
+                        "Notes (Optional)". The internal field name stays
+                        `notes` so existing rows + the API don't churn; only
+                        the user-facing label and the required-flag changed. */}
                     <div>
-                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Notes (Optional)</label>
+                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">
+                            Description <span className="text-rose-500">*</span>
+                        </label>
                         <textarea value={newViolation.notes} onChange={e => setNewViolation(p => ({ ...p, notes: e.target.value }))}
-                            rows={2} placeholder="Additional notes or remarks..."
+                            rows={3} placeholder="What happened? Add context, dates, people involved…"
                             className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30 resize-none" />
                     </div>
                 </div>
@@ -765,7 +1029,7 @@ export default function ViolationsPage() {
                         className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors">
                         Cancel
                     </button>
-                    <button onClick={handleCreate} disabled={saving || !newViolation.userId || !newViolation.actionTaken.trim()}
+                    <button onClick={handleCreate} disabled={saving || !newViolation.userId || !actionTakenFile || !newViolation.notes.trim()}
                         className="px-4 py-2 text-sm font-semibold text-white bg-rose-500 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm">
                         {saving ? "Saving..." : "Submit Violation"}
                     </button>

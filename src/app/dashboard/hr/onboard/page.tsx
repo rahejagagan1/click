@@ -59,6 +59,24 @@ type Form = {
   workEmail:       string;
   mobileCountry:   string;
   mobileNumber:    string;
+  // Step 1 — Extended contact + demographics + family + emergency
+  // (Keka-parity additions; all optional, all map 1:1 to EmployeeProfile
+  // columns. fatherName persists into the existing parentName column —
+  // the schema comment notes that's the "father's / spouse's name as on
+  // the PAN card", which is the same field Keka calls Father Name.)
+  workPhone:               string;
+  homePhone:               string;
+  personalEmail:           string;
+  maritalStatus:           string;
+  bloodGroup:              string;
+  physicallyHandicapped:   string;
+  fatherName:              string;
+  motherName:              string;
+  spouseName:              string;
+  childrenNames:           string;
+  emergencyContactName:    string;
+  emergencyRelationship:   string;
+  emergencyPhone:          string;
 
   // Step 2 — Job
   joiningDate:       string;
@@ -90,6 +108,9 @@ type Form = {
   penalizationPolicy: string;
   orgLevel:         string;
   role:             string;
+  // Step 3 extras (Keka-parity)
+  attendanceCaptureScheme: string; // "On-Site" | "Remote" | "Hybrid"
+  costCenter:              string;
 
   // Step 4 — Compensation (fields visible, not persisted to DB)
   salaryType:    string;   // "Regular Employee" | "Intern" — gates which fields show
@@ -100,6 +121,29 @@ type Form = {
   pfEligible:    boolean;
   salaryStructure: string;
   taxRegime:     string;
+
+  // Step 5 — Address & Government IDs (Keka-parity)
+  // Current address: addressLine1 persists into the legacy `address`
+  // column; everything else is a new EmployeeProfile column.
+  addressLine1:    string;
+  addressLine2:    string;
+  city:            string;
+  state:           string;
+  addressPincode:  string;
+  addressCountry:  string;
+  // Permanent address — distinct set of columns from current.
+  permanentLine1:    string;
+  permanentLine2:    string;
+  permanentCity:     string;
+  permanentState:    string;
+  permanentPincode:  string;
+  permanentCountry:  string;
+  // Statutory IDs
+  panNumber:       string;
+  aadhaarNumber:   string;
+  pfNumber:        string;
+  uanNumber:       string;
+  biometricId:     string;
 };
 
 const EMPTY: Form = {
@@ -107,6 +151,10 @@ const EMPTY: Form = {
   displayName: "", gender: "male", dateOfBirth: "", nationality: "India",
   numberSeries: "NB Media series", employeeNumber: "", workEmail: "",
   mobileCountry: "+91", mobileNumber: "",
+  workPhone: "", homePhone: "", personalEmail: "",
+  maritalStatus: "", bloodGroup: "", physicallyHandicapped: "No",
+  fatherName: "", motherName: "", spouseName: "", childrenNames: "",
+  emergencyContactName: "", emergencyRelationship: "", emergencyPhone: "",
   joiningDate: new Date().toISOString().slice(0, 10),
   jobTitle: "", secondaryJobTitle: "", timeType: "Full Time",
   legalEntity: "NB Media Productions", businessUnit: "NB Media", department: "",
@@ -120,11 +168,17 @@ const EMPTY: Form = {
   attendanceNumber: "", timeTrackingPolicy: "On-Site Capture",
   penalizationPolicy: "Default",
   orgLevel: "member", role: "member",
+  attendanceCaptureScheme: "On-Site", costCenter: "",
   salaryType: "Regular Employee",
   payGroup: "NB Media", annualSalary: "",
   basicPay: "",
   bonusIncluded: false, pfEligible: false,
   salaryStructure: "Range Based", taxRegime: "New Regime (Section 115BAC)",
+  addressLine1: "", addressLine2: "", city: "", state: "",
+  addressPincode: "", addressCountry: "India",
+  permanentLine1: "", permanentLine2: "", permanentCity: "", permanentState: "",
+  permanentPincode: "", permanentCountry: "India",
+  panNumber: "", aadhaarNumber: "", pfNumber: "", uanNumber: "", biometricId: "",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -132,7 +186,7 @@ const EMPTY: Form = {
 // ─────────────────────────────────────────────────────────────────────────────
 export default function OnboardEmployeePage() {
   const router = useRouter();
-  const [step, setStep]       = useState<1 | 2 | 3 | 4>(1);
+  const [step, setStep]       = useState<1 | 2 | 3 | 4 | 5>(1);
   const [form, setForm]       = useState<Form>(EMPTY);
   const [saving, setSaving]   = useState(false);
   const [error, setError]     = useState("");
@@ -246,18 +300,23 @@ export default function OnboardEmployeePage() {
   const nextEmployeeId = activeSeries
     ? `${activeSeries.prefix}${activeSeries.nextNumber}`
     : "";
-  // Prefix from whichever ID is in play: a manually-typed employeeNumber
-  // wins (lets HR pick a different series mid-form), otherwise fall back
-  // to the active series. Strip trailing digits to get just "HRM" out of
-  // "HRM47" or whatever HR typed.
-  const employeeIdPrefix = ((form.employeeNumber || nextEmployeeId).match(/^[A-Za-z]+/)?.[0]) ?? "";
+  // HRM No. ↔ Attendance No. convention: they should be identical
+  // (e.g. HRM47 / HRM47), matching how the Keka export ships every
+  // row with both columns set to the same value. We mirror the FULL
+  // employee number into the Attendance Number field, not just the
+  // "HRM" prefix. A manually-typed employeeNumber still wins; if HR
+  // hasn't typed one yet, fall back to the next-allocatable ID from
+  // the active series so the form previews "HRM47" → "HRM47" before
+  // submit. attendanceTouched stays so HR can override per-employee
+  // if they ever need a different attendance ID.
+  const fullEmployeeId = (form.employeeNumber || nextEmployeeId).trim();
   useEffect(() => {
     if (attendanceTouched) return;
-    if (employeeIdPrefix && employeeIdPrefix !== form.attendanceNumber) {
-      setForm(f => ({ ...f, attendanceNumber: employeeIdPrefix }));
+    if (fullEmployeeId && fullEmployeeId !== form.attendanceNumber) {
+      setForm(f => ({ ...f, attendanceNumber: fullEmployeeId }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [employeeIdPrefix, attendanceTouched]);
+  }, [fullEmployeeId, attendanceTouched]);
 
   useEffect(() => {
     const q = form.workEmail.trim().toLowerCase();
@@ -341,7 +400,7 @@ export default function OnboardEmployeePage() {
         const parsed = JSON.parse(raw);
         if (parsed?.form)  setForm({ ...EMPTY, ...parsed.form });
         if (parsed?.step && parsed.step >= 1 && parsed.step <= 4) {
-          setStep(parsed.step as 1 | 2 | 3 | 4);
+          setStep(parsed.step as 1 | 2 | 3 | 4 | 5);
         }
         if (parsed?.displayTouched) setDisplayTouched(true);
         if (parsed?.savedAt) {
@@ -428,6 +487,50 @@ export default function OnboardEmployeePage() {
           dateOfBirth:  form.dateOfBirth || undefined,
           gender:       form.gender || undefined,
           noticePeriodDays: Number(form.noticePeriodDays) || 30,
+          // ── Keka-parity additions ──
+          // Contact
+          workPhone:     form.workPhone     || undefined,
+          homePhone:     form.homePhone     || undefined,
+          personalEmail: form.personalEmail || undefined,
+          // Demographics + family
+          maritalStatus:         form.maritalStatus         || undefined,
+          bloodGroup:            form.bloodGroup            || undefined,
+          physicallyHandicapped: form.physicallyHandicapped || undefined,
+          parentName:            form.fatherName            || undefined, // Keka "Father Name" → existing parentName column
+          motherName:            form.motherName            || undefined,
+          spouseName:            form.spouseName            || undefined,
+          childrenNames:         form.childrenNames         || undefined,
+          // Emergency contact
+          emergencyContact:      form.emergencyContactName  || undefined,
+          emergencyRelationship: form.emergencyRelationship || undefined,
+          emergencyPhone:        form.emergencyPhone        || undefined,
+          // Org / attendance extras
+          attendanceCaptureScheme: form.attendanceCaptureScheme || undefined,
+          costCenter:              form.costCenter              || undefined,
+          // HRM No. ↔ Attendance No. convention: same value. Send the
+          // form's attendanceNumber if HR overrode it, else fall back
+          // to the employeeNumber so they stay in sync.
+          attendanceNumber:        (form.attendanceNumber || form.employeeNumber) || undefined,
+          // Current address — `address` is Line 1 (legacy column).
+          address:        form.addressLine1   || undefined,
+          addressLine2:   form.addressLine2   || undefined,
+          city:           form.city           || undefined,
+          state:          form.state          || undefined,
+          addressPincode: form.addressPincode || undefined,
+          addressCountry: form.addressCountry || undefined,
+          // Permanent address
+          permanentLine1:    form.permanentLine1    || undefined,
+          permanentLine2:    form.permanentLine2    || undefined,
+          permanentCity:     form.permanentCity     || undefined,
+          permanentState:    form.permanentState    || undefined,
+          permanentPincode:  form.permanentPincode  || undefined,
+          permanentCountry:  form.permanentCountry  || undefined,
+          // Statutory IDs
+          panNumber:     form.panNumber     || undefined,
+          aadhaarNumber: form.aadhaarNumber || undefined,
+          pfNumber:      form.pfNumber      || undefined,
+          uanNumber:     form.uanNumber     || undefined,
+          biometricId:   form.biometricId   || undefined,
         },
         shiftId: form.shiftId ? Number(form.shiftId) : undefined,
         // New hires start at zero across the board. Sick Leave accrues
@@ -493,6 +596,7 @@ export default function OnboardEmployeePage() {
     { n: 2, label: "Job Details",     Icon: Briefcase },
     { n: 3, label: "Work Details",    Icon: SettingsIcon },
     { n: 4, label: "Compensation",    Icon: IndianRupee },
+    { n: 5, label: "Address & IDs",   Icon: UserIcon },
   ] as const;
 
   return (
@@ -540,7 +644,7 @@ export default function OnboardEmployeePage() {
                 className="h-9 px-5 text-[13px] font-semibold text-[#008CFF] border border-[#008CFF]/40 rounded-lg hover:bg-[#008CFF]/5"
               >Back</button>
             )}
-            {step < 4 ? (
+            {step < 5 ? (
               <button
                 onClick={() => stepValid && setStep(s => (s + 1) as any)}
                 disabled={!stepValid}
@@ -747,6 +851,59 @@ export default function OnboardEmployeePage() {
                   <Input v={form.mobileNumber} set={v => set("mobileNumber", v)} placeholder="Write mobile number" />
                 </div>
               </Field>
+              <Field label="Work Phone">
+                <Input v={form.workPhone} set={v => set("workPhone", v)} placeholder="Work landline / extension" />
+              </Field>
+              <Field label="Home Phone">
+                <Input v={form.homePhone} set={v => set("homePhone", v)} placeholder="Home landline" />
+              </Field>
+              <Field label="Personal Email">
+                <Input type="email" v={form.personalEmail} set={v => set("personalEmail", v)} placeholder="personal@example.com" />
+              </Field>
+            </Grid>
+          </StepCard>
+        )}
+
+        {step === 1 && (
+          <StepCard title="Personal Details & Family">
+            <Grid>
+              <Field label="Marital Status">
+                <Select v={form.maritalStatus} set={v => set("maritalStatus", v)} opts={["", "Single", "Married", "Divorced", "Widowed"]} />
+              </Field>
+              <Field label="Blood Group">
+                <Select v={form.bloodGroup} set={v => set("bloodGroup", v)} opts={["", "A+ (A Positive)", "A- (A Negative)", "B+ (B Positive)", "B- (B Negative)", "AB+ (AB Positive)", "AB- (AB Negative)", "O+ (O Positive)", "O- (O Negative)", "Not Available"]} />
+              </Field>
+              <Field label="Physically Handicapped">
+                <Select v={form.physicallyHandicapped} set={v => set("physicallyHandicapped", v)} opts={["No", "Yes"]} />
+              </Field>
+              <Field label="Father Name">
+                <Input v={form.fatherName} set={v => set("fatherName", v)} placeholder="As printed on PAN card" />
+              </Field>
+              <Field label="Mother Name">
+                <Input v={form.motherName} set={v => set("motherName", v)} placeholder="Mother's full name" />
+              </Field>
+              <Field label="Spouse Name">
+                <Input v={form.spouseName} set={v => set("spouseName", v)} placeholder="If applicable" />
+              </Field>
+              <Field label="Children Names" hint="Comma-separated if multiple">
+                <Input v={form.childrenNames} set={v => set("childrenNames", v)} placeholder="e.g. Ria, Rohan" />
+              </Field>
+            </Grid>
+          </StepCard>
+        )}
+
+        {step === 1 && (
+          <StepCard title="Emergency Contact">
+            <Grid cols={3}>
+              <Field label="Contact Name">
+                <Input v={form.emergencyContactName} set={v => set("emergencyContactName", v)} placeholder="Person's name" />
+              </Field>
+              <Field label="Relationship">
+                <Select v={form.emergencyRelationship} set={v => set("emergencyRelationship", v)} opts={["", "Father", "Mother", "Spouse", "Sibling", "Friend", "Guardian", "Other"]} />
+              </Field>
+              <Field label="Contact Phone">
+                <Input type="tel" v={form.emergencyPhone} set={v => set("emergencyPhone", v)} placeholder="Phone number" />
+              </Field>
             </Grid>
           </StepCard>
         )}
@@ -925,7 +1082,7 @@ export default function OnboardEmployeePage() {
                 <Input
                   v={form.attendanceNumber}
                   set={v => { setAttendanceTouched(true); set("attendanceNumber", v); }}
-                  placeholder={employeeIdPrefix || "Auto-fills from employee number"}
+                  placeholder={fullEmployeeId || "Auto-fills from employee number"}
                 />
               </Field>
               <Field label="Time Tracking Policy">
@@ -935,6 +1092,12 @@ export default function OnboardEmployeePage() {
               <Field label="Penalization Policy">
                 <CustomSelect listKey="penalizationPolicy" defaults={["Default", "Strict", "Lenient"]}
                   value={form.penalizationPolicy} onChange={v => set("penalizationPolicy", v)} />
+              </Field>
+              <Field label="Attendance Capture Scheme">
+                <Select v={form.attendanceCaptureScheme} set={v => set("attendanceCaptureScheme", v)} opts={["On-Site", "Remote", "Hybrid"]} />
+              </Field>
+              <Field label="Cost Center">
+                <Input v={form.costCenter} set={v => set("costCenter", v)} placeholder="e.g. NB Media" />
               </Field>
             </Grid>
           </StepCard>
@@ -1064,6 +1227,76 @@ export default function OnboardEmployeePage() {
               )}
             </div>
           </div>
+        )}
+
+        {step === 5 && (
+          <>
+            <StepCard title="Current Address">
+              <Grid>
+                <Field label="Address Line 1">
+                  <Input v={form.addressLine1} set={v => set("addressLine1", v)} placeholder="House / street" />
+                </Field>
+                <Field label="Address Line 2">
+                  <Input v={form.addressLine2} set={v => set("addressLine2", v)} placeholder="Area / landmark (optional)" />
+                </Field>
+                <Field label="City">
+                  <Input v={form.city} set={v => set("city", v)} placeholder="e.g. Mohali" />
+                </Field>
+                <Field label="State">
+                  <Input v={form.state} set={v => set("state", v)} placeholder="e.g. Punjab" />
+                </Field>
+                <Field label="Pincode">
+                  <Input v={form.addressPincode} set={v => set("addressPincode", v)} placeholder="6-digit pincode" />
+                </Field>
+                <Field label="Country">
+                  <Input v={form.addressCountry} set={v => set("addressCountry", v)} placeholder="India" />
+                </Field>
+              </Grid>
+            </StepCard>
+
+            <StepCard title="Permanent Address">
+              <Grid>
+                <Field label="Address Line 1">
+                  <Input v={form.permanentLine1} set={v => set("permanentLine1", v)} placeholder="House / street" />
+                </Field>
+                <Field label="Address Line 2">
+                  <Input v={form.permanentLine2} set={v => set("permanentLine2", v)} placeholder="Area / landmark (optional)" />
+                </Field>
+                <Field label="City">
+                  <Input v={form.permanentCity} set={v => set("permanentCity", v)} placeholder="City" />
+                </Field>
+                <Field label="State">
+                  <Input v={form.permanentState} set={v => set("permanentState", v)} placeholder="State" />
+                </Field>
+                <Field label="Pincode">
+                  <Input v={form.permanentPincode} set={v => set("permanentPincode", v)} placeholder="6-digit pincode" />
+                </Field>
+                <Field label="Country">
+                  <Input v={form.permanentCountry} set={v => set("permanentCountry", v)} placeholder="India" />
+                </Field>
+              </Grid>
+            </StepCard>
+
+            <StepCard title="Government IDs & Biometric">
+              <Grid>
+                <Field label="PAN Number">
+                  <Input v={form.panNumber} set={v => set("panNumber", v)} placeholder="ABCDE1234F" />
+                </Field>
+                <Field label="Aadhaar Number">
+                  <Input v={form.aadhaarNumber} set={v => set("aadhaarNumber", v)} placeholder="12-digit Aadhaar" />
+                </Field>
+                <Field label="PF Number">
+                  <Input v={form.pfNumber} set={v => set("pfNumber", v)} placeholder="Provident Fund number" />
+                </Field>
+                <Field label="UAN Number">
+                  <Input v={form.uanNumber} set={v => set("uanNumber", v)} placeholder="Universal Account Number" />
+                </Field>
+                <Field label="Biometric ID" hint="As assigned by office biometric system">
+                  <Input v={form.biometricId} set={v => set("biometricId", v)} placeholder="e.g. 87" />
+                </Field>
+              </Grid>
+            </StepCard>
+          </>
         )}
       </div>
 
