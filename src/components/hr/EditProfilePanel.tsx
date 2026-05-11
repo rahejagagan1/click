@@ -136,6 +136,10 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
   // too — it's "personal information about the employee", same surface.
   const [basic, setBasic] = useState({
     displayName:   user.name ?? "",
+    employeeId:    p.employeeId ?? "",
+    firstName:     p.firstName ?? "",
+    middleName:    p.middleName ?? "",
+    lastName:      p.lastName ?? "",
     dateOfBirth:   dateISO(p.dateOfBirth),
     gender:        p.gender ?? "",
     bloodGroup:    p.bloodGroup ?? "",
@@ -157,9 +161,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
     phone:                 p.phone ?? "",
     workPhone:             p.workPhone ?? "",
     homePhone:             p.homePhone ?? "",
-    emergencyContact:      p.emergencyContact ?? "",
     emergencyRelationship: p.emergencyRelationship ?? "",
-    emergencyPhone:        p.emergencyPhone ?? "",
   });
   const contactHook = useSaveSection(userId);
 
@@ -240,6 +242,10 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
   useEffect(() => {
     setBasic({
       displayName:   user.name ?? "",
+      employeeId:    p.employeeId ?? "",
+      firstName:     p.firstName ?? "",
+      middleName:    p.middleName ?? "",
+      lastName:      p.lastName ?? "",
       dateOfBirth:   dateISO(p.dateOfBirth),
       gender:        p.gender ?? "",
       bloodGroup:    p.bloodGroup ?? "",
@@ -255,9 +261,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
       phone:                 p.phone ?? "",
       workPhone:             p.workPhone ?? "",
       homePhone:             p.homePhone ?? "",
-      emergencyContact:      p.emergencyContact ?? "",
       emergencyRelationship: p.emergencyRelationship ?? "",
-      emergencyPhone:        p.emergencyPhone ?? "",
     });
     setAddress({
       address:          p.address ?? "",
@@ -313,11 +317,24 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.id, p.id]);
 
-  // Manager dropdown — exclude self.
-  const managerOpts = useMemo(
-    () => managers.filter((m) => m.id !== userId),
-    [managers, userId],
-  );
+  // Manager dropdown — exclude self, but always include whoever is
+  // currently assigned as Reporting / Inline manager. /api/managers
+  // filters out admin / ceo / special_access roles, so without this
+  // union the select can't render the matching <option> for a manager
+  // that's outside the pickable set, and the field looks empty even
+  // though managerId is set in the DB.
+  const managerOpts = useMemo(() => {
+    const base = managers.filter((m) => m.id !== userId);
+    const seen = new Set(base.map((m) => m.id));
+    const extras: Array<{ id: number; name: string }> = [];
+    for (const assigned of [user.manager, user.inlineManager] as const) {
+      if (assigned && assigned.id !== userId && !seen.has(assigned.id)) {
+        extras.push({ id: assigned.id, name: assigned.name });
+        seen.add(assigned.id);
+      }
+    }
+    return [...extras, ...base];
+  }, [managers, userId, user.manager, user.inlineManager]);
 
   return (
     <div className="space-y-5">
@@ -329,35 +346,70 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
         saving={basicHook.saving}
         error={basicHook.error}
         savedAt={basicHook.savedAt}
-        onSave={() => basicHook.save({
-          displayName:           basic.displayName.trim(),
-          dateOfBirth:           basic.dateOfBirth || null,
-          gender:                basic.gender || null,
-          bloodGroup:            basic.bloodGroup || null,
-          maritalStatus:         basic.maritalStatus || null,
-          physicallyHandicapped: basic.physicallyHandicapped || null,
-          // Father Name persists into the existing parentName column.
-          parentName:            basic.fatherName.trim() || null,
-          motherName:            basic.motherName.trim() || null,
-          spouseName:            basic.spouseName.trim() || null,
-          childrenNames:         basic.childrenNames.trim() || null,
-        })}
+        onSave={() => {
+          // Auto-derive displayName from first/middle/last when HR has typed
+          // a name but left displayName untouched — keeps the org-wide name
+          // in sync with the canonical first/middle/last fields.
+          const fullName = [basic.firstName, basic.middleName, basic.lastName]
+            .map((s) => s.trim()).filter(Boolean).join(" ");
+          const displayName = basic.displayName.trim() || fullName;
+          basicHook.save({
+            displayName,
+            employeeId:            basic.employeeId.trim() || null,
+            firstName:             basic.firstName.trim() || null,
+            middleName:            basic.middleName.trim() || null,
+            lastName:              basic.lastName.trim() || null,
+            dateOfBirth:           basic.dateOfBirth || null,
+            gender:                basic.gender || null,
+            bloodGroup:            basic.bloodGroup || null,
+            maritalStatus:         basic.maritalStatus || null,
+            physicallyHandicapped: basic.physicallyHandicapped || null,
+            // Father Name persists into the existing parentName column.
+            parentName:            basic.fatherName.trim() || null,
+            motherName:            basic.motherName.trim() || null,
+            spouseName:            basic.spouseName.trim() || null,
+            childrenNames:         basic.childrenNames.trim() || null,
+          });
+        }}
       >
-        {/* HRM (Employee) Number — read-only chip so HR can see it
-            but can't accidentally edit it (it's auto-allocated from
-            the Number Series). Shown only when one exists. */}
-        {p.employeeId && (
-          <div className="mb-4 flex items-center gap-2">
-            <span className="text-[10.5px] uppercase tracking-wider font-semibold text-slate-500">HRM No.</span>
-            <span className="inline-flex items-center rounded-md bg-slate-100 dark:bg-white/[0.05] px-2 py-1 text-[12.5px] font-mono font-semibold text-slate-700 dark:text-slate-200 ring-1 ring-inset ring-slate-200 dark:ring-white/10">
-              {p.employeeId}
-            </span>
-            <span className="text-[11px] text-slate-400">read-only · also used as Attendance No.</span>
-          </div>
-        )}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {/* HRM (Employee) Number — editable. Auto-allocated at onboarding
+            from the Number Series, but HR can override if needed. Saving
+            this also writes the same value to Attendance No. (server-side)
+            because the convention is they stay in sync. */}
+        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className={cls.label}>Display Name</label>
+            <label className={cls.label}>HRM No.</label>
+            <input
+              className={`${cls.field} font-mono`}
+              value={basic.employeeId}
+              onChange={(e) => setBasic({ ...basic, employeeId: e.target.value })}
+              placeholder="e.g. HRM104"
+            />
+            <p className="mt-1 text-[10.5px] text-slate-400">
+              Also used as Attendance No. — kept in sync on save.
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div>
+            <label className={cls.label}>First Name</label>
+            <input className={cls.field} value={basic.firstName}
+              onChange={(e) => setBasic({ ...basic, firstName: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>Middle Name <span className="text-[10px] text-slate-400">(optional)</span></label>
+            <input className={cls.field} value={basic.middleName}
+              onChange={(e) => setBasic({ ...basic, middleName: e.target.value })} />
+          </div>
+          <div>
+            <label className={cls.label}>Last Name</label>
+            <input className={cls.field} value={basic.lastName}
+              onChange={(e) => setBasic({ ...basic, lastName: e.target.value })} />
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className={cls.label}>Display Name <span className="text-[10px] text-slate-400">(shown across the app — leave blank to auto-derive)</span></label>
             <input className={cls.field} value={basic.displayName}
               onChange={(e) => setBasic({ ...basic, displayName: e.target.value })} />
           </div>
@@ -446,9 +498,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
           phone:                 contact.phone.trim() || null,
           workPhone:             contact.workPhone.trim() || null,
           homePhone:             contact.homePhone.trim() || null,
-          emergencyContact:      contact.emergencyContact.trim() || null,
           emergencyRelationship: contact.emergencyRelationship.trim() || null,
-          emergencyPhone:        contact.emergencyPhone.trim() || null,
         })}
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -473,11 +523,6 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
               onChange={(e) => setContact({ ...contact, homePhone: e.target.value })} />
           </div>
           <div>
-            <label className={cls.label}>Emergency Contact</label>
-            <input className={cls.field} value={contact.emergencyContact}
-              onChange={(e) => setContact({ ...contact, emergencyContact: e.target.value })} />
-          </div>
-          <div>
             <label className={cls.label}>Relationship</label>
             <CustomSelect
               listKey="emergencyRelationship"
@@ -486,11 +531,6 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
               onChange={(v) => setContact({ ...contact, emergencyRelationship: v })}
               placeholder="—"
             />
-          </div>
-          <div className="sm:col-span-2">
-            <label className={cls.label}>Emergency Phone</label>
-            <input className={cls.field} value={contact.emergencyPhone}
-              onChange={(e) => setContact({ ...contact, emergencyPhone: e.target.value })} />
           </div>
         </div>
       </Section>
@@ -710,7 +750,9 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
             />
           </div>
           <div>
-            <label className={cls.label}>Joining Date</label>
+            <label className={cls.label}>
+              {job.employmentType === "intern" ? "Internship Start Date" : "Joining Date"}
+            </label>
             <input type="date" className={cls.field} value={job.joiningDate}
               onChange={(e) => setJob({ ...job, joiningDate: e.target.value })} />
           </div>
@@ -826,12 +868,13 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
           </div>
           <div>
             <label className={cls.label}>Attendance Number</label>
-            <input className={cls.field} value={work.attendanceNumber}
+            <input className={`${cls.field} font-mono`}
+              value={work.attendanceNumber || basic.employeeId}
               onChange={(e) => setWork({ ...work, attendanceNumber: e.target.value })}
-              placeholder="Defaults to HRM No." />
+              placeholder={basic.employeeId || "e.g. HRM104"} />
             <p className="mt-1 text-[10.5px] text-slate-400">
-              Convention: Attendance Number = HRM No. (e.g. <span className="font-mono">{p.employeeId || "HRM104"}</span>).
-              Leave blank to inherit; otherwise enter a custom number.
+              Convention: Attendance Number = HRM No. — kept in sync with{" "}
+              <span className="font-mono">{basic.employeeId || "HRM104"}</span> on save.
             </p>
           </div>
           <div>

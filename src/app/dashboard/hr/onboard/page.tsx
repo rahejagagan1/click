@@ -74,7 +74,6 @@ type Form = {
   motherName:              string;
   spouseName:              string;
   childrenNames:           string;
-  emergencyContactName:    string;
   emergencyRelationship:   string;
   emergencyPhone:          string;
 
@@ -154,7 +153,7 @@ const EMPTY: Form = {
   workPhone: "", homePhone: "", personalEmail: "",
   maritalStatus: "", bloodGroup: "", physicallyHandicapped: "No",
   fatherName: "", motherName: "", spouseName: "", childrenNames: "",
-  emergencyContactName: "", emergencyRelationship: "", emergencyPhone: "",
+  emergencyRelationship: "", emergencyPhone: "",
   joiningDate: new Date().toISOString().slice(0, 10),
   jobTitle: "", secondaryJobTitle: "", timeType: "Full Time",
   legalEntity: "NB Media Productions", businessUnit: "NB Media", department: "",
@@ -501,7 +500,6 @@ export default function OnboardEmployeePage() {
           spouseName:            form.spouseName            || undefined,
           childrenNames:         form.childrenNames         || undefined,
           // Emergency contact
-          emergencyContact:      form.emergencyContactName  || undefined,
           emergencyRelationship: form.emergencyRelationship || undefined,
           emergencyPhone:        form.emergencyPhone        || undefined,
           // Org / attendance extras
@@ -894,10 +892,7 @@ export default function OnboardEmployeePage() {
 
         {step === 1 && (
           <StepCard title="Emergency Contact">
-            <Grid cols={3}>
-              <Field label="Contact Name">
-                <Input v={form.emergencyContactName} set={v => set("emergencyContactName", v)} placeholder="Person's name" />
-              </Field>
+            <Grid cols={2}>
               <Field label="Relationship">
                 <Select v={form.emergencyRelationship} set={v => set("emergencyRelationship", v)} opts={["", "Father", "Mother", "Spouse", "Sibling", "Friend", "Guardian", "Other"]} />
               </Field>

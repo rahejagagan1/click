@@ -134,7 +134,7 @@ export default function ProfilePage() {
 
   const [form, setForm] = useState({
     phone: "", dateOfBirth: "", gender: "", bloodGroup: "", maritalStatus: "",
-    emergencyContact: "", emergencyPhone: "",
+    emergencyPhone: "",
     address: "", city: "", state: "",
     profilePictureUrl: "",
     personalEmail: "", workPhone: "",
@@ -158,7 +158,7 @@ export default function ProfilePage() {
         phone: p.phone ?? "", workPhone: p.workPhone ?? "", personalEmail: p.personalEmail ?? "",
         dateOfBirth: dateISO(p.dateOfBirth),
         gender: p.gender ?? "", bloodGroup: p.bloodGroup ?? "", maritalStatus: p.maritalStatus ?? "",
-        emergencyContact: p.emergencyContact ?? "", emergencyPhone: p.emergencyPhone ?? "",
+        emergencyPhone: p.emergencyPhone ?? "",
         address: p.address ?? "", city: p.city ?? "", state: p.state ?? "",
         profilePictureUrl: profile.profilePictureUrl ?? "",
         // Onboarding-set fields straight from the EmployeeProfile row.
