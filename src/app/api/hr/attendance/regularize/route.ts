@@ -6,6 +6,7 @@ import { parseBody } from "@/lib/validate";
 import { notifyUsers } from "@/lib/notifications";
 import { writeAuditLog } from "@/lib/audit-log";
 import { istTimeOnDate, istMonthRange, istTodayDateOnly, istDateOnlyFrom } from "@/lib/ist-date";
+import { isRegularizationWindowEnforced } from "@/app/api/hr/policy/regularization-window/route";
 
 // Schema covers both self-apply and admin-grant flavours of regularize POST.
 const RegularizePost = z.object({
@@ -180,7 +181,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 48-hour window — bypassed on admin grant.
+    // 48-hour window — bypassed on admin grant. The window itself is gated
+    // by an org-wide HR policy flag (SyncConfig.regularization_window_enforced).
+    // When the flag is OFF, employees can self-apply for any past IST date;
+    // future dates are still rejected, and admin grants still bypass.
     if (!isAdminGrant) {
       const todayIst = istTodayDateOnly();
       const diff = dayDiff(todayIst, targetDateOnly);
@@ -190,7 +194,8 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      if (diff > REGULARIZATION_WINDOW_DAYS) {
+      const windowEnforced = await isRegularizationWindowEnforced();
+      if (windowEnforced && diff > REGULARIZATION_WINDOW_DAYS) {
         const dateLabel = targetDateOnly.toLocaleDateString("en-IN", {
           day: "2-digit", month: "short", year: "numeric", timeZone: "UTC",
         });
@@ -458,11 +463,16 @@ export async function PUT(req: NextRequest) {
     // Apply approved punch correction. We've already gated to L2
     // approve above, so this runs unconditionally.
     //
-    //  1. Clocked in, missed clock-out
-    //     → keep clockIn (cap at 10:00 IST if late), clockOut = 23:59 IST.
-    //  2. Both clock-in and clock-out exist (user was late or needs fix)
-    //     → cap clockIn at 10:00 IST, keep clockOut.
-    //  3. Missed both clock-in AND clock-out
+    //  1. Clocked in, missed clock-out (rawOut only synthesised)
+    //     → keep real clockIn as-is, clockOut = 23:59 IST.
+    //  2. Both real clock-in AND clock-out exist
+    //     → keep BOTH as-is. Regularization here is just an audit/
+    //       approval trail; the punches themselves are valid and we
+    //       no longer 10am-cap the clock-in (that was clobbering the
+    //       user's actual time and surprising HR).
+    //  3. Missed clock-in but real clock-out exists
+    //     → clockIn = 10:00 IST (standard "treat as on-time"), keep clockOut.
+    //  4. Missed both punches entirely
     //     → standard 9-hour shift: 09:00 → 18:00 IST.
     {
       const dateOnly = new Date(reg.date);
@@ -474,8 +484,24 @@ export async function PUT(req: NextRequest) {
       const sixPmIst     = istTimeOnDate(dateOnly, 18,  0);
       const endOfDayIst  = istTimeOnDate(dateOnly, 23, 59);
 
-      const rawIn  = reg.requestedIn  ?? existing?.clockIn  ?? null;
-      const rawOut = reg.requestedOut ?? existing?.clockOut ?? null;
+      // Track WHICH side of each punch is "real" (already on the
+      // Attendance row) vs. synthesised by the regularization. Real
+      // punches are preserved verbatim — HR is just rubber-stamping a
+      // valid record; the user already came in/left at those times.
+      const realIn  = existing?.clockIn  ?? null;
+      const realOut = existing?.clockOut ?? null;
+      const reqIn   = reg.requestedIn  ?? null;
+      const reqOut  = reg.requestedOut ?? null;
+      const rawIn   = realIn  ?? reqIn;
+      const rawOut  = realOut ?? reqOut;
+
+      // 10am-IST cap is a "treat-as-on-time" perk that should ONLY apply
+      // to HR-synthesised clock-ins. A real clock-in is the user's actual
+      // wall-clock time — we never overwrite it, otherwise the approved
+      // record contradicts the audit trail.
+      const inIsReal = !!realIn;
+      const capIfNeeded = (t: Date) =>
+        inIsReal ? t : (t.getTime() > tenAmIst.getTime() ? tenAmIst : t);
 
       let finalClockIn:  Date;
       let finalClockOut: Date;
@@ -483,13 +509,13 @@ export async function PUT(req: NextRequest) {
         finalClockIn  = nineAmIst;
         finalClockOut = sixPmIst;
       } else if (rawIn !== null && rawOut === null) {
-        finalClockIn  = rawIn.getTime() > tenAmIst.getTime() ? tenAmIst : rawIn;
+        finalClockIn  = capIfNeeded(rawIn);
         finalClockOut = endOfDayIst;
       } else if (rawIn === null && rawOut !== null) {
         finalClockIn  = tenAmIst;
         finalClockOut = rawOut;
       } else {
-        finalClockIn  = rawIn!.getTime() > tenAmIst.getTime() ? tenAmIst : rawIn!;
+        finalClockIn  = capIfNeeded(rawIn!);
         finalClockOut = rawOut!;
       }
 

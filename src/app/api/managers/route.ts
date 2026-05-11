@@ -1,13 +1,21 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
+import { isDeveloperEmail } from "@/lib/hr/notification-policy";
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
     try {
-        const { errorResponse } = await requireAuth();
+        const { session, errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
+        const viewer = session?.user as any;
+        // Developer invisibility: hide developer-account names from
+        // anyone except other developers.
+        const viewerIsDev = isDeveloperEmail(viewer?.email ?? null);
+        const devEmails = (process.env.DEVELOPER_EMAILS || "")
+            .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+        const hideDev = !viewerIsDev && devEmails.length > 0 ? devEmails : [];
 
         // True report-OWNERS only — used by the "Manager Reports"
         // sidebar and the Reporting/Inline-Manager dropdowns.
@@ -35,6 +43,7 @@ export async function GET() {
                         "hr_manager",
                     ] } },
                 ],
+                ...(hideDev.length > 0 ? { NOT: { email: { in: hideDev } } } : {}),
             },
             orderBy: { name: "asc" },
             select: {

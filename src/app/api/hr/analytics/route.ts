@@ -7,10 +7,14 @@ export async function GET() {
   const { errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   try {
-    const now = new Date();
-    const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    // Anchor month boundaries to the IST calendar so newJoiners / exits
+    // don't shift around UTC midnight (which is 05:30 IST). Pulling year/
+    // month off the IST "today" gives the right month name everywhere.
     const todayIst = istTodayDateOnly();
+    const y = todayIst.getUTCFullYear();
+    const m = todayIst.getUTCMonth();
+    const thisMonth = new Date(Date.UTC(y, m,     1));
+    const lastMonth = new Date(Date.UTC(y, m - 1, 1));
 
     const [totalEmployees, activeEmployees, newJoiners, exits, attendanceToday, pendingLeaves, openTickets, totalAssets, assignedAssets] = await Promise.all([
       prisma.user.count(),

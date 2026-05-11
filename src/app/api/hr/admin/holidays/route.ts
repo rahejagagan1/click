@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
+import { istTodayDateOnly } from "@/lib/ist-date";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
   if (errorResponse) return errorResponse;
   try {
     const { searchParams } = new URL(req.url);
-    const year = parseInt(searchParams.get("year") || String(new Date().getFullYear()), 10);
+    const year = parseInt(searchParams.get("year") || String(istTodayDateOnly().getUTCFullYear()), 10);
     const holidays = await prisma.holidayCalendar.findMany({
       where: { year },
       orderBy: { date: "asc" },
