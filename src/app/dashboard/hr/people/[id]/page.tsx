@@ -41,7 +41,17 @@ function Initials({ name, size = 80, fontSize = 22 }: { name?: string; size?: nu
 }
 
 function Avatar({ url, name, size = 80, fontSize = 22 }: { url?: string | null; name?: string; size?: number; fontSize?: number }) {
-  if (url) return <img src={url} alt={name ?? ""} style={{ width: size, height: size }} className="rounded-full object-cover" />;
+  const [failed, setFailed] = useState(false);
+  if (url && !failed) return (
+    <img
+      src={url}
+      alt={name ?? ""}
+      style={{ width: size, height: size }}
+      className="rounded-full object-cover"
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+    />
+  );
   return <Initials name={name} size={size} fontSize={fontSize} />;
 }
 
@@ -319,7 +329,6 @@ export default function EmployeeDetailPage() {
                   <div className="grid grid-cols-2 gap-x-8 gap-y-5">
                     <Compact label="Email"             value={user.email} />
                     <Compact label="Phone"             value={p.phone} />
-                    <Compact label="Emergency Contact" value={p.emergencyContact} />
                     <Compact label="Emergency Phone"   value={p.emergencyPhone} />
                     <div className="col-span-2">
                       <Compact label="Address" value={[p.address, p.city, p.state].filter(Boolean).join(", ")} />
@@ -353,7 +362,6 @@ export default function EmployeeDetailPage() {
                     <KV label="Personal Email" value={p.personalEmail} />
                     <KV label="Mobile Number"  value={p.phone} />
                     <KV label="Work Number"    value={p.workPhone} />
-                    <KV label="Emergency Contact" value={p.emergencyContact} />
                     <KV label="Emergency Phone"   value={p.emergencyPhone} />
                   </Grid3>
                 </DetailCard>
@@ -741,7 +749,6 @@ function ProfileEditModal({
     personalEmail: p.personalEmail ?? "",
     phone:       p.phone ?? "",
     workPhone:   p.workPhone ?? "",
-    emergencyContact: p.emergencyContact ?? "",
     emergencyPhone:   p.emergencyPhone ?? "",
     address:     p.address ?? "",
     city:        p.city ?? "",
@@ -775,7 +782,6 @@ function ProfileEditModal({
         { key: "personalEmail",    label: "Personal Email", type: "email", fullWidth: true },
         { key: "phone",            label: "Mobile Number",  type: "tel" },
         { key: "workPhone",        label: "Work Number",    type: "tel" },
-        { key: "emergencyContact", label: "Emergency Contact" },
         { key: "emergencyPhone",   label: "Emergency Phone", type: "tel" },
       ],
     },
