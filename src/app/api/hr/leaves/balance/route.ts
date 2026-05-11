@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, requireAdmin, resolveUserId, serverError } from "@/lib/api-auth";
 import { accrueLeavesForUser, ymKey } from "@/lib/leave-accrual";
+import { istTodayDateOnly } from "@/lib/ist-date";
 
 export async function GET(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
@@ -13,7 +14,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const isAdmin = self.orgLevel === "ceo" || self.isDeveloper || self.orgLevel === "hr_manager";
     const userId = isAdmin ? parseInt(searchParams.get("userId") || String(myId)) : myId;
-    const year = parseInt(searchParams.get("year") || String(new Date().getFullYear()));
+    const year = parseInt(searchParams.get("year") || String(istTodayDateOnly().getUTCFullYear()));
 
     // Self-heal: ensure the user has a LeaveBalance row for every active
     // LeaveType in the requested year. Every type defaults to 0 days —

@@ -1,11 +1,11 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import useSWR, { mutate } from "swr";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3 } from "lucide-react";
+import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3 } from "lucide-react";
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
@@ -42,6 +42,25 @@ const DAYS_LABEL = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 export default function HRAdminPage() {
   const { data: session } = useSession();
   const user = session?.user as any;
+  // Hover-flyout state for the "Permissions" rail menu — mirrors the
+  // Reports / HR-Me flyout pattern in the main sidebar. Hover opens;
+  // hover-out closes after a 200ms grace so the cursor can travel from
+  // the button into the submenu without it snapping shut. Click also
+  // toggles (for accessibility + touch devices).
+  const [permsOpen, setPermsOpen] = useState(false);
+  const permsCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const permsHandlers = {
+    onMouseEnter: () => {
+      if (permsCloseTimer.current) { clearTimeout(permsCloseTimer.current); permsCloseTimer.current = null; }
+      setPermsOpen(true);
+    },
+    onMouseLeave: () => {
+      permsCloseTimer.current = setTimeout(() => setPermsOpen(false), 200);
+    },
+  };
+  useEffect(() => () => {
+    if (permsCloseTimer.current) clearTimeout(permsCloseTimer.current);
+  }, []);
   // Includes ceo / developer / special_access / role=admin / hr_manager —
   // all of whom should see the HR Dashboard. Full admins see every tab;
   // hr_manager-only users see a curated subset.
@@ -269,16 +288,48 @@ export default function HRAdminPage() {
             </Link>
           )}
           {showTabPermsRail && (
-            <Link
-              href="/dashboard/hr/admin/permissions"
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span className="flex-1">Tab Permissions</span>
-              <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </Link>
+            // Permissions group — hover-flyout. Mouse-enter opens the
+            // submenu; mouse-leave (anywhere in the wrapper) starts a
+            // 200ms grace timer before closing, so the cursor can move
+            // from the trigger into the submenu without it snapping shut.
+            // The trigger is still a real <button> so keyboard users and
+            // touch devices can toggle by click.
+            <div {...permsHandlers}>
+              <button
+                type="button"
+                onClick={() => setPermsOpen((v) => !v)}
+                aria-expanded={permsOpen}
+                aria-controls="hr-rail-permissions-children"
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span className="flex-1">Permissions</span>
+                <svg
+                  className={`w-3.5 h-3.5 opacity-60 transition-transform ${permsOpen ? "rotate-90" : ""}`}
+                  fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+              {permsOpen && (
+                <div id="hr-rail-permissions-children" className="ml-3 mt-0.5 pl-3 border-l border-slate-200 dark:border-white/[0.06] space-y-0.5">
+                  <Link
+                    href="/dashboard/hr/admin/permissions"
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[12.5px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+                  >
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-300" />
+                    <span className="flex-1">Tab Permissions</span>
+                  </Link>
+                  <Link
+                    href="/dashboard/hr/admin/permissions/payroll-attendance"
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[12.5px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+                  >
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-300" />
+                    <span className="flex-1">Payroll &amp; Attendance</span>
+                  </Link>
+                </div>
+              )}
+            </div>
           )}
           {showManageKpisRail && (
             <Link
