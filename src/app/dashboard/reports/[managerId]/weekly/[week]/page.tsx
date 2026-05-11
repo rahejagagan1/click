@@ -740,6 +740,13 @@ export default function WeeklyReportPage() {
     const [isSubmitted,  setIsSubmitted]  = useState(false);
     const [isDraftSaved, setIsDraftSaved] = useState(false);
     const [submitting,        setSubmitting]        = useState(false);
+    // Synchronous re-entry guard for postReport. `submitting` is React
+    // state — there's a render gap between click → setState → re-render
+    // where the disabled prop hasn't been applied yet, so a double-click
+    // (or Submit clicked while a Save-Draft is mid-flight) can fire two
+    // concurrent POSTs. A ref is checked synchronously in postReport
+    // before the await, so the second click is dropped immediately.
+    const submitInFlight = React.useRef(false);
     const [submitError,       setSubmitError]       = useState<string | null>(null);
     const [statusLoaded,      setStatusLoaded]      = useState(false);
     const [showConfirm,       setShowConfirm]       = useState(false);
@@ -1132,6 +1139,8 @@ export default function WeeklyReportPage() {
             const err = validateRequired();
             if (err) { setSubmitError(err); setShowConfirm(false); return; }
         }
+        if (submitInFlight.current) return;
+        submitInFlight.current = true;
         setSubmitting(true);
         setSubmitError(null);
         setShowConfirm(false);
@@ -1169,6 +1178,7 @@ export default function WeeklyReportPage() {
             setSubmitError(e.message);
         }
         setSubmitting(false);
+        submitInFlight.current = false;
     };
 
     const handleSubmit    = () => postReport(false);
@@ -1269,12 +1279,16 @@ export default function WeeklyReportPage() {
                             <ResizableTh colIndex={3} widths={wColWidths} setWidths={setWColWidths}>Subtask Name</ResizableTh>
                             {!isResearcherReport && <ResizableTh colIndex={4} widths={wColWidths} setWidths={setWColWidths}>Case Status</ResizableTh>}
                             <ResizableTh colIndex={4} widths={wColWidths} setWidths={setWColWidths}>Hero Case? <span className="text-red-300">*</span></ResizableTh>
-                            <ResizableTh colIndex={4} widths={wColWidths} setWidths={setWColWidths}>TAT — First Draft <span className="text-red-300">*</span></ResizableTh>
-                            <ResizableTh colIndex={5} widths={wColWidths} setWidths={setWColWidths}>TAT — Revision <span className="text-red-400">*</span></ResizableTh>
-                            <ResizableTh colIndex={6} widths={wColWidths} setWidths={setWColWidths}>Reason for TAT Exceeding <span className="text-red-400">*</span></ResizableTh>
-                            <ResizableTh colIndex={7} widths={wColWidths} setWidths={setWColWidths}>Action Taken <span className="text-red-400">*</span></ResizableTh>
-                            <ResizableTh colIndex={8} widths={wColWidths} setWidths={setWColWidths}>Quality Score <span className="text-red-300">*</span></ResizableTh>
-                            <ResizableTh colIndex={9} widths={wColWidths} setWidths={setWColWidths}><span className="text-amber-200 italic text-[10px] font-medium">Remark (optional)</span></ResizableTh>
+                            {/* colIndex was previously a duplicate `4`, which made
+                                this column share width state with "Hero Case?" —
+                                resizing one resized both. Sequential numbering
+                                gives each column its own width. */}
+                            <ResizableTh colIndex={5} widths={wColWidths} setWidths={setWColWidths}>TAT — First Draft <span className="text-red-300">*</span></ResizableTh>
+                            <ResizableTh colIndex={6} widths={wColWidths} setWidths={setWColWidths}>TAT — Revision <span className="text-red-400">*</span></ResizableTh>
+                            <ResizableTh colIndex={7} widths={wColWidths} setWidths={setWColWidths}>Reason for TAT Exceeding <span className="text-red-400">*</span></ResizableTh>
+                            <ResizableTh colIndex={8} widths={wColWidths} setWidths={setWColWidths}>Action Taken <span className="text-red-400">*</span></ResizableTh>
+                            <ResizableTh colIndex={9} widths={wColWidths} setWidths={setWColWidths}>Quality Score <span className="text-red-300">*</span></ResizableTh>
+                            <ResizableTh colIndex={10} widths={wColWidths} setWidths={setWColWidths}><span className="text-amber-200 italic text-[10px] font-medium">Remark (optional)</span></ResizableTh>
                             <Th>{" "}</Th>
                         </tr>
                     </thead>
@@ -1361,12 +1375,14 @@ export default function WeeklyReportPage() {
                             <ResizableTh colIndex={3} widths={cColWidths} setWidths={setCColWidths}>Subtask Name</ResizableTh>
                             {!isResearcherReport && <ResizableTh colIndex={4} widths={cColWidths} setWidths={setCColWidths}>Case Status</ResizableTh>}
                             <ResizableTh colIndex={4} widths={cColWidths} setWidths={setCColWidths}>Hero Case? <span className="text-red-300">*</span></ResizableTh>
-                            <ResizableTh colIndex={4} widths={cColWidths} setWidths={setCColWidths}>TAT for the First Draft <span className="text-red-300">*</span></ResizableTh>
-                            <ResizableTh colIndex={5} widths={cColWidths} setWidths={setCColWidths}>TAT for Revision <span className="text-red-400">*</span></ResizableTh>
-                            <ResizableTh colIndex={6} widths={cColWidths} setWidths={setCColWidths}>Reason for TAT Exceeding <span className="text-red-400">*</span></ResizableTh>
-                            <ResizableTh colIndex={7} widths={cColWidths} setWidths={setCColWidths}>Action Taken <span className="text-red-400">*</span></ResizableTh>
-                            <ResizableTh colIndex={8} widths={cColWidths} setWidths={setCColWidths}>Quality Score <span className="text-red-300">*</span></ResizableTh>
-                            <ResizableTh colIndex={9} widths={cColWidths} setWidths={setCColWidths}><span className="text-amber-200 italic text-[10px] font-medium">Remark (optional)</span></ResizableTh>
+                            {/* See writer table above — duplicate colIndex 4
+                                made TAT share width state with Hero Case. */}
+                            <ResizableTh colIndex={5} widths={cColWidths} setWidths={setCColWidths}>TAT for the First Draft <span className="text-red-300">*</span></ResizableTh>
+                            <ResizableTh colIndex={6} widths={cColWidths} setWidths={setCColWidths}>TAT for Revision <span className="text-red-400">*</span></ResizableTh>
+                            <ResizableTh colIndex={7} widths={cColWidths} setWidths={setCColWidths}>Reason for TAT Exceeding <span className="text-red-400">*</span></ResizableTh>
+                            <ResizableTh colIndex={8} widths={cColWidths} setWidths={setCColWidths}>Action Taken <span className="text-red-400">*</span></ResizableTh>
+                            <ResizableTh colIndex={9} widths={cColWidths} setWidths={setCColWidths}>Quality Score <span className="text-red-300">*</span></ResizableTh>
+                            <ResizableTh colIndex={10} widths={cColWidths} setWidths={setCColWidths}><span className="text-amber-200 italic text-[10px] font-medium">Remark (optional)</span></ResizableTh>
                             <Th>{" "}</Th>
                         </tr>
                     </thead>

@@ -851,6 +851,18 @@ model Violation {
   status        ViolationStatus    @default(open)
   category            String?            // violation type: "attendance", "misconduct", "policy_breach", etc.
   actionTaken         String?            @db.Text
+  /// Optional PDF / doc uploaded by the reporter as evidence of the
+  /// action taken. The bytes live in `actionTakenFileBlob` (BYTEA)
+  /// so they survive redeploys — the legacy `actionTakenFileUrl`
+  /// pointed at /public/uploads/, which got wiped on every deploy.
+  /// `actionTakenFileName` preserves the original filename for the
+  /// Content-Disposition header on download. `actionTakenFileMime`
+  /// drives Content-Type. The legacy URL column is kept (nullable)
+  /// for one transition release; new uploads write only the blob.
+  actionTakenFileUrl  String?
+  actionTakenFileName String?
+  actionTakenFileBlob Bytes?
+  actionTakenFileMime String?
   notes               String?            @db.Text
   violationDate       DateTime?
   responsiblePersonId Int?
@@ -912,6 +924,47 @@ model EmployeeProfile {
   city              String?
   state             String?
   noticePeriodDays  Int       @default(30)
+  // ── Extended contact (mirrors Keka columns) ──
+  homePhone         String?
+  // ── Extended demographics ──
+  /// "Yes" | "No" — kept as a string for parity with the Keka export
+  /// column "Physically Handicapped"; nullable to allow legacy rows.
+  physicallyHandicapped String?
+  // ── Address splits (mirrors Keka's Line 1 / Line 2 / Zip / Country) ──
+  // The legacy single `address` column above acts as Line 1; addressLine2
+  // is the new optional second line. addressPincode + addressCountry are
+  // strict additions — the existing `workCountry` is for the WORK location,
+  // not the residential one.
+  addressLine2      String?
+  addressPincode    String?
+  addressCountry    String?   @default("India")
+  // ── Permanent address (separate from current/correspondence above) ──
+  permanentLine1    String?
+  permanentLine2    String?
+  permanentCity     String?
+  permanentState    String?
+  permanentPincode  String?
+  permanentCountry  String?   @default("India")
+  // ── Family ──
+  motherName        String?
+  spouseName        String?
+  /// Comma-separated list of children's names — matches Keka export shape.
+  childrenNames     String?
+  // ── Emergency contact relationship (we already had name + phone) ──
+  emergencyRelationship String?
+  // ── Policies / org extras ──
+  /// "On-Site" | "Remote" | "Hybrid" — Keka's attendance capture rule,
+  /// distinct from `workLocation` (the employee's work-mode preference)
+  /// and `jobLocation` (the city).
+  attendanceCaptureScheme String?
+  costCenter        String?
+  // ── Statutory IDs beyond PAN / Aadhaar ──
+  pfNumber          String?
+  uanNumber         String?
+  // ── Biometric (IN-specific Keka field) ──
+  /// Free-text since some employees have a numeric biometric ID, others
+  /// have none ("Not Available") or a multi-part code.
+  biometricId       String?
   // ── Payment Information (My Finances > Summary) ──
   // Stored in plaintext for now; treat as PII — limit selects to the owning user / HR roles.
   bankName          String?

@@ -3,7 +3,7 @@
 import React from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ResizableTh } from "@/components/ui/ResizableTh";
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, createContext, useContext } from "react";
 import { useSession } from "next-auth/react";
 import useSWR from "swr";
 import type { ManagerReportFormat } from "@/lib/reports/manager-report-format";
@@ -75,16 +75,13 @@ function EditableField({
     rows = 2,
     className = "",
     readOnly = false,
-    manual = false,
 }: {
     value: string;
     onChange: (v: string) => void;
     rows?: number;
     className?: string;
     readOnly?: boolean;
-    manual?: boolean;
 }) {
-    const isManualFilled = manual && value && value.trim().length > 0;
     return (
         <textarea
             value={value}
@@ -92,7 +89,7 @@ function EditableField({
             placeholder={readOnly ? "" : "Type here"}
             rows={rows}
             readOnly={readOnly}
-            className={`w-full bg-slate-50 dark:bg-[#1a1a32] border border-slate-200 dark:border-white/20 rounded-md px-3 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500/80 placeholder:italic focus:outline-none focus:ring-1 focus:ring-violet-500/40 focus:border-violet-400 dark:focus:border-violet-500/50 resize-y transition-all ${readOnly ? "opacity-75 cursor-default" : ""} ${isManualFilled ? "manual-entry" : ""} ${className}`}
+            className={`w-full bg-slate-50 dark:bg-[#1a1a32] border border-slate-200 dark:border-white/20 rounded-md px-3 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500/80 placeholder:italic focus:outline-none focus:ring-1 focus:ring-violet-500/40 focus:border-violet-400 dark:focus:border-violet-500/50 resize-y transition-all ${readOnly ? "opacity-75 cursor-default" : ""} ${className}`}
         />
     );
 }
@@ -102,15 +99,12 @@ function EditableCell({
     onChange,
     className = "",
     readOnly = false,
-    manual = false,
 }: {
     value: string;
     onChange: (v: string) => void;
     className?: string;
     readOnly?: boolean;
-    manual?: boolean;
 }) {
-    const isManualFilled = manual && value && value.trim().length > 0;
     return (
         <input
             type="text"
@@ -118,7 +112,7 @@ function EditableCell({
             onChange={(e) => onChange(e.target.value)}
             placeholder={readOnly ? "" : "Type here"}
             readOnly={readOnly}
-            className={`w-full bg-transparent border-0 border-b border-dashed border-slate-300 dark:border-white/30 px-1 py-0.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500/80 placeholder:italic focus:outline-none focus:border-violet-400 dark:focus:border-violet-500/50 transition-all ${readOnly ? "opacity-75 cursor-default" : ""} ${isManualFilled ? "manual-entry" : ""} ${className}`}
+            className={`w-full bg-transparent border-0 border-b border-dashed border-slate-300 dark:border-white/30 px-1 py-0.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500/80 placeholder:italic focus:outline-none focus:border-violet-400 dark:focus:border-violet-500/50 transition-all ${readOnly ? "opacity-75 cursor-default" : ""} ${className}`}
         />
     );
 }
@@ -189,13 +183,11 @@ function RichTextField({
     onChange,
     placeholder = "Type here...",
     className = "",
-    manual = false,
 }: {
     value: string;
     onChange: (v: string) => void;
     placeholder?: string;
     className?: string;
-    manual?: boolean;
 }) {
     const modules = {
         toolbar: [
@@ -207,10 +199,8 @@ function RichTextField({
         ],
     };
 
-    const hasContent = manual && value && value !== "<p><br></p>" && value.trim().length > 0;
-
     return (
-        <div className={`quill-editor ${hasContent ? "manual-rich-text" : ""} ${className}`}>
+        <div className={`quill-editor ${className}`}>
             <ReactQuill
                 theme="snow"
                 value={value}
@@ -224,8 +214,29 @@ function RichTextField({
 
 /** Andrew table cell — module-level so React doesn't remount inputs inside it */
 function ATd({ children, className = "" }: { children?: React.ReactNode; className?: string }) {
+    // Click anywhere in the cell → focus the first input/textarea/select
+    // inside it. This is the only reliable way to make the WHOLE cell
+    // a focus target: <label> + h-full doesn't physically fill the cell
+    // when the row is stretched by a sibling textarea (label sizes to
+    // content, not row height), and absolute-positioning a label inside
+    // a <td> is unreliable across browsers. An onClick on the cell
+    // works regardless of layout.
+    const handleClick = (e: React.MouseEvent<HTMLTableCellElement>) => {
+        // Skip if the click already landed on the input (its own focus
+        // handling does the right thing — re-firing would move the caret
+        // unexpectedly). Also skip clicks on buttons inside the cell.
+        const t = e.target as HTMLElement;
+        if (t.matches("input, textarea, select, button, a")) return;
+        const target = e.currentTarget.querySelector(
+            "input:not([disabled]), textarea:not([disabled]), select:not([disabled])"
+        ) as HTMLElement | null;
+        target?.focus();
+    };
     return (
-        <td className={`px-2 py-2 border border-slate-200 dark:border-white/10 bg-white dark:bg-[#32324a] text-[13px] align-top text-slate-800 dark:text-slate-200 ${className}`}>
+        <td
+            onClick={handleClick}
+            className={`p-0 border border-slate-200 dark:border-white/10 bg-white dark:bg-[#32324a] text-[13px] align-top text-slate-800 dark:text-slate-200 cursor-text ${className}`}
+        >
             {children}
         </td>
     );
@@ -233,14 +244,30 @@ function ATd({ children, className = "" }: { children?: React.ReactNode; classNa
 
 /** Nishant table cell — module-level so React doesn't remount inputs inside it */
 function NCell({ children, bold, center, colored }: { children?: React.ReactNode; bold?: boolean; center?: boolean; colored?: string }) {
+    // Same focus-on-cell-click pattern as ATd — see the comment there
+    // for the rationale (label / h-full doesn't reliably fill a td
+    // when the row height is driven by a sibling cell).
+    const handleClick = (e: React.MouseEvent<HTMLTableCellElement>) => {
+        const t = e.target as HTMLElement;
+        if (t.matches("input, textarea, select, button, a")) return;
+        const target = e.currentTarget.querySelector(
+            "input:not([disabled]), textarea:not([disabled]), select:not([disabled])"
+        ) as HTMLElement | null;
+        target?.focus();
+    };
     return (
-        <td className={`px-3 py-2 border border-slate-300 dark:border-white/10 text-[13px] align-middle ${bold ? "font-semibold" : ""} ${center ? "text-center" : ""} ${colored || "text-slate-800 dark:text-slate-200 bg-white dark:bg-[#32324a]"}`}>
+        <td
+            onClick={handleClick}
+            className={`p-0 border border-slate-300 dark:border-white/10 text-[13px] align-middle cursor-text ${bold ? "font-semibold" : ""} ${center ? "text-center" : ""} ${colored || "text-slate-800 dark:text-slate-200 bg-white dark:bg-[#32324a]"}`}
+        >
             {children}
         </td>
     );
 }
 
-/** Nishant report input — module-level so React doesn't remount on every render */
+/** Nishant report input — module-level so React doesn't remount on every
+ *  render. Click-anywhere-to-focus behaviour lives on NCell's onClick
+ *  handler (see there). This component just paints the field. */
 function NInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
     return (
         <input
@@ -248,30 +275,55 @@ function NInput({ value, onChange, placeholder }: { value: string; onChange: (v:
             value={value}
             onChange={e => onChange(e.target.value)}
             placeholder={placeholder ?? "Type here…"}
-            className="w-full text-[13px] text-slate-800 dark:text-slate-200 focus:outline-none rounded px-1 cursor-text bg-transparent hover:bg-emerald-50 dark:hover:bg-emerald-900/20 focus:bg-white dark:focus:bg-white/10 focus:ring-1 focus:ring-emerald-400/50 placeholder:text-slate-300 dark:placeholder:text-slate-500 transition-colors"
+            className="block w-full text-[13px] text-slate-800 dark:text-slate-200 focus:outline-none cursor-text bg-transparent px-3 py-2 placeholder:text-slate-300 dark:placeholder:text-slate-500"
         />
     );
 }
 
-/** Andrew report input — module-level so React doesn't remount on every render */
+/** Andrew report input — click-anywhere-to-focus is handled by ATd's
+ *  onClick. This component just paints the field with cell-matching
+ *  padding (px-2 py-2). */
 function AInput({ value, onChange, placeholder = "", disabled = false }: {
     value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean;
 }) {
     return (
         <input type="text" value={value} onChange={e => onChange(e.target.value)}
             placeholder={placeholder} disabled={disabled}
-            className={`w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none ${disabled ? "opacity-60 cursor-default" : ""}`} />
+            className={`block w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none px-2 py-2 ${disabled ? "opacity-60 cursor-default" : "cursor-text"}`} />
     );
 }
 
-/** Andrew report textarea — module-level so React doesn't remount on every render */
+/** Andrew report textarea — sibling of AInput. min-h keeps the cell
+ *  tall enough to drag the resize handle. Click-anywhere-to-focus is
+ *  on ATd. */
 function ATextarea({ value, onChange, placeholder = "", disabled = false }: {
     value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean;
 }) {
     return (
         <textarea value={value} onChange={e => onChange(e.target.value)}
             placeholder={placeholder} disabled={disabled} rows={3}
-            className="w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none resize-y" />
+            className={`block w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none resize-y px-2 py-2 min-h-[60px] ${disabled ? "cursor-default" : "cursor-text"}`} />
+    );
+}
+
+/** Andrew report header cell — module-level for the same reason as ATd/AInput.
+ *  Was previously declared inline inside the QA-report render branch, which
+ *  gave it a new function identity on every keystroke → React unmounted +
+ *  remounted the ResizableTh subtree → column widths reset and the table
+ *  repainted on every typed character. Stable identity = no remount. */
+function ATh({ children, colIndex, widths, setWidths, tableRef, colCount }: {
+    children: React.ReactNode;
+    colIndex: number;
+    widths: Record<number, number>;
+    setWidths: React.Dispatch<React.SetStateAction<Record<number, number>>>;
+    tableRef?: React.RefObject<HTMLTableElement>;
+    colCount?: number;
+}) {
+    return (
+        <ResizableTh colIndex={colIndex} widths={widths} setWidths={setWidths} minWidth={80} tableRef={tableRef} colCount={colCount}
+            className="px-3 py-2.5 text-left text-[12px] font-bold bg-[#1e3a5f] border border-[#2a4a6f] whitespace-normal leading-tight">
+            <span style={{ color: '#ffffff' }}>{children}</span>
+        </ResizableTh>
     );
 }
 
@@ -317,32 +369,8 @@ const mkAB = (id: string, reviewer = ""): AndrewBRow => ({ id, reviewer, targetF
 interface AndrewSBRow { id: string; person: string; thumbnailsDone: string; avgCtr: string; remark: string; autoFilled?: boolean; }
 const mkSBRow = (id: string, person = ""): AndrewSBRow => ({ id, person, thumbnailsDone: "", avgCtr: "", remark: "" });
 
-interface AndrewSCRow {
-    id: string;
-    capsule: string;
-    currentMonthViews: string;
-    // Mirrors the Section D spreadsheet HR shared on 2026-05-04 — these
-    // four columns sit between the current-month views and previous-
-    // month views so the table reads left-to-right as a single month
-    // snapshot before the comparison.
-    viewsNotCountingShorts: string;
-    subscriberCount: string;
-    videosUploaded: string;
-    titlesThumbnailsChanged: string;
-    lastMonthViews: string;
-    remark: string;
-    autoFilled?: boolean;
-}
-const mkSCRow = (id: string, capsule = ""): AndrewSCRow => ({
-    id, capsule,
-    currentMonthViews:        "",
-    viewsNotCountingShorts:   "",
-    subscriberCount:          "",
-    videosUploaded:           "",
-    titlesThumbnailsChanged:  "",
-    lastMonthViews:           "",
-    remark:                   "",
-});
+interface AndrewSCRow { id: string; capsule: string; currentMonthViews: string; lastMonthViews: string; remark: string; autoFilled?: boolean; }
+const mkSCRow = (id: string, capsule = ""): AndrewSCRow => ({ id, capsule, currentMonthViews: "", lastMonthViews: "", remark: "" });
 
 const mkNishantRow = (id: string, name = ""): NishantResearcherRow => ({
     id, researcher: name, approvedCasesRTC: "", avgRating: "",
@@ -418,6 +446,104 @@ function DragScrollDiv({ children, className }: { children: React.ReactNode; cla
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// HR Manager Monthly Report — module-scoped primitives.
+//
+// These USED to live inline inside MonthlyReportPage's render. Every
+// keystroke triggered setState → parent re-render → new function
+// references for HrInput/HrTextarea/HrSelect → React saw a different
+// component type → unmounted + remounted the entire input subtree on
+// every character → the input lost focus after one key (the "typing
+// bug" reported by HR). Hoisting them here gives them stable identity
+// across renders, so React reuses the same DOM nodes and focus stays.
+//
+// `locked` was a closed-over local in the old inline versions. To
+// avoid threading it as a prop through ~97 call sites, the HR return
+// JSX wraps everything in <HrLockedContext.Provider value={locked}>
+// and the components below read it via useContext. Default `false`
+// is safe — outside the provider these components aren't rendered.
+// ─────────────────────────────────────────────────────────────────────
+const HrLockedContext = createContext<boolean>(false);
+
+function HrTh({ children }: { children: React.ReactNode }) {
+    return (
+        <th className="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-white bg-[#1e3a5f] border border-[#1e3a5f]/60 whitespace-normal leading-snug">{children}</th>
+    );
+}
+
+function HrTd({ children, className = "" }: { children?: React.ReactNode; className?: string }) {
+    return (
+        <td className={`px-3 py-2.5 border-b border-slate-100 dark:border-white/5 text-[13px] align-top text-white ${className}`}>{children}</td>
+    );
+}
+
+function HrInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+    const locked = useContext(HrLockedContext);
+    return (
+        <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={locked ? "" : "—"} readOnly={locked}
+            className={`w-full bg-transparent text-[13px] text-white placeholder:text-slate-400 focus:outline-none rounded px-1 py-0.5 ${locked ? "cursor-default" : "hover:bg-blue-50/50 dark:hover:bg-white/5 focus:bg-blue-50 dark:focus:bg-white/10 focus:ring-1 focus:ring-blue-300/60"} transition-colors`} />
+    );
+}
+
+function HrTextarea({ value, onChange, rows = 3 }: { value: string; onChange: (v: string) => void; rows?: number }) {
+    const locked = useContext(HrLockedContext);
+    return (
+        <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={locked ? "" : "Type here…"} readOnly={locked} rows={rows}
+            className={`w-full rounded-lg border text-[13px] px-3 py-2.5 text-white placeholder:text-slate-400 focus:outline-none resize-y transition-all leading-relaxed ${locked ? "bg-slate-50 dark:bg-white/[0.03] border-slate-100 dark:border-white/5 cursor-default opacity-80" : "bg-white dark:bg-[#1a1a32] border-slate-200 dark:border-white/10 focus:ring-2 focus:ring-blue-400/30 focus:border-blue-400/60 shadow-sm"}`} />
+    );
+}
+
+function HrSelect({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) {
+    const locked = useContext(HrLockedContext);
+    return (
+        <select value={value} onChange={e => onChange(e.target.value)} disabled={locked}
+            className={`w-full text-[13px] text-white bg-transparent focus:outline-none rounded px-1 py-0.5 ${locked ? "cursor-default" : "hover:bg-blue-50/50 dark:hover:bg-white/5 focus:ring-1 focus:ring-blue-300/60"} transition-colors`}>
+            <option value="">—</option>
+            {options.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+    );
+}
+
+function SectionHeader({ num, title, objective, color = "#1e3a5f" }: { num: string; title: string; objective?: string; color?: string }) {
+    return (
+        <div className="flex items-start gap-3 px-6 py-4 border-b border-slate-100 dark:border-white/5 bg-slate-50/60 dark:bg-white/[0.02]">
+            <span className="mt-0.5 flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-[12px] font-bold shadow-sm" style={{ background: color, color: "#ffffff" }}>{num}</span>
+            <div>
+                <h2 className="text-[14px] font-bold text-white leading-tight">{title}</h2>
+                {objective && <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{objective}</p>}
+            </div>
+        </div>
+    );
+}
+
+function SubHeader({ label }: { label: string }) {
+    return (
+        <div className="flex items-center gap-2 mb-3">
+            <div className="w-1 h-4 rounded-full bg-[#1e3a5f]/60" />
+            <h3 className="text-[12px] font-semibold uppercase tracking-wide text-white">{label}</h3>
+        </div>
+    );
+}
+
+function AddRowBtn({ onClick }: { onClick: () => void }) {
+    return (
+        <button onClick={onClick} className="mt-2.5 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+            Add Row
+        </button>
+    );
+}
+
+function DelBtn({ onClick }: { onClick: () => void }) {
+    return (
+        <td className="px-1.5 border-b border-slate-100 dark:border-white/5 w-7">
+            <button onClick={onClick} className="w-5 h-5 flex items-center justify-center rounded text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+        </td>
+    );
+}
+
 export default function MonthlyReportPage() {
     const params = useParams();
     const router = useRouter();
@@ -440,8 +566,6 @@ export default function MonthlyReportPage() {
     const sessionUser = session?.user as any;
     const isAdmin      = sessionUser?.isDeveloper === true || sessionUser?.orgLevel === "special_access";
     const isCeo        = sessionUser?.orgLevel === "ceo" && !isAdmin;
-    // Only developer and CEO can override auto-computed actuals; special_access cannot.
-    const canOverrideActuals = sessionUser?.isDeveloper === true || sessionUser?.orgLevel === "ceo";
     const isOwner      = sessionUser?.dbId && String(sessionUser.dbId) === String(managerId);
 
     // Explicit per-manager access granted by admin
@@ -460,7 +584,7 @@ export default function MonthlyReportPage() {
 
     // Data Fetching
     const fetcher = (url: string) => fetch(url).then((res) => res.json());
-    const { data, isLoading } = useSWR(`/api/reports/${managerId}`, fetcher);
+    const { data, error, isLoading } = useSWR(`/api/reports/${managerId}`, fetcher);
 
     const manager = data?.manager;
     const reportFmt = (manager?.reportFormat ?? "production") as ManagerReportFormat;
@@ -468,11 +592,11 @@ export default function MonthlyReportPage() {
     const isQaReport = !isLoading && reportFmt === "qa";
     const isHrReport = !isLoading && reportFmt === "hr";
 
-    // Researcher stats from ClickUp (approved RTC count + avg rating per researcher)
-    const { data: statsData } = useSWR(
-        isResearcherReport ? `/api/reports/${managerId}/monthly/${monthIndex}/researcher-stats?year=${year}` : null,
-        fetcher
-    );
+    // Researcher report is fully manual now — HR fills in approved
+    // cases, avg rating, FOIA columns, etc. by hand. The
+    // /researcher-stats endpoint stays around (untouched) in case we
+    // ever bring back a "Auto-fill from ClickUp" button, but the
+    // page no longer fetches or merges it.
 
     // Contributor stats — casesCompleted per editor/writer from MonthlyRating
     const { data: contributorData } = useSWR(
@@ -504,20 +628,16 @@ export default function MonthlyReportPage() {
     // ── Editable state for all manager fields ──────────────
     const [executiveSummary, setExecutiveSummary] = useState("");
     const [shortfallSummary, setShortfallSummary] = useState("");
-    // Production Volume: Target is developer-set (only canOverrideActuals users can edit).
-    // Actual ClickUp is auto-computed from qualified Video QA1 cases unless overridden.
-    // Target Achieved is a free-form manual entry by the manager.
+    // Production Volume: Target is free-form (manager input). Actual is auto-computed
+    // from qualified Video QA1 cases unless a CEO/developer has overridden it.
     const [totalVideoTarget, setTotalVideoTarget] = useState("");
     const [totalVideoActual, setTotalVideoActual] = useState("");
-    const [totalVideoTargetAchieved, setTotalVideoTargetAchieved] = useState("");
     const [totalVideoVariance, setTotalVideoVariance] = useState("");
     const [heroContentTarget, setHeroContentTarget] = useState("");
     const [heroContentActual, setHeroContentActual] = useState("");
-    const [heroContentTargetAchieved, setHeroContentTargetAchieved] = useState("");
     const [heroContentVariance, setHeroContentVariance] = useState("");
     const [videosPublishedTarget, setVideosPublishedTarget] = useState("");
     const [videosPublishedActual, setVideosPublishedActual] = useState("");
-    const [videosPublishedTargetAchieved, setVideosPublishedTargetAchieved] = useState("");
     const [videosPublishedVariance, setVideosPublishedVariance] = useState("");
     const [totalVideoActualOverridden, setTotalVideoActualOverridden]   = useState(false);
     const [heroContentActualOverridden, setHeroContentActualOverridden] = useState(false);
@@ -568,7 +688,7 @@ export default function MonthlyReportPage() {
     const [nColWidths, setNColWidths] = React.useState<Record<number, number>>({});
     const [nOvColWidths, setNOvColWidths] = React.useState<Record<number, number>>({});
     const nResTableRef = React.useRef<HTMLTableElement>(null);
-
+    const nOvTableRef  = React.useRef<HTMLTableElement>(null);
 
     // ── Andrew James monthly state ──
     const [andrewA1Rows, setAndrewA1Rows] = useState<any[]>([]);
@@ -606,17 +726,11 @@ export default function MonthlyReportPage() {
     const [hrFeedbackRows, setHrFeedbackRows] = useState([{ id: "fs-1", methodOfSurvey: "", topicCovered: "", keyInsights: "", actionTaken: "" }]);
     const [hrGrievanceRows, setHrGrievanceRows] = useState([{ id: "g-1", employeeName: "", issueType: "", briefDescription: "", actionTaken: "", status: "" }]);
 
-    // Auto-fill Section B thumbnail counts from DB
-    const { data: thumbnailData } = useSWR(
-        isQaReport ? `/api/reports/${managerId}/monthly/${monthIndex}/andrew-thumbnail-cases?year=${year}` : null,
-        fetcher
-    );
-
-    // Auto-fill Section C capsule views from DB
-    const { data: capsuleViewsData } = useSWR(
-        isQaReport ? `/api/reports/${managerId}/monthly/${monthIndex}/capsule-views?year=${year}` : null,
-        fetcher
-    );
+    // QA report is fully manual now — Section B (thumbnails) and
+    // Section C (capsule views) used to auto-fetch counts from the
+    // DB; they're entered by the manager directly. The endpoints
+    // (/andrew-thumbnail-cases, /capsule-views) stay around in case
+    // we ever bring back an "Auto-fill from DB" button.
 
     // Auto-fill Production Monthly Section 4 — videos published in the prior
     // month by the PM's capsule, ranked by first-30-day views.
@@ -645,7 +759,8 @@ export default function MonthlyReportPage() {
     const setNR = useCallback((idx: number, f: keyof NishantResearcherRow, v: string) =>
         setNishantRows(p => (p ?? defaultNishantRows).map((r, i) => i === idx ? { ...r, [f]: v } : r)),
     [defaultNishantRows]);
-
+    const setNO = (f: keyof NishantOverview, v: string) =>
+        setNishantOverview(p => ({ ...p, [f]: v }));
     const addNR    = () => setNishantRows(p => [...(p ?? defaultNishantRows), mkNishantRow(`nr-${Date.now()}`)]);
     const removeNR = (idx: number) => setNishantRows(p => (p ?? defaultNishantRows).filter((_, i) => i !== idx));
 
@@ -654,6 +769,13 @@ export default function MonthlyReportPage() {
     const [isSubmitted,  setIsSubmitted]  = useState(false);
     const [isDraftSaved, setIsDraftSaved] = useState(false);
     const [submitting,        setSubmitting]        = useState(false);
+    // Synchronous re-entry guard for postReport. `submitting` is React
+    // state — there's a render gap between click → setState → re-render
+    // where the disabled prop hasn't been applied yet, so a double-click
+    // (or Submit clicked while a Save-Draft is mid-flight) can fire two
+    // concurrent POSTs. A ref is checked synchronously in postReport
+    // before the await, so the second click is dropped immediately.
+    const submitInFlight = React.useRef(false);
     const [submitError,       setSubmitError]       = useState<string | null>(null);
     const [statusLoaded,      setStatusLoaded]      = useState(false);
     const [showConfirm,       setShowConfirm]       = useState(false);
@@ -669,18 +791,15 @@ export default function MonthlyReportPage() {
                 // Production Volume actuals are auto-computed on GET — load them
                 // even for unsubmitted reports so the table is pre-filled.
                 const saved = d.data as any;
-                if (saved?.totalVideoTarget)          setTotalVideoTarget(saved.totalVideoTarget);
-                if (saved?.totalVideoActual)          setTotalVideoActual(saved.totalVideoActual);
-                if (saved?.totalVideoTargetAchieved)  setTotalVideoTargetAchieved(saved.totalVideoTargetAchieved);
-                if (saved?.totalVideoVariance)        setTotalVideoVariance(saved.totalVideoVariance);
-                if (saved?.heroContentTarget)         setHeroContentTarget(saved.heroContentTarget);
-                if (saved?.heroContentActual)         setHeroContentActual(saved.heroContentActual);
-                if (saved?.heroContentTargetAchieved) setHeroContentTargetAchieved(saved.heroContentTargetAchieved);
-                if (saved?.heroContentVariance)       setHeroContentVariance(saved.heroContentVariance);
-                if (saved?.videosPublishedTarget)          setVideosPublishedTarget(saved.videosPublishedTarget);
-                if (saved?.videosPublishedActual)          setVideosPublishedActual(saved.videosPublishedActual);
-                if (saved?.videosPublishedTargetAchieved)  setVideosPublishedTargetAchieved(saved.videosPublishedTargetAchieved);
-                if (saved?.videosPublishedVariance)        setVideosPublishedVariance(saved.videosPublishedVariance);
+                if (saved?.totalVideoTarget)    setTotalVideoTarget(saved.totalVideoTarget);
+                if (saved?.totalVideoActual)    setTotalVideoActual(saved.totalVideoActual);
+                if (saved?.totalVideoVariance)  setTotalVideoVariance(saved.totalVideoVariance);
+                if (saved?.heroContentTarget)   setHeroContentTarget(saved.heroContentTarget);
+                if (saved?.heroContentActual)   setHeroContentActual(saved.heroContentActual);
+                if (saved?.heroContentVariance) setHeroContentVariance(saved.heroContentVariance);
+                if (saved?.videosPublishedTarget)   setVideosPublishedTarget(saved.videosPublishedTarget);
+                if (saved?.videosPublishedActual)   setVideosPublishedActual(saved.videosPublishedActual);
+                if (saved?.videosPublishedVariance) setVideosPublishedVariance(saved.videosPublishedVariance);
                 setTotalVideoActualOverridden(!!saved?.totalVideoActualOverridden);
                 setHeroContentActualOverridden(!!saved?.heroContentActualOverridden);
                 setVideosPublishedActualOverridden(!!saved?.videosPublishedActualOverridden);
@@ -703,7 +822,7 @@ export default function MonthlyReportPage() {
                     if (saved?.risksAttention)     setRisksAttention(saved.risksAttention);
                     if (saved?.behavioralConcerns) setBehavioralConcerns(saved.behavioralConcerns);
                     if (saved?.remark)             setRemark(saved.remark);
-                    if (saved?.nishantResearcherRows?.length) setNishantRows(saved.nishantResearcherRows);
+                    if (saved?.nishantResearcherRows) setNishantRows(saved.nishantResearcherRows);
                     if (saved?.nishantOverview)       setNishantOverview(saved.nishantOverview);
                     if (saved?.andrewA1Rows?.length)  setAndrewA1Rows(saved.andrewA1Rows);
                     if (saved?.andrewA2Rows?.length)  setAndrewA2Rows(saved.andrewA2Rows);
@@ -732,144 +851,16 @@ export default function MonthlyReportPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [managerId, monthIndex, year]);
 
-    // ── Andrew monthly auto-fill ──
-    const fetchAndFillAndrewMonthly = useCallback(() => {
-        if (!isQaReport) return;
-        fetch(`/api/reports/${managerId}/monthly/${monthIndex}/andrew-cases?year=${year}`)
-            .then(r => r.json()).then(d => {
-                const cases: any[] = d.andrewCases ?? [];
-                if (!cases.length) return;
-                setAndrewA1Rows(cases.map((c, i) => ({
-                    id: `ma1-${i}-${Date.now()}`,
-                    caseName: c.caseName, capsuleName: c.capsuleName,
-                    caseRating: c.caseRating, caseType: c.caseType,
-                    writer: c.writerName, qaScriptStartDate: c.qaScriptStartDate,
-                    ratingByQATeam: c.scriptQualityRating,
-                    reasonForRating: "", writerQualityScore: c.writerQualityScore,
-                    structuralChanges: "", autoFilled: true,
-                })));
-            }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [managerId, monthIndex, year, isQaReport]);
+    // (QA report is fully manual now — there's no Andrew/Abhishek
+    //  auto-fetch from /andrew-cases or /andrew-video-cases, no
+    //  thumbnail or capsule-views auto-fill, and no auto-aggregation
+    //  of the reviewer summary from A1/A2 case rows. Every numeric
+    //  cell in Section A / B / C is typed by the manager. The
+    //  endpoints stay live so a future "Auto-fill" button can wire
+    //  back into them, and saved drafts still load exactly as saved.)
 
-    const fetchAndFillAbhishekMonthly = useCallback(() => {
-        if (!isQaReport) return;
-        fetch(`/api/reports/${managerId}/monthly/${monthIndex}/andrew-video-cases?year=${year}`)
-            .then(r => r.json()).then(d => {
-                const cases: any[] = d.videoCases ?? [];
-                if (!cases.length) return;
-                setAndrewA2Rows(cases.map((c, i) => ({
-                    id: `ma2-${i}-${Date.now()}`,
-                    caseName: c.caseName, capsuleName: c.capsuleName,
-                    caseRating: c.caseRating, caseType: c.caseType,
-                    writer: c.writerName, writerQualityScore: c.writerQualityScore,
-                    editor: c.editorName, qaVideoStartDate: c.qaVideoStartDate,
-                    ratingByAbhishek: c.videoQualityRating,
-                    reasonForRating: "", editorQualityScore: c.editorQualityScore,
-                    structuralChanges: "", autoFilled: true,
-                })));
-            }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [managerId, monthIndex, year, isQaReport]);
-
-    // Trigger auto-fill on load when no draft exists
-    useEffect(() => {
-        if (!statusLoaded || !isQaReport) return;
-        if (isLocked || isSubmitted || isDraftSaved) return;
-        fetchAndFillAndrewMonthly();
-        fetchAndFillAbhishekMonthly();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [statusLoaded, isQaReport, managerId, monthIndex, year]);
-
-    // Auto-fill Section B thumbnail counts from API
-    useEffect(() => {
-        if (!thumbnailData?.thumbnailData?.length) return;
-        setAndrewSBRows(prev => prev.map(row => {
-            const match = thumbnailData.thumbnailData.find(
-                (t: any) => {
-                    const tp = t.person?.toLowerCase() ?? "";
-                    const rp = row.person?.toLowerCase() ?? "";
-                    return tp === rp || tp.includes(rp) || rp.includes(tp);
-                }
-            );
-            if (!match) return row;
-            return { ...row, thumbnailsDone: match.thumbnailsDone, autoFilled: true };
-        }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [thumbnailData]);
-
-    // Auto-fill Section C monthly views from DB (only when no draft exists)
-    useEffect(() => {
-        if (!capsuleViewsData?.views?.length) return;
-        if (isLocked || isSubmitted || isDraftSaved) return;
-        const rows: AndrewSCRow[] = capsuleViewsData.views.map((v: any, i: number) => ({
-            id:                       `sc-auto-${i}-${Date.now()}`,
-            capsule:                  v.capsule           ?? "",
-            currentMonthViews:        v.currentMonthViews ?? "",
-            // The four Section-D columns aren't in the capsule-views API
-            // yet — leave blank so HR/Andrew can fill them by hand.
-            viewsNotCountingShorts:   "",
-            subscriberCount:          "",
-            videosUploaded:           "",
-            titlesThumbnailsChanged:  "",
-            lastMonthViews:           v.lastMonthViews    ?? "",
-            remark:                   "",
-            autoFilled:               true,
-        }));
-        // Pad with at least one empty row if data is sparse
-        if (rows.length === 0) rows.push(mkSCRow("sc-1"));
-        setAndrewSCRows(rows);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [capsuleViewsData]);
-
-    // Auto-compute Section B from A1/A2 data
-    useEffect(() => {
-        if (!isQaReport || isLocked || isSubmitted || isDraftSaved) return;
-        const andrewCount = andrewA1Rows.filter(r => r.caseName && r.caseName !== "N/A").length;
-        const abhishekCount = andrewA2Rows.filter(r => r.caseName && r.caseName !== "N/A").length;
-        const andrewRatings = andrewA1Rows.map(r => parseFloat(r.ratingByQATeam)).filter(n => !isNaN(n));
-        const abhishekRatings = andrewA2Rows.map(r => parseFloat(r.ratingByAbhishek)).filter(n => !isNaN(n));
-        const andrewAvg = andrewRatings.length ? (andrewRatings.reduce((s,n)=>s+n,0)/andrewRatings.length).toFixed(2) : "";
-        const abhishekAvg = abhishekRatings.length ? (abhishekRatings.reduce((s,n)=>s+n,0)/abhishekRatings.length).toFixed(2) : "";
-        const andrewWQS = andrewA1Rows.map(r => parseFloat(r.writerQualityScore)).filter(n => !isNaN(n));
-        const abhishekEQS = andrewA2Rows.map(r => parseFloat(r.editorQualityScore)).filter(n => !isNaN(n));
-        const andrewAvgQS = andrewWQS.length ? (andrewWQS.reduce((s,n)=>s+n,0)/andrewWQS.length).toFixed(1) : "";
-        const abhishekAvgQS = abhishekEQS.length ? (abhishekEQS.reduce((s,n)=>s+n,0)/abhishekEQS.length).toFixed(1) : "";
-        setAndrewBRows(prev => prev.map(row => {
-            if (row.reviewer === "Andrew") return { ...row,
-                totalReviewsDone: andrewCount > 0 ? String(andrewCount) : row.totalReviewsDone,
-                avgRating: andrewAvg || row.avgRating,
-                avgWriterEditorQaScore: andrewAvgQS || row.avgWriterEditorQaScore,
-            };
-            if (row.reviewer === "Abhishek") return { ...row,
-                totalReviewsDone: abhishekCount > 0 ? String(abhishekCount) : row.totalReviewsDone,
-                avgRating: abhishekAvg || row.avgRating,
-                avgWriterEditorQaScore: abhishekAvgQS || row.avgWriterEditorQaScore,
-            };
-            return row;
-        }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [andrewA1Rows, andrewA2Rows, isQaReport]);
-
-    // Merge ClickUp-derived stats into rows whenever they load
-    useEffect(() => {
-        if (!statsData?.stats?.length) return;
-        setNishantRows(prev => {
-            const rows = prev ?? defaultNishantRows;
-            return rows.map(row => {
-                const match = statsData.stats.find(
-                    (s: any) => row.researcher && s.name?.toLowerCase().trim() === row.researcher.toLowerCase().trim()
-                );
-                if (!match) return row;
-                return {
-                    ...row,
-                    approvedCasesRTC: String(match.approvedCasesRTC ?? row.approvedCasesRTC),
-                    avgRating: match.avgRating ?? row.avgRating,
-                };
-            });
-        });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [statsData]);
+    // (Researcher report intentionally has no ClickUp auto-merge —
+    //  every numeric column is manual entry.)
 
     const validateRequired = (): string | null => {
         // Andrew: validate Section A rows
@@ -916,6 +907,8 @@ export default function MonthlyReportPage() {
             const err = validateRequired();
             if (err) { setSubmitError(err); setShowConfirm(false); return; }
         }
+        if (submitInFlight.current) return;
+        submitInFlight.current = true;
         setSubmitting(true);
         setSubmitError(null);
         setShowConfirm(false);
@@ -930,15 +923,12 @@ export default function MonthlyReportPage() {
                     shortfallSummary,
                     totalVideoTarget,
                     totalVideoActual,
-                    totalVideoTargetAchieved,
                     totalVideoVariance,
                     heroContentTarget,
                     heroContentActual,
-                    heroContentTargetAchieved,
                     heroContentVariance,
                     videosPublishedTarget,
                     videosPublishedActual,
-                    videosPublishedTargetAchieved,
                     videosPublishedVariance,
                     totalVideoActualOverridden,
                     heroContentActualOverridden,
@@ -979,6 +969,12 @@ export default function MonthlyReportPage() {
             if (isDraft) {
                 setIsDraftSaved(true);
                 setIsSubmitted(false);
+                // Admins can save-as-draft on a locked report — that
+                // unlocks the DB record (the API treats isDraft=true as
+                // shouldLock=false). Mirror that locally so the UI
+                // switches out of read-only mode without needing a
+                // page reload.
+                if (isAdmin) setIsLocked(false);
             } else {
                 setIsSubmitted(true);
                 setIsDraftSaved(false);
@@ -991,6 +987,7 @@ export default function MonthlyReportPage() {
             setSubmitError(e.message);
         }
         setSubmitting(false);
+        submitInFlight.current = false;
     };
 
     const handleSubmit    = () => postReport(false);
@@ -1056,15 +1053,20 @@ export default function MonthlyReportPage() {
 
     /* ──────────────── Andrew James Monthly Report ──────────────── */
     if (isQaReport) {
-        const ATh = ({ children, colIndex, widths, setWidths, tableRef, colCount }: { children: React.ReactNode; colIndex: number; widths: Record<number,number>; setWidths: React.Dispatch<React.SetStateAction<Record<number,number>>>; tableRef?: React.RefObject<HTMLTableElement>; colCount?: number }) => (
-            <ResizableTh colIndex={colIndex} widths={widths} setWidths={setWidths} minWidth={80} tableRef={tableRef} colCount={colCount}
-                className="px-3 py-2.5 text-left text-[12px] font-bold bg-[#1e3a5f] border border-[#2a4a6f] whitespace-normal leading-tight">
-                <span style={{ color: '#ffffff' }}>{children}</span>
-            </ResizableTh>
-        );
-        // Pre-compute disabled helpers for Andrew inputs
-        const aDisabled  = isLocked && !isAdmin;   // manually-filled columns: editable unless report is locked (admins can always edit)
-        const aAutoLock  = true;                   // auto-filled columns (Month, Reviewer, Target, Total Reviews, Avg QA Score, Avg Rating): always read-only for everyone
+        // ATh is defined at module top-level (above) so its identity stays
+        // stable across re-renders and the ResizableTh tree isn't unmounted
+        // on every keystroke. Don't declare it inline here.
+
+        // Pre-compute disabled helpers for Andrew inputs.
+        // Every column is manually-filled now — `aAutoLock` used to
+        // pin the four "computed" columns (Target, Total Reviews,
+        // Avg QA Score, Avg Rating) read-only because they were
+        // populated from A1/A2 aggregation. With auto-fill removed,
+        // they have no value unless the manager types one — so they
+        // need to be editable. `aAutoLock` stays as an alias of
+        // `aDisabled` to keep the existing JSX call sites unchanged.
+        const aDisabled  = isLocked && !isAdmin;
+        const aAutoLock  = aDisabled;
 
         return (
             <div className="max-w-7xl mx-auto flex flex-col gap-3 px-2 pt-2 pb-6" style={{minHeight:"calc(100vh - 80px)"}}>
@@ -1119,9 +1121,9 @@ export default function MonthlyReportPage() {
                                     <tbody>
                                         {andrewBRows.map((row,idx) => (
                                             <tr key={row.id} className="hover:bg-amber-50/40">
-                                                <ATd><span className="font-medium text-slate-600 text-[12px]">{idx===0 ? monthName : ""}</span></ATd>
+                                                <ATd><span className="block px-2 py-2 font-medium text-slate-600 text-[12px]">{idx===0 ? monthName : ""}</span></ATd>
                                                 <ATd>
-                                                    <select value={row.reviewer} onChange={e=>setAB(idx,"reviewer",e.target.value)} disabled={!isAdmin} className={`w-full bg-transparent text-[13px] focus:outline-none appearance-none ${!isAdmin ? "opacity-60 cursor-default" : ""}`}>
+                                                    <select value={row.reviewer} onChange={e=>setAB(idx,"reviewer",e.target.value)} disabled={!isAdmin} className={`block w-full h-full bg-transparent text-[13px] focus:outline-none appearance-none px-2 py-2 ${!isAdmin ? "opacity-60 cursor-default" : ""}`}>
                                                         <option value="">—</option>
                                                         <option>Andrew</option><option>Abhishek</option><option>Andrew/Diya</option>
                                                     </select>
@@ -1181,12 +1183,16 @@ export default function MonthlyReportPage() {
                                     <tbody>
                                         {andrewSBRows.map((row,idx) => (
                                             <tr key={row.id} className="hover:bg-amber-50/40">
-                                                <ATd><span className="font-medium text-slate-600 text-[12px]">{idx===0 ? monthName : ""}</span></ATd>
+                                                <ATd><span className="block px-2 py-2 font-medium text-slate-600 text-[12px]">{idx===0 ? monthName : ""}</span></ATd>
                                                 <ATd>
-                                                    <span className="text-[13px] text-slate-800 dark:text-slate-200">{row.person || "—"}</span>
+                                                    {/* Person + Thumbnails Done were read-only spans
+                                                        (auto-filled from /andrew-thumbnail-cases).
+                                                        QA report is fully manual now — they're
+                                                        editable inputs the manager types into. */}
+                                                    <AInput value={row.person} onChange={v=>setSBR(idx,"person",v)} placeholder="Name" disabled={aDisabled} />
                                                 </ATd>
                                                 <ATd>
-                                                    <span className="text-[13px] text-slate-800 dark:text-slate-200">{row.thumbnailsDone || "—"}</span>
+                                                    <AInput value={row.thumbnailsDone} onChange={v=>setSBR(idx,"thumbnailsDone",v)} placeholder="" disabled={aDisabled} />
                                                 </ATd>
                                                 <ATd>
                                                     <ATextarea value={row.avgCtr} onChange={v=>setSBR(idx,"avgCtr",v)} placeholder="e.g. M7cs -9.7 and M7 - 8.1" disabled={aDisabled} />
@@ -1220,18 +1226,14 @@ export default function MonthlyReportPage() {
                                 <p className="text-[11px] text-amber-100 mt-0.5">Compare current month ({monthName} {year}) vs previous month views</p>
                             </div>
                             <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 shadow-sm">
-                                <table ref={scTableRef as any} className="border-collapse w-full" style={{minWidth:1200}}>
+                                <table ref={scTableRef as any} className="border-collapse w-full" style={{minWidth:800}}>
                                     <thead>
                                         <tr>
-                                            <ATh colIndex={0} widths={scColWidths} setWidths={setScColWidths} tableRef={scTableRef as any} colCount={9}>Capsule / Channel <span style={{color:"#fca5a5"}}>*</span></ATh>
+                                            <ATh colIndex={0} widths={scColWidths} setWidths={setScColWidths} tableRef={scTableRef as any} colCount={5}>Capsule / Channel <span style={{color:"#fca5a5"}}>*</span></ATh>
                                             <ATh colIndex={1} widths={scColWidths} setWidths={setScColWidths}>{monthName} {year} Views <span style={{color:"#fca5a5"}}>*</span></ATh>
-                                            <ATh colIndex={2} widths={scColWidths} setWidths={setScColWidths}>Views (Not Counting Shorts)</ATh>
-                                            <ATh colIndex={3} widths={scColWidths} setWidths={setScColWidths}>Subscriber Count</ATh>
-                                            <ATh colIndex={4} widths={scColWidths} setWidths={setScColWidths}>Videos Uploaded</ATh>
-                                            <ATh colIndex={5} widths={scColWidths} setWidths={setScColWidths}>Titles &amp; Thumbnails Changed</ATh>
-                                            <ATh colIndex={6} widths={scColWidths} setWidths={setScColWidths}>Previous Month Views <span style={{color:"#fca5a5"}}>*</span></ATh>
-                                            <ATh colIndex={7} widths={scColWidths} setWidths={setScColWidths}>Difference (↑ / ↓)</ATh>
-                                            <ATh colIndex={8} widths={scColWidths} setWidths={setScColWidths}><span style={{color:"#fde68a",fontStyle:"italic",fontSize:"10px",fontWeight:400}}>Remark (optional)</span></ATh>
+                                            <ATh colIndex={2} widths={scColWidths} setWidths={setScColWidths}>Previous Month Views <span style={{color:"#fca5a5"}}>*</span></ATh>
+                                            <ATh colIndex={3} widths={scColWidths} setWidths={setScColWidths}>Difference (↑ / ↓)</ATh>
+                                            <ATh colIndex={4} widths={scColWidths} setWidths={setScColWidths}><span style={{color:"#fde68a",fontStyle:"italic",fontSize:"10px",fontWeight:400}}>Remark (optional)</span></ATh>
                                             <th className="px-2 py-2 bg-[#1e3a5f] border border-[#2a4a6f] w-8"></th>
                                         </tr>
                                     </thead>
@@ -1249,24 +1251,17 @@ export default function MonthlyReportPage() {
                                                         <AInput value={row.currentMonthViews} onChange={v=>setSCR(idx,"currentMonthViews",v)} placeholder="e.g. 50000" disabled={aDisabled} />
                                                     </ATd>
                                                     <ATd>
-                                                        <AInput value={row.viewsNotCountingShorts} onChange={v=>setSCR(idx,"viewsNotCountingShorts",v)} placeholder="e.g. 45000" disabled={aDisabled} />
-                                                    </ATd>
-                                                    <ATd>
-                                                        <AInput value={row.subscriberCount} onChange={v=>setSCR(idx,"subscriberCount",v)} placeholder="e.g. 12.1k" disabled={aDisabled} />
-                                                    </ATd>
-                                                    <ATd>
-                                                        <AInput value={row.videosUploaded} onChange={v=>setSCR(idx,"videosUploaded",v)} placeholder="e.g. 10 + 6 shorts" disabled={aDisabled} />
-                                                    </ATd>
-                                                    <ATd>
-                                                        <ATextarea value={row.titlesThumbnailsChanged} onChange={v=>setSCR(idx,"titlesThumbnailsChanged",v)} placeholder="e.g. 1 - <title>" disabled={aDisabled} />
-                                                    </ATd>
-                                                    <ATd>
                                                         <AInput value={row.lastMonthViews} onChange={v=>setSCR(idx,"lastMonthViews",v)} placeholder="e.g. 45000" disabled={aDisabled} />
                                                     </ATd>
                                                     <ATd>
-                                                        {diff !== null
-                                                            ? <span className={`text-[13px] font-semibold ${diff >= 0 ? "text-emerald-600" : "text-red-500"}`}>{diff >= 0 ? "↑" : "↓"} {Math.abs(diff).toLocaleString()}</span>
-                                                            : <span className="text-slate-300 text-[12px] italic">auto</span>}
+                                                        {/* Diff is the only column still computed —
+                                                            current minus previous. Wrapper carries
+                                                            the cell padding now that ATd is p-0. */}
+                                                        <span className="block px-2 py-2 text-center">
+                                                            {diff !== null
+                                                                ? <span className={`text-[13px] font-semibold ${diff >= 0 ? "text-emerald-600" : "text-red-500"}`}>{diff >= 0 ? "↑" : "↓"} {Math.abs(diff).toLocaleString()}</span>
+                                                                : <span className="text-slate-300 text-[12px] italic">auto</span>}
+                                                        </span>
                                                     </ATd>
                                                     <ATd><ATextarea value={row.remark} onChange={v=>setSCR(idx,"remark",v)} placeholder="Remark…" disabled={aDisabled} /></ATd>
                                                     <td className="px-2 py-2 border border-slate-200 bg-white text-center">
@@ -1405,13 +1400,7 @@ export default function MonthlyReportPage() {
 
         return (
             <>
-            <style>{`
-              .monthly-report-page input.manual-entry:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-              .monthly-report-page textarea.manual-entry {
-                color: #ef4444 !important;
-              }
-            `}</style>
-            <div className="monthly-report-page max-w-5xl mx-auto pb-16 space-y-6 px-2">
+            <div className="max-w-5xl mx-auto pb-16 space-y-6 px-2">
                 {/* Back */}
                 <button onClick={() => router.back()} className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-900 transition-colors group mt-2">
                     <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1427,11 +1416,18 @@ export default function MonthlyReportPage() {
                     </div>
                 )}
 
-                {/* Title banner */}
+                {/* Title banner — soft slate (Tailwind slate-700).
+                    Calm, low-saturation, eye-friendly. The bg uses a
+                    Tailwind class (not inline style) on purpose: a
+                    global rule in globals.css forces `.text-white` →
+                    near-black in light mode unless the element ALSO
+                    has a `bg-{color}-{shade}` class, so an inline-bg
+                    header would render its title text invisibly dark.
+                    Children use opacity- classes for the de-emphasised
+                    secondary lines, which inherit the parent's white. */}
                 <div className="rounded-t-xl overflow-hidden shadow-md">
-                    <div className="bg-[#0d2137] px-6 pt-1 pb-2 text-left">
-                        <h1 className="text-lg font-bold text-white">Nishant's Monthly Report for the month of {monthName}</h1>
-                        <p className="text-xl font-semibold text-white/80 mt-0.5">Monthly Report of Researchers <span className="text-base font-normal text-white/60">— {monthName} {year}</span></p>
+                    <div className="bg-slate-700 text-white px-6 py-4 text-left">
+                        <h1 className="text-xl font-semibold">Monthly Report of Researchers <span className="text-base font-normal opacity-75">— {monthName} {year}</span></h1>
                     </div>
                     <div className="bg-[#e87722] px-6 py-3 text-center">
                         <p className="text-[12px] text-white font-medium leading-snug">
@@ -1464,17 +1460,19 @@ export default function MonthlyReportPage() {
                         </thead>
                         <tbody>
                             {nRows.map((row, idx) => (
-                                <tr key={row.id} className="group hover:bg-emerald-50/40 dark:hover:bg-emerald-900/20 transition-colors">
+                                <tr key={row.id} className="group hover:bg-slate-50/60 dark:hover:bg-white/[0.03] transition-colors">
                                     <NCell colored="bg-slate-50 dark:bg-[#2a2a42] text-slate-700 dark:text-slate-300 font-medium"><NInput value={row.researcher} onChange={v => setNR(idx, "researcher", v)} placeholder="Name" /></NCell>
-                                    <NCell center colored="bg-emerald-50 dark:bg-emerald-900/20 text-slate-800 dark:text-slate-200">
-                                        <span className="text-[13px] font-medium">
-                                            {row.approvedCasesRTC || <span className="text-slate-400 dark:text-slate-500 italic text-[12px]">auto</span>}
-                                        </span>
+                                    {/* Approved Cases (RTC) + Avg Rating are manual
+                                        inputs (the auto-merge from ClickUp stats was
+                                        removed when this report went fully manual).
+                                        No coloured background — falls back to NCell's
+                                        default white so the table reads as a clean
+                                        editable grid. */}
+                                    <NCell center>
+                                        <NInput value={row.approvedCasesRTC} onChange={v => setNR(idx, "approvedCasesRTC", v)} placeholder="" />
                                     </NCell>
-                                    <NCell center colored="bg-emerald-50 dark:bg-emerald-900/20 text-slate-800 dark:text-slate-200">
-                                        <span className="text-[13px] font-medium">
-                                            {row.avgRating || <span className="text-slate-400 dark:text-slate-500 italic text-[12px]">auto</span>}
-                                        </span>
+                                    <NCell center>
+                                        <NInput value={row.avgRating} onChange={v => setNR(idx, "avgRating", v)} placeholder="" />
                                     </NCell>
                                     <NCell center colored={`bg-white dark:bg-[#32324a] ${row.approvedCasesFOIA && !isNaN(Number(row.approvedCasesFOIA)) && Number(row.approvedCasesFOIA) > 20 ? "text-red-600 font-semibold" : "text-slate-800 dark:text-slate-200"}`}><NInput value={row.approvedCasesFOIA} onChange={v => setNR(idx, "approvedCasesFOIA", v)} placeholder="N/A" /></NCell>
                                     <NCell center><NInput value={row.expectedTargetRTC} onChange={v => setNR(idx, "expectedTargetRTC", v)} placeholder="" /></NCell>
@@ -1608,57 +1606,20 @@ export default function MonthlyReportPage() {
         const locked = isLocked && !isAdmin;
 
         // ── Reusable primitives ──
-        const HrTh = ({ children }: { children: React.ReactNode }) => (
-            <th className="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-white bg-[#1e3a5f] border border-[#1e3a5f]/60 whitespace-normal leading-snug">{children}</th>
-        );
-        const HrTd = ({ children, className = "" }: { children?: React.ReactNode; className?: string }) => (
-            <td className={`px-3 py-2.5 border-b border-slate-100 dark:border-white/5 text-[13px] align-top text-white ${className}`}>{children}</td>
-        );
-        const HrInput = ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-            <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={locked ? "" : "—"} readOnly={locked}
-                className={`w-full bg-transparent text-[13px] text-white placeholder:text-slate-400 focus:outline-none rounded px-1 py-0.5 ${locked ? "cursor-default" : "hover:bg-blue-50/50 dark:hover:bg-white/5 focus:bg-blue-50 dark:focus:bg-white/10 focus:ring-1 focus:ring-blue-300/60"} transition-colors`} />
-        );
-        const HrTextarea = ({ value, onChange, rows = 3 }: { value: string; onChange: (v: string) => void; rows?: number }) => (
-            <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={locked ? "" : "Type here…"} readOnly={locked} rows={rows}
-                className={`w-full rounded-lg border text-[13px] px-3 py-2.5 text-white placeholder:text-slate-400 focus:outline-none resize-y transition-all leading-relaxed ${locked ? "bg-slate-50 dark:bg-white/[0.03] border-slate-100 dark:border-white/5 cursor-default opacity-80" : "bg-white dark:bg-[#1a1a32] border-slate-200 dark:border-white/10 focus:ring-2 focus:ring-blue-400/30 focus:border-blue-400/60 shadow-sm"}`} />
-        );
-        const HrSelect = ({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) => (
-            <select value={value} onChange={e => onChange(e.target.value)} disabled={locked}
-                className={`w-full text-[13px] text-white bg-transparent focus:outline-none rounded px-1 py-0.5 ${locked ? "cursor-default" : "hover:bg-blue-50/50 dark:hover:bg-white/5 focus:ring-1 focus:ring-blue-300/60"} transition-colors`}>
-                <option value="">—</option>
-                {options.map(o => <option key={o} value={o}>{o}</option>)}
-            </select>
-        );
-        const SectionHeader = ({ num, title, objective, color = "#1e3a5f" }: { num: string; title: string; objective?: string; color?: string }) => (
-            <div className="flex items-start gap-3 px-6 py-4 border-b border-slate-100 dark:border-white/5 bg-slate-50/60 dark:bg-white/[0.02]">
-                <span className="mt-0.5 flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-[12px] font-bold shadow-sm" style={{ background: color, color: "#ffffff" }}>{num}</span>
-                <div>
-                    <h2 className="text-[14px] font-bold text-white leading-tight">{title}</h2>
-                    {objective && <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{objective}</p>}
-                </div>
-            </div>
-        );
-        const SubHeader = ({ label }: { label: string }) => (
-            <div className="flex items-center gap-2 mb-3">
-                <div className="w-1 h-4 rounded-full bg-[#1e3a5f]/60" />
-                <h3 className="text-[12px] font-semibold uppercase tracking-wide text-white">{label}</h3>
-            </div>
-        );
-        const AddRowBtn = ({ onClick }: { onClick: () => void }) => (
-            <button onClick={onClick} className="mt-2.5 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors">
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
-                Add Row
-            </button>
-        );
-        const DelBtn = ({ onClick }: { onClick: () => void }) => (
-            <td className="px-1.5 border-b border-slate-100 dark:border-white/5 w-7">
-                <button onClick={onClick} className="w-5 h-5 flex items-center justify-center rounded text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
-            </td>
-        );
+        //
+        // All Hr* primitives live at module top-level (above this
+        // component) so their function identity is stable across
+        // re-renders. Previously they were defined inline here, which
+        // gave them a new identity on every keystroke → React saw a
+        // different component type → unmounted + remounted the input
+        // subtree → focus lost after one character (the "typing bug").
+        //
+        // `locked` is passed down through HrLockedContext rather than
+        // a per-call prop so the 97 existing call sites don't need
+        // updating. The provider wraps the JSX returned below.
 
         return (
+            <HrLockedContext.Provider value={locked}>
             <div className="max-w-5xl mx-auto pb-16 space-y-5 px-2">
                 {/* ── Back ── */}
                 <button onClick={() => router.back()} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors group mt-2">
@@ -2014,12 +1975,12 @@ export default function MonthlyReportPage() {
                                 )}
                             </div>
                             <div className="flex items-center gap-2.5">
-                                <button onClick={() => postReport(true)} disabled={submitting || !statusLoaded || isLoading}
+                                <button onClick={() => postReport(true)} disabled={submitting || !statusLoaded}
                                     className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-300 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 text-[13px] font-medium shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                                     <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>
                                     Save Draft
                                 </button>
-                                <button onClick={() => setShowConfirm(true)} disabled={submitting || !statusLoaded || isLoading}
+                                <button onClick={() => setShowConfirm(true)} disabled={submitting || !statusLoaded}
                                     className="flex items-center gap-1.5 px-5 py-2 rounded-lg bg-[#1e3a5f] hover:bg-[#1a3356] text-[13px] font-semibold shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed" style={{ color: "#ffffff" }}>
                                     {submitting
                                         ? <><svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>Submitting…</>
@@ -2074,6 +2035,7 @@ export default function MonthlyReportPage() {
                     </div>
                 )}
             </div>
+            </HrLockedContext.Provider>
         );
     }
 
@@ -2081,13 +2043,7 @@ export default function MonthlyReportPage() {
 
     return (
         <>
-        <style>{`
-          .monthly-report-page input.manual-entry:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-          .monthly-report-page textarea.manual-entry {
-            color: #ef4444 !important;
-          }
-        `}</style>
-        <div className="monthly-report-page max-w-4xl mx-auto space-y-8 pb-16">
+        <div className="max-w-4xl mx-auto space-y-8 pb-16">
             <style jsx global>{`
                 .quill-editor .ql-toolbar {
                     border-color: rgba(0, 0, 0, 0.1) !important;
@@ -2139,14 +2095,6 @@ export default function MonthlyReportPage() {
                 .quill-editor .ql-snow .ql-picker.ql-font .ql-picker-label,
                 .quill-editor .ql-snow .ql-picker.ql-font .ql-picker-item {
                     white-space: nowrap !important;
-                }
-                /* Manual entry red text for rich text fields */
-                .monthly-report-page .manual-rich-text .ql-editor p,
-                .monthly-report-page .manual-rich-text .ql-editor li,
-                .monthly-report-page .manual-rich-text .ql-editor h1,
-                .monthly-report-page .manual-rich-text .ql-editor h2,
-                .monthly-report-page .manual-rich-text .ql-editor h3 {
-                    color: #ef4444;
                 }
             `}</style>
             {/* ── Back button ──────────────────────────────── */}
@@ -2218,7 +2166,7 @@ export default function MonthlyReportPage() {
 
                         {/* Executive Summary Rich Text */}
                         <div className="mb-6">
-                            <RichTextField value={executiveSummary} onChange={viewOnly ? () => {} : setExecutiveSummary} placeholder="Write achievements here..." manual />
+                            <RichTextField value={executiveSummary} onChange={viewOnly ? () => {} : setExecutiveSummary} placeholder="Write achievements here..." />
                         </div>
 
                         {/* Shortfall sub-section */}
@@ -2227,7 +2175,7 @@ export default function MonthlyReportPage() {
                                 Shortfall <span className="text-red-500 ml-0.5">*</span>
                             </h3>
                             <div>
-                                <RichTextField value={shortfallSummary} onChange={viewOnly ? () => {} : setShortfallSummary} placeholder="Write shortfalls here..." manual />
+                                <RichTextField value={shortfallSummary} onChange={viewOnly ? () => {} : setShortfallSummary} placeholder="Write shortfalls here..." />
                             </div>
                         </div>
                     </section>
@@ -2244,69 +2192,59 @@ export default function MonthlyReportPage() {
                                 <thead>
                                     <tr className="border-b border-slate-200 dark:border-white/10">
                                         <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Metric</th>
-                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Actual Targets</th>
-                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Actual Targets (picked from ClickUp)</th>
-                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Target Achieved</th>
-                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Reason</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Target</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Actual</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Variance</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {/* Target: developer-set, only canOverrideActuals users can edit. Actual ClickUp auto-fills from qualified Video QA1 cases. Target Achieved is manager manual entry. */}
+                                    {/* Actual columns auto-fill from qualified Video QA1 cases; only CEO/developer/special_access can override. */}
                                     <tr className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
                                         <td className="py-2 px-3 text-slate-700 dark:text-slate-300 font-medium">Total Video Completed</td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={totalVideoTarget} onChange={setTotalVideoTarget} readOnly={viewOnly || !canOverrideActuals} manual />
+                                            <EditableCell value={totalVideoTarget} onChange={setTotalVideoTarget} readOnly={viewOnly} />
                                         </td>
                                         <td className="py-2 px-3">
                                             <EditableCell
                                                 value={totalVideoActual}
                                                 onChange={(v) => { setTotalVideoActual(v); setTotalVideoActualOverridden(true); }}
-                                                readOnly={viewOnly || !canOverrideActuals}
+                                                readOnly={viewOnly || !(isCeo || isAdmin)}
                                             />
                                         </td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={totalVideoTargetAchieved} onChange={setTotalVideoTargetAchieved} readOnly={viewOnly} manual />
-                                        </td>
-                                        <td className="py-2 px-3">
-                                            <EditableCell value={totalVideoVariance} onChange={setTotalVideoVariance} readOnly={viewOnly} manual />
+                                            <EditableCell value={totalVideoVariance} onChange={setTotalVideoVariance} readOnly={viewOnly} />
                                         </td>
                                     </tr>
                                     <tr className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
                                         <td className="py-2 px-3 text-slate-700 dark:text-slate-300 font-medium">Hero Content Completed</td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={heroContentTarget} onChange={setHeroContentTarget} readOnly={viewOnly || !canOverrideActuals} manual />
+                                            <EditableCell value={heroContentTarget} onChange={setHeroContentTarget} readOnly={viewOnly} />
                                         </td>
                                         <td className="py-2 px-3">
                                             <EditableCell
                                                 value={heroContentActual}
                                                 onChange={(v) => { setHeroContentActual(v); setHeroContentActualOverridden(true); }}
-                                                readOnly={viewOnly || !canOverrideActuals}
+                                                readOnly={viewOnly || !(isCeo || isAdmin)}
                                             />
                                         </td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={heroContentTargetAchieved} onChange={setHeroContentTargetAchieved} readOnly={viewOnly} manual />
-                                        </td>
-                                        <td className="py-2 px-3">
-                                            <EditableCell value={heroContentVariance} onChange={setHeroContentVariance} readOnly={viewOnly} manual />
+                                            <EditableCell value={heroContentVariance} onChange={setHeroContentVariance} readOnly={viewOnly} />
                                         </td>
                                     </tr>
                                     <tr className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
                                         <td className="py-2 px-3 text-slate-700 dark:text-slate-300 font-medium">Videos Published</td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={videosPublishedTarget} onChange={setVideosPublishedTarget} readOnly={viewOnly || !canOverrideActuals} manual />
+                                            <EditableCell value={videosPublishedTarget} onChange={setVideosPublishedTarget} readOnly={viewOnly} />
                                         </td>
                                         <td className="py-2 px-3">
                                             <EditableCell
                                                 value={videosPublishedActual}
                                                 onChange={(v) => { setVideosPublishedActual(v); setVideosPublishedActualOverridden(true); }}
-                                                readOnly={viewOnly || !canOverrideActuals}
+                                                readOnly={viewOnly || !(isCeo || isAdmin)}
                                             />
                                         </td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={videosPublishedTargetAchieved} onChange={setVideosPublishedTargetAchieved} readOnly={viewOnly} manual />
-                                        </td>
-                                        <td className="py-2 px-3">
-                                            <EditableCell value={videosPublishedVariance} onChange={setVideosPublishedVariance} readOnly={viewOnly} manual />
+                                            <EditableCell value={videosPublishedVariance} onChange={setVideosPublishedVariance} readOnly={viewOnly} />
                                         </td>
                                     </tr>
                                 </tbody>
@@ -2406,7 +2344,7 @@ export default function MonthlyReportPage() {
                                                 </td>
                                                 <td className="py-2 px-3 align-top">
                                                     <div className="flex flex-col gap-1">
-                                                        <EditableCell value={editorNotes[editor.id] || ""} onChange={(v) => handleEditorNoteChange(editor.id, v)} readOnly={viewOnly} manual />
+                                                        <EditableCell value={editorNotes[editor.id] || ""} onChange={(v) => handleEditorNoteChange(editor.id, v)} readOnly={viewOnly} />
                                                     </div>
                                                 </td>
                                             </tr>
@@ -2502,7 +2440,7 @@ export default function MonthlyReportPage() {
                                                 </td>
                                                 <td className="py-2 px-3 align-top">
                                                     <div className="flex flex-col gap-1">
-                                                        <EditableCell value={writerNotes[writer.id] || ""} onChange={(v) => handleWriterNoteChange(writer.id, v)} readOnly={viewOnly} manual />
+                                                        <EditableCell value={writerNotes[writer.id] || ""} onChange={(v) => handleWriterNoteChange(writer.id, v)} readOnly={viewOnly} />
                                                     </div>
                                                 </td>
                                             </tr>
@@ -2520,7 +2458,7 @@ export default function MonthlyReportPage() {
                         <p className="text-xs text-slate-500 mb-3">
                             Highlight 1–2 top individual achievements or reliable contributors for the month, and note any individuals needing additional support/mentoring.
                         </p>
-                        <RichTextField value={teamRecognition} onChange={viewOnly ? () => {} : setTeamRecognition} manual />
+                        <RichTextField value={teamRecognition} onChange={viewOnly ? () => {} : setTeamRecognition} />
                     </section>
 
                     <hr className="border-slate-200 dark:border-white/5" />
@@ -2619,15 +2557,15 @@ export default function MonthlyReportPage() {
                         <div className="space-y-3">
                             <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2">
                                 <span className="text-sm text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap mt-1">1. What Worked Well (Content/Format/Hook): <span className="text-red-400">*</span></span>
-                                <EditableField value={keyLearnings[0]} onChange={(v) => updateArrayItem(setKeyLearnings, 0, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} manual />
+                                <EditableField value={keyLearnings[0]} onChange={(v) => updateArrayItem(setKeyLearnings, 0, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} />
                             </div>
                             <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2">
                                 <span className="text-sm text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap mt-1">2. What Did Not Work (Content/Topic/Process): <span className="text-red-400">*</span></span>
-                                <EditableField value={keyLearnings[1]} onChange={(v) => updateArrayItem(setKeyLearnings, 1, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} manual />
+                                <EditableField value={keyLearnings[1]} onChange={(v) => updateArrayItem(setKeyLearnings, 1, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} />
                             </div>
                             <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2">
                                 <span className="text-sm text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap mt-1">3. Improvements Adapted for {monthName}: <span className="text-red-400">*</span></span>
-                                <EditableField value={keyLearnings[2]} onChange={(v) => updateArrayItem(setKeyLearnings, 2, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} manual />
+                                <EditableField value={keyLearnings[2]} onChange={(v) => updateArrayItem(setKeyLearnings, 2, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} />
                             </div>
                         </div>
 
@@ -2637,7 +2575,7 @@ export default function MonthlyReportPage() {
                         <p className="text-xs text-slate-500 italic mb-3">
                             Identify potential risks (e.g., resource overload, content fatigue, technical issues) and any process or communication issues requiring CEO awareness/intervention.
                         </p>
-                        <EditableField value={risksAttention} onChange={setRisksAttention} rows={3} readOnly={viewOnly} manual />
+                        <EditableField value={risksAttention} onChange={setRisksAttention} rows={3} readOnly={viewOnly} />
                     </section>
 
                     <hr className="border-slate-200 dark:border-white/5" />
@@ -2651,7 +2589,7 @@ export default function MonthlyReportPage() {
                         <p className="text-xs text-slate-500 italic mb-3">
                             If applicable, detail any observed inappropriate behavioral patterns from a capsule manager or team member that requires executive attention or HR intervention.
                         </p>
-                        <EditableField value={behavioralConcerns} onChange={setBehavioralConcerns} rows={3} readOnly={viewOnly} manual />
+                        <EditableField value={behavioralConcerns} onChange={setBehavioralConcerns} rows={3} readOnly={viewOnly} />
                     </section>
 
                     <hr className="border-slate-200 dark:border-white/5" />
@@ -2665,7 +2603,7 @@ export default function MonthlyReportPage() {
                         <p className="text-xs text-slate-500 italic mb-3">
                             Any additional notes, observations, or comments you would like to include with this report.
                         </p>
-                        <EditableField value={remark} onChange={setRemark} rows={3} readOnly={viewOnly} manual />
+                        <EditableField value={remark} onChange={setRemark} rows={3} readOnly={viewOnly} />
                     </section>
                 </div>
 
@@ -2743,7 +2681,7 @@ export default function MonthlyReportPage() {
                                 {/* Save as Draft */}
                                 <button
                                     onClick={handleSaveDraft}
-                                    disabled={submitting || !statusLoaded || isLoading}
+                                    disabled={submitting || !statusLoaded}
                                     className="flex items-center gap-1.5 px-3.5 py-[7px] rounded-lg border border-slate-300 bg-white hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600 text-[13px] font-medium shadow-sm transition-colors"
                                 >
                                     <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2755,7 +2693,7 @@ export default function MonthlyReportPage() {
                                 {/* Send to CEO */}
                                 <button
                                     onClick={() => setShowConfirm(true)}
-                                    disabled={submitting || !statusLoaded || isLoading}
+                                    disabled={submitting || !statusLoaded}
                                     className="flex items-center gap-1.5 px-4 py-[7px] rounded-lg bg-violet-600 hover:bg-violet-700 active:bg-violet-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[13px] font-semibold shadow-sm transition-colors"
                                 >
                                     {submitting ? (
