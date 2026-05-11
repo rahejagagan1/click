@@ -6,6 +6,7 @@ import { closeMissedClockOuts } from "@/lib/hr/close-missed-clockouts";
 import {
   sendMissedClockInReminders,
   sendMissedClockOutReminders,
+  sendHrLateClockInSummary,
 } from "@/lib/hr/missed-attendance-emails";
 import { maybeRunSickLeaveAccrual } from "@/lib/hr/leave-accrual";
 
@@ -13,19 +14,23 @@ const TICK_MS    = 60_000;
 const HOUR_MS    = 60 * 60 * 1000;
 
 // Trigger windows for the daily attendance reminder emails (IST).
-//   • Clock-IN  reminder fires at 10:00 IST — at the half-day cut-off.
-//     Anyone who hasn't clocked in by 10am gets the nag.
-//   • Clock-OUT reminder fires at 19:00 IST — one hour after the
-//     standard 6 PM end of shift; anyone still without a clock-out
-//     has missed it.
+//   • Employee  Clock-IN  reminder fires at 09:50 IST — gives everyone
+//     a 10-minute heads-up before the late cut-off.
+//   • HR Manager Late Summary fires at 10:05 IST — listing absent +
+//     late employees consolidated into one mail per HR admin.
+//   • Employee  Clock-OUT reminder fires at 19:00 IST — one hour after
+//     the standard 6 PM end of shift.
 // Window caps:
-//   • Clock-IN  fires from 10:00 → 11:59 IST (`< CLOCK_IN_HOUR + 2`).
-//     A server-down stretch beyond noon misses today's clock-in nag.
+//   • Clock-IN  fires from 09:50 → 09:59 IST (HR summary at 10:05 takes
+//     over the "late" framing after that).
+//   • HR Late Summary fires from 10:05 → 11:59 IST (window cap so a
+//     restart at noon doesn't email after lunch).
 //   • Clock-OUT fires from 19:00 IST → midnight IST (no upper cap;
-//     past-midnight, t.day rolls over and the gate is fresh for the
-//     next day).
-const CLOCK_IN_HOUR  = 10;
-const CLOCK_IN_MIN   = 0;
+//     past-midnight, t.day rolls over and the gate is fresh).
+const CLOCK_IN_HOUR  = 9;
+const CLOCK_IN_MIN   = 50;
+const HR_SUMMARY_HOUR = 10;
+const HR_SUMMARY_MIN  = 5;
 const CLOCK_OUT_HOUR = 19;
 const CLOCK_OUT_MIN  = 0;
 
@@ -65,8 +70,9 @@ function logSchedulerError(label: string, err: any): void {
 // post-window restart wipes the gate and the next tick re-fires the
 // emails. SyncConfig keys + payload shape mirror the leave-accrual
 // helper.
-const SYNC_KEY_CLOCK_IN  = "hr_missed_clockin_last_day";
-const SYNC_KEY_CLOCK_OUT = "hr_missed_clockout_last_day";
+const SYNC_KEY_CLOCK_IN   = "hr_missed_clockin_last_day";
+const SYNC_KEY_HR_SUMMARY = "hr_late_summary_last_day";
+const SYNC_KEY_CLOCK_OUT  = "hr_missed_clockout_last_day";
 
 /**
  * Try to claim today's "fired" slot for the given SyncConfig key.
@@ -168,14 +174,14 @@ export function startInternalCronScheduler(): void {
         //   • we haven't already fired today.
         const t = istClock();
 
-        // Clock-in reminder — 10:00 IST. Window check is "past or equal"
-        // so a server restarted at 10:30 still fires today (once),
-        // protected by the SyncConfig gate against re-firing.
-        const pastClockInWindow = (t.hour > CLOCK_IN_HOUR)
-            || (t.hour === CLOCK_IN_HOUR && t.minute >= CLOCK_IN_MIN);
-        // Don't keep nagging late in the day — give a 2-hour cap.
-        const stillInClockInRange = t.hour < (CLOCK_IN_HOUR + 2);
-        if (pastClockInWindow && stillInClockInRange) {
+        // Employee clock-in reminder — 09:50 IST. Window is narrow
+        // (until 09:59 IST) — the 10:05 HR summary takes over after
+        // that. SyncConfig gate protects against double-fire.
+        const pastClockInWindow =
+            (t.hour > CLOCK_IN_HOUR) ||
+            (t.hour === CLOCK_IN_HOUR && t.minute >= CLOCK_IN_MIN);
+        const stillInClockInWindow = t.hour < HR_SUMMARY_HOUR;
+        if (pastClockInWindow && stillInClockInWindow) {
             claimDailyGate(SYNC_KEY_CLOCK_IN, t.day)
                 .then(async (claimed) => {
                     if (!claimed) return;
@@ -185,8 +191,25 @@ export function startInternalCronScheduler(): void {
                 .catch((e) => logSchedulerError("hr-clock-in", e));
         }
 
-        // Clock-out reminder — 19:00 IST. Same idea but with a wider cap
-        // (until midnight IST) so a 21:30 restart still fires once.
+        // HR Manager daily summary — 10:05 IST. One consolidated email
+        // per HR-admin recipient with absent + late tables. Window cap
+        // at 11:59 IST so a noon restart doesn't email after lunch.
+        const pastHrSummaryWindow =
+            (t.hour > HR_SUMMARY_HOUR) ||
+            (t.hour === HR_SUMMARY_HOUR && t.minute >= HR_SUMMARY_MIN);
+        const stillInHrSummaryWindow = t.hour < (HR_SUMMARY_HOUR + 2);
+        if (pastHrSummaryWindow && stillInHrSummaryWindow) {
+            claimDailyGate(SYNC_KEY_HR_SUMMARY, t.day)
+                .then(async (claimed) => {
+                    if (!claimed) return;
+                    const n = await sendHrLateClockInSummary();
+                    if (n > 0) console.log(`[CronScheduler/hr] Sent HR late-summary email`);
+                })
+                .catch((e) => logSchedulerError("hr-late-summary", e));
+        }
+
+        // Clock-out reminder — 19:00 IST. Wide cap (until midnight IST)
+        // so a 21:30 restart still fires once.
         const pastClockOutWindow = (t.hour > CLOCK_OUT_HOUR)
             || (t.hour === CLOCK_OUT_HOUR && t.minute >= CLOCK_OUT_MIN);
         if (pastClockOutWindow) {

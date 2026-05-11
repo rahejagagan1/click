@@ -5,6 +5,7 @@ import { requireAuth, serverError } from "@/lib/api-auth";
 import { parseBody } from "@/lib/validate";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { istTodayDateOnly } from "@/lib/ist-date";
+import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
 
 // Same shape as the clock-in body. Optional here because legacy
 // callers (cron sweeper, integration tests, anyone POSTing an empty
@@ -28,6 +29,12 @@ export async function POST(req: NextRequest) {
       userId = dbUser?.id!;
     }
     if (!userId) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (!(await isAttendanceEnabled(userId))) {
+      return NextResponse.json(
+        { error: "Attendance tracking is disabled for your account. Contact HR if this is wrong." },
+        { status: 403 },
+      );
+    }
     const now = new Date();
     const today = istTodayDateOnly();
 
