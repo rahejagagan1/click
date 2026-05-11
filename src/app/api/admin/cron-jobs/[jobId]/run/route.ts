@@ -10,6 +10,7 @@ import { getCronJobsConfig, saveCronJobsConfig } from "@/lib/cron-jobs-config";
 import { CRON_JOB_IDS, type CronJobId } from "@/lib/cron-jobs-registry";
 import { CRON_JOB_RUNNERS } from "@/lib/cron-jobs-runners";
 import { serverError } from "@/lib/api-auth";
+import prisma from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // long syncs (ClickUp / ratings) can take a while
@@ -34,7 +35,23 @@ export async function POST(
         }
         const id = jobId as CronJobId;
 
-        await CRON_JOB_RUNNERS[id]();
+        const log = await prisma.syncLog.create({
+            data: { syncType: id, status: "running" },
+        });
+
+        try {
+            await CRON_JOB_RUNNERS[id]();
+            await prisma.syncLog.update({
+                where: { id: log.id },
+                data: { status: "success", completedAt: new Date() },
+            });
+        } catch (runError) {
+            await prisma.syncLog.update({
+                where: { id: log.id },
+                data: { status: "error", completedAt: new Date() },
+            });
+            throw runError;
+        }
 
         const cfg = await getCronJobsConfig();
         cfg[id] = { ...cfg[id], lastManualRunAt: new Date().toISOString() };

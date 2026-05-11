@@ -67,15 +67,38 @@ export default function CaseDetailPage() {
         { label: "▶ YouTube Video", url: data.youtubeVideoUrl },
     ].filter((d) => d.url);
 
+    const shownIds = new Set<number>();
+    const addPerson = (role: string, user: any) => {
+        if (!user || shownIds.has(user.id)) return null;
+        shownIds.add(user.id);
+        return { role, user };
+    };
+
+    // Editors and writers from custom field join tables (authoritative source)
+    const allEditors: any[] = data.allEditors?.map((e: any) => e.user).filter(Boolean) ?? [];
+    const allWriters: any[] = data.allWriters?.map((w: any) => w.user).filter(Boolean) ?? [];
+
+    // Fall back to single editorUserId/writerUserId if join tables are empty (pre-sync data)
+    const editors = allEditors.length > 0 ? allEditors : [data.editor].filter(Boolean);
+    const writers = allWriters.length > 0 ? allWriters : [data.writer].filter(Boolean);
+
+    const namedRoleIds = new Set([
+        data.researcher?.id,
+        ...editors.map((u: any) => u.id),
+        ...writers.map((u: any) => u.id),
+    ].filter(Boolean));
+
+    const allAssignees = data.assignees?.length > 0
+        ? data.assignees.map((a: any) => a.user).filter(Boolean)
+        : data.assignee ? [data.assignee] : [];
+    const cmAssignees = allAssignees.filter((u: any) => !namedRoleIds.has(u.id));
+
     const people = [
-        { role: "Researcher", user: data.researcher },
-        { role: "Writer", user: data.writer },
-        { role: "Editor", user: data.editor },
-        // Multiple assignees from join table, fallback to single assignee
-        ...(data.assignees && data.assignees.length > 0
-            ? data.assignees.map((a: any) => ({ role: "Assignee", user: a.user }))
-            : data.assignee ? [{ role: "Assignee", user: data.assignee }] : []),
-    ].filter((p) => p.user);
+        addPerson("Researcher", data.researcher),
+        ...writers.map((u: any) => addPerson("Writer", u)),
+        ...editors.map((u: any) => addPerson("Editor", u)),
+        ...cmAssignees.map((u: any) => addPerson("CM", u)),
+    ].filter(Boolean);
 
     const ytUrl = data.youtubeVideoUrl || data.finalVideoLink;
     const videoId = ytUrl ? extractVideoId(ytUrl) : null;
@@ -127,7 +150,7 @@ export default function CaseDetailPage() {
             {people.length > 0 && (
                 <div className="flex flex-wrap gap-4">
                     {people.map((p) => (
-                        <div key={p.role} className="flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-100 dark:bg-[#12122a] border border-slate-200 dark:border-white/5">
+                        <div key={`${p.role}-${p.user.id}`} className="flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-100 dark:bg-[#12122a] border border-slate-200 dark:border-white/5">
                             <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500/40 to-fuchsia-500/40 flex items-center justify-center text-white text-sm font-medium">
                                 {p.user.name.charAt(0)}
                             </div>

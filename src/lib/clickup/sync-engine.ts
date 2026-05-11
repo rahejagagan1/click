@@ -1,7 +1,7 @@
 import prisma from "@/lib/prisma";
 import { clickupApi, WORKSPACE_ID, TARGET_SPACE_IDS } from "./api-client";
 import { parseCustomFields } from "./field-parser";
-import { USER_FIELDS } from "./field-mapping";
+import { USER_FIELDS, CUSTOM_FIELD_MAP } from "./field-mapping";
 import { delay, deriveShortName, calcBusinessDaysTat } from "@/lib/utils";
 
 // ═══ STEP 1: Sync Workspace Members ═══
@@ -125,10 +125,10 @@ export async function syncSpaces(): Promise<number> {
     );
     let count = 0;
 
-    // Read admin-selected spaces from DB (fallback to TARGET_SPACE_IDS if none configured)
+    // Always include TARGET_SPACE_IDS; admin config can add more but never removes the baseline.
     const config = await prisma.syncConfig.findUnique({ where: { key: "selected_spaces" } });
-    const selectedIds: string[] = (config?.value as string[]) || TARGET_SPACE_IDS;
-    const filterIds = selectedIds.length > 0 ? selectedIds : TARGET_SPACE_IDS;
+    const configIds: string[] = Array.isArray(config?.value) ? (config!.value as string[]) : [];
+    const filterIds = [...new Set([...TARGET_SPACE_IDS, ...configIds])];
 
     for (const space of response.spaces || []) {
         if (filterIds.includes(space.id)) {
@@ -339,11 +339,27 @@ async function upsertSubtaskFromClickup(subtask: any, caseId: number): Promise<v
         dateCreated: authoritative.date_created ? new Date(parseInt(authoritative.date_created)) : null,
     };
 
-    await prisma.subtask.upsert({
+    const savedSubtask = await prisma.subtask.upsert({
         where: { clickupTaskId: authoritative.id },
         create,
         update,
     });
+
+    // Sync ALL subtask assignees into SubtaskAssignee join table
+    const subtaskAssignees: any[] = Array.isArray(authoritative.assignees) ? authoritative.assignees : [];
+    if (subtaskAssignees.length > 0) {
+        await prisma.subtaskAssignee.deleteMany({ where: { subtaskId: savedSubtask.id } });
+        for (const assignee of subtaskAssignees) {
+            const resolvedId = await resolveUserId(assignee.id);
+            if (resolvedId) {
+                await prisma.subtaskAssignee.upsert({
+                    where: { subtaskId_userId: { subtaskId: savedSubtask.id, userId: resolvedId } },
+                    create: { subtaskId: savedSubtask.id, userId: resolvedId, clickupUserId: BigInt(assignee.id) },
+                    update: {},
+                });
+            }
+        }
+    }
 }
 
 // ═══ STEP 5: Sync Tasks + Subtasks ═══
@@ -403,6 +419,12 @@ export async function syncTasks(): Promise<number> {
                         const writerId = await resolveUserId(customData.writerUserId);
                         const editorId = await resolveUserId(customData.editorUserId);
 
+                        // Collect ALL editors and writers from custom fields (multi-user)
+                        const EDITOR_FIELD_ID = "7564d086-10d1-4db5-9190-6c9d34a79c1f";
+                        const WRITER_FIELD_ID = "e39e94a8-5144-4759-a007-91b1a2c78ea8";
+                        const editorClickupIds: number[] = (task.custom_fields?.find((f: any) => f.id === EDITOR_FIELD_ID)?.value || []).map((u: any) => u.id).filter(Boolean);
+                        const writerClickupIds: number[] = (task.custom_fields?.find((f: any) => f.id === WRITER_FIELD_ID)?.value || []).map((u: any) => u.id).filter(Boolean);
+
                         // Remove user fields from customData (they need FK resolution)
                         const cleanCustomData = { ...customData };
                         for (const field of USER_FIELDS) {
@@ -453,19 +475,66 @@ export async function syncTasks(): Promise<number> {
 
                         count++;
 
-                        // Sync all assignees into CaseAssignee join table
-                        if (task.assignees && Array.isArray(task.assignees) && task.assignees.length > 0) {
-                            await prisma.caseAssignee.deleteMany({ where: { caseId: savedCase.id } });
-                            for (const assignee of task.assignees) {
-                                const resolvedId = await resolveUserId(assignee.id);
-                                if (resolvedId) {
-                                    await prisma.caseAssignee.create({
-                                        data: {
-                                            caseId: savedCase.id,
-                                            userId: resolvedId,
-                                            clickupUserId: BigInt(assignee.id),
-                                        },
-                                    });
+                        // Sync all editors into CaseEditorEntry
+                        await prisma.$executeRawUnsafe(`DELETE FROM "CaseEditorEntry" WHERE "caseId" = $1`, savedCase.id);
+                        for (const clickupId of editorClickupIds) {
+                            const resolvedId = await resolveUserId(clickupId);
+                            if (resolvedId) {
+                                await prisma.$executeRawUnsafe(
+                                    `INSERT INTO "CaseEditorEntry" ("caseId","userId","clickupUserId") VALUES ($1,$2,$3) ON CONFLICT ("caseId","userId") DO NOTHING`,
+                                    savedCase.id, resolvedId, BigInt(clickupId)
+                                );
+                            }
+                        }
+
+                        // Sync all writers into CaseWriterEntry
+                        await prisma.$executeRawUnsafe(`DELETE FROM "CaseWriterEntry" WHERE "caseId" = $1`, savedCase.id);
+                        for (const clickupId of writerClickupIds) {
+                            const resolvedId = await resolveUserId(clickupId);
+                            if (resolvedId) {
+                                await prisma.$executeRawUnsafe(
+                                    `INSERT INTO "CaseWriterEntry" ("caseId","userId","clickupUserId") VALUES ($1,$2,$3) ON CONFLICT ("caseId","userId") DO NOTHING`,
+                                    savedCase.id, resolvedId, BigInt(clickupId)
+                                );
+                            }
+                        }
+
+                        // Sync ALL assignees into CaseAssignee:
+                        // – task.assignees (the ClickUp Assignees field)
+                        // – every user in user-type custom fields (editor, writer, researcher)
+                        {
+                            const seenClickupIds = new Set<number>();
+                            const toAdd: Array<{ clickupId: number }> = [];
+
+                            for (const a of (task.assignees || [])) {
+                                if (a?.id && !seenClickupIds.has(a.id)) {
+                                    seenClickupIds.add(a.id);
+                                    toAdd.push({ clickupId: a.id });
+                                }
+                            }
+                            for (const field of (task.custom_fields || [])) {
+                                const mapping = CUSTOM_FIELD_MAP[field.id];
+                                if (!mapping || mapping.parseAs !== "user_id") continue;
+                                if (!Array.isArray(field.value)) continue;
+                                for (const u of field.value) {
+                                    if (u?.id && !seenClickupIds.has(u.id)) {
+                                        seenClickupIds.add(u.id);
+                                        toAdd.push({ clickupId: u.id });
+                                    }
+                                }
+                            }
+
+                            if (toAdd.length > 0) {
+                                await prisma.caseAssignee.deleteMany({ where: { caseId: savedCase.id } });
+                                for (const { clickupId } of toAdd) {
+                                    const resolvedId = await resolveUserId(clickupId);
+                                    if (resolvedId) {
+                                        await prisma.caseAssignee.upsert({
+                                            where: { caseId_userId: { caseId: savedCase.id, userId: resolvedId } },
+                                            create: { caseId: savedCase.id, userId: resolvedId, clickupUserId: BigInt(clickupId) },
+                                            update: {},
+                                        });
+                                    }
                                 }
                             }
                         }
