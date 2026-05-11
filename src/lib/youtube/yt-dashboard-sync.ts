@@ -14,18 +14,22 @@ export type YoutubeDashboardSyncResult = {
     shortsSkipped: number;
     channelsProcessed: number;
     quarterMetricsUpserted: number;
-    /** Stored 10-day bucket charts (same cron as quarter metrics). */
     channelQuarterAnalysisUpserted: number;
     errors: string[];
 };
 
 async function syncQuarterMetricsForChannels(
-    configs: ChannelConfig[]
+    configs: ChannelConfig[],
+    syncPastQuarters: boolean
 ): Promise<{ upserted: number; channelQuarterAnalysisUpserted: number; errors: string[] }> {
     const errors: string[] = [];
     if (configs.length === 0) return { upserted: 0, channelQuarterAnalysisUpserted: 0, errors };
 
-    const keys = getQuarterKeysToRefreshOnSync(new Date(), 5);
+    const now = new Date();
+    const keys = syncPastQuarters
+        ? getQuarterKeysToRefreshOnSync(now, 5)
+        : [{ year: now.getUTCFullYear(), quarter: Math.floor(now.getUTCMonth() / 3) + 1 }];
+
     let upserted = 0;
     let channelQuarterAnalysisUpserted = 0;
 
@@ -80,8 +84,12 @@ async function syncQuarterMetricsForChannels(
 
 /**
  * Refreshes YouTube Analytics quarter view totals into YoutubeDashboardQuarterMetrics (per-channel OAuth).
+ * When syncPastQuarters is false (default), only the current quarter is synced.
+ * When true, the last 5 years of quarters are synced.
  */
-export async function runYoutubeDashboardSync(): Promise<YoutubeDashboardSyncResult> {
+export async function runYoutubeDashboardSync(
+    opts?: { syncPastQuarters?: boolean }
+): Promise<YoutubeDashboardSyncResult> {
     const configs = getChannelConfigs();
     if (configs.length === 0) {
         return {
@@ -94,8 +102,9 @@ export async function runYoutubeDashboardSync(): Promise<YoutubeDashboardSyncRes
         };
     }
 
-    console.log("[yt-dashboard-sync] Syncing YouTube Analytics quarter metrics + stored channel charts…");
-    const quarterResult = await syncQuarterMetricsForChannels(configs);
+    const syncPastQuarters = opts?.syncPastQuarters ?? false;
+    console.log(`[yt-dashboard-sync] Syncing quarter metrics + charts (past quarters: ${syncPastQuarters})…`);
+    const quarterResult = await syncQuarterMetricsForChannels(configs, syncPastQuarters);
 
     return {
         upserted: 0,

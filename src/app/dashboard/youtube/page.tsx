@@ -28,6 +28,7 @@ type ChannelRow = {
     viewsGainedInQuarter: number | null;
     viewsPreviousQuarter?: number | null;
     quarterOverQuarterDelta?: number | null;
+    subscriberCount?: number | null;
     error: string | null;
     /** Logged-in user: cases in this quarter on this channel (writer/editor) + sum of stored video views. */
     me?: { videoCount: number; viewsOnVideos: number };
@@ -105,10 +106,7 @@ function truncateLabel(s: string, max = 22): string {
     return `${s.slice(0, max - 1)}…`;
 }
 
-/** YouTube Studio–style blue accent for the selected “tab” (channel). */
-const STUDIO_TAB_ACCENT = "#065fd4";
-
-/** Production: merged card — four channel tabs + optional chart/analysis below (same shell). */
+/** YouTube Studio–style horizontal channel tab bar (matches Overview / Content / Audience / Trends look). */
 function StudioStyleChannelStrip({
     channels,
     periodLabel,
@@ -120,124 +118,62 @@ function StudioStyleChannelStrip({
 }: {
     channels: ChannelRow[];
     periodLabel: string;
-    /** 1–4, shown in the card title as Q1 … Q4 */
     quarter: number;
     onSelectChannel?: (ch: ChannelRow) => void;
-    /** Which channel tab shows white + blue top bar (Studio selection). */
     selectedChannelId?: string | null;
-    /** Renders inside the same card under the tab row (e.g. quarter chart). */
     children?: ReactNode;
-    /** Extra controls rendered in the header row (e.g. year/quarter selectors). */
     headerRight?: ReactNode;
 }) {
-    const slots = Array.from({ length: 4 }, (_, i) => channels[i] ?? null);
-    const extra = channels.length > 4 ? channels.length - 4 : 0;
-
     return (
-        <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-100/90 dark:bg-[#0e0e1a] shadow-sm overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 bg-white dark:border-white/10 dark:bg-[#12122a] px-5 py-2.5">
-                <div className="flex items-center gap-3">
-                    <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Q{quarter} views</h2>
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{periodLabel}</span>
-                </div>
+        <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0f0f0f] shadow-sm overflow-hidden">
+            {/* Top bar: period label + year/quarter selectors */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/60 dark:border-white/[0.08] bg-white dark:bg-[#0f0f0f] px-5 py-2.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                    Q{quarter} · {periodLabel}
+                </span>
                 {headerRight && <div className="flex items-center gap-2">{headerRight}</div>}
             </div>
-            <div className="grid grid-cols-2 lg:grid-cols-4">
-                {slots.map((ch, idx) => {
-                    const selected = !!ch && !!selectedChannelId && ch.channelId === selectedChannelId;
-                    const hasContribution = ch?.me && ch.me.viewsOnVideos > 0;
-                    const inner = (
-                        <>
-                            <p
-                                className={cn(
-                                    "mb-1.5 line-clamp-2 text-sm font-medium leading-snug tracking-tight sm:text-[15px]",
-                                    selected
-                                        ? "text-slate-600 dark:text-slate-300"
-                                        : "text-slate-500 dark:text-slate-400"
-                                )}
-                            >
-                                {ch?.name ?? "—"}
-                                {hasContribution && (
-                                    <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-violet-500 align-middle" title="You contributed to this channel" />
-                                )}
-                            </p>
-                            <div className="flex flex-wrap items-center justify-center gap-1.5">
-                                <span
-                                    className={cn(
-                                        "text-2xl font-bold tabular-nums tracking-tight sm:text-3xl sm:leading-none",
-                                        selected
-                                            ? "text-slate-900 dark:text-white"
-                                            : "text-slate-800 dark:text-slate-100"
-                                    )}
-                                >
-                                    {ch ? formatCompactViews(ch.viewsGainedInQuarter) : "—"}
-                                </span>
-                                {ch && ch.viewsGainedInQuarter != null && ch.quarterOverQuarterDelta != null && ch.quarterOverQuarterDelta !== 0 && (
-                                    <svg className={cn("h-4 w-4 shrink-0", ch.quarterOverQuarterDelta > 0 ? "text-emerald-500" : "text-rose-500")} fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24" aria-hidden>
-                                        {ch.quarterOverQuarterDelta > 0 ? (
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                                        ) : (
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                                        )}
-                                    </svg>
-                                )}
-                            </div>
-                            <p
-                                className={cn(
-                                    "mt-2 max-w-[200px] text-[11px] leading-snug italic sm:max-w-[220px] sm:text-xs",
-                                    selected ? "text-slate-500 dark:text-slate-400" : "text-slate-500/90 dark:text-slate-500"
-                                )}
-                            >
-                                {ch ? studioComparisonLine(ch) : "No channel configured in this slot."}
-                            </p>
-                        </>
-                    );
 
-                    const tabShell = cn(
-                        "relative flex min-h-[100px] w-full flex-col items-center justify-center border-slate-200/90 px-3 py-3 text-center transition-[background-color,box-shadow] duration-300 ease-out sm:min-h-[108px] sm:px-4 sm:py-4 dark:border-white/10",
-                        "border-r max-lg:[&:nth-child(2n)]:border-r-0 lg:[&:nth-child(4n)]:border-r-0",
-                        "max-lg:[&:nth-child(-n+2)]:border-b lg:border-b-0",
-                        selected
-                            ? "bg-white dark:bg-[#12122a]"
-                            : "bg-slate-100/95 dark:bg-white/[0.055]"
-                    );
-
+            {/* YT Studio–style channel name tab bar */}
+            <div className="flex overflow-x-auto border-b border-slate-200/60 dark:border-white/[0.08] bg-white dark:bg-[#0f0f0f] px-2">
+                {channels.map((ch) => {
+                    const selected = ch.channelId === selectedChannelId;
+                    const hasContribution = ch.me && ch.me.viewsOnVideos > 0;
                     return (
-                        <div key={ch?.channelId ?? `slot-${idx}`} className={tabShell}>
+                        <button
+                            key={ch.channelId}
+                            type="button"
+                            onClick={() => onSelectChannel?.(ch)}
+                            className={cn(
+                                "relative shrink-0 px-4 py-3.5 text-sm font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500/30",
+                                selected
+                                    ? "text-slate-900 dark:text-white"
+                                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                            )}
+                            aria-pressed={selected}
+                            aria-label={`${selected ? "Selected" : "Select"} ${ch.name}`}
+                        >
+                            {ch.name}
+                            {hasContribution && (
+                                <span
+                                    className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-violet-500 align-middle"
+                                    title="You contributed to this channel"
+                                />
+                            )}
                             {selected && (
-                                <div
-                                    className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-[3px]"
-                                    style={{ backgroundColor: STUDIO_TAB_ACCENT }}
+                                <span
+                                    className="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-slate-900 dark:bg-white"
                                     aria-hidden
                                 />
                             )}
-                            {ch && onSelectChannel ? (
-                                <button
-                                    type="button"
-                                    onClick={() => onSelectChannel(ch)}
-                                    className={cn(
-                                        "relative z-[2] flex h-full min-h-[100px] w-full flex-col items-center justify-center px-1 py-1 text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500/35 sm:min-h-[108px]",
-                                        selected ? "" : "hover:bg-slate-200/40 dark:hover:bg-white/[0.06]"
-                                    )}
-                                    aria-pressed={selected}
-                                    aria-label={`${selected ? "Selected" : "Select"} ${ch.name} for quarterly chart`}
-                                >
-                                    {inner}
-                                </button>
-                            ) : (
-                                <div className="relative z-[2] flex min-h-[100px] flex-col items-center justify-center px-1 py-1 sm:min-h-[108px]">{inner}</div>
-                            )}
-                        </div>
+                        </button>
                     );
                 })}
             </div>
+
+            {/* Analytics content for the selected channel */}
             {children != null && (
-                <div className="border-t border-slate-200/90 bg-white dark:border-white/10 dark:bg-[#12122a]">{children}</div>
-            )}
-            {extra > 0 && (
-                <p className="border-t border-slate-200/80 bg-slate-100/90 px-4 py-2.5 text-center text-[11px] text-slate-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400">
-                    +{extra} more channel{extra === 1 ? "" : "s"} — open <strong className="text-slate-700 dark:text-slate-300">Developer analytics</strong> for the full list.
-                </p>
+                <div className="bg-white dark:bg-[#0f0f0f]">{children}</div>
             )}
         </div>
     );
@@ -298,12 +234,14 @@ export default function YoutubeDashboardPage() {
         setAnalysisChannel(null);
     }, [year, quarter]);
 
-    // Auto-open the quarterly graph if the user contributed to exactly one channel
+    // Auto-open the quarterly chart: prefer a channel the user contributed to, else open the first
     useEffect(() => {
         if (!data?.configured || analysisChannel) return;
         const contributed = data.channels.filter((ch) => ch.me && ch.me.viewsOnVideos > 0);
-        if (contributed.length === 1) {
+        if (contributed.length >= 1) {
             setAnalysisChannel(contributed[0]);
+        } else if (data.channels.length > 0) {
+            setAnalysisChannel(data.channels[0]);
         }
     }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -461,6 +399,7 @@ export default function YoutubeDashboardPage() {
                                             quarter={quarter}
                                             quarterLabel={data.label}
                                             userContribution={analysisChannel.me ?? null}
+                                            subscriberCount={analysisChannel.subscriberCount ?? null}
                                             onDismiss={() => setAnalysisChannel(null)}
                                         />
                                     ) : null}
