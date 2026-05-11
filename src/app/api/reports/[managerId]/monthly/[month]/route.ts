@@ -121,15 +121,28 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
             });
         }
 
+        // Snapshot-on-submit behaviour for ClickUp-sourced actuals:
+        //   - CEO-overridden value  → always use saved value
+        //   - Report is locked      → use saved snapshot (frozen at submit time)
+        //                             developer can refresh via /refresh-actuals
+        //   - Draft / unsubmitted   → recompute live so manager sees fresh data
+        //                             while writing the report
+        const useSnapshot = report.isLocked;
         const totalVideoActual = (report as any).totalVideoActualOverridden
             ? report.totalVideoActual
-            : (isProduction ? String(auto.totalVideo) : report.totalVideoActual);
+            : useSnapshot
+                ? report.totalVideoActual
+                : (isProduction ? String(auto.totalVideo) : report.totalVideoActual);
         const heroContentActual = (report as any).heroContentActualOverridden
             ? report.heroContentActual
-            : (isProduction ? String(auto.heroContent) : report.heroContentActual);
+            : useSnapshot
+                ? report.heroContentActual
+                : (isProduction ? String(auto.heroContent) : report.heroContentActual);
         const videosPublishedActual = (report as any).videosPublishedActualOverridden
             ? (report as any).videosPublishedActual
-            : (isProduction ? String(autoVideosPublished) : (report as any).videosPublishedActual);
+            : useSnapshot
+                ? (report as any).videosPublishedActual
+                : (isProduction ? String(autoVideosPublished) : (report as any).videosPublishedActual);
 
         return NextResponse.json({
             submitted: true,
