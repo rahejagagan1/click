@@ -24,6 +24,16 @@ export type TabKey =
   | "reports"
   | "departments"
   | "violations"
+  // ── HR feature pages that escaped the original catalog ──────
+  // Added as part of the permissions-coverage audit. Each one is a
+  // real route under /dashboard/hr/* that wasn't behind a permission
+  // gate before, so the Permissions UI couldn't hide them per-user.
+  | "hr_engage"
+  | "hr_announcements"
+  | "hr_org"
+  | "hr_expenses"
+  | "hr_approvals"
+  | "hr_analytics"
   // ── HR Admin sub-tabs (inside /dashboard/hr/admin) ───────────
   // Per-user toggles for the inner panel each section. The parent
   // `hr_admin` toggle still gates the whole HR Dashboard; these keys
@@ -58,7 +68,7 @@ export const TAB_CATALOG: TabDef[] = [
   { key: "company",     label: "Company",       description: "Company health / org metrics",       pathPrefixes: ["/dashboard/company"],                   defaultForNewUser: false },
   { key: "scores",      label: "Scores",        description: "Team scorecards + ratings",          pathPrefixes: ["/dashboard/scores"],                    defaultForNewUser: false },
   { key: "youtube",     label: "YouTube",       description: "YouTube dashboard",                  pathPrefixes: ["/dashboard/youtube"],                   defaultForNewUser: true  },
-  { key: "feedback",    label: "Feedback",      description: "Feedback form + (HR) inbox",         pathPrefixes: ["/dashboard/feedback"],                  defaultForNewUser: true  },
+  { key: "feedback",    label: "Feedback",      description: "Feedback form + (HR) inbox",         pathPrefixes: ["/dashboard/feedback", "/dashboard/feedback_inbox"], defaultForNewUser: true  },
   { key: "tools",       label: "Tools",         description: "General-purpose tools page",         pathPrefixes: ["/dashboard/tools"],                     defaultForNewUser: true  },
   // `admin` is deliberately OFF this catalog — super-admin access is
   // governed by orgLevel/isDeveloper only. Keeping it out of the
@@ -77,6 +87,15 @@ export const TAB_CATALOG: TabDef[] = [
   // UserTabPermission rows; only the user-facing label and URL changed.
   { key: "departments", label: "KPIs",           description: "Per-department KPIs (role-scoped)",  pathPrefixes: ["/dashboard/kpis"],                      defaultForNewUser: true  },
   { key: "violations",  label: "Violation Log", description: "Attendance / policy violations",     pathPrefixes: ["/dashboard/violations"],                defaultForNewUser: false },
+  // ── HR feature pages added by the coverage audit ─────────────────
+  // Community / informational tabs default to ON for new employees;
+  // admin / manager-only tabs default OFF and rely on ROLE overrides.
+  { key: "hr_engage",        label: "Engage",        description: "Org-wide engagement feed (posts, polls, praise)", pathPrefixes: ["/dashboard/hr/engage"],        defaultForNewUser: true  },
+  { key: "hr_announcements", label: "Announcements", description: "Company-wide announcements",                     pathPrefixes: ["/dashboard/hr/announcements"], defaultForNewUser: true  },
+  { key: "hr_org",           label: "Org Tree",      description: "Org chart / reporting structure",                pathPrefixes: ["/dashboard/hr/org"],           defaultForNewUser: true  },
+  { key: "hr_expenses",      label: "Expenses",      description: "Submit & track expense claims",                  pathPrefixes: ["/dashboard/hr/expenses"],      defaultForNewUser: true  },
+  { key: "hr_approvals",     label: "My Approvals",  description: "Manager queue for leave / WFH / regularize",     pathPrefixes: ["/dashboard/hr/approvals"],     defaultForNewUser: false },
+  { key: "hr_analytics",     label: "HR Analytics",  description: "Org-wide HR analytics dashboard",                pathPrefixes: ["/dashboard/hr/analytics"],     defaultForNewUser: false },
   // ── HR Dashboard sub-tabs ────────────────────────────────────────
   // Sub-keys that gate the inner panels of /dashboard/hr/admin. They
   // only apply to viewers who already have the parent `hr_admin` tab
@@ -128,6 +147,9 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     hr_admin_attendance:true, hr_admin_approvals:true, hr_admin_leaves:true,
     hr_admin_holidays:true, hr_admin_assets:true, hr_admin_leave_types:true,
     hr_admin_shifts:true, hr_admin_departments:true,
+    // Audit-added pages — admins see everything by default.
+    hr_engage:true, hr_announcements:true, hr_org:true, hr_expenses:true,
+    hr_approvals:true, hr_analytics:true,
   },
   // special_access is the senior-admin role — same visibility as CEO
   // (minus the literal /dashboard CEO-only landing). Sidebar's isAdmin
@@ -140,9 +162,13 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     hr_admin_attendance:true, hr_admin_approvals:true, hr_admin_leaves:true,
     hr_admin_holidays:true, hr_admin_assets:true, hr_admin_leave_types:true,
     hr_admin_shifts:true, hr_admin_departments:true,
+    hr_engage:true, hr_announcements:true, hr_org:true, hr_expenses:true,
+    hr_approvals:true, hr_analytics:true,
   },
   hod: {
     hr_my_team: true, scores: true, reports: true,
+    // HODs approve their direct reports' leave / WFH / etc.
+    hr_approvals: true,
   },
   hr_manager: {
     hr_my_team: true, hr_admin: true, hr_people: true,
@@ -157,9 +183,14 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     // shifts default OFF — admins can flip them on per-user.
     hr_admin_attendance:true, hr_admin_leaves:true, hr_admin_holidays:true,
     hr_admin_assets:true, hr_admin_departments:true,
+    // HR-Manager also gets the new HR feature pages.
+    hr_engage:true, hr_announcements:true, hr_org:true, hr_expenses:true,
+    hr_approvals:true, hr_analytics:true,
   },
   manager: {
     scores: true, reports: true,
+    // Line managers approve their direct reports.
+    hr_approvals: true,
   },
   // leads / sub-leads / production team / members use the base 4-tab defaults.
 };

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
@@ -139,13 +139,35 @@ export default function EmployeeDetailPage() {
                   <h1 className="text-[24px] font-bold leading-none tracking-[-0.01em] text-slate-800">
                     {user.name}
                   </h1>
-                  <span
-                    className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700 ring-1 ring-inset ring-emerald-200"
-                    title="India"
-                  >
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    IN
-                  </span>
+                  {/* Live presence — driven by today's Attendance row + any
+                      currently-open session. "IN" only when there's an
+                      unfinished session right now; "OUT" once today is
+                      closed out; "ON LEAVE" if today is a leave day;
+                      "OFFLINE" when there's no clock-in for today at all. */}
+                  {(() => {
+                    const t = user.todayAttendance as
+                      | { status: string; clockIn: string | null; clockOut: string | null; hasOpenSession: boolean }
+                      | null;
+                    let label: string, dot: string, ring: string, bg: string, text: string, title: string;
+                    if (t?.status === "on_leave") {
+                      label = "On Leave"; dot = "bg-violet-500"; ring = "ring-violet-200"; bg = "bg-violet-50"; text = "text-violet-700"; title = "On leave today";
+                    } else if (t && t.hasOpenSession) {
+                      label = "In"; dot = "bg-emerald-500"; ring = "ring-emerald-200"; bg = "bg-emerald-50"; text = "text-emerald-700"; title = "Currently clocked in";
+                    } else if (t?.clockIn) {
+                      label = "Out"; dot = "bg-slate-400"; ring = "ring-slate-200"; bg = "bg-slate-100"; text = "text-slate-600"; title = "Clocked out for the day";
+                    } else {
+                      label = "Offline"; dot = "bg-slate-300"; ring = "ring-slate-200"; bg = "bg-slate-100"; text = "text-slate-500"; title = "Not clocked in today";
+                    }
+                    return (
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full ${bg} px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${text} ring-1 ring-inset ${ring}`}
+                        title={title}
+                      >
+                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`} />
+                        {label}
+                      </span>
+                    );
+                  })()}
                   {!isActive ? (
                     <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600 ring-1 ring-inset ring-slate-200">
                       Inactive
@@ -429,7 +451,7 @@ export default function EmployeeDetailPage() {
 
             {activeTab === "Attendance" && (
               <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
-                <EmployeeTimePanel userId={userId} userName={user.name} isHRAdmin={isHRAdmin} />
+                <EmployeeTimePanel userId={userId} userName={user.name} isHRAdmin={isHRAdmin} meDbId={Number(me?.dbId) || null} />
               </section>
             )}
 
@@ -1118,8 +1140,24 @@ function TimelineBar({
   );
 }
 
-function EmployeeTimePanel({ userId, userName, isHRAdmin }: { userId: number; userName: string; isHRAdmin: boolean }) {
+function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: number; userName: string; isHRAdmin: boolean; meDbId: number | null }) {
+  // True when the signed-in viewer is looking at their own profile — used
+  // to render a "Regularize this day" link in place of the passive Absent
+  // cross icon, deep-linking into /dashboard/hr/attendance with the date
+  // pre-filled so the user can self-apply.
+  const isSelfView = meDbId !== null && meDbId === userId;
   const today = new Date();
+
+  // Live clock tick — used to add the currently-open session's elapsed
+  // minutes onto today's Effective/Gross hours. Without this, the row
+  // is stuck on the last clocked-out totalMinutes (which is what the DB
+  // stores) and a user mid-session sees stale numbers. 1-minute cadence
+  // is plenty; per-second feels jittery in a table cell.
+  const [now, setNow] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Period selector: "30d" | "YYYY-MM"
   type Period = "30d" | string;
@@ -1256,12 +1294,36 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin }: { userId: number; us
   });
   const [submitting, setSubmitting] = useState(false);
 
+  // datetime-local <-> IST helpers. The native input is timezone-naive
+  // (just "YYYY-MM-DDTHH:mm" text), so we have to format the stored UTC
+  // instant in IST when pre-filling, and parse the entered IST string
+  // back to a UTC instant on submit. Otherwise HR sees UTC times and a
+  // server in UTC re-interprets the entered value, producing day-old
+  // garbage on the regularization row.
+  const utcToIstInput = (instant: Date | string): string => {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(typeof instant === "string" ? new Date(instant) : instant);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value || "00";
+    // formatToParts can emit "24" for midnight on some engines — normalize.
+    const hh = get("hour") === "24" ? "00" : get("hour");
+    return `${get("year")}-${get("month")}-${get("day")}T${hh}:${get("minute")}`;
+  };
+  const istInputToUtcIso = (val: string): string => {
+    // val is "YYYY-MM-DDTHH:mm" interpreted as IST (+05:30). Append the
+    // offset so Date parses unambiguously regardless of the runtime TZ.
+    if (!val) return "";
+    return new Date(`${val}:00+05:30`).toISOString();
+  };
+
   const openRegFor = (rec: any) => {
     const dateOnly = String(rec.date).slice(0, 10);
     setRegForm({
       date: dateOnly,
-      requestedIn:  rec.clockIn  ? new Date(rec.clockIn).toISOString().slice(0, 16)  : `${dateOnly}T09:00`,
-      requestedOut: rec.clockOut ? new Date(rec.clockOut).toISOString().slice(0, 16) : `${dateOnly}T18:00`,
+      requestedIn:  rec.clockIn  ? utcToIstInput(rec.clockIn)  : `${dateOnly}T09:00`,
+      requestedOut: rec.clockOut ? utcToIstInput(rec.clockOut) : `${dateOnly}T18:00`,
       reason: "",
     });
     setRegOpen(true);
@@ -1276,8 +1338,8 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin }: { userId: number; us
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           date: regForm.date,
-          requestedIn:  regForm.requestedIn  ? new Date(regForm.requestedIn).toISOString()  : null,
-          requestedOut: regForm.requestedOut ? new Date(regForm.requestedOut).toISOString() : null,
+          requestedIn:  regForm.requestedIn  ? istInputToUtcIso(regForm.requestedIn)  : null,
+          requestedOut: regForm.requestedOut ? istInputToUtcIso(regForm.requestedOut) : null,
           reason: regForm.reason.trim(),
           userId,
           forceGrant: true,
@@ -1376,7 +1438,19 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin }: { userId: number; us
                 : isHoliday  ? "bg-amber-50/40"
                 : "bg-white hover:bg-slate-50/60";
 
-              const totalMin = rec.totalMinutes ?? 0;
+              // Today's row keeps ticking live for as long as a session
+              // is open. Without this, after clocking back in from a
+              // break the row would freeze at the closed-session sum
+              // (what Attendance.totalMinutes stores). Mirrors the
+              // attendance-page elapsed math: stored total + elapsed
+              // since the currently-open session's clockIn.
+              const sess = (rec.sessions ?? []) as Array<{ clockIn: string; clockOut: string | null }>;
+              const openSess = sess.find((s) => !s.clockOut);
+              const baseMin = rec.totalMinutes ?? 0;
+              const liveMin = isToday && openSess
+                ? baseMin + Math.max(0, Math.floor((now.getTime() - new Date(openSess.clockIn).getTime()) / 60000))
+                : baseMin;
+              const totalMin = liveMin;
               const effectiveDot = totalMin >= 480 ? "bg-emerald-500" : totalMin >= 240 ? "bg-amber-500" : totalMin > 0 ? "bg-red-500" : "bg-slate-300";
 
               return (
@@ -1397,7 +1471,15 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin }: { userId: number; us
                       punches" cases (leave / w-off / holiday / pending requests
                       / regularization). Reads cleaner than a striped bar. */}
                   {(() => {
-                    const hasActualPunches = !!(rec.clockIn && rec.clockOut);
+                    // "Has actual punches" means there's at least a real
+                    // clock-in on the row. An open session (clockOut still
+                    // null) is real data — the live timeline + counter
+                    // still tell the user what's been worked so far. The
+                    // old `clockIn && clockOut` rule treated today's open
+                    // session as "no data" and hid the timeline behind a
+                    // centered "Regularization Pending" banner, which made
+                    // the row look like attendance was missing.
+                    const hasActualPunches = !!rec.clockIn;
                     const isRegOnly = !hasActualPunches && (isRegPending || isRegApproved);
                     const showCentered = isWeekend || isLeaveRow || isHoliday
                       || (isLeavePending && !isPresent)
@@ -1442,7 +1524,13 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin }: { userId: number; us
                                 approved. Tone changes color: amber-striped while
                                 pending, emerald when approved, sky when actual. */}
                             {(() => {
-                              const hasActual = !!(rec.clockIn && rec.clockOut);
+                              // Prefer the real clock-in whenever it exists
+                              // (open session counts). Only fall back to the
+                              // regularization's requested times when there
+                              // are no real punches at all — matches the
+                              // hasActualPunches check above so the centered
+                              // banner and the bar agree on what to draw.
+                              const hasActual = !!rec.clockIn;
                               const useReg = !hasActual && reg && (reg.requestedIn || reg.requestedOut);
                               const barIn  = useReg ? reg.requestedIn  : rec.clockIn;
                               const barOut = useReg ? reg.requestedOut : rec.clockOut;
@@ -1458,7 +1546,7 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin }: { userId: number; us
                       <td className="px-5 py-3 align-middle">
                         {(() => {
                           // Compute regularization-based hours when actual punches are missing.
-                          const hasActual = !!(rec.clockIn && rec.clockOut);
+                          const hasActual = !!rec.clockIn;
                           let mins = totalMin;
                           if (!hasActual && reg && reg.requestedIn && reg.requestedOut) {
                             mins = Math.max(0, Math.round((new Date(reg.requestedOut).getTime() - new Date(reg.requestedIn).getTime()) / 60000));
@@ -1481,7 +1569,7 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin }: { userId: number; us
                       </td>
                       <td className="px-5 py-3 align-middle">
                         {(() => {
-                          const hasActual = !!(rec.clockIn && rec.clockOut);
+                          const hasActual = !!rec.clockIn;
                           let mins = totalMin;
                           if (!hasActual && reg && reg.requestedIn && reg.requestedOut) {
                             mins = Math.max(0, Math.round((new Date(reg.requestedOut).getTime() - new Date(reg.requestedIn).getTime()) / 60000));
@@ -1564,12 +1652,40 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin }: { userId: number; us
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                       </span>
                     ) : rec.status === "absent" ? (
-                      <span
-                        title="No attendance recorded"
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-red-50 text-red-500 ring-1 ring-inset ring-red-200 shadow-[0_1px_2px_rgba(239,68,68,0.18)]"
-                      >
-                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
-                      </span>
+                      // Absent day → render a "Regularize" affordance instead
+                      // of a passive cross. HR admins open the on-behalf
+                      // modal; the profile owner is deep-linked into
+                      // /dashboard/hr/attendance with the date pre-filled
+                      // so they can self-apply. Anyone else (rare: an HR
+                      // viewer who's not an admin) still sees the icon but
+                      // it's non-interactive.
+                      isHRAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => openRegFor(rec)}
+                          title="Regularize this day"
+                          aria-label="Regularize this day"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-50 text-amber-600 ring-1 ring-inset ring-amber-200 shadow-[0_1px_2px_rgba(245,158,11,0.18)] transition hover:bg-amber-100 hover:ring-amber-300"
+                        >
+                          <ShieldCheck className="h-4 w-4" strokeWidth={2.25} />
+                        </button>
+                      ) : isSelfView ? (
+                        <Link
+                          href={`/dashboard/hr/attendance?apply=regularize&date=${dateOnly}`}
+                          title="Regularize this day"
+                          aria-label="Regularize this day"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-50 text-amber-600 ring-1 ring-inset ring-amber-200 shadow-[0_1px_2px_rgba(245,158,11,0.18)] transition hover:bg-amber-100 hover:ring-amber-300"
+                        >
+                          <ShieldCheck className="h-4 w-4" strokeWidth={2.25} />
+                        </Link>
+                      ) : (
+                        <span
+                          title="Absent — ask HR to regularize"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-50 text-amber-500 ring-1 ring-inset ring-amber-200"
+                        >
+                          <ShieldCheck className="h-4 w-4" strokeWidth={2.25} />
+                        </span>
+                      )
                     ) : null}
                   </td>
 

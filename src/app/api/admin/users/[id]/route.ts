@@ -39,6 +39,19 @@ export async function PATCH(
             updateData.teamCapsule = resolved.value;
         }
 
+        // Before the update, capture role/orgLevel so we know whether to
+        // re-sync tab permissions. The Tab Permissions UI lets admins
+        // override role-derived defaults per-user; once an override row
+        // exists, role changes here stop propagating, which is surprising.
+        // Solution: when role or orgLevel changes via Admin → Users,
+        // wipe any UserTabPermission rows for that user — their effective
+        // permissions then fall back to the new role's defaults from
+        // ROLE_TAB_OVERRIDES. HR can still re-override afterward.
+        const before = await prisma.user.findUnique({
+            where: { id },
+            select: { role: true, orgLevel: true },
+        });
+
         const user = await prisma.user.update({
             where: { id },
             data: updateData,
@@ -51,6 +64,23 @@ export async function PATCH(
                 manager: { select: { id: true, name: true } },
             },
         });
+
+        const roleChanged     = before && updateData.role !== undefined     && updateData.role     !== before.role;
+        const orgLevelChanged = before && updateData.orgLevel !== undefined && updateData.orgLevel !== before.orgLevel;
+        if (roleChanged || orgLevelChanged) {
+            try {
+                // Raw SQL — the generated Prisma client may not include
+                // UserTabPermission on some dev machines. Best-effort: if
+                // the table is missing, we silently no-op rather than
+                // failing the whole PATCH.
+                await prisma.$executeRawUnsafe(
+                    `DELETE FROM "UserTabPermission" WHERE "userId" = $1`,
+                    id,
+                );
+            } catch (e) {
+                console.warn("[admin/users PATCH] tab-permission resync skipped:", e);
+            }
+        }
 
         return NextResponse.json(user);
     } catch (error) {

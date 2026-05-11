@@ -5,6 +5,7 @@ import { requireAuth, serverError } from "@/lib/api-auth";
 import { parseBody } from "@/lib/validate";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { istTodayDateOnly, istHour } from "@/lib/ist-date";
+import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
 
 // Real GPS coordinates required so the attendance log always has a verifiable
 // physical location. Address is optional and capped to keep payloads small.
@@ -26,6 +27,18 @@ export async function POST(req: NextRequest) {
       userId = dbUser?.id!;
     }
     if (!userId) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+    // Attendance tracking can be turned off per-employee (HR Dashboard →
+    // Permissions → Payroll & Attendance). CEO + developers default OFF;
+    // any user with the toggle off is blocked from punching in/out at all,
+    // and the dashboards skip them.
+    if (!(await isAttendanceEnabled(userId))) {
+      return NextResponse.json(
+        { error: "Attendance tracking is disabled for your account. Contact HR if this is wrong." },
+        { status: 403 },
+      );
+    }
+
     const ip = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || undefined;
 
     const parsed = await parseBody(req, ClockInBody);
