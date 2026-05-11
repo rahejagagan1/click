@@ -22,7 +22,6 @@ export async function POST(request: NextRequest) {
   const address         = typeof body?.address === "string"         ? body.address.trim()         : null;
   const city            = typeof body?.city === "string"            ? body.city.trim()            : null;
   const state           = typeof body?.state === "string"           ? body.state.trim()           : null;
-  const emergencyContact = typeof body?.emergencyContact === "string" ? body.emergencyContact.trim() : null;
   const emergencyPhone  = typeof body?.emergencyPhone === "string"  ? body.emergencyPhone.trim()  : null;
 
   const user = await prisma.user.findUnique({
@@ -41,7 +40,6 @@ export async function POST(request: NextRequest) {
         ...(address          ? { address }          : {}),
         ...(city             ? { city }             : {}),
         ...(state            ? { state }            : {}),
-        ...(emergencyContact ? { emergencyContact } : {}),
         ...(emergencyPhone   ? { emergencyPhone }   : {}),
       },
     });

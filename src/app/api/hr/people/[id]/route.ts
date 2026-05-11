@@ -130,9 +130,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const body = await req.json();
     const {
       displayName,
+      employeeId,
+      firstName, middleName, lastName,
       phone, workPhone, personalEmail,
       dateOfBirth, gender, bloodGroup, maritalStatus,
-      emergencyContact, emergencyPhone,
+      emergencyPhone,
       address, city, state, profilePictureUrl,
       // Sensitive — encrypted at rest before save.
       panNumber, parentName, aadhaarNumber, aadhaarEnrollment,
@@ -163,11 +165,47 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     // Each field is only included when explicitly sent (not undefined) so
     // partial section saves don't overwrite untouched fields with null.
     const profileData: Record<string, unknown> = {};
+    // HRM No. — editable. Uniqueness is enforced by Prisma's @unique;
+    // we pre-check so we can return a clean 409 instead of a raw P2002.
+    let employeeIdNew: string | null = null;
+    if (employeeId !== undefined) {
+      const trimmed = String(employeeId ?? "").trim();
+      if (!trimmed) {
+        return NextResponse.json({ error: "HRM No. cannot be empty." }, { status: 400 });
+      }
+      if (existing && trimmed !== existing.employeeId) {
+        const clash = await prisma.employeeProfile.findUnique({
+          where: { employeeId: trimmed },
+          select: { userId: true },
+        });
+        if (clash && clash.userId !== id) {
+          return NextResponse.json(
+            { error: `HRM No. "${trimmed}" is already used by another employee.` },
+            { status: 409 },
+          );
+        }
+        profileData.employeeId = trimmed;
+        employeeIdNew = trimmed;
+      }
+    }
+    // First / Last name are NOT NULL in the schema — only write when the
+    // submitted value is non-empty. Middle name is optional and may be null.
+    if (firstName  !== undefined) {
+      const trimmed = String(firstName ?? "").trim();
+      if (trimmed) profileData.firstName = trimmed;
+    }
+    if (lastName   !== undefined) {
+      const trimmed = String(lastName ?? "").trim();
+      if (trimmed) profileData.lastName  = trimmed;
+    }
+    if (middleName !== undefined) {
+      const trimmed = String(middleName ?? "").trim();
+      profileData.middleName = trimmed || null;
+    }
     if (phone             !== undefined) profileData.phone             = phone;
     if (gender            !== undefined) profileData.gender            = gender;
     if (bloodGroup        !== undefined) profileData.bloodGroup        = bloodGroup;
     if (dateOfBirth       !== undefined) profileData.dateOfBirth       = dateOfBirth ? new Date(dateOfBirth) : null;
-    if (emergencyContact  !== undefined) profileData.emergencyContact  = emergencyContact;
     if (emergencyPhone    !== undefined) profileData.emergencyPhone    = emergencyPhone;
     if (address           !== undefined) profileData.address           = address;
     if (city              !== undefined) profileData.city              = city;
@@ -214,6 +252,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         await prisma.$transaction(txOps);
       } catch (e: any) {
         console.error("[people PUT] main transaction failed:", e);
+        if (e?.code === "P2002" && Array.isArray(e?.meta?.target) && e.meta.target.includes("employeeId")) {
+          return NextResponse.json(
+            { error: `HRM No. is already used by another employee.` },
+            { status: 409 },
+          );
+        }
         return NextResponse.json({
           error: `Save failed: ${e?.message ?? "Unknown DB error"}`,
         }, { status: 500 });
@@ -283,6 +327,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           );
         } catch (e) {
           console.warn("[people PUT] new-column raw update failed:", e);
+        }
+      }
+
+      // Convention: Attendance No. == HRM No. When HR changes employeeId,
+      // mirror the new value into attendanceNumber so the two stay in sync
+      // (unless HR explicitly overrode attendanceNumber in the same save).
+      if (employeeIdNew && attendanceNumber === undefined) {
+        try {
+          await prisma.$executeRawUnsafe(
+            `UPDATE "EmployeeProfile" SET "attendanceNumber" = $1 WHERE "userId" = $2`,
+            employeeIdNew, id,
+          );
+        } catch (e) {
+          console.warn("[people PUT] attendanceNumber sync failed:", e);
         }
       }
     }

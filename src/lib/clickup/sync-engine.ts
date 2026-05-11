@@ -53,13 +53,25 @@ export async function syncUsers(): Promise<number> {
                 }
             }
 
+            // Profile picture priority: Gmail (set on Google sign-in) > ClickUp.
+            // Only write the ClickUp picture when (a) ClickUp actually has one and
+            // (b) the HR user has no picture yet — never clobber an existing Gmail
+            // avatar with ClickUp's null. Refetch the row so we know the current
+            // value (we only selected `clickupUserId` above for the collision check).
+            const updateData: { clickupUserId: bigint; name: string; profilePictureUrl?: string } = {
+                clickupUserId: clickupId,
+                name,
+            };
+            if (picture) {
+                const cur = await prisma.user.findUnique({
+                    where: { id: hrUser.id },
+                    select: { profilePictureUrl: true },
+                });
+                if (!cur?.profilePictureUrl) updateData.profilePictureUrl = picture;
+            }
             await prisma.user.update({
                 where: { id: hrUser.id },
-                data: {
-                    clickupUserId: clickupId,
-                    name,
-                    profilePictureUrl: picture,
-                },
+                data: updateData,
             });
             matched++;
         } else {
