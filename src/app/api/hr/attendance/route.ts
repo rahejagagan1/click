@@ -52,10 +52,14 @@ export async function GET(req: NextRequest) {
     // multi-session days. One round-trip — fetch all sessions for the
     // page's records in a single query, then bucket by attendanceId.
     const recordIds = records.map((r) => r.id);
-    type SessRow = { id: number; attendanceId: number; clockIn: Date; clockOut: Date | null };
+    // clockInLocation / clockOutLocation are JSON-stringified geo blobs
+    // (same format as Attendance.location). Per-session so multi-session
+    // days can show where each individual punch happened, not just the
+    // last clock-in for the whole day.
+    type SessRow = { id: number; attendanceId: number; clockIn: Date; clockOut: Date | null; clockInLocation: string | null; clockOutLocation: string | null };
     const sessions = recordIds.length
       ? await prisma.$queryRawUnsafe<SessRow[]>(
-          `SELECT id, "attendanceId", "clockIn", "clockOut"
+          `SELECT id, "attendanceId", "clockIn", "clockOut", "clockInLocation", "clockOutLocation"
              FROM "AttendanceSession"
             WHERE "attendanceId" = ANY($1::int[])
             ORDER BY "clockIn" ASC`,
@@ -91,7 +95,7 @@ export async function GET(req: NextRequest) {
       // Today's record may not be in the requested range (e.g. when the
       // user is browsing a past month) so fetch its sessions separately.
       const todaySessions = await prisma.$queryRawUnsafe<SessRow[]>(
-        `SELECT id, "attendanceId", "clockIn", "clockOut"
+        `SELECT id, "attendanceId", "clockIn", "clockOut", "clockInLocation", "clockOutLocation"
            FROM "AttendanceSession"
           WHERE "attendanceId" = $1
           ORDER BY "clockIn" ASC`,

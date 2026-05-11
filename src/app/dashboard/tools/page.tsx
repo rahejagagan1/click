@@ -1,7 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { Clock, ExternalLink, Wrench, Subtitles, ClipboardList } from "lucide-react";
+import { Clock, ExternalLink, Wrench, Subtitles, ClipboardList, History } from "lucide-react";
+
+// Custom "VO" letter-mark, used in place of a Lucide glyph for the
+// Extractor tool (which pulls voice-over audio). Matches the same prop
+// signature as Lucide icons so it slots into the Tool.Icon field
+// without changing the renderer. `strokeWidth` is accepted but
+// ignored — a text mark has no stroke. The tile container handles
+// colour + background; this component only paints the letters.
+function VoMark({ size = 24, className }: { size?: number; strokeWidth?: number; className?: string }) {
+  return (
+    <span
+      className={className}
+      style={{
+        fontSize:      Math.round(size * 0.72),
+        fontWeight:    800,
+        letterSpacing: "-0.04em",
+        lineHeight:    1,
+        fontFamily:    "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+      }}
+    >
+      VO
+    </span>
+  );
+}
 
 type Tool = {
   name: string;
@@ -30,12 +53,28 @@ const TOOLS: Tool[] = [
     accent: "#9b6bd1",
   },
   {
+    name: "Old SRT Model",
+    description: "Legacy subtitle generator hosted on Streamlit — kept for fallback / archive use.",
+    href: "https://srtnbmedia.streamlit.app/",
+    external: true,
+    Icon: History,
+    accent: "#64748b",
+  },
+  {
     name: "Case Tracker",
     description: "Track production cases end-to-end across the team.",
     href: "https://casetracker.nbmedia.co.in",
     external: true,
     Icon: ClipboardList,
     accent: "#16a34a",
+  },
+  {
+    name: "Analysis Tool",
+    description: "Analyse and break down content for the team.",
+    href: "https://analysis.nbmedia.co.in/",
+    external: true,
+    Icon: VoMark,
+    accent: "#0d9488",
   },
 ];
 
