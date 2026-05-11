@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { notifyApprovers, notifyUsers } from "@/lib/notifications";
-import { istTimeOnDate } from "@/lib/ist-date";
+import { istTimeOnDate, istDateOnlyFrom, istMonthRange } from "@/lib/ist-date";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 
 export const dynamic = "force-dynamic";
@@ -42,61 +42,175 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+  const self = session!.user as any;
   const myId = await resolveUserId(session);
   if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
+  // Same gate the rest of the HR module uses for "on-behalf" actions.
+  const callerIsHRAdmin = self?.orgLevel === "ceo" || self?.isDeveloper
+    || self?.orgLevel === "special_access" || self?.role === "admin"
+    || self?.orgLevel === "hr_manager"     || self?.role === "hr_manager";
 
   try {
-    const { date, reason, notifyUserIds } = await req.json();
+    const body = await req.json();
+    const date = body.date, reason = body.reason, notifyUserIds = body.notifyUserIds;
+    // toDate is optional and only honored on the HR-on-behalf+forceGrant path.
+    // For self-apply, `date` is single-day as before.
+    const toDateRaw = body.toDate ?? null;
     if (!date || !reason) return NextResponse.json({ error: "date and reason required" }, { status: 400 });
     const extras = Array.isArray(notifyUserIds) ? notifyUserIds.filter((x: any) => Number.isInteger(x)) : [];
 
-    // ── Monthly WFH cap ────────────────────────────────────────────────
-    // Each employee can WFH at most twice per calendar month (the cap
-    // doesn't carry over). Pending and approved requests both count
-    // against the limit so users can't queue up more than 2 in flight.
-    const targetDate = new Date(date);
-    const monthStart = new Date(Date.UTC(targetDate.getUTCFullYear(), targetDate.getUTCMonth(), 1));
-    const monthEnd   = new Date(Date.UTC(targetDate.getUTCFullYear(), targetDate.getUTCMonth() + 1, 0));
-    const usedThisMonth = await prisma.wFHRequest.count({
-      where: {
-        userId: myId,
-        status: { in: ["pending", "approved"] },
-        date:   { gte: monthStart, lte: monthEnd },
-      },
-    });
-    if (usedThisMonth >= 2) {
-      const monthLabel = monthStart.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
-      return NextResponse.json({
-        error: `WFH limit reached: 2 of 2 already used for ${monthLabel}.`,
-      }, { status: 400 });
+    // HR on-behalf: when targetUserId is set and the caller is HR-admin,
+    // the WFH is created for that user instead of the caller. forceGrant
+    // skips the monthly 2-of-2 cap (HR is overriding policy intentionally)
+    // and unlocks the from/to RANGE form — one approved WFHRequest per
+    // working day in the range.
+    const targetUserId    = typeof body.targetUserId === "number" ? body.targetUserId : null;
+    const forceGrant      = body.forceGrant === true;
+    const onBehalf        = targetUserId !== null && targetUserId !== myId;
+    if (onBehalf && !callerIsHRAdmin) {
+      return NextResponse.json(
+        { error: "Only HR admins can grant WFH on behalf of another user." },
+        { status: 403 },
+      );
+    }
+    const subjectUserId = onBehalf ? targetUserId! : myId;
+    const isHRGrant     = onBehalf && callerIsHRAdmin && forceGrant;
+
+    // Normalise to IST calendar days so any UTC-vs-IST drift around 18:30 UTC
+    // doesn't shift which day a request belongs to.
+    const fromIst = istDateOnlyFrom(new Date(date));
+    const toIst   = toDateRaw ? istDateOnlyFrom(new Date(toDateRaw)) : fromIst;
+    if (toIst.getTime() < fromIst.getTime()) {
+      return NextResponse.json({ error: "toDate must be on or after fromDate" }, { status: 400 });
+    }
+    // Range support is HR-grant-only. Self-apply ignores toDate.
+    const isRange = isHRGrant && toIst.getTime() > fromIst.getTime();
+    if (!isHRGrant && toDateRaw && toIst.getTime() !== fromIst.getTime()) {
+      return NextResponse.json(
+        { error: "Date ranges are only available when HR applies on behalf." },
+        { status: 400 },
+      );
     }
 
-    const req2 = await prisma.wFHRequest.create({
-      data: { userId: myId, date: new Date(date), reason },
+    // ── Monthly WFH cap ────────────────────────────────────────────────
+    // Each employee can WFH at most twice per IST calendar month (the cap
+    // doesn't carry over). Pending and approved requests both count
+    // against the limit so users can't queue up more than 2 in flight.
+    if (!isHRGrant) {
+      const { start: monthStart, end: monthEnd } = istMonthRange(fromIst);
+      const usedThisMonth = await prisma.wFHRequest.count({
+        where: {
+          userId: subjectUserId,
+          status: { in: ["pending", "approved"] },
+          date:   { gte: monthStart, lte: monthEnd },
+        },
+      });
+      if (usedThisMonth >= 2) {
+        const monthLabel = monthStart.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
+        return NextResponse.json({
+          error: `WFH limit reached: 2 of 2 already used for ${monthLabel}.`,
+        }, { status: 400 });
+      }
+    }
+
+    // Build the list of IST calendar days to create. Skip Sat/Sun (no
+    // working WFH on a weekend) and any day the subject already has a
+    // pending/approved WFH for (idempotent — HR can re-run the same
+    // range without duplicating rows).
+    const targetDays: Date[] = [];
+    for (let cur = new Date(fromIst.getTime()); cur.getTime() <= toIst.getTime(); cur.setUTCDate(cur.getUTCDate() + 1)) {
+      const dow = cur.getUTCDay();
+      if (dow === 0 || dow === 6) continue;
+      targetDays.push(new Date(cur));
+    }
+    if (targetDays.length === 0) {
+      return NextResponse.json({ error: "Selected dates are all weekends." }, { status: 400 });
+    }
+    const existing = await prisma.wFHRequest.findMany({
+      where: {
+        userId: subjectUserId,
+        status: { in: ["pending", "approved"] },
+        date: { in: targetDays },
+      },
+      select: { date: true },
     });
-    const requester = await prisma.user.findUnique({ where: { id: myId }, select: { name: true } });
-    const dateLabel = new Date(date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-    await Promise.all([
-      notifyApprovers({
+    const existingKeys = new Set(existing.map((r) => r.date.toISOString().slice(0, 10)));
+    const daysToCreate = targetDays.filter((d) => !existingKeys.has(d.toISOString().slice(0, 10)));
+    if (daysToCreate.length === 0) {
+      return NextResponse.json(
+        { error: "All selected days already have a pending or approved WFH." },
+        { status: 409 },
+      );
+    }
+
+    // HR-on-behalf auto-approves. Self-apply stays pending → L1/L2.
+    const finalStatus = isHRGrant ? "approved" : "pending";
+    // Create rows in a single transaction so partial failures don't leave
+    // half a range behind.
+    const created = await prisma.$transaction(
+      daysToCreate.map((d) =>
+        prisma.wFHRequest.create({
+          data: {
+            userId: subjectUserId,
+            date: d,
+            reason,
+            status: finalStatus,
+            approvedById: finalStatus === "approved" ? myId : null,
+          },
+        }),
+      ),
+    );
+
+    const subject = await prisma.user.findUnique({ where: { id: subjectUserId }, select: { name: true } });
+    const fmt = (d: Date) => d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+    const rangeLabel = isRange
+      ? `${fmt(fromIst)} – ${fmt(toIst)}`
+      : fmt(fromIst);
+    const skippedNote = existingKeys.size > 0
+      ? ` (skipped ${existingKeys.size} day(s) that already had WFH)`
+      : "";
+
+    if (finalStatus === "approved" && onBehalf) {
+      await notifyApprovers({
         actorId:  myId,
         type:     "wfh",
-        entityId: req2.id,
-        title:    `${requester?.name || "An employee"} requested Work From Home`,
-        body:     `Date: ${dateLabel} — ${String(reason).slice(0, 120)}`,
+        entityId: created[0].id,
+        title:    isRange
+          ? `HR granted ${subject?.name || "an employee"} WFH for ${created.length} day(s)`
+          : `HR granted ${subject?.name || "an employee"} a WFH for ${rangeLabel}`,
+        body:     `${rangeLabel}${skippedNote} · ${String(reason).slice(0, 120)}`,
         linkUrl:  "/dashboard/hr/approvals?tab=wfh",
-        extraUserIds: extras,
-      }),
-      notifyUsers({
-        actorId:  null,
-        userIds:  [myId],
-        type:     "wfh",
-        entityId: req2.id,
-        title:    `Work From Home request submitted`,
-        body:     `Your request for ${dateLabel} is awaiting approval.`,
-        linkUrl:  "/dashboard/hr/attendance",
-      }),
-    ]);
-    return NextResponse.json(req2, { status: 201 });
+        extraUserIds: [subjectUserId, ...extras],
+      });
+    } else {
+      await Promise.all([
+        notifyApprovers({
+          actorId:  myId,
+          type:     "wfh",
+          entityId: created[0].id,
+          title:    `${subject?.name || "An employee"} requested Work From Home`,
+          body:     `Date: ${rangeLabel} — ${String(reason).slice(0, 120)}`,
+          linkUrl:  "/dashboard/hr/approvals?tab=wfh",
+          extraUserIds: extras,
+        }),
+        notifyUsers({
+          actorId:  null,
+          userIds:  [subjectUserId],
+          type:     "wfh",
+          entityId: created[0].id,
+          title:    `Work From Home request submitted`,
+          body:     `Your request for ${rangeLabel} is awaiting approval.`,
+          linkUrl:  "/dashboard/hr/attendance",
+        }),
+      ]);
+    }
+    // Backwards-compat shape for the single-day path; range returns a list.
+    return NextResponse.json(
+      isRange
+        ? { created, skipped: Array.from(existingKeys) }
+        : created[0],
+      { status: 201 },
+    );
   } catch (e) { return serverError(e, "POST /api/hr/attendance/wfh"); }
 }
 

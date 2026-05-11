@@ -9,6 +9,7 @@ import { welcomeLoginEmail } from "@/lib/email/templates";
 export const dynamic = 'force-dynamic';
 import { serializeBigInt } from "@/lib/utils";
 import { resolveTeamCapsuleForSave } from "@/lib/capsule-matching";
+import { isDeveloperEmail } from "@/lib/hr/notification-policy";
 
 // CEO + developer only — used for destructive actions (DELETE).
 // Onboarding employees is gated separately by `canCreateUsers` so HR
@@ -34,8 +35,9 @@ function canCreateUsers(session: any): boolean {
 
 export async function GET(request: Request) {
     try {
-        const { errorResponse } = await requireAuth();
+        const { session, errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
+        const viewer = session?.user as any;
 
         const { searchParams } = new URL(request.url);
         const includeAll      = searchParams.get("all") === "true";
@@ -50,6 +52,16 @@ export async function GET(request: Request) {
         const where: any = {};
         if (!includeInactive) where.isActive = true;
         if (!includeAll)      where.NOT = { role: "member", orgLevel: "member" };
+
+        // Developer invisibility: developer accounts are hidden from
+        // everyone except other developers. CEO sees the org without
+        // them. NOT clauses can be merged via AND.
+        const viewerIsDev = isDeveloperEmail(viewer?.email ?? null);
+        const devEmails = (process.env.DEVELOPER_EMAILS || "")
+            .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+        if (!viewerIsDev && devEmails.length > 0) {
+            where.AND = [{ NOT: { email: { in: devEmails } } }];
+        }
 
         const users = await prisma.user.findMany({
             where,
@@ -151,7 +163,27 @@ export async function POST(request: NextRequest) {
                         ? null
                         : Number(managerId);
                 }
+                // Detect role/orgLevel change so we can re-sync tab perms
+                // after the update commits (same logic as Admin → Users
+                // PATCH). Read the pre-update values from the DB so we're
+                // not relying on whatever `existing` happened to include.
+                const preRoleRow = await tx.user.findUnique({
+                    where: { id: existing.id },
+                    select: { role: true, orgLevel: true },
+                });
                 created = await tx.user.update({ where: { id: existing.id }, data: updateData });
+                const roleChanged     = preRoleRow && updateData.role     !== undefined && updateData.role     !== preRoleRow.role;
+                const orgLevelChanged = preRoleRow && updateData.orgLevel !== undefined && updateData.orgLevel !== preRoleRow.orgLevel;
+                if (roleChanged || orgLevelChanged) {
+                    try {
+                        await tx.$executeRawUnsafe(
+                            `DELETE FROM "UserTabPermission" WHERE "userId" = $1`,
+                            existing.id,
+                        );
+                    } catch (e) {
+                        console.warn("[users POST] tab-permission resync skipped:", e);
+                    }
+                }
             } else {
                 created = await tx.user.create({
                     data: {
