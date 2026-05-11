@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
+import { istTodayDateOnly } from "@/lib/ist-date";
 
 export const dynamic = "force-dynamic";
 
@@ -42,8 +43,8 @@ export async function GET(req: NextRequest) {
 
     // Split into "all working days in the month" and "working days elapsed" —
     // the latter drives the live attendance % so it isn't diluted by future days.
-    const now = new Date();
-    const nowKey = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString().slice(0, 10);
+    // Use IST "today" so the elapsed count flips at IST midnight, not UTC.
+    const nowKey = istTodayDateOnly().toISOString().slice(0, 10);
     let workingDays = 0;
     let workingDaysElapsed = 0;
     let weekendDays = 0;

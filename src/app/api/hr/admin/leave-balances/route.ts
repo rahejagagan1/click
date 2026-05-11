@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 import { accrueLeavesForEveryone } from "@/lib/leave-accrual";
+import { istTodayDateOnly } from "@/lib/ist-date";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url);
-    const year = Number(searchParams.get("year") || new Date().getFullYear());
+    const year = Number(searchParams.get("year") || istTodayDateOnly().getUTCFullYear());
 
     // Idempotent monthly accrual — guarantees the matrix reflects this
     // month's +1 Sick Leave for everyone before we read.
@@ -105,7 +106,7 @@ export async function PUT(req: NextRequest) {
     const body = await req.json();
     const userId      = Number(body?.userId);
     const leaveTypeId = Number(body?.leaveTypeId);
-    const year        = Number(body?.year || new Date().getFullYear());
+    const year        = Number(body?.year || istTodayDateOnly().getUTCFullYear());
     if (!Number.isInteger(userId) || !Number.isInteger(leaveTypeId)) {
       return NextResponse.json({ error: "userId and leaveTypeId required" }, { status: 400 });
     }

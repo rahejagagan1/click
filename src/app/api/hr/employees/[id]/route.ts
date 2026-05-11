@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
+import { istTodayDateOnly } from "@/lib/ist-date";
 
 // GET /api/hr/employees/:id
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -60,7 +61,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
       await prisma.employeeProfile.upsert({
         where: { userId: id },
-        create: { userId: id, employeeId: `NB-${new Date().getFullYear()}-${String(id).padStart(3, "0")}`, ...profileData },
+        create: { userId: id, employeeId: `NB-${istTodayDateOnly().getUTCFullYear()}-${String(id).padStart(3, "0")}`, ...profileData },
         update: profileData,
       });
     }
