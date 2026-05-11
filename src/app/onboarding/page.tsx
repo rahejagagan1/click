@@ -42,7 +42,6 @@ export default function OnboardingPage() {
     address: "",
     city: "",
     state: "",
-    emergencyContact: "",
     emergencyPhone: "",
   });
   const [saving, setSaving] = useState(false);
@@ -199,15 +198,6 @@ export default function OnboardingPage() {
                 hint="Someone we can reach if anything urgent comes up."
               />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                <div>
-                  <label className={labelCls}>Contact name</label>
-                  <input
-                    className={inputCls}
-                    value={form.emergencyContact}
-                    onChange={(e) => set("emergencyContact", e.target.value)}
-                    placeholder="Parent / spouse / sibling"
-                  />
-                </div>
                 <div>
                   <label className={labelCls}>Contact number</label>
                   <input
