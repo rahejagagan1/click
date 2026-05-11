@@ -30,12 +30,21 @@ export async function GET(
                 assignees: {
                     include: { user: { select: { id: true, name: true, profilePictureUrl: true, role: true } } },
                 },
+                allEditors: {
+                    include: { user: { select: { id: true, name: true, profilePictureUrl: true, role: true } } },
+                },
+                allWriters: {
+                    include: { user: { select: { id: true, name: true, profilePictureUrl: true, role: true } } },
+                },
                 subtasks: {
                     orderBy: { orderIndex: "asc" },
                     select: {
                         id: true, name: true, status: true, statusType: true,
                         startDate: true, dueDate: true, dateDone: true, orderIndex: true,
                         assignee: { select: { id: true, name: true, profilePictureUrl: true } },
+                        assignees: {
+                            include: { user: { select: { id: true, name: true, profilePictureUrl: true } } },
+                        },
                     },
                 },
                 youtubeStats: {

@@ -476,9 +476,30 @@ export async function DELETE(request: NextRequest) {
         }
 
         const { id } = await request.json();
-        await prisma.user.delete({
-            where: { id },
-        });
+
+        // Clean up all related records before deleting the user to avoid FK constraint errors
+        await prisma.notification.deleteMany({ where: { userId: id } });
+        await prisma.userTabPermission.deleteMany({ where: { userId: id } });
+        await prisma.leaveBalance.deleteMany({ where: { userId: id } });
+        await prisma.leaveApplication.deleteMany({ where: { userId: id } });
+        await prisma.attendance.deleteMany({ where: { userId: id } });
+        await prisma.attendanceRegularization.deleteMany({ where: { userId: id } });
+        await prisma.wFHRequest.deleteMany({ where: { userId: id } });
+        await prisma.compOffRequest.deleteMany({ where: { userId: id } });
+        await prisma.userShift.deleteMany({ where: { userId: id } });
+        await prisma.youtubeDashUserQuarterChannel.deleteMany({ where: { userId: id } });
+        await prisma.monthlyRating.deleteMany({ where: { userId: id } });
+        await prisma.monthlyReport.deleteMany({ where: { managerId: id } });
+        await prisma.weeklyReport.deleteMany({ where: { managerId: id } });
+        await prisma.managerRating.deleteMany({ where: { managerId: id } });
+        await prisma.userReportAccess.deleteMany({ where: { userId: id } });
+        await prisma.announcementRead.deleteMany({ where: { userId: id } });
+        await prisma.userFeedback.deleteMany({ where: { userId: id } });
+        await prisma.violation.deleteMany({ where: { OR: [{ userId: id }, { reportedBy: id }] } });
+        await prisma.auditLog.deleteMany({ where: { actorId: id } });
+        await prisma.employeeProfile.deleteMany({ where: { userId: id } });
+
+        await prisma.user.delete({ where: { id } });
 
         return NextResponse.json({ success: true });
     } catch (error: any) {

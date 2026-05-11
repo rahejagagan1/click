@@ -1404,17 +1404,11 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
         )}
 
         {post.mediaUrl ? (
-          // Image fills the home-feed card width and grows to its
-          // natural height, capped so a tall portrait can't dominate
-          // the feed. Matches the Keka layout — posters / anniversary
-          // cards render prominently instead of as small thumbnails.
-          // Lower max-height than the engage page since home cards sit
-          // alongside other widgets.
           <div className="mt-3 overflow-hidden rounded-[3px] border border-[#ecf1f5] bg-[#f8fafc]">
             <img
               src={post.mediaUrl}
               alt="Post media"
-              className="block w-full h-auto max-h-[480px] object-contain"
+              className="block mx-auto max-h-[360px] w-auto max-w-full object-contain"
             />
           </div>
         ) : null}
@@ -1957,23 +1951,18 @@ export default function HRHomePage() {
   // the browser is busy asking the OS for coordinates (first-time GPS/Wi-Fi
   // lookup on Windows can take 10–15s).
   const [clockingIn, setClockingIn] = useState(false);
-  // Two-step Clock-Out confirmation (Keka pattern). First click on
-  // the red Web Clock-Out button flips this to true and the button
-  // splits into a Clock-out / Cancel pair so a stray click doesn't
-  // close the day. Auto-cancels after 6s if the user walks away.
-  const [confirmingClockOut, setConfirmingClockOut] = useState(false);
-  // True while the async clockOut() call is in flight. Used to keep
-  // the Confirm/Cancel pair on screen until the API call resolves
-  // (otherwise the synchronous setConfirmingClockOut(false) reverted
-  // the button to "Web Clock-Out" before todayRec.clockOut had
-  // refreshed — looking like the action did nothing) AND to disable
-  // the Confirm button so a rapid double-click can't fire two POSTs.
-  const [clockingOut, setClockingOut] = useState(false);
+
+  // Detect mobile devices via User-Agent (covers "Request Desktop Site" mode too).
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
   useEffect(() => {
-    if (!confirmingClockOut || clockingOut) return;
-    const t = setTimeout(() => setConfirmingClockOut(false), 6000);
-    return () => clearTimeout(t);
-  }, [confirmingClockOut, clockingOut]);
+    if (typeof navigator !== "undefined") {
+      setIsMobileDevice(
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+          navigator.userAgent
+        )
+      );
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.permissions?.query) {
@@ -2086,19 +2075,7 @@ export default function HRHomePage() {
     }
   };
   const clockOut = async () => {
-    // Try to capture geo so the AttendanceSession row gets a
-    // clockOutLocation alongside clockInLocation. Best-effort: if
-    // the browser denies / can't fix a position, we still POST so
-    // the user isn't trapped with an open session — the server
-    // accepts a body without coords and just stores NULL.
-    let body: Record<string, unknown> = {};
-    const geo = await captureClockInGeo();
-    if (geo.ok) body = { lat: geo.lat, lng: geo.lng, address: geo.address };
-    const res = await fetch("/api/hr/attendance/clock-out", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const res = await fetch("/api/hr/attendance/clock-out", { method: "POST" });
     const d = await res.json();
     if (!res.ok) return alert(d.error);
     mutate(`/api/hr/attendance?month=${monthKey}`);
@@ -2328,93 +2305,41 @@ export default function HRHomePage() {
 
                 <div className="flex items-center gap-1.5">
                   {!todayRec?.clockIn ? (
-                    // Clock-in is the GO action → green. Gradient +
-                    // inner sheen + soft halo so the button reads as
-                    // raised against the purple Quick-Access widget.
-                    // `bg-green-600` is a stub class needed so the
-                    // global "preserve white text" rule in globals.css
-                    // matches — without it, .text-white gets forced
-                    // dark in light mode and the label is unreadable.
-                    <button
-                      onClick={clockIn}
-                      disabled={clockingIn}
-                      className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold bg-green-600 text-white transition-all duration-150 hover:brightness-110 disabled:opacity-70 disabled:cursor-wait"
-                      style={{
-                        background:  "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
-                        boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.25), 0 3px 10px -3px rgba(34,197,94,0.6), 0 1px 2px rgba(0,0,0,0.10)",
-                      }}
-                    >
-                      {clockingIn ? "Getting location…" : isRemoteMode ? "Remote Clock-in" : "Clock-in"}
-                    </button>
-                  ) : !todayRec?.clockOut ? (
-                    // Two-step Clock-Out confirmation (Keka pattern).
-                    // First click flips the single Clock-out button
-                    // into a red Confirm + dark Cancel pair so a stray
-                    // click can't end the day. Auto-cancels after 6s.
-                    confirmingClockOut ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={async () => {
-                            if (clockingOut) return;
-                            setClockingOut(true);
-                            try {
-                              await clockOut();
-                            } finally {
-                              setClockingOut(false);
-                              setConfirmingClockOut(false);
-                            }
-                          }}
-                          disabled={clockingOut}
-                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3 text-[11px] font-semibold bg-red-600 text-white transition-all duration-150 hover:brightness-110 disabled:opacity-70 disabled:cursor-wait"
-                          style={{
-                            background:  "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
-                            boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.25), 0 3px 10px -3px rgba(239,68,68,0.6), 0 1px 2px rgba(0,0,0,0.10)",
-                          }}
-                        >
-                          {clockingOut ? "Clocking out…" : "Confirm Web Clock-Out"}
-                        </button>
-                        <button
-                          onClick={() => setConfirmingClockOut(false)}
-                          disabled={clockingOut}
-                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3 text-[11px] font-semibold bg-slate-700 text-white transition-all duration-150 hover:brightness-110 disabled:opacity-70 disabled:cursor-not-allowed"
-                          style={{
-                            background:  "linear-gradient(180deg, #334155 0%, #1e293b 100%)",
-                            boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.12), 0 1px 2px rgba(0,0,0,0.10)",
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
+                    <div className="flex flex-col items-center gap-1">
                       <button
-                        onClick={() => setConfirmingClockOut(true)}
-                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold bg-red-600 text-white transition-all duration-150 hover:brightness-110"
-                        style={{
-                          background:  "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
-                          boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.25), 0 3px 10px -3px rgba(239,68,68,0.6), 0 1px 2px rgba(0,0,0,0.10)",
-                        }}
+                        onClick={isMobileDevice ? undefined : clockIn}
+                        disabled={clockingIn || isMobileDevice}
+                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ background: isRemoteMode ? "#008CFF" : "#ff6a63" }}
+                      >
+                        {clockingIn ? "Getting location…" : isRemoteMode ? "Remote Clock-in" : "Clock-in"}
+                      </button>
+                      {isMobileDevice && (
+                        <span className="text-center text-[9.5px] leading-tight text-white/70">
+                          Only accessible on Laptop &amp; Desktop
+                        </span>
+                      )}
+                    </div>
+                  ) : !todayRec?.clockOut ? (
+                    <div className="flex flex-col items-center gap-1">
+                      <button
+                        onClick={isMobileDevice ? undefined : clockOut}
+                        disabled={isMobileDevice}
+                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a63" }}
                       >
                         {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
                       </button>
-                    )
+                      {isMobileDevice && (
+                        <span className="text-center text-[9.5px] leading-tight text-white/70">
+                          Only accessible on Laptop &amp; Desktop
+                        </span>
+                      )}
+                    </div>
                   ) : (
-                    // Already clocked out, but the day isn't a hard
-                    // terminal state — multi-session is supported, so
-                    // give the user the Clock-In affordance back
-                    // instead of a non-actionable "Done" pill. Behaves
-                    // identically to the first branch (just appears
-                    // after a prior clock-out).
-                    <button
-                      onClick={clockIn}
-                      disabled={clockingIn}
-                      className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold bg-green-600 text-white transition-all duration-150 hover:brightness-110 disabled:opacity-70 disabled:cursor-wait"
-                      style={{
-                        background:  "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
-                        boxShadow:   "inset 0 1px 0 rgba(255,255,255,0.25), 0 3px 10px -3px rgba(34,197,94,0.6), 0 1px 2px rgba(0,0,0,0.10)",
-                      }}
-                    >
-                      {clockingIn ? "Getting location…" : isRemoteMode ? "Remote Clock-in" : "Clock-in"}
-                    </button>
+                    <span className="flex h-[24px] items-center rounded-[3px] bg-white/15 px-3.5 text-[11px] font-semibold text-white/90">
+                      Done
+                    </span>
                   )}
                   <OtherActionsMenu onSelect={(kind) => setOtherForm(kind)} />
                 </div>

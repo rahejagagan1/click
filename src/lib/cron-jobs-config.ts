@@ -17,6 +17,8 @@ export type CronJobState = {
   intervalHours: number;
   lastAutoRunAt: string | null;
   lastManualRunAt: string | null;
+  /** youtube_dashboard only: when true, also re-syncs past quarters on every run. */
+  syncPastQuarters?: boolean;
 };
 
 export type CronJobsConfig = Record<CronJobId, CronJobState>;
@@ -50,10 +52,11 @@ export async function getCronJobsConfig(): Promise<CronJobsConfig> {
     const def = defaultStateFor(id);
     const r   = raw[id] ?? {};
     out[id] = {
-      enabled:         typeof r.enabled === "boolean" ? r.enabled : def.enabled,
-      intervalHours:   clampHours(Number(r.intervalHours), def.intervalHours),
-      lastAutoRunAt:   typeof r.lastAutoRunAt   === "string" ? r.lastAutoRunAt   : null,
-      lastManualRunAt: typeof r.lastManualRunAt === "string" ? r.lastManualRunAt : null,
+      enabled:          typeof r.enabled === "boolean" ? r.enabled : def.enabled,
+      intervalHours:    clampHours(Number(r.intervalHours), def.intervalHours),
+      lastAutoRunAt:    typeof r.lastAutoRunAt   === "string" ? r.lastAutoRunAt   : null,
+      lastManualRunAt:  typeof r.lastManualRunAt === "string" ? r.lastManualRunAt : null,
+      syncPastQuarters: typeof r.syncPastQuarters === "boolean" ? r.syncPastQuarters : false,
     };
   }
   return out;

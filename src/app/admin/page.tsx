@@ -149,17 +149,35 @@ export default function AdminPage() {
         intervalHours: number;
         lastAutoRunAt: string | null;
         lastManualRunAt: string | null;
+        syncPastQuarters: boolean;
     };
     const [cronLoading, setCronLoading] = useState(false);
     const [cronBanner, setCronBanner] = useState<{ type: "ok" | "err"; text: string } | null>(null);
     const [cronServerNote, setCronServerNote] = useState<string | null>(null);
     const [cronInternalOff, setCronInternalOff] = useState(false);
     const [cronJobs, setCronJobs] = useState<CronJobRow[]>([]);
-    const [cronDrafts, setCronDrafts] = useState<Record<string, { enabled: boolean; hours: string }>>({});
+    const [cronDrafts, setCronDrafts] = useState<Record<string, { enabled: boolean; hours: string; syncPastQuarters: boolean }>>({});
     const [cronSavingId, setCronSavingId]   = useState<string | null>(null);
     const [cronRunningId, setCronRunningId] = useState<string | null>(null);
     // Active sub-tab inside Crons. Defaults to the first job once jobs load.
     const [cronActiveJob, setCronActiveJob] = useState<string>("");
+
+    // Poll server every 3s to keep running state accurate across tab switches
+    useEffect(() => {
+        if (!canManageUsers) return;
+        const poll = async () => {
+            try {
+                const res = await fetch("/api/admin/cron-jobs/running");
+                if (res.ok) {
+                    const data = await res.json();
+                    setCronRunningId(data.runningJobId ?? null);
+                }
+            } catch { /* ignore network errors */ }
+        };
+        poll();
+        const interval = setInterval(poll, 3000);
+        return () => clearInterval(interval);
+    }, [canManageUsers]);
 
     useEffect(() => {
         if (!canManageUsers && activeTab === "crons") {
@@ -191,11 +209,12 @@ export default function AdminPage() {
                           intervalHours: Math.min(168, Math.max(1, Math.floor(Number(j.intervalHours)) || 6)),
                           lastAutoRunAt:   j.lastAutoRunAt   ?? null,
                           lastManualRunAt: j.lastManualRunAt ?? null,
+                          syncPastQuarters: !!j.syncPastQuarters,
                       }))
                     : [];
                 setCronJobs(rows);
-                const drafts: Record<string, { enabled: boolean; hours: string }> = {};
-                for (const r of rows) drafts[r.id] = { enabled: r.enabled, hours: String(r.intervalHours) };
+                const drafts: Record<string, { enabled: boolean; hours: string; syncPastQuarters: boolean }> = {};
+                for (const r of rows) drafts[r.id] = { enabled: r.enabled, hours: String(r.intervalHours), syncPastQuarters: r.syncPastQuarters };
                 setCronDrafts(drafts);
                 // Pin the first job as the active sub-tab on first load (or
                 // when the previously-active job no longer exists in the
@@ -501,8 +520,13 @@ export default function AdminPage() {
             if (res.ok) {
                 const fresh = await fetch("/api/users?all=true&includeInactive=true").then(r => r.json());
                 setUsers(Array.isArray(fresh) ? fresh : fresh.users || []);
+            } else {
+                const err = await res.json().catch(() => ({ error: "Unknown error" }));
+                alert("Failed to delete user: " + (err.error || res.statusText));
             }
-        } catch { }
+        } catch (e: any) {
+            alert("Failed to delete user: " + e.message);
+        }
         setDeletingUserId(null);
         setConfirmDeleteId(null);
     };
@@ -569,18 +593,21 @@ export default function AdminPage() {
                                 { key: "clickup", label: "Sync ClickUp", icon: "📥" },
                                 { key: "youtube", label: "Sync YouTube", icon: "▶️" },
                                 { key: "ratings", label: "Sync Ratings", icon: "⭐" },
-                            ].map(({ key, label, icon }) => (
+                            ].map(({ key, label, icon }) => {
+                                const isRunning = syncing === key || cronRunningId === key;
+                                return (
                                 <div key={key} className="flex flex-col items-center gap-1.5">
-                                    <button onClick={() => runSync(key)} disabled={!!syncing}
-                                        className={`w-full flex items-center gap-2 justify-center px-4 py-2.5 rounded-xl border text-sm text-white transition-all disabled:opacity-50 ${syncDone === key ? "bg-green-600/20 border-green-500/30 text-green-400" : "bg-white/5 hover:bg-violet-600/20 border-white/10 hover:border-violet-500/30"}`}>
-                                        <span>{icon}</span>
-                                        {syncing === key ? "Syncing..." : syncDone === key ? "✓ Done" : label}
+                                    <button onClick={() => runSync(key)} disabled={!!syncing || !!cronRunningId}
+                                        className={`w-full flex items-center gap-2 justify-center px-4 py-2.5 rounded-xl border text-sm text-white transition-all disabled:opacity-50 ${syncDone === key ? "bg-green-600/20 border-green-500/30 text-green-400" : isRunning ? "bg-violet-600/20 border-violet-500/30" : "bg-white/5 hover:bg-violet-600/20 border-white/10 hover:border-violet-500/30"}`}>
+                                        <span>{isRunning ? "⏳" : icon}</span>
+                                        {isRunning ? "Syncing..." : syncDone === key ? "✓ Done" : label}
                                     </button>
                                     {lastSyncs[key] && (
                                         <span className="text-[10px] text-slate-600">{formatSyncTime(lastSyncs[key])}</span>
                                     )}
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
 
@@ -762,10 +789,10 @@ export default function AdminPage() {
                                 </button>
                             </div>
                             <div className="flex flex-col items-end gap-1">
-                                <button onClick={() => runSync("users")} disabled={!!syncing}
-                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all disabled:opacity-50 ${syncDone === "users" ? "bg-green-600/20 border-green-500/30 text-green-400" : "bg-violet-600 hover:bg-violet-500 border-violet-500/30 text-white"}`}>
-                                    <span>👥</span>
-                                    {syncing === "users" ? "Syncing..." : syncDone === "users" ? "✓ Done" : "Sync ClickUp Users"}
+                                <button onClick={() => runSync("users")} disabled={!!syncing || !!cronRunningId}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all disabled:opacity-50 ${syncDone === "users" ? "bg-green-600/20 border-green-500/30 text-green-400" : (syncing === "users" || cronRunningId === "users") ? "bg-violet-700 border-violet-500/30 text-white" : "bg-violet-600 hover:bg-violet-500 border-violet-500/30 text-white"}`}>
+                                    <span>{(syncing === "users" || cronRunningId === "users") ? "⏳" : "👥"}</span>
+                                    {(syncing === "users" || cronRunningId === "users") ? "Syncing..." : syncDone === "users" ? "✓ Done" : "Sync ClickUp Users"}
                                 </button>
                                 {lastSyncs["users"] && (
                                     <span className="text-[10px] text-slate-600">{formatSyncTime(lastSyncs["users"])}</span>
@@ -1434,13 +1461,13 @@ export default function AdminPage() {
                             {(() => {
                                 const job = cronJobs.find((j) => j.id === cronActiveJob);
                                 if (!job) return null;
-                                const draft = cronDrafts[job.id] ?? { enabled: job.enabled, hours: String(job.intervalHours) };
-                                const setDraft = (patch: Partial<{ enabled: boolean; hours: string }>) =>
+                                const draft = cronDrafts[job.id] ?? { enabled: job.enabled, hours: String(job.intervalHours), syncPastQuarters: job.syncPastQuarters };
+                                const setDraft = (patch: Partial<{ enabled: boolean; hours: string; syncPastQuarters: boolean }>) =>
                                     setCronDrafts((d) => ({ ...d, [job.id]: { ...draft, ...patch } }));
                                 const saving  = cronSavingId  === job.id;
                                 const running = cronRunningId === job.id;
                                 const Icon = jobIconFor(job.id);
-                                const dirty = draft.enabled !== job.enabled || String(draft.hours) !== String(job.intervalHours);
+                                const dirty = draft.enabled !== job.enabled || String(draft.hours) !== String(job.intervalHours) || draft.syncPastQuarters !== job.syncPastQuarters;
 
                                 const onSave = async () => {
                                     const h = Math.min(168, Math.max(1, Math.floor(Number(draft.hours)) || job.intervalHours));
@@ -1451,7 +1478,7 @@ export default function AdminPage() {
                                         const res = await fetch("/api/admin/cron-jobs", {
                                             method: "PATCH",
                                             headers: { "Content-Type": "application/json" },
-                                            body: JSON.stringify({ [job.id]: { enabled: draft.enabled, intervalHours: h } }),
+                                            body: JSON.stringify({ [job.id]: { enabled: draft.enabled, intervalHours: h, syncPastQuarters: draft.syncPastQuarters } }),
                                         });
                                         const data = await res.json();
                                         if (!res.ok) {
@@ -1465,11 +1492,12 @@ export default function AdminPage() {
                                                     ...r,
                                                     enabled: !!next.enabled,
                                                     intervalHours: Number(next.intervalHours) || h,
-                                                    lastAutoRunAt:   next.lastAutoRunAt   ?? r.lastAutoRunAt,
-                                                    lastManualRunAt: next.lastManualRunAt ?? r.lastManualRunAt,
+                                                    lastAutoRunAt:    next.lastAutoRunAt    ?? r.lastAutoRunAt,
+                                                    lastManualRunAt:  next.lastManualRunAt  ?? r.lastManualRunAt,
+                                                    syncPastQuarters: typeof next.syncPastQuarters === "boolean" ? next.syncPastQuarters : r.syncPastQuarters,
                                                 } : r))
                                             );
-                                            setDraft({ enabled: !!next.enabled, hours: String(next.intervalHours) });
+                                            setDraft({ enabled: !!next.enabled, hours: String(next.intervalHours), syncPastQuarters: !!next.syncPastQuarters });
                                         }
                                         setCronBanner({ type: "ok", text: `${job.name} settings saved.` });
                                         setTimeout(() => setCronBanner(null), 4000);
@@ -1571,6 +1599,28 @@ export default function AdminPage() {
                                                     }`} />
                                                 </button>
                                             </div>
+
+                                            {job.id === "youtube_dashboard" && (
+                                                <div className="flex items-start justify-between gap-4">
+                                                    <div className="min-w-0">
+                                                        <p className="text-[13px] font-semibold text-slate-800">Sync past quarters</p>
+                                                        <p className="mt-0.5 text-[11.5px] text-slate-500">When on, re-syncs the last 5 years of quarters each run. Turn off once historical data is fetched to save API quota.</p>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        role="switch"
+                                                        aria-checked={draft.syncPastQuarters}
+                                                        onClick={() => setDraft({ syncPastQuarters: !draft.syncPastQuarters })}
+                                                        className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors ${
+                                                            draft.syncPastQuarters ? "bg-[#3b82f6]" : "bg-slate-300"
+                                                        }`}
+                                                    >
+                                                        <span className={`absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow transition-transform ${
+                                                            draft.syncPastQuarters ? "translate-x-[23px]" : "translate-x-[3px]"
+                                                        }`} />
+                                                    </button>
+                                                </div>
+                                            )}
 
                                             <div>
                                                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Run every</label>

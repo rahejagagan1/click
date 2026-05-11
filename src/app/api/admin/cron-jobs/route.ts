@@ -55,7 +55,7 @@ export async function PATCH(request: NextRequest) {
         const current = await getCronJobsConfig();
 
         // Build a patch-by-id map regardless of which body shape was used.
-        const patchById: Partial<Record<CronJobId, Partial<{ enabled: boolean; intervalHours: number }>>> = {};
+        const patchById: Partial<Record<CronJobId, Partial<{ enabled: boolean; intervalHours: number; syncPastQuarters: boolean }>>> = {};
         for (const id of CRON_JOB_IDS) {
             if (body?.[id] && typeof body[id] === "object") patchById[id] = body[id];
         }
@@ -74,6 +74,7 @@ export async function PATCH(request: NextRequest) {
                           intervalHours: Math.min(168, Math.max(1, Math.floor(Number(patch.intervalHours)) || cur.intervalHours)),
                       }
                     : {}),
+                ...(typeof patch?.syncPastQuarters === "boolean" ? { syncPastQuarters: patch.syncPastQuarters } : {}),
             };
         }
         await saveCronJobsConfig(current);

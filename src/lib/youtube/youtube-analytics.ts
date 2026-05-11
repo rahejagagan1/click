@@ -418,10 +418,11 @@ export async function getChannelViewsInRange(
     }
 }
 
-export type DailyViewPoint = { day: string; views: number };
+export type DailyViewPoint = { day: string; views: number; subscribersGained: number };
 
 /**
- * Channel-level views per calendar day (YouTube Analytics). Uses OAuth for the channel.
+ * Channel-level views + subscribers gained per calendar day (YouTube Analytics). Uses OAuth.
+ * Columns returned by API: day, views, subscribersGained
  */
 export async function getChannelDailyViewsSeries(
     channel: ChannelConfig,
@@ -436,7 +437,7 @@ export async function getChannelDailyViewsSeries(
             `ids=channel==${channel.channelId}` +
             `&startDate=${startStr}` +
             `&endDate=${endStr}` +
-            `&metrics=views` +
+            `&metrics=views,subscribersGained` +
             `&dimensions=day` +
             `&sort=day`;
         const response = await fetch(url, {
@@ -449,9 +450,11 @@ export async function getChannelDailyViewsSeries(
         const data = await response.json();
         const rows = data.rows as unknown[][] | undefined;
         if (!rows?.length) return [];
+        // API columns: [day, views, subscribersGained]
         return rows.map((r) => ({
             day: String(r[0]),
             views: Number(r[1]) || 0,
+            subscribersGained: Number(r[2]) || 0,
         }));
     } catch (error) {
         console.error(`[YT daily series] ${channel.name}:`, error);
@@ -460,6 +463,37 @@ export async function getChannelDailyViewsSeries(
 }
 
 export type UploadSnippet = { publishedAt: string; title: string; videoId: string };
+
+/**
+ * Batch-fetch current subscriber counts for multiple channels via YouTube Data API (API key only, no OAuth).
+ * Returns a Map of channelId → subscriberCount. Channels with hidden subscriber counts are omitted.
+ */
+export async function getChannelSubscriberCounts(
+    channelIds: string[]
+): Promise<Map<string, number>> {
+    const apiKey = process.env.YOUTUBE_API_KEY;
+    if (!apiKey || channelIds.length === 0) return new Map();
+
+    try {
+        // Data API allows up to 50 IDs per request as comma-separated values
+        const ids = channelIds.slice(0, 50).join(",");
+        const res = await fetch(
+            `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${encodeURIComponent(ids)}&key=${encodeURIComponent(apiKey)}&maxResults=50`
+        );
+        if (!res.ok) return new Map();
+        const data = await res.json();
+        const result = new Map<string, number>();
+        for (const item of data.items ?? []) {
+            const stats = item?.statistics;
+            if (!stats || stats.hiddenSubscriberCount) continue;
+            const count = parseInt(stats.subscriberCount, 10);
+            if (Number.isFinite(count)) result.set(item.id as string, count);
+        }
+        return result;
+    } catch {
+        return new Map();
+    }
+}
 
 /**
  * Long-form uploads in a date range via YouTube Data API (API key). Newest-first pagination stops when older than range.

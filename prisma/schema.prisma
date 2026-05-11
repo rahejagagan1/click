@@ -77,6 +77,9 @@ model User {
   editedCases       Case[]     @relation("CaseEditor")
   assignedSubtasks  Subtask[]  @relation("SubtaskAssignee")
   caseAssignments   CaseAssignee[]
+  subtaskAssignments SubtaskAssignee[]
+  caseEditorEntries CaseEditorEntry[]
+  caseWriterEntries CaseWriterEntry[]
   monthlyRatings    MonthlyRating[]
   scorecardConfigs  ScorecardConfig[]
   scoreEditsMade    ScoreEditLog[]     @relation("ScoreEditor")
@@ -269,6 +272,8 @@ model Case {
   editor                  User?     @relation("CaseEditor", fields: [editorUserId], references: [id])
   subtasks                Subtask[]
   assignees               CaseAssignee[]
+  allEditors              CaseEditorEntry[]
+  allWriters              CaseWriterEntry[]
   youtubeStats            YoutubeStats?
 
   @@index([status])
@@ -296,6 +301,28 @@ model CaseAssignee {
   @@index([userId])
 }
 
+model CaseEditorEntry {
+  id            Int     @id @default(autoincrement())
+  caseId        Int
+  userId        Int
+  clickupUserId BigInt?
+  case          Case    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user          User    @relation(fields: [userId], references: [id])
+  @@unique([caseId, userId])
+  @@index([caseId])
+}
+
+model CaseWriterEntry {
+  id            Int     @id @default(autoincrement())
+  caseId        Int
+  userId        Int
+  clickupUserId BigInt?
+  case          Case    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user          User    @relation(fields: [userId], references: [id])
+  @@unique([caseId, userId])
+  @@index([caseId])
+}
+
 model Subtask {
   id                Int       @id @default(autoincrement())
   clickupTaskId     String    @unique
@@ -315,9 +342,24 @@ model Subtask {
 
   case              Case      @relation(fields: [caseId], references: [id], onDelete: Cascade)
   assignee          User?     @relation("SubtaskAssignee", fields: [assigneeUserId], references: [id])
+  assignees         SubtaskAssignee[]
 
   @@index([caseId])
   @@index([assigneeUserId])
+}
+
+model SubtaskAssignee {
+  id              Int     @id @default(autoincrement())
+  subtaskId       Int
+  userId          Int
+  clickupUserId   BigInt
+
+  subtask         Subtask @relation(fields: [subtaskId], references: [id], onDelete: Cascade)
+  user            User    @relation(fields: [userId], references: [id])
+
+  @@unique([subtaskId, userId])
+  @@index([subtaskId])
+  @@index([userId])
 }
 
 model YoutubeStats {
