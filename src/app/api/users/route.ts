@@ -264,7 +264,6 @@ export async function POST(request: NextRequest) {
                     gender:           profile.gender           ?? null,
                     maritalStatus:    profile.maritalStatus    ?? null,
                     bloodGroup:       profile.bloodGroup       ?? null,
-                    emergencyContact: profile.emergencyContact ?? null,
                     emergencyPhone:   profile.emergencyPhone   ?? null,
                     address:          profile.address          ?? null,
                     city:             profile.city             ?? null,
