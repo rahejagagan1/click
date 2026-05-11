@@ -8,6 +8,7 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import { isHRAdmin } from "@/lib/access";
+import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { PageShell } from "@/components/layout";
 import {
   ChevronDown,
@@ -1952,16 +1953,9 @@ export default function HRHomePage() {
   // lookup on Windows can take 10–15s).
   const [clockingIn, setClockingIn] = useState(false);
 
-  // Detect mobile devices via User-Agent (covers "Request Desktop Site" mode too).
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   useEffect(() => {
-    if (typeof navigator !== "undefined") {
-      setIsMobileDevice(
-        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-          navigator.userAgent
-        )
-      );
-    }
+    setIsMobileDevice(detectMobileDevice());
   }, []);
 
   useEffect(() => {
