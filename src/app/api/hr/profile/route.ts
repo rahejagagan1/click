@@ -47,7 +47,7 @@ export async function PUT(req: NextRequest) {
       displayName,
       phone, workPhone, personalEmail,
       dateOfBirth, gender, bloodGroup, maritalStatus,
-      emergencyContact, emergencyPhone,
+      emergencyPhone,
       address, city, state, profilePictureUrl,
       // Sensitive fields — encrypted at rest before insert.
       bankName, bankAccountNumber, bankIfsc, bankBranch, accountHolderName,
@@ -115,7 +115,7 @@ export async function PUT(req: NextRequest) {
     const profileData: Record<string, unknown> = {
       phone, gender, bloodGroup,
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
-      emergencyContact, emergencyPhone, address, city, state,
+      emergencyPhone, address, city, state,
       bankName, bankBranch, accountHolderName, parentName,
     };
     if (bankAccountNumber !== undefined) profileData.bankAccountNumber = encryptPII(bankAccountNumber);
