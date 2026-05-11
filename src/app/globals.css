@@ -203,6 +203,23 @@ html:not(.dark) .text-cyan-400    { color: #155e75 !important; }
 html:not(.dark) .text-teal-300    { color: #0f766e !important; }
 html:not(.dark) .text-teal-400    { color: #0d5f57 !important; }
 
+/* ── Manual-entry highlight: red text on report inputs filled in by hand.
+   The light-mode rule below (line ~282) forces ALL inputs/textareas/selects
+   to color: #111827 !important with specificity (0,0,4,2). To override it
+   we prepend `html:not(.dark)` / `html.dark` which adds a class selector,
+   pushing this rule to (0,0,5,2) — wins in both light and dark mode.
+   Covers plain inputs, textareas, selects, and ReactQuill rich-text editors. */
+html:not(.dark) input.manual-entry:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html.dark      input.manual-entry:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html:not(.dark) textarea.manual-entry,
+html.dark      textarea.manual-entry,
+html:not(.dark) select.manual-entry,
+html.dark      select.manual-entry,
+.quill-manual-entry .ql-editor,
+.quill-manual-entry .ql-editor * {
+  color: #ef4444 !important;
+}
+
 /* ── Border overrides ── */
 html:not(.dark) .border-white\/5,
 html:not(.dark) .border-white\/10,
