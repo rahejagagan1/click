@@ -93,9 +93,13 @@ export async function POST(req: NextRequest) {
         const created = await tx.attendance.create({
           data: { userId, date: today, clockIn: now, status, ipAddress: ip, location },
         });
+        // Per-session location too — the parent Attendance.location only
+        // tracks the LATEST punch, so for multi-session days we record
+        // each session's location on the session row itself. Same JSON
+        // string format as the parent column.
         await tx.$executeRawUnsafe(
-          `INSERT INTO "AttendanceSession" ("attendanceId","clockIn") VALUES ($1, $2)`,
-          created.id, now,
+          `INSERT INTO "AttendanceSession" ("attendanceId","clockIn","clockInLocation") VALUES ($1, $2, $3)`,
+          created.id, now, location,
         );
         return { record: created, conflict: false as const };
       }
@@ -121,8 +125,8 @@ export async function POST(req: NextRequest) {
         },
       });
       await tx.$executeRawUnsafe(
-        `INSERT INTO "AttendanceSession" ("attendanceId","clockIn") VALUES ($1, $2)`,
-        updated.id, now,
+        `INSERT INTO "AttendanceSession" ("attendanceId","clockIn","clockInLocation") VALUES ($1, $2, $3)`,
+        updated.id, now, location,
       );
       return { record: updated, conflict: false as const };
     });
