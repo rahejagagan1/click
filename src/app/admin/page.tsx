@@ -7,6 +7,7 @@ import {
     PlayCircle, ListTree, Users as UsersIcon, Star, Layers,
 } from "lucide-react";
 import OrgTree from "@/components/admin/org-tree";
+import RegularizationPolicyCard from "@/components/admin/RegularizationPolicyCard";
 import UserAvatar from "@/components/ui/user-avatar";
 import {
     type TeamCapsuleCatalog,
@@ -40,7 +41,7 @@ interface Space {
     loading?: boolean;
 }
 
-type AdminTab = "workspaces" | "users" | "ytviews" | "reports" | "crons" | "permissions";
+type AdminTab = "workspaces" | "users" | "ytviews" | "reports" | "crons" | "permissions" | "regularization-policy";
 
 // Per-job icon + short label for the cron sub-tab pills. Falls back to
 // generic Clock + the full name when an unknown job id is added.
@@ -85,7 +86,7 @@ export default function AdminPage() {
     const adminTabs: readonly AdminTab[] = useMemo(
         () =>
             canManageUsers
-                ? (["workspaces", "users", "ytviews", "reports", "crons", "permissions"] as const)
+                ? (["workspaces", "users", "ytviews", "reports", "crons", "permissions", "regularization-policy"] as const)
                 : (["workspaces", "users", "ytviews", "reports", "permissions"] as const),
         [canManageUsers],
     );
@@ -577,7 +578,9 @@ export default function AdminPage() {
                                   ? "Reports"
                                   : tab === "crons"
                                     ? "Crons"
-                                    : "Permissions"}
+                                    : tab === "permissions"
+                                      ? "Permissions"
+                                      : "Regularization Policy"}
                     </button>
                 ))}
             </div>
@@ -1906,6 +1909,19 @@ export default function AdminPage() {
                             </div>
                         )}
                     </div>
+                </div>
+            )}
+
+            {/* ── Regularization Policy Tab ── */}
+            {activeTab === "regularization-policy" && (
+                <div className="max-w-3xl space-y-4">
+                    <div>
+                        <h2 className="text-base font-semibold text-white">Regularization Policy</h2>
+                        <p className="text-xs text-slate-400 mt-1">
+                            Control whether the 2-day self-apply window for attendance regularization is enforced organization-wide.
+                        </p>
+                    </div>
+                    <RegularizationPolicyCard />
                 </div>
             )}
         </div>

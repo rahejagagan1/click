@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
 import { encryptPII } from "@/lib/pii-crypto";
+import { istTodayDateOnly } from "@/lib/ist-date";
 
 // Editing other employees' profiles is reserved for HR ops + admins.
 // Mirrors src/lib/access.ts:isHRAdmin so the server gate matches the UI:
@@ -92,6 +93,27 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       console.warn("[people GET] extended fields lookup failed:", e);
     }
 
+    // Today's attendance + any currently-open session — drives the "IN /
+    // OUT / OFFLINE" presence badge in the page header. Re-sum the
+    // session secs so an open session counts as "IN" even if the parent
+    // Attendance.totalMinutes is stale from a prior clock-out.
+    const today = istTodayDateOnly();
+    const todayAtt = await prisma.attendance.findUnique({
+      where: { userId_date: { userId: id, date: today } },
+      select: { status: true, clockIn: true, clockOut: true, totalMinutes: true },
+    });
+    let hasOpenSession = false;
+    if (todayAtt) {
+      const open = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+        `SELECT s.id FROM "AttendanceSession" s
+           JOIN "Attendance" a ON a.id = s."attendanceId"
+          WHERE a."userId" = $1 AND a."date" = $2 AND s."clockOut" IS NULL
+          LIMIT 1`,
+        id, today,
+      );
+      hasOpenSession = open.length > 0;
+    }
+
     // Reshape to what the detail page reads.
     const { employeeProfile, heldAssets, ownedDocuments, teamMembers, userShift, ...rest } = user;
     const payload = {
@@ -102,6 +124,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       directReports: teamMembers,
       shift:         userShift?.shift ?? null,
       inlineManager,
+      todayAttendance: todayAtt
+        ? { ...todayAtt, hasOpenSession }
+        : null,
     };
     return NextResponse.json(serializeBigInt(payload));
   } catch (e) {
