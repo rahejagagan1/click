@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
                 { researcherUserId: uid },
                 { assigneeUserId: uid },
                 { assignees: { some: { userId: uid } } },
+                { subtasks: { some: { assignees: { some: { userId: uid } } } } },
             ];
         }
         if (search) {

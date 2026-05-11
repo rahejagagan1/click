@@ -27,7 +27,7 @@ export const CRON_JOB_DEFINITIONS: CronJobDefinition[] = [
     id: "youtube_dashboard",
     name: "YouTube dashboard quarter sync",
     description:
-      "YouTube Analytics + Data API: upserts YoutubeDashboardQuarterMetrics (quarter totals) and YoutubeDashboardChannelQuarterAnalysis (10-day view buckets + uploads) per channel (OAuth). Dashboard reads DB only.",
+      "YouTube Analytics + Data API: upserts YoutubeDashboardQuarterMetrics (quarter totals) and YoutubeDashboardChannelQuarterAnalysis (7-day view buckets + uploads) per channel (OAuth). Dashboard reads DB only. Enable 'Sync past quarters' to also refresh historical quarters on every run.",
     defaultIntervalHours: 5,
   },
   {

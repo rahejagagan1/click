@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getChannelConfigs, getFullQuarterDateStrings, getQuarterDateStrings } from "@/lib/youtube/youtube-analytics";
+import { getChannelConfigs, getFullQuarterDateStrings, getQuarterDateStrings, getChannelSubscriberCounts } from "@/lib/youtube/youtube-analytics";
 import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { serverError } from "@/lib/api-auth";
@@ -162,6 +162,14 @@ export async function GET(request: NextRequest) {
             }
         }
 
+        // Fetch live subscriber counts in one batch request (YouTube Data API, API key only)
+        let subscribersByChannelId = new Map<string, number>();
+        try {
+            subscribersByChannelId = await getChannelSubscriberCounts(channelIds);
+        } catch {
+            /* non-critical — subscriber counts simply won't appear */
+        }
+
         const channels = configs.map((c) => {
             const viewsGainedInQuarter = quarterByChannel.get(c.channelId) ?? null;
             const viewsPreviousQuarter = prevByChannel.get(c.channelId) ?? null;
@@ -179,6 +187,7 @@ export async function GET(request: NextRequest) {
                 viewsGainedInQuarter,
                 viewsPreviousQuarter,
                 quarterOverQuarterDelta,
+                subscriberCount: subscribersByChannelId.get(c.channelId) ?? null,
                 me,
                 error: null as string | null,
             };

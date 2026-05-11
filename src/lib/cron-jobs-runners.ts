@@ -8,10 +8,15 @@ import { syncYoutubeStats } from "@/lib/youtube/sync";
 import { calculateMonthlyRatings } from "@/lib/ratings/calculator";
 import { runYoutubeDashboardSync } from "@/lib/youtube/yt-dashboard-sync";
 import { sendViolationInProgressReminders } from "@/lib/hr/violation-reminders";
+import { getCronJobsConfig } from "@/lib/cron-jobs-config";
 import type { CronJobId } from "@/lib/cron-jobs-registry";
 
 export const CRON_JOB_RUNNERS: Record<CronJobId, () => Promise<void>> = {
-  youtube_dashboard: async () => { await runYoutubeDashboardSync(); },
+  youtube_dashboard: async () => {
+    const cfg = await getCronJobsConfig();
+    await runYoutubeDashboardSync({ syncPastQuarters: cfg.youtube_dashboard.syncPastQuarters ?? false });
+    await syncYoutubeStats();
+  },
   clickup:           async () => { await runFullSync(); },
   users:             async () => { await runUsersSync(); },
   ratings:           async () => { await calculateMonthlyRatings(); },
