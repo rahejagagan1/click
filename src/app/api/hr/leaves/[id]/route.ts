@@ -179,8 +179,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       });
       if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
 
+      // Final approvers: CEO + Special Access + HR Manager (role) + Devs.
+      // Drops orgLevel="hr_manager"-only members (e.g. HR-team folks
+      // whose role is "member") and role="admin" alone.
+      const devEmailsLeaveId = (process.env.DEVELOPER_EMAILS || "")
+        .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
       const finalApprovers = await prisma.user.findMany({
-        where: { isActive: true, orgLevel: { in: ["ceo", "hr_manager"] } },
+        where: {
+          isActive: true,
+          OR: [
+            { orgLevel: { in: ["ceo", "special_access"] } },
+            { role: "hr_manager" },
+            ...(devEmailsLeaveId.length > 0 ? [{ email: { in: devEmailsLeaveId } }] : []),
+          ],
+        },
         select: { id: true },
       });
       const extras = application.notifyUserIds ?? [];
