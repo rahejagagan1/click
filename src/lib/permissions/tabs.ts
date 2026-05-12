@@ -188,8 +188,11 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     hr_approvals:true, hr_analytics:true,
   },
   manager: {
+    // Line managers approve their direct reports' leave / WFH / regularize
+    // (hr_approvals) — so they also need My Team to see those reports'
+    // attendance + leave balances. Approving blind would be inconsistent.
+    hr_my_team: true,
     scores: true, reports: true,
-    // Line managers approve their direct reports.
     hr_approvals: true,
   },
   // leads / sub-leads / production team / members use the base 4-tab defaults.
