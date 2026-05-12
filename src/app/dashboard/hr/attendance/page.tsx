@@ -10,6 +10,7 @@ import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPi
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
 import { isHRAdmin } from "@/lib/access";
+import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 
 // ── Form copy per kind ───────────────────────────────────────────────────────
 const FORM_TITLE: Record<LeaveRequestKind, string> = {
@@ -744,10 +745,15 @@ export default function AttendancePage() {
     return () => clearTimeout(t);
   }, [confirmingClockOut, clockingOut]);
 
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
+  useEffect(() => {
+    setIsMobileDevice(detectMobileDevice());
+  }, []);
+
   // "Day Complete · 9h reached" toast — set after a successful clock-out
   // whose final totalMinutes ≥ 540. Auto-dismisses after 5 seconds; user
-  // can also close it manually. The persistent inline badge on the
-  // clock-in button is unchanged — this is just an immediate confirm.
+  // can also close it manually. Replaces the previous inline badge on the
+  // re-clockin button.
   const [dayCompleteToast, setDayCompleteToast] = useState(false);
   useEffect(() => {
     if (!dayCompleteToast) return;
@@ -1310,15 +1316,22 @@ export default function AttendancePage() {
                   inline gradient — its only job is to trigger the
                   "preserve white text" rule. Don't remove. */}
               {!todayRec?.clockIn ? (
-                <button onClick={clockIn}
-                  disabled={clockingIn}
-                  style={{
-                    background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
-                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
-                  }}
-                  className="h-8 px-4 bg-green-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
-                  {clockingIn ? "Getting location…" : "Web Clock-In"}
-                </button>
+                <div className="flex flex-col gap-1 w-fit">
+                  <button onClick={isMobileDevice ? undefined : clockIn}
+                    disabled={clockingIn || isMobileDevice}
+                    style={{
+                      background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
+                    }}
+                    className="h-8 px-4 bg-green-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
+                    {clockingIn ? "Getting location…" : "Web Clock-In"}
+                  </button>
+                  {isMobileDevice && (
+                    <span className="text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
+                      Only accessible on Laptop &amp; Desktop
+                    </span>
+                  )}
+                </div>
               ) : !todayRec?.clockOut ? (
                 // Two-step confirmation. First click splits the single
                 // Web Clock-Out button into a red Confirm + dark Cancel
@@ -1358,18 +1371,26 @@ export default function AttendancePage() {
                     </button>
                   </div>
                 ) : (
-                  <button onClick={() => setConfirmingClockOut(true)}
-                    style={{
-                      background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
-                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
-                    }}
-                    className="h-8 px-4 bg-red-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px">
-                    Web Clock-Out
-                  </button>
+                  <div className="flex flex-col gap-1 w-fit">
+                    <button onClick={isMobileDevice ? undefined : () => setConfirmingClockOut(true)}
+                      disabled={isMobileDevice}
+                      style={{
+                        background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
+                        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
+                      }}
+                      className="h-8 px-4 bg-red-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-not-allowed">
+                      Web Clock-Out
+                    </button>
+                    {isMobileDevice && (
+                      <span className="text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
+                        Only accessible on Laptop &amp; Desktop
+                      </span>
+                    )}
+                  </div>
                 )
               ) : (
                 <div className="flex flex-col gap-1.5 w-fit">
-                  <button onClick={clockIn} disabled={clockingIn}
+                  <button onClick={isMobileDevice ? undefined : clockIn} disabled={clockingIn || isMobileDevice}
                     style={{
                       background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
                       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
@@ -1377,6 +1398,11 @@ export default function AttendancePage() {
                     className="h-8 px-4 bg-green-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
                     {clockingIn ? "Getting location…" : "Web Clock-In"}
                   </button>
+                  {isMobileDevice && (
+                    <span className="text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
+                      Only accessible on Laptop &amp; Desktop
+                    </span>
+                  )}
                 </div>
               )}
 

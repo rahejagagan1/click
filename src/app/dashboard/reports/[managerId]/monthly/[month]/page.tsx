@@ -75,13 +75,16 @@ function EditableField({
     rows = 2,
     className = "",
     readOnly = false,
+    manual = true,
 }: {
     value: string;
     onChange: (v: string) => void;
     rows?: number;
     className?: string;
     readOnly?: boolean;
+    manual?: boolean;
 }) {
+    const isManualFilled = manual && value && value.trim().length > 0;
     return (
         <textarea
             value={value}
@@ -89,7 +92,7 @@ function EditableField({
             placeholder={readOnly ? "" : "Type here"}
             rows={rows}
             readOnly={readOnly}
-            className={`w-full bg-slate-50 dark:bg-[#1a1a32] border border-slate-200 dark:border-white/20 rounded-md px-3 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500/80 placeholder:italic focus:outline-none focus:ring-1 focus:ring-violet-500/40 focus:border-violet-400 dark:focus:border-violet-500/50 resize-y transition-all ${readOnly ? "opacity-75 cursor-default" : ""} ${className}`}
+            className={`w-full bg-slate-50 dark:bg-[#1a1a32] border border-slate-200 dark:border-white/20 rounded-md px-3 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500/80 placeholder:italic focus:outline-none focus:ring-1 focus:ring-violet-500/40 focus:border-violet-400 dark:focus:border-violet-500/50 resize-y transition-all ${readOnly ? "opacity-75 cursor-default" : ""} ${isManualFilled ? "manual-entry" : ""} ${className}`}
         />
     );
 }
@@ -99,12 +102,15 @@ function EditableCell({
     onChange,
     className = "",
     readOnly = false,
+    manual = false,
 }: {
     value: string;
     onChange: (v: string) => void;
     className?: string;
     readOnly?: boolean;
+    manual?: boolean;
 }) {
+    const isManualFilled = manual && value && value.trim().length > 0;
     return (
         <input
             type="text"
@@ -112,7 +118,7 @@ function EditableCell({
             onChange={(e) => onChange(e.target.value)}
             placeholder={readOnly ? "" : "Type here"}
             readOnly={readOnly}
-            className={`w-full bg-transparent border-0 border-b border-dashed border-slate-300 dark:border-white/30 px-1 py-0.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500/80 placeholder:italic focus:outline-none focus:border-violet-400 dark:focus:border-violet-500/50 transition-all ${readOnly ? "opacity-75 cursor-default" : ""} ${className}`}
+            className={`w-full bg-transparent border-0 border-b border-dashed border-slate-300 dark:border-white/30 px-1 py-0.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500/80 placeholder:italic focus:outline-none focus:border-violet-400 dark:focus:border-violet-500/50 transition-all ${readOnly ? "opacity-75 cursor-default" : ""} ${isManualFilled ? "manual-entry" : ""} ${className}`}
         />
     );
 }
@@ -183,11 +189,13 @@ function RichTextField({
     onChange,
     placeholder = "Type here...",
     className = "",
+    manual = true,
 }: {
     value: string;
     onChange: (v: string) => void;
     placeholder?: string;
     className?: string;
+    manual?: boolean;
 }) {
     const modules = {
         toolbar: [
@@ -198,9 +206,11 @@ function RichTextField({
             ['clean']
         ],
     };
+    // Quill emits "<p><br></p>" for an empty editor; strip tags before checking.
+    const isManualFilled = manual && value && value.replace(/<[^>]*>/g, "").trim().length > 0;
 
     return (
-        <div className={`quill-editor ${className}`}>
+        <div className={`quill-editor ${isManualFilled ? "quill-manual-entry" : ""} ${className}`}>
             <ReactQuill
                 theme="snow"
                 value={value}
@@ -269,13 +279,14 @@ function NCell({ children, bold, center, colored }: { children?: React.ReactNode
  *  render. Click-anywhere-to-focus behaviour lives on NCell's onClick
  *  handler (see there). This component just paints the field. */
 function NInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+    const isManualFilled = !!value && value.trim().length > 0;
     return (
         <input
             type="text"
             value={value}
             onChange={e => onChange(e.target.value)}
             placeholder={placeholder ?? "Type here…"}
-            className="block w-full text-[13px] text-slate-800 dark:text-slate-200 focus:outline-none cursor-text bg-transparent px-3 py-2 placeholder:text-slate-300 dark:placeholder:text-slate-500"
+            className={`block w-full text-[13px] text-slate-800 dark:text-slate-200 focus:outline-none cursor-text bg-transparent px-3 py-2 placeholder:text-slate-300 dark:placeholder:text-slate-500 ${isManualFilled ? "manual-entry" : ""}`}
         />
     );
 }
@@ -286,10 +297,11 @@ function NInput({ value, onChange, placeholder }: { value: string; onChange: (v:
 function AInput({ value, onChange, placeholder = "", disabled = false }: {
     value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean;
 }) {
+    const isManualFilled = !!value && value.trim().length > 0;
     return (
         <input type="text" value={value} onChange={e => onChange(e.target.value)}
             placeholder={placeholder} disabled={disabled}
-            className={`block w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none px-2 py-2 ${disabled ? "opacity-60 cursor-default" : "cursor-text"}`} />
+            className={`block w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none px-2 py-2 ${disabled ? "opacity-60 cursor-default" : "cursor-text"} ${isManualFilled ? "manual-entry" : ""}`} />
     );
 }
 
@@ -299,10 +311,11 @@ function AInput({ value, onChange, placeholder = "", disabled = false }: {
 function ATextarea({ value, onChange, placeholder = "", disabled = false }: {
     value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean;
 }) {
+    const isManualFilled = !!value && value.trim().length > 0;
     return (
         <textarea value={value} onChange={e => onChange(e.target.value)}
             placeholder={placeholder} disabled={disabled} rows={3}
-            className={`block w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none resize-y px-2 py-2 min-h-[60px] ${disabled ? "cursor-default" : "cursor-text"}`} />
+            className={`block w-full bg-transparent text-[13px] text-slate-800 dark:text-slate-200 placeholder:text-slate-300 focus:outline-none resize-y px-2 py-2 min-h-[60px] ${disabled ? "cursor-default" : "cursor-text"} ${isManualFilled ? "manual-entry" : ""}`} />
     );
 }
 
@@ -479,25 +492,28 @@ function HrTd({ children, className = "" }: { children?: React.ReactNode; classN
 
 function HrInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
     const locked = useContext(HrLockedContext);
+    const isManualFilled = !!value && value.trim().length > 0;
     return (
         <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={locked ? "" : "—"} readOnly={locked}
-            className={`w-full bg-transparent text-[13px] text-white placeholder:text-slate-400 focus:outline-none rounded px-1 py-0.5 ${locked ? "cursor-default" : "hover:bg-blue-50/50 dark:hover:bg-white/5 focus:bg-blue-50 dark:focus:bg-white/10 focus:ring-1 focus:ring-blue-300/60"} transition-colors`} />
+            className={`w-full bg-transparent text-[13px] text-white placeholder:text-slate-400 focus:outline-none rounded px-1 py-0.5 ${locked ? "cursor-default" : "hover:bg-blue-50/50 dark:hover:bg-white/5 focus:bg-blue-50 dark:focus:bg-white/10 focus:ring-1 focus:ring-blue-300/60"} ${isManualFilled ? "manual-entry" : ""} transition-colors`} />
     );
 }
 
 function HrTextarea({ value, onChange, rows = 3 }: { value: string; onChange: (v: string) => void; rows?: number }) {
     const locked = useContext(HrLockedContext);
+    const isManualFilled = !!value && value.trim().length > 0;
     return (
         <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={locked ? "" : "Type here…"} readOnly={locked} rows={rows}
-            className={`w-full rounded-lg border text-[13px] px-3 py-2.5 text-white placeholder:text-slate-400 focus:outline-none resize-y transition-all leading-relaxed ${locked ? "bg-slate-50 dark:bg-white/[0.03] border-slate-100 dark:border-white/5 cursor-default opacity-80" : "bg-white dark:bg-[#1a1a32] border-slate-200 dark:border-white/10 focus:ring-2 focus:ring-blue-400/30 focus:border-blue-400/60 shadow-sm"}`} />
+            className={`w-full rounded-lg border text-[13px] px-3 py-2.5 text-white placeholder:text-slate-400 focus:outline-none resize-y transition-all leading-relaxed ${locked ? "bg-slate-50 dark:bg-white/[0.03] border-slate-100 dark:border-white/5 cursor-default opacity-80" : "bg-white dark:bg-[#1a1a32] border-slate-200 dark:border-white/10 focus:ring-2 focus:ring-blue-400/30 focus:border-blue-400/60 shadow-sm"} ${isManualFilled ? "manual-entry" : ""}`} />
     );
 }
 
 function HrSelect({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) {
     const locked = useContext(HrLockedContext);
+    const isManualFilled = !!value && value.trim().length > 0;
     return (
         <select value={value} onChange={e => onChange(e.target.value)} disabled={locked}
-            className={`w-full text-[13px] text-white bg-transparent focus:outline-none rounded px-1 py-0.5 ${locked ? "cursor-default" : "hover:bg-blue-50/50 dark:hover:bg-white/5 focus:ring-1 focus:ring-blue-300/60"} transition-colors`}>
+            className={`w-full text-[13px] text-white bg-transparent focus:outline-none rounded px-1 py-0.5 ${locked ? "cursor-default" : "hover:bg-blue-50/50 dark:hover:bg-white/5 focus:ring-1 focus:ring-blue-300/60"} ${isManualFilled ? "manual-entry" : ""} transition-colors`}>
             <option value="">—</option>
             {options.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
@@ -642,6 +658,9 @@ export default function MonthlyReportPage() {
     const [totalVideoActualOverridden, setTotalVideoActualOverridden]   = useState(false);
     const [heroContentActualOverridden, setHeroContentActualOverridden] = useState(false);
     const [videosPublishedActualOverridden, setVideosPublishedActualOverridden] = useState(false);
+    const [totalVideoTargetAchieved, setTotalVideoTargetAchieved]               = useState("");
+    const [heroContentTargetAchieved, setHeroContentTargetAchieved]             = useState("");
+    const [videosPublishedTargetAchieved, setVideosPublishedTargetAchieved]     = useState("");
     const [editorNotes, setEditorNotes] = useState<Record<number, string>>({});
     const [writerNotes, setWriterNotes] = useState<Record<number, string>>({});
     type ExtraCase = { id: string; name: string };
@@ -803,6 +822,9 @@ export default function MonthlyReportPage() {
                 setTotalVideoActualOverridden(!!saved?.totalVideoActualOverridden);
                 setHeroContentActualOverridden(!!saved?.heroContentActualOverridden);
                 setVideosPublishedActualOverridden(!!saved?.videosPublishedActualOverridden);
+                if (saved?.totalVideoTargetAchieved)        setTotalVideoTargetAchieved(saved.totalVideoTargetAchieved);
+                if (saved?.heroContentTargetAchieved)       setHeroContentTargetAchieved(saved.heroContentTargetAchieved);
+                if (saved?.videosPublishedTargetAchieved)   setVideosPublishedTargetAchieved(saved.videosPublishedTargetAchieved);
                 if (d.submitted) {
                     setIsSubmitted(d.locked);
                     setIsDraftSaved(!d.locked);
@@ -933,6 +955,9 @@ export default function MonthlyReportPage() {
                     totalVideoActualOverridden,
                     heroContentActualOverridden,
                     videosPublishedActualOverridden,
+                    totalVideoTargetAchieved,
+                    heroContentTargetAchieved,
+                    videosPublishedTargetAchieved,
                     editorNotes,
                     writerNotes,
                     editorExtraCases,
@@ -2166,7 +2191,7 @@ export default function MonthlyReportPage() {
 
                         {/* Executive Summary Rich Text */}
                         <div className="mb-6">
-                            <RichTextField value={executiveSummary} onChange={viewOnly ? () => {} : setExecutiveSummary} placeholder="Write achievements here..." />
+                            <RichTextField value={executiveSummary} onChange={viewOnly ? () => {} : setExecutiveSummary} placeholder="Write achievements here..." manual />
                         </div>
 
                         {/* Shortfall sub-section */}
@@ -2175,7 +2200,7 @@ export default function MonthlyReportPage() {
                                 Shortfall <span className="text-red-500 ml-0.5">*</span>
                             </h3>
                             <div>
-                                <RichTextField value={shortfallSummary} onChange={viewOnly ? () => {} : setShortfallSummary} placeholder="Write shortfalls here..." />
+                                <RichTextField value={shortfallSummary} onChange={viewOnly ? () => {} : setShortfallSummary} placeholder="Write shortfalls here..." manual />
                             </div>
                         </div>
                     </section>
@@ -2192,13 +2217,15 @@ export default function MonthlyReportPage() {
                                 <thead>
                                     <tr className="border-b border-slate-200 dark:border-white/10">
                                         <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Metric</th>
-                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Target</th>
-                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Actual</th>
-                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Variance</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Actual Target</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Targets Completed (captured from ClickUp)</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Targets Completed (by Managers)</th>
+                                        <th className="text-left py-2 px-3 text-slate-500 dark:text-slate-400 font-medium text-xs">Reason</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {/* Actual columns auto-fill from qualified Video QA1 cases; only CEO/developer/special_access can override. */}
+                                    {/* Actual ClickUp auto-fills from qualified Video QA1 cases (only CEO/developer/special_access can override).
+                                        Target / Target Achieved / Variance are manager-entered — shown in red when filled. */}
                                     <tr className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
                                         <td className="py-2 px-3 text-slate-700 dark:text-slate-300 font-medium">Total Video Completed</td>
                                         <td className="py-2 px-3">
@@ -2212,7 +2239,10 @@ export default function MonthlyReportPage() {
                                             />
                                         </td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={totalVideoVariance} onChange={setTotalVideoVariance} readOnly={viewOnly} />
+                                            <EditableCell value={totalVideoTargetAchieved} onChange={setTotalVideoTargetAchieved} readOnly={viewOnly} manual />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell value={totalVideoVariance} onChange={setTotalVideoVariance} readOnly={viewOnly} manual />
                                         </td>
                                     </tr>
                                     <tr className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
@@ -2228,7 +2258,10 @@ export default function MonthlyReportPage() {
                                             />
                                         </td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={heroContentVariance} onChange={setHeroContentVariance} readOnly={viewOnly} />
+                                            <EditableCell value={heroContentTargetAchieved} onChange={setHeroContentTargetAchieved} readOnly={viewOnly} manual />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell value={heroContentVariance} onChange={setHeroContentVariance} readOnly={viewOnly} manual />
                                         </td>
                                     </tr>
                                     <tr className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
@@ -2244,7 +2277,10 @@ export default function MonthlyReportPage() {
                                             />
                                         </td>
                                         <td className="py-2 px-3">
-                                            <EditableCell value={videosPublishedVariance} onChange={setVideosPublishedVariance} readOnly={viewOnly} />
+                                            <EditableCell value={videosPublishedTargetAchieved} onChange={setVideosPublishedTargetAchieved} readOnly={viewOnly} manual />
+                                        </td>
+                                        <td className="py-2 px-3">
+                                            <EditableCell value={videosPublishedVariance} onChange={setVideosPublishedVariance} readOnly={viewOnly} manual />
                                         </td>
                                     </tr>
                                 </tbody>
@@ -2344,7 +2380,7 @@ export default function MonthlyReportPage() {
                                                 </td>
                                                 <td className="py-2 px-3 align-top">
                                                     <div className="flex flex-col gap-1">
-                                                        <EditableCell value={editorNotes[editor.id] || ""} onChange={(v) => handleEditorNoteChange(editor.id, v)} readOnly={viewOnly} />
+                                                        <EditableCell value={editorNotes[editor.id] || ""} onChange={(v) => handleEditorNoteChange(editor.id, v)} readOnly={viewOnly} manual />
                                                     </div>
                                                 </td>
                                             </tr>
@@ -2440,7 +2476,7 @@ export default function MonthlyReportPage() {
                                                 </td>
                                                 <td className="py-2 px-3 align-top">
                                                     <div className="flex flex-col gap-1">
-                                                        <EditableCell value={writerNotes[writer.id] || ""} onChange={(v) => handleWriterNoteChange(writer.id, v)} readOnly={viewOnly} />
+                                                        <EditableCell value={writerNotes[writer.id] || ""} onChange={(v) => handleWriterNoteChange(writer.id, v)} readOnly={viewOnly} manual />
                                                     </div>
                                                 </td>
                                             </tr>
@@ -2458,7 +2494,7 @@ export default function MonthlyReportPage() {
                         <p className="text-xs text-slate-500 mb-3">
                             Highlight 1–2 top individual achievements or reliable contributors for the month, and note any individuals needing additional support/mentoring.
                         </p>
-                        <RichTextField value={teamRecognition} onChange={viewOnly ? () => {} : setTeamRecognition} />
+                        <RichTextField value={teamRecognition} onChange={viewOnly ? () => {} : setTeamRecognition} manual />
                     </section>
 
                     <hr className="border-slate-200 dark:border-white/5" />
@@ -2557,15 +2593,15 @@ export default function MonthlyReportPage() {
                         <div className="space-y-3">
                             <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2">
                                 <span className="text-sm text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap mt-1">1. What Worked Well (Content/Format/Hook): <span className="text-red-400">*</span></span>
-                                <EditableField value={keyLearnings[0]} onChange={(v) => updateArrayItem(setKeyLearnings, 0, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} />
+                                <EditableField value={keyLearnings[0]} onChange={(v) => updateArrayItem(setKeyLearnings, 0, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} manual />
                             </div>
                             <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2">
                                 <span className="text-sm text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap mt-1">2. What Did Not Work (Content/Topic/Process): <span className="text-red-400">*</span></span>
-                                <EditableField value={keyLearnings[1]} onChange={(v) => updateArrayItem(setKeyLearnings, 1, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} />
+                                <EditableField value={keyLearnings[1]} onChange={(v) => updateArrayItem(setKeyLearnings, 1, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} manual />
                             </div>
                             <div className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-2">
                                 <span className="text-sm text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap mt-1">3. Improvements Adapted for {monthName}: <span className="text-red-400">*</span></span>
-                                <EditableField value={keyLearnings[2]} onChange={(v) => updateArrayItem(setKeyLearnings, 2, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} />
+                                <EditableField value={keyLearnings[2]} onChange={(v) => updateArrayItem(setKeyLearnings, 2, v)} rows={1} className="sm:flex-1" readOnly={viewOnly} manual />
                             </div>
                         </div>
 
@@ -2575,7 +2611,7 @@ export default function MonthlyReportPage() {
                         <p className="text-xs text-slate-500 italic mb-3">
                             Identify potential risks (e.g., resource overload, content fatigue, technical issues) and any process or communication issues requiring CEO awareness/intervention.
                         </p>
-                        <EditableField value={risksAttention} onChange={setRisksAttention} rows={3} readOnly={viewOnly} />
+                        <EditableField value={risksAttention} onChange={setRisksAttention} rows={3} readOnly={viewOnly} manual />
                     </section>
 
                     <hr className="border-slate-200 dark:border-white/5" />
@@ -2589,7 +2625,7 @@ export default function MonthlyReportPage() {
                         <p className="text-xs text-slate-500 italic mb-3">
                             If applicable, detail any observed inappropriate behavioral patterns from a capsule manager or team member that requires executive attention or HR intervention.
                         </p>
-                        <EditableField value={behavioralConcerns} onChange={setBehavioralConcerns} rows={3} readOnly={viewOnly} />
+                        <EditableField value={behavioralConcerns} onChange={setBehavioralConcerns} rows={3} readOnly={viewOnly} manual />
                     </section>
 
                     <hr className="border-slate-200 dark:border-white/5" />
@@ -2603,7 +2639,7 @@ export default function MonthlyReportPage() {
                         <p className="text-xs text-slate-500 italic mb-3">
                             Any additional notes, observations, or comments you would like to include with this report.
                         </p>
-                        <EditableField value={remark} onChange={setRemark} rows={3} readOnly={viewOnly} />
+                        <EditableField value={remark} onChange={setRemark} rows={3} readOnly={viewOnly} manual />
                     </section>
                 </div>
 
