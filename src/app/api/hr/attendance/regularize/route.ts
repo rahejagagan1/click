@@ -258,8 +258,8 @@ export async function POST(req: NextRequest) {
       where: {
         isActive: true,
         OR: [
-          { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
-          { role: "admin" },
+          // CEO + Special Access + HR Manager (role) + Developers.
+          { orgLevel: { in: ["ceo", "special_access"] } },
           { role: "hr_manager" },
           ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
         ],
@@ -410,8 +410,8 @@ export async function PUT(req: NextRequest) {
         where: {
           isActive: true,
           OR: [
-            { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
-            { role: "admin" },
+            // CEO + Special Access + HR Manager (role) + Developers.
+            { orgLevel: { in: ["ceo", "special_access"] } },
             { role: "hr_manager" },
             ...(devEmailsL1.length > 0 ? [{ email: { in: devEmailsL1 } }] : []),
           ],
