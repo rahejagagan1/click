@@ -138,6 +138,8 @@ model User {
   notificationsTriggered Notification[]   @relation("NotificationActor")
   tabPermissions         UserTabPermission[] @relation("UserTabPermsOwner")
   tabPermissionsUpdated  UserTabPermission[] @relation("UserTabPermsUpdater")
+  notificationPolicy     EmployeeNotificationPolicy?  @relation("NotifPolicyOwner")
+  notificationPoliciesUpdated EmployeeNotificationPolicy[] @relation("NotifPolicyUpdater")
   auditLogs              AuditLog[]          @relation("AuditLogActor")
   employeeExit           EmployeeExit?       @relation("ExitUser")
   exitsInitiated         EmployeeExit[]      @relation("ExitInitiator")
@@ -1219,6 +1221,27 @@ model UserTabPermission {
   updater    User?    @relation("UserTabPermsUpdater", fields: [updatedBy], references: [id])
 
   @@unique([userId, tabKey])
+  @@index([userId])
+}
+
+// Per-employee override for attendance + payroll email/processing.
+// Absence of a row = use role-based defaults (CEO and Developers default
+// to BOTH disabled; everyone else defaults to BOTH enabled). An explicit
+// row always wins, so HR can grant attendance emails to the CEO if they
+// want them back. Wired into the daily reminder + 10:05 summary jobs in
+// src/lib/hr/missed-attendance-emails.ts.
+model EmployeeNotificationPolicy {
+  id                Int      @id @default(autoincrement())
+  userId            Int      @unique
+  attendanceEnabled Boolean  @default(true)
+  payrollEnabled    Boolean  @default(true)
+  updatedById       Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user              User     @relation("NotifPolicyOwner",   fields: [userId],      references: [id], onDelete: Cascade)
+  updater           User?    @relation("NotifPolicyUpdater", fields: [updatedById], references: [id])
+
   @@index([userId])
 }
 

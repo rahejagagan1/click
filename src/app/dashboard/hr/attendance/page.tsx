@@ -750,6 +750,17 @@ export default function AttendancePage() {
     setIsMobileDevice(detectMobileDevice());
   }, []);
 
+  // "Day Complete · 9h reached" toast — set after a successful clock-out
+  // whose final totalMinutes ≥ 540. Auto-dismisses after 5 seconds; user
+  // can also close it manually. Replaces the previous inline badge on the
+  // re-clockin button.
+  const [dayCompleteToast, setDayCompleteToast] = useState(false);
+  useEffect(() => {
+    if (!dayCompleteToast) return;
+    const t = setTimeout(() => setDayCompleteToast(false), 5000);
+    return () => clearTimeout(t);
+  }, [dayCompleteToast]);
+
   useEffect(() => {
     setClock(new Date());
     const t = setInterval(() => setClock(new Date()), 1000);
@@ -869,6 +880,11 @@ export default function AttendancePage() {
     const d = await res.json();
     if (!res.ok) return alert(d.error);
     mutate(`/api/hr/attendance?${attendanceQs}`);
+    // The API returns the updated Attendance row; flash a "Day Complete"
+    // toast when the day's total crosses the 9h shift target.
+    if (typeof d?.totalMinutes === "number" && d.totalMinutes >= 540) {
+      setDayCompleteToast(true);
+    }
   };
 
   const todayRec  = myData?.todayRecord;
@@ -1042,6 +1058,37 @@ export default function AttendancePage() {
 
   return (
     <div className="min-h-screen bg-[#f4f7f8] dark:bg-[#011627]">
+
+      {/* ── Day Complete toast — fires once on a clock-out where the
+          day's total crossed 9h. Auto-dismisses after 5s. Positioned
+          fixed top-center, above all panel content. */}
+      {dayCompleteToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[60] pointer-events-auto animate-toast-in"
+        >
+          <div className="flex items-center gap-3 bg-white dark:bg-[#001529] border border-emerald-200 dark:border-emerald-500/30 shadow-lg shadow-emerald-500/10 rounded-xl px-4 py-3 min-w-[280px] max-w-[420px]">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600">
+              <CheckCircle2 size={18} strokeWidth={2.5} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-bold text-slate-800 dark:text-white">Day Complete</p>
+              <p className="text-[11.5px] text-slate-500 dark:text-slate-400 leading-snug">
+                You've reached the 9-hour shift target. Great work!
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDayCompleteToast(false)}
+              aria-label="Dismiss"
+              className="shrink-0 -mr-1 -my-1 p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.05]"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Top Module Tabs ── */}
       <div className="flex items-center bg-white dark:bg-[#001529] border-b border-slate-200 dark:border-white/[0.06] px-4">
@@ -1354,11 +1401,6 @@ export default function AttendancePage() {
                   {isMobileDevice && (
                     <span className="text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
                       Only accessible on Laptop &amp; Desktop
-                    </span>
-                  )}
-                  {(todayRec.totalMinutes ?? 0) >= 540 && (
-                    <span className="h-7 px-3 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 rounded-md text-[11.5px] font-bold flex items-center whitespace-nowrap w-fit">
-                      ✓ Day Complete · 9h reached
                     </span>
                   )}
                 </div>
@@ -1872,19 +1914,30 @@ export default function AttendancePage() {
                                     <div className="grid grid-cols-2 gap-x-3 gap-y-1 tabular-nums">
                                       {sessions.map((s, i) => {
                                         const open = !s.clockOut;
+                                        // An "open" session on a PAST row isn't
+                                        // really live — the user simply forgot
+                                        // to clock out. Show "Missed" in amber
+                                        // instead of the live ticker, so the
+                                        // popover agrees with the badge.
+                                        const isLiveNow = open && isTodayRow;
                                         return (
                                           <div key={i} className="contents">
                                             <span className="inline-flex items-center gap-1 text-[12px] text-slate-700 dark:text-slate-200 font-medium">
                                               <ArrowDownLeft size={13} strokeWidth={2.4} className="text-emerald-500 shrink-0" />
                                               {fmtT(s.clockIn)}
                                             </span>
-                                            {open ? (
+                                            {isLiveNow ? (
                                               <span className="inline-flex items-center gap-1 text-[12px] font-medium">
                                                 <span className="relative inline-flex h-3 w-3 shrink-0 items-center justify-center">
                                                   <span className="absolute inset-0 rounded-full bg-emerald-400/40 animate-ping" />
                                                   <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
                                                 </span>
                                                 <span className="text-emerald-600 dark:text-emerald-400 font-semibold">now</span>
+                                              </span>
+                                            ) : open ? (
+                                              <span className="inline-flex items-center gap-1 text-[12px] font-medium">
+                                                <AlertCircle size={13} strokeWidth={2.4} className="text-amber-500 shrink-0" />
+                                                <span className="text-amber-600 dark:text-amber-400 font-semibold">Missed</span>
                                               </span>
                                             ) : (
                                               <span className="inline-flex items-center gap-1 text-[12px] text-slate-700 dark:text-slate-200 font-medium">
