@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
+import { isDeveloperEmail } from "@/lib/hr/notification-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -48,12 +49,22 @@ export async function GET(req: NextRequest) {
       ? {}
       : { OR: [{ userId: myId }, { user: { managerId: myId } }] };
 
+    // Developer invisibility: developer accounts (DEVELOPER_EMAILS env)
+    // are hidden from everyone *except other developers*. Even the CEO
+    // can't search up a developer. The viewer is excluded from this gate
+    // (so a developer searching for themselves still finds themselves).
+    const viewerIsDeveloper = isDeveloperEmail(user?.email ?? null);
+    const devEmails = (process.env.DEVELOPER_EMAILS || "")
+      .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const hideDevEmails = !viewerIsDeveloper && devEmails.length > 0 ? devEmails : [];
+
     const [employees, cases, leaves, expenses, wfh, onDuty, regs, notifications] = await Promise.all([
       // ── Employees ────────────────────────────────────────────────
       prisma.user.findMany({
         where: {
           isActive: true,
           OR: [{ name: contains }, { email: contains }],
+          ...(hideDevEmails.length > 0 ? { NOT: { email: { in: hideDevEmails } } } : {}),
         },
         select: { id: true, name: true, email: true, role: true, orgLevel: true, profilePictureUrl: true, teamCapsule: true },
         take: limit,

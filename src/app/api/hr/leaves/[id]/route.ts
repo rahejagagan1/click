@@ -179,8 +179,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       });
       if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
 
+      // Final approvers: CEO + Special Access + HR Manager (role) + Devs.
+      // Drops orgLevel="hr_manager"-only members (e.g. HR-team folks
+      // whose role is "member") and role="admin" alone.
+      const devEmailsLeaveId = (process.env.DEVELOPER_EMAILS || "")
+        .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
       const finalApprovers = await prisma.user.findMany({
-        where: { isActive: true, orgLevel: { in: ["ceo", "hr_manager"] } },
+        where: {
+          isActive: true,
+          OR: [
+            { orgLevel: { in: ["ceo", "special_access"] } },
+            { role: "hr_manager" },
+            ...(devEmailsLeaveId.length > 0 ? [{ email: { in: devEmailsLeaveId } }] : []),
+          ],
+        },
         select: { id: true },
       });
       const extras = application.notifyUserIds ?? [];
@@ -235,18 +247,26 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       // Attendance.upsert is idempotent on the unique key, so even if two
       // callers reached this far (they can't, but belt-and-braces), the
       // second just re-writes status=on_leave to the same value.
-      const from = new Date(application.fromDate), to = new Date(application.toDate);
-      const cur = new Date(from);
-      while (cur <= to) {
-        if (cur.getDay() !== 0 && cur.getDay() !== 6) {
-          const dateOnly = new Date(Date.UTC(cur.getFullYear(), cur.getMonth(), cur.getDate()));
+      //
+      // fromDate/toDate are `@db.Date` columns stored as UTC-midnight of the
+      // IST calendar day, so we walk the range in UTC arithmetic only.
+      // Using local getters/setters (getDay / setDate) leaks server wall-time
+      // into the loop and can skip or duplicate a day around 18:30 UTC.
+      const from = new Date(application.fromDate);
+      const to   = new Date(application.toDate);
+      const cur  = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
+      const end  = new Date(Date.UTC(to.getUTCFullYear(),   to.getUTCMonth(),   to.getUTCDate()));
+      while (cur.getTime() <= end.getTime()) {
+        const dow = cur.getUTCDay(); // 0 = Sun, 6 = Sat
+        if (dow !== 0 && dow !== 6) {
+          const dateOnly = new Date(cur);
           await prisma.attendance.upsert({
             where: { userId_date: { userId: application.userId, date: dateOnly } },
             create: { userId: application.userId, date: dateOnly, status: "on_leave" },
             update: { status: "on_leave" },
           });
         }
-        cur.setDate(cur.getDate() + 1);
+        cur.setUTCDate(cur.getUTCDate() + 1);
       }
 
       const extras = application.notifyUserIds ?? [];

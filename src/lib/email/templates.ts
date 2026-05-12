@@ -239,7 +239,7 @@ export function attendanceReminderEmail(args: {
       Hi ${escape(args.userName)},
     </p>
     <p style="margin:0 0 14px;font-size:14px;line-height:1.6">
-      Friendly reminder — you haven't <strong style="color:${accent}">${action}ed</strong> on the dashboard yet today.
+      Friendly reminder — you haven't done <strong style="color:${accent}">${action}</strong> today.
     </p>
     ${isIn ? `
       <div style="margin:14px 0;padding:12px;background:#fff7ed;border-left:3px solid #f59e0b;border-radius:4px">
@@ -264,7 +264,7 @@ export function attendanceReminderEmail(args: {
   const text = [
     `Hi ${args.userName},`,
     ``,
-    `Reminder: you haven't ${action}ed on the NB Media dashboard yet today.`,
+    `Reminder: you haven't done ${action} on the NB Media dashboard today.`,
     ``,
     isIn
       ? `If you're on leave, WFH, or out for a meeting, please file the matching request from the dashboard. Otherwise please clock in now — past 10:00 AM IST counts as a half day.`
@@ -273,6 +273,131 @@ export function attendanceReminderEmail(args: {
     `Open: ${link}`,
   ].join("\n");
   return { subject, html: SHELL(subject, body), text };
+}
+
+// ── HR daily "who's late / absent" summary (10:05 IST) ─────────────────
+// Recipients: CEO + HR Manager + Developers. Minimalist redesign with
+// mobile-first markup:
+//   • Single-column-friendly: a 4-up summary is hard to read on a 360px
+//     phone, so we use a single quiet stats line + two lean section
+//     tables. No card-in-card nesting.
+//   • Quiet palette: one accent (slate-blue). Status uses tiny coloured
+//     dots so the email reads as a document, not a dashboard.
+//   • Pure-table layout, no flexbox. Renders identically on Gmail web,
+//     Gmail iOS, Gmail Android, Outlook, Apple Mail.
+const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif";
+export function hrLateSummaryEmail(args: {
+  today: Date;
+  absent: Array<{ name: string; department: string | null }>;
+  late:   Array<{ name: string; department: string | null; clockIn: Date | null }>;
+  totals: { absent: number; late: number; onTime: number; onLeave: number };
+}): EmailContent {
+  const subject = `Attendance — ${fmtDate(args.today)} · ${args.totals.absent} absent · ${args.totals.late} late`;
+  const fmtTime = (d: Date | null) =>
+    d ? d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "—";
+  const weekday = args.today.toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" });
+  const dateStr = args.today.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric", timeZone: "UTC" });
+  const headcount = args.totals.absent + args.totals.late + args.totals.onTime + args.totals.onLeave;
+
+  // Tiny coloured-dot helper.
+  const dot = (color: string) =>
+    `<span style="display:inline-block;width:7px;height:7px;background:${color};border-radius:50%;vertical-align:middle;margin-right:6px"></span>`;
+
+  // Single-line stats summary — replaces the 4-card row that wrapped
+  // awkwardly on phones. One line of plain text with coloured dots,
+  // separated by middle-dots. Reads on any width.
+  const statsLine = `
+    <div style="font-family:${FONT};font-size:13px;color:#475569;line-height:1.7">
+      ${dot("#dc2626")}<strong style="color:#0f172a">${args.totals.absent}</strong>&nbsp;Absent
+      &nbsp;&nbsp;·&nbsp;&nbsp;
+      ${dot("#ea580c")}<strong style="color:#0f172a">${args.totals.late}</strong>&nbsp;Late
+      &nbsp;&nbsp;·&nbsp;&nbsp;
+      ${dot("#16a34a")}<strong style="color:#0f172a">${args.totals.onTime}</strong>&nbsp;On time
+      &nbsp;&nbsp;·&nbsp;&nbsp;
+      ${dot("#7c3aed")}<strong style="color:#0f172a">${args.totals.onLeave}</strong>&nbsp;On leave
+    </div>
+    <div style="font-family:${FONT};font-size:11px;color:#94a3b8;margin-top:4px">${headcount} employees in scope</div>`;
+
+  // Row builder — name + department on the left, status text on the right.
+  // No avatars (broke on Gmail mobile), no alternating stripes (looked
+  // busy with the toned-down palette). Just clean rows with a hairline
+  // divider between them.
+  const renderRow = (name: string, department: string | null, right: string) => `
+    <tr>
+      <td valign="middle" style="padding:11px 0;border-bottom:1px solid #eef2f7;font-family:${FONT}">
+        <div style="font-size:13.5px;color:#0f172a;font-weight:600;line-height:1.3">${escape(name)}</div>
+        ${department ? `<div style="margin-top:2px;font-size:11.5px;color:#94a3b8">${escape(department)}</div>` : ""}
+      </td>
+      <td valign="middle" align="right" style="padding:11px 0;border-bottom:1px solid #eef2f7;white-space:nowrap;font-family:${FONT};font-size:12px;color:#475569;font-weight:600">${right}</td>
+    </tr>`;
+
+  // Section: a small-caps heading with a count, then a borderless table.
+  const renderSection = (heading: string, accent: string, count: number, rows: string, emptyMsg: string) => `
+    <div style="margin-top:24px">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+        <tr>
+          <td valign="middle" style="font-family:${FONT};font-size:11px;color:#0f172a;text-transform:uppercase;letter-spacing:0.12em;font-weight:700">
+            ${dot(accent)}${heading}
+          </td>
+          <td valign="middle" align="right" style="font-family:${FONT};font-size:11px;color:#94a3b8;font-weight:600">${count}</td>
+        </tr>
+      </table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-top:6px;border-top:1px solid #eef2f7">
+        ${rows || `<tr><td align="center" style="padding:18px 0;font-family:${FONT};font-size:12.5px;color:#cbd5e1;font-style:italic;border-bottom:1px solid #eef2f7">${emptyMsg}</td></tr>`}
+      </table>
+    </div>`;
+
+  const absentRows = args.absent.map((r) => renderRow(r.name, r.department,
+    `<span style="color:#dc2626">Absent</span>`,
+  )).join("");
+  const lateRows = args.late.map((r) => renderRow(r.name, r.department,
+    `<span style="color:#ea580c">${fmtTime(r.clockIn)}</span>`,
+  )).join("");
+
+  const link = `${appUrl()}/dashboard/hr/admin?tab=attendance-dashboard`;
+  const body = `
+    <!-- Header: just the date, lightly styled. No coloured banner. -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 4px">
+      <tr>
+        <td style="font-family:${FONT};font-size:11px;color:#64748b;letter-spacing:0.12em;text-transform:uppercase;font-weight:700">Daily Attendance · 10:05 AM IST</td>
+      </tr>
+      <tr>
+        <td style="font-family:${FONT};font-size:20px;font-weight:700;color:#0f172a;line-height:1.3;padding-top:4px">${weekday}, ${dateStr}</td>
+      </tr>
+    </table>
+
+    <!-- Subtle divider, then the stats line. -->
+    <div style="border-top:1px solid #e2e8f0;margin:14px 0 12px"></div>
+    ${statsLine}
+
+    ${renderSection("Absent · no clock-in, no leave", "#dc2626", args.absent.length, absentRows, "Nobody absent today.")}
+    ${renderSection("Late · clocked in after 10:00 IST", "#ea580c", args.late.length, lateRows, "Everyone clocked in on time.")}
+
+    <!-- CTA: simple inline link button. -->
+    <div style="margin-top:28px;border-top:1px solid #e2e8f0;padding-top:18px">
+      <a href="${link}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;font-family:${FONT};font-size:12.5px;font-weight:600;padding:9px 18px;border-radius:6px">Open attendance dashboard →</a>
+    </div>
+
+    <!-- Quiet footer note. -->
+    <p style="font-family:${FONT};margin:18px 0 0;font-size:11px;color:#94a3b8;line-height:1.55">
+      WFH and On-Duty employees are expected to clock in — they appear in Absent if they haven't.
+      Anyone with an active leave application (any non-rejected status) is excluded.
+      Weekends and holidays don't generate this email.
+    </p>`;
+
+  const textRows = [
+    `Daily Attendance — ${weekday}, ${dateStr} (10:05 AM IST)`,
+    `${args.totals.absent} absent · ${args.totals.late} late · ${args.totals.onTime} on time · ${args.totals.onLeave} on leave (${headcount} in scope)`,
+    ``,
+    `ABSENT (${args.totals.absent})`,
+    ...(args.absent.length ? args.absent.map((r) => `  • ${r.name}${r.department ? ` — ${r.department}` : ""}`) : ["  (none)"]),
+    ``,
+    `LATE (${args.totals.late}) — clocked in after 10:00 IST`,
+    ...(args.late.length ? args.late.map((r) => `  • ${r.name}${r.department ? ` — ${r.department}` : ""} · ${fmtTime(r.clockIn)}`) : ["  (none)"]),
+    ``,
+    `Open: ${link}`,
+  ];
+  return { subject, html: SHELL(`Attendance — ${fmtDate(args.today)}`, body), text: textRows.join("\n") };
 }
 
 export function reportSubmittedEmail(args: {

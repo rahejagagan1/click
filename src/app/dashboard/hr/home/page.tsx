@@ -1952,6 +1952,16 @@ export default function HRHomePage() {
   // the browser is busy asking the OS for coordinates (first-time GPS/Wi-Fi
   // lookup on Windows can take 10–15s).
   const [clockingIn, setClockingIn] = useState(false);
+  // Two-step clock-out confirmation — mirrors the Attendance page. First
+  // click splits the single Clock-Out into a red Confirm + dark Cancel
+  // pair so a stray click doesn't end the day. Auto-cancels after 6s.
+  const [confirmingClockOut, setConfirmingClockOut] = useState(false);
+  const [clockingOut, setClockingOut] = useState(false);
+  useEffect(() => {
+    if (!confirmingClockOut || clockingOut) return;
+    const t = setTimeout(() => setConfirmingClockOut(false), 6000);
+    return () => clearTimeout(t);
+  }, [confirmingClockOut, clockingOut]);
 
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   useEffect(() => {
@@ -2299,6 +2309,7 @@ export default function HRHomePage() {
 
                 <div className="flex items-center gap-1.5">
                   {!todayRec?.clockIn ? (
+                    // ── Not clocked in yet → green "Clock-in" ──
                     <div className="flex flex-col items-center gap-1">
                       <button
                         onClick={isMobileDevice ? undefined : clockIn}
@@ -2315,14 +2326,62 @@ export default function HRHomePage() {
                       )}
                     </div>
                   ) : !todayRec?.clockOut ? (
+                    // ── Clocked in, no clock-out yet → two-step confirm. ──
+                    // First click flips to a Confirm/Cancel pair so a stray
+                    // click can't accidentally end the day.
+                    confirmingClockOut ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={async () => {
+                            if (clockingOut) return;
+                            setClockingOut(true);
+                            try { await clockOut(); }
+                            finally { setClockingOut(false); setConfirmingClockOut(false); }
+                          }}
+                          disabled={clockingOut || isMobileDevice}
+                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{ background: "linear-gradient(180deg,#ef4444 0%,#b91c1c 100%)" }}
+                        >
+                          {clockingOut ? "Clocking out…" : "Confirm Clock-out"}
+                        </button>
+                        <button
+                          onClick={() => setConfirmingClockOut(false)}
+                          disabled={clockingOut}
+                          className="h-[24px] whitespace-nowrap rounded-[3px] bg-white/15 px-2.5 text-[11px] font-semibold text-white transition hover:bg-white/25 disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-1">
+                        <button
+                          onClick={isMobileDevice ? undefined : () => setConfirmingClockOut(true)}
+                          disabled={isMobileDevice}
+                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a63" }}
+                        >
+                          {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
+                        </button>
+                        {isMobileDevice && (
+                          <span className="text-center text-[9.5px] leading-tight text-white/70">
+                            Only accessible on Laptop &amp; Desktop
+                          </span>
+                        )}
+                      </div>
+                    )
+                  ) : (
+                    // ── Clocked out (multi-session day) → another Clock-in,
+                    //    so users on break can resume. No "Day complete"
+                    //    pill here — the Attendance tab already shows it
+                    //    and HR didn't want a duplicate on the home tile.
                     <div className="flex flex-col items-center gap-1">
                       <button
-                        onClick={isMobileDevice ? undefined : clockOut}
-                        disabled={isMobileDevice}
+                        onClick={isMobileDevice ? undefined : clockIn}
+                        disabled={clockingIn || isMobileDevice}
                         className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a63" }}
+                        style={{ background: isRemoteMode ? "#008CFF" : "#22c55e" }}
                       >
-                        {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
+                        {clockingIn ? "Getting location…" : isRemoteMode ? "Remote Clock-in" : "Clock-in"}
                       </button>
                       {isMobileDevice && (
                         <span className="text-center text-[9.5px] leading-tight text-white/70">
@@ -2330,10 +2389,6 @@ export default function HRHomePage() {
                         </span>
                       )}
                     </div>
-                  ) : (
-                    <span className="flex h-[24px] items-center rounded-[3px] bg-white/15 px-3.5 text-[11px] font-semibold text-white/90">
-                      Done
-                    </span>
                   )}
                   <OtherActionsMenu onSelect={(kind) => setOtherForm(kind)} />
                 </div>
