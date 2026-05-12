@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { istTodayDateOnly } from "@/lib/ist-date";
+import { getPoliciesByUser } from "@/lib/hr/notification-policy";
 
 // GET /api/hr/attendance/board — today's team attendance board
 export async function GET() {
@@ -11,11 +12,16 @@ export async function GET() {
   try {
     const today = istTodayDateOnly();
 
-    const allUsers = await prisma.user.findMany({
+    const allActive = await prisma.user.findMany({
       where: { isActive: true },
       select: { id: true, name: true, profilePictureUrl: true, role: true },
       orderBy: { name: "asc" },
     });
+    // Filter out attendance-disabled users (CEO + developers default OFF;
+    // HR can override via the toggles page). They don't appear on the
+    // home page's attendance lists or in the counts.
+    const policies = await getPoliciesByUser(allActive.map((u) => u.id));
+    const allUsers = allActive.filter((u) => policies.get(u.id)?.attendanceEnabled !== false);
 
     const todayRecords = await prisma.attendance.findMany({
       where: { date: today },

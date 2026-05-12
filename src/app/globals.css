@@ -510,3 +510,15 @@ html:not(.dark) .glass {
 .animate-fade-in {
   animation: fadeIn 0.2s ease-out;
 }
+
+/* Top-anchored toast: slides down from above + fades in. Paired with
+   a 5s setTimeout in React for the dismiss; on unmount the element
+   simply detaches (no exit animation — the page is already idle by
+   then so it's not visually jarring). */
+@keyframes toastIn {
+  from { opacity: 0; transform: translate(-50%, -12px); }
+  to   { opacity: 1; transform: translate(-50%,   0  ); }
+}
+.animate-toast-in {
+  animation: toastIn 0.22s ease-out;
+}

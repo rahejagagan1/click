@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { Search, Sparkles, Plus, Minus, X } from "lucide-react";
+import { Search, Sparkles, Plus, Minus, X, CalendarPlus, AlertTriangle, Home } from "lucide-react";
 
 type LeaveTypeRow = { id: number; name: string; code: string; daysPerYear: number; applicable?: boolean };
 type Bal          = { id: number | null; total: number; used: number; pending: number };
@@ -130,52 +130,219 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
 
   const yearOptions = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
 
+  // ── Apply On Behalf modal ──────────────────────────────────────
+  // HR admins can grant any active leave type — or a Work From Home —
+  // for any active user. When applying leave: an insufficient/missing
+  // balance auto-routes to LWP if the toggle is on. When applying WFH:
+  // the monthly 2-of-2 cap is bypassed (HR is overriding intentionally).
+  type ApplyMode = "leave" | "wfh";
+  const [applyOpen, setApplyOpen] = useState(false);
+  const [applyMode, setApplyMode] = useState<ApplyMode>("leave");
+  const [applyForm, setApplyForm] = useState({
+    userId: "" as number | "",
+    leaveTypeId: "" as number | "",
+    fromDate: new Date().toISOString().slice(0, 10),
+    toDate:   new Date().toISOString().slice(0, 10),
+    reason: "",
+    useLwpFallback: true,
+  });
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applyError, setApplyError] = useState("");
+  // Pickable leave types — only active + applicable. Reuses the data
+  // already loaded for the matrix so no extra fetch is needed.
+  const applicableTypes = useMemo(
+    () => leaveTypes.filter((t) => t.applicable !== false),
+    [leaveTypes],
+  );
+  // Live preview of the chosen user's available balance for the chosen type.
+  const applyBalancePreview = useMemo(() => {
+    if (typeof applyForm.userId !== "number" || typeof applyForm.leaveTypeId !== "number") return null;
+    const emp = employees.find((e) => e.id === applyForm.userId);
+    const bal = emp?.balances?.[applyForm.leaveTypeId];
+    if (!bal) return { total: 0, used: 0, pending: 0, available: 0 };
+    return { ...bal, available: Math.max(0, (bal.total ?? 0) - (bal.used ?? 0) - (bal.pending ?? 0)) };
+  }, [applyForm.userId, applyForm.leaveTypeId, employees]);
+
+  // Inline balance editor — HR can grant / adjust the chosen employee's
+  // balance for the chosen leave type without leaving the Apply modal.
+  // Useful for the common case where Sick Leave shows 0/0 and HR wants
+  // to give a quick allotment so the leave goes through instead of
+  // falling back to LWP. Closes back to the read-only preview on Save.
+  const [editingBalance, setEditingBalance] = useState(false);
+  const [balanceEdit, setBalanceEdit] = useState({ total: "", used: "", pending: "" });
+  const [savingBalance, setSavingBalance] = useState(false);
+  const [balanceError, setBalanceError] = useState("");
+
+  // Whenever the picked (user, type) changes, exit edit mode so the
+  // pre-fill on next edit reflects the new pair, not the previous one.
+  useEffect(() => {
+    setEditingBalance(false);
+    setBalanceError("");
+  }, [applyForm.userId, applyForm.leaveTypeId]);
+
+  const openBalanceEdit = () => {
+    const b = applyBalancePreview;
+    setBalanceEdit({
+      total:   String(b?.total   ?? 0),
+      used:    String(b?.used    ?? 0),
+      pending: String(b?.pending ?? 0),
+    });
+    setBalanceError("");
+    setEditingBalance(true);
+  };
+  const saveBalance = async () => {
+    if (typeof applyForm.userId !== "number" || typeof applyForm.leaveTypeId !== "number") return;
+    const t = Number(balanceEdit.total),
+          u = Number(balanceEdit.used),
+          pen = Number(balanceEdit.pending);
+    if (![t, u, pen].every(Number.isFinite) || t < 0 || u < 0 || pen < 0) {
+      setBalanceError("All three values must be non-negative numbers.");
+      return;
+    }
+    setSavingBalance(true);
+    setBalanceError("");
+    try {
+      const fromDate = applyForm.fromDate || new Date().toISOString().slice(0, 10);
+      const yr = parseInt(fromDate.slice(0, 4), 10);
+      const res = await fetch("/api/hr/admin/leave-balances", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId:      applyForm.userId,
+          leaveTypeId: applyForm.leaveTypeId,
+          year:        yr,
+          totalDays:   t,
+          usedDays:    u,
+          pendingDays: pen,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { setBalanceError(json?.error || "Failed to save balance."); return; }
+      // Refresh the matrix so the live preview picks up the new numbers.
+      await mutate(url);
+      setEditingBalance(false);
+    } finally { setSavingBalance(false); }
+  };
+
+  const submitApply = async () => {
+    setApplyError("");
+    if (typeof applyForm.userId !== "number")     return setApplyError("Pick an employee.");
+    if (!applyForm.fromDate || !applyForm.toDate) return setApplyError("Pick a date range.");
+    if (!applyForm.reason.trim())                 return setApplyError("Reason is required.");
+    if (applyMode === "leave" && typeof applyForm.leaveTypeId !== "number") {
+      return setApplyError("Pick a leave type.");
+    }
+    setApplyBusy(true);
+    try {
+      let res: Response;
+      if (applyMode === "leave") {
+        res = await fetch("/api/hr/leaves", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetUserId:    applyForm.userId,
+            leaveTypeId:     applyForm.leaveTypeId,
+            fromDate:        applyForm.fromDate,
+            toDate:          applyForm.toDate,
+            reason:          applyForm.reason.trim(),
+            useLwpFallback:  applyForm.useLwpFallback,
+          }),
+        });
+      } else {
+        // WFH range: the API iterates working days between date and
+        // toDate, creating one approved WFHRequest per day. Weekends
+        // are skipped server-side; days that already have an active
+        // WFH are quietly skipped too.
+        res = await fetch("/api/hr/attendance/wfh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetUserId: applyForm.userId,
+            forceGrant:   true,
+            date:         applyForm.fromDate,
+            toDate:       applyForm.toDate,
+            reason:       applyForm.reason.trim(),
+          }),
+        });
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setApplyError(data?.error || `Failed to apply ${applyMode === "wfh" ? "WFH" : "leave"}.`); return; }
+      setApplyOpen(false);
+      setApplyForm((f) => ({ ...f, reason: "" }));
+      mutate(url);
+    } finally { setApplyBusy(false); }
+  };
+
   return (
     <>
-      {/* ── Header bar ─────────────────────────────────────────────── */}
-      <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-[15px] font-semibold text-slate-800 dark:text-white">Leave balances</h2>
-          <p className="mt-0.5 text-[12.5px] text-slate-500">
-            Click any cell to edit. Changes apply to <span className="font-semibold text-slate-700">{year}</span>.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Search */}
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search employee…"
-              className="h-9 w-[220px] rounded-lg border border-slate-200 bg-white pl-8 pr-3 text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
-            />
-            {query ? (
-              <button onClick={() => setQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
-                <X size={12} />
-              </button>
-            ) : null}
+      {/* ── Header card ────────────────────────────────────────────
+          Two-row layout: title + tiny meta strip on top; controls
+          underneath. Wraps cleanly on narrow widths so the buttons
+          never collide with the search box. */}
+      <header className="mb-5 rounded-2xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
+        <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-bold text-slate-800 dark:text-white">Leave Balances</h2>
+            <p className="mt-0.5 text-[12px] text-slate-500">
+              Click any cell to edit. Changes apply to{" "}
+              <span className="font-semibold text-slate-700">{year}</span>.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+              <span className="inline-flex items-center gap-1">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                {employees.length} {employees.length === 1 ? "employee" : "employees"}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#008CFF]" />
+                {applicableTypes.length} active leave types
+              </span>
+            </div>
           </div>
 
-          {/* Year */}
-          <select
-            value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
-          >
-            {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
-
-          {/* Bulk apply */}
-          <button
-            onClick={() => seedDefaults("all")}
-            disabled={bulkBusy || leaveTypes.length === 0}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#008CFF] px-3.5 text-[12.5px] font-semibold text-white hover:bg-[#0070d4] disabled:opacity-60"
-          >
-            <Sparkles size={14} />
-            {bulkBusy ? "Applying…" : "Apply policy defaults"}
-          </button>
+          {/* Controls — primary actions on the right, search/year on the left
+              within the control row so the eye lands on the action first. */}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search employee…"
+                className="h-9 w-[200px] rounded-lg border border-slate-200 bg-white pl-8 pr-3 text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
+              />
+              {query ? (
+                <button onClick={() => setQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
+                  <X size={12} />
+                </button>
+              ) : null}
+            </div>
+            <select
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+              aria-label="Year"
+              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
+            >
+              {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            {/* Tonal divider so action buttons feel grouped */}
+            <div className="hidden h-7 w-px bg-slate-200 sm:block" aria-hidden />
+            <button
+              onClick={() => { setApplyMode("leave"); setApplyOpen(true); }}
+              disabled={employees.length === 0 || applicableTypes.length === 0}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-500 px-3.5 text-[12.5px] font-semibold text-white shadow-sm shadow-emerald-500/20 transition hover:bg-emerald-600 disabled:opacity-60"
+            >
+              <CalendarPlus size={14} />
+              Apply on behalf
+            </button>
+            <button
+              onClick={() => seedDefaults("all")}
+              disabled={bulkBusy || leaveTypes.length === 0}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 text-[12.5px] font-semibold text-slate-700 transition hover:border-[#008CFF] hover:text-[#008CFF] disabled:opacity-60"
+            >
+              <Sparkles size={14} />
+              {bulkBusy ? "Applying…" : "Apply policy defaults"}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -372,6 +539,260 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
               <button onClick={saveEdit} disabled={busy}
                 className="h-9 rounded-md bg-[#008CFF] px-4 text-[13px] font-semibold text-white hover:bg-[#0070d4] disabled:opacity-60">
                 {busy ? "Saving…" : "Save changes"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
+      {/* ── Apply On Behalf modal ────────────────────────────────── */}
+      {applyOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4" onClick={() => !applyBusy && setApplyOpen(false)}>
+          <div
+            className="w-full max-w-lg rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200/60"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="flex items-start justify-between border-b border-slate-100 px-6 py-4">
+              <div className="min-w-0">
+                <h3 className="text-[15px] font-bold text-slate-800">
+                  Apply {applyMode === "wfh" ? "WFH" : "Leave"} on behalf
+                </h3>
+                <p className="mt-0.5 text-[11.5px] text-slate-500">
+                  {applyMode === "wfh"
+                    ? "Auto-approved. The monthly 2-of-2 cap is bypassed when HR grants on behalf."
+                    : "Auto-approved. If balance is insufficient and LWP fallback is on, switches to Leave Without Pay."}
+                </p>
+              </div>
+              <button onClick={() => !applyBusy && setApplyOpen(false)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                <X size={16} />
+              </button>
+            </header>
+
+            {/* Segmented Leave / WFH selector — clearer than two tabs at
+                the top of the panel, since the rest of the form depends on
+                this choice. */}
+            <div className="px-6 pt-4">
+              <div className="inline-flex w-full rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setApplyMode("leave")}
+                  className={`flex-1 inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold transition ${
+                    applyMode === "leave"
+                      ? "bg-white text-emerald-700 shadow-sm ring-1 ring-emerald-200"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  <CalendarPlus size={13} /> Leave
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setApplyMode("wfh")}
+                  className={`flex-1 inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold transition ${
+                    applyMode === "wfh"
+                      ? "bg-white text-[#0070d4] shadow-sm ring-1 ring-[#008CFF]/30"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  <Home size={13} /> WFH
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3 px-6 pb-5 pt-4">
+              {applyError && (
+                <p className="inline-flex w-full items-center gap-1.5 rounded-md bg-red-50 px-2.5 py-1.5 text-[12px] text-red-700 ring-1 ring-inset ring-red-200">
+                  <AlertTriangle size={12} />
+                  {applyError}
+                </p>
+              )}
+
+              <div>
+                <label className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Employee</label>
+                <select
+                  value={applyForm.userId === "" ? "" : String(applyForm.userId)}
+                  onChange={(e) => setApplyForm((f) => ({ ...f, userId: e.target.value ? Number(e.target.value) : "" }))}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
+                >
+                  <option value="">— Select an employee —</option>
+                  {employees.map((e) => (
+                    <option key={e.id} value={e.id}>{e.name} ({e.email})</option>
+                  ))}
+                </select>
+              </div>
+
+              {applyMode === "leave" && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Leave type</label>
+                  <select
+                    value={applyForm.leaveTypeId === "" ? "" : String(applyForm.leaveTypeId)}
+                    onChange={(e) => setApplyForm((f) => ({ ...f, leaveTypeId: e.target.value ? Number(e.target.value) : "" }))}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
+                  >
+                    <option value="">— Select type —</option>
+                    {applicableTypes.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Live balance</label>
+                    {applyBalancePreview !== null && !editingBalance && (
+                      <button
+                        type="button"
+                        onClick={openBalanceEdit}
+                        className="text-[10.5px] font-bold uppercase tracking-wider text-[#008CFF] hover:underline"
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </div>
+                  {!editingBalance ? (
+                    <div className="mt-1 h-[38px] flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-[12.5px] text-slate-600">
+                      {applyBalancePreview === null ? "— —" : (
+                        <>
+                          <span className="font-semibold text-slate-800">{applyBalancePreview.available}</span>
+                          <span className="ml-1 text-slate-500">available · {applyBalancePreview.total} total</span>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-1 rounded-lg border border-[#008CFF]/30 bg-[#008CFF]/[0.04] p-2.5 space-y-2">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="block text-[9.5px] font-semibold uppercase tracking-wider text-slate-500">Total</label>
+                          <input
+                            type="number" min={0} step="0.5"
+                            value={balanceEdit.total}
+                            onChange={(e) => setBalanceEdit((f) => ({ ...f, total: e.target.value }))}
+                            className="mt-0.5 w-full rounded border border-slate-200 bg-white px-2 py-1 text-[12px] text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9.5px] font-semibold uppercase tracking-wider text-slate-500">Used</label>
+                          <input
+                            type="number" min={0} step="0.5"
+                            value={balanceEdit.used}
+                            onChange={(e) => setBalanceEdit((f) => ({ ...f, used: e.target.value }))}
+                            className="mt-0.5 w-full rounded border border-slate-200 bg-white px-2 py-1 text-[12px] text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9.5px] font-semibold uppercase tracking-wider text-slate-500">Pending</label>
+                          <input
+                            type="number" min={0} step="0.5"
+                            value={balanceEdit.pending}
+                            onChange={(e) => setBalanceEdit((f) => ({ ...f, pending: e.target.value }))}
+                            className="mt-0.5 w-full rounded border border-slate-200 bg-white px-2 py-1 text-[12px] text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                          />
+                        </div>
+                      </div>
+                      {balanceError && (
+                        <p className="text-[11px] text-red-700 bg-red-50 px-2 py-1 rounded ring-1 ring-inset ring-red-200">{balanceError}</p>
+                      )}
+                      <div className="flex justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => { setEditingBalance(false); setBalanceError(""); }}
+                          disabled={savingBalance}
+                          className="rounded border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={saveBalance}
+                          disabled={savingBalance}
+                          className="rounded bg-[#008CFF] px-3 py-1 text-[11px] font-semibold text-white hover:bg-[#0070d4] disabled:opacity-60"
+                        >
+                          {savingBalance ? "Saving…" : "Save balance"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              )}
+
+              {/* Date range — both leave and WFH use From/To. HR-grant
+                  WFH iterates working days in the range; weekends are
+                  skipped server-side. */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">From date</label>
+                  <input
+                    type="date"
+                    value={applyForm.fromDate}
+                    onChange={(e) => setApplyForm((f) => ({ ...f, fromDate: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">To date</label>
+                  <input
+                    type="date"
+                    value={applyForm.toDate}
+                    onChange={(e) => setApplyForm((f) => ({ ...f, toDate: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Reason</label>
+                <textarea
+                  value={applyForm.reason}
+                  onChange={(e) => setApplyForm((f) => ({ ...f, reason: e.target.value }))}
+                  rows={3}
+                  placeholder={applyMode === "wfh"
+                    ? "Why is HR granting this WFH?"
+                    : "Why is HR applying this leave on behalf?"}
+                  className="mt-1 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
+                />
+              </div>
+
+              {applyMode === "leave" && (
+                <label className="flex items-start gap-2 rounded-lg bg-amber-50/60 px-3 py-2 ring-1 ring-inset ring-amber-200/60">
+                  <input
+                    type="checkbox"
+                    checked={applyForm.useLwpFallback}
+                    onChange={(e) => setApplyForm((f) => ({ ...f, useLwpFallback: e.target.checked }))}
+                    className="mt-0.5"
+                  />
+                  <span className="text-[12px] text-amber-900">
+                    Fall back to <strong>Leave Without Pay</strong> if balance is missing or insufficient.
+                    When off, the request will be rejected with an insufficient-balance error.
+                  </span>
+                </label>
+              )}
+              {applyMode === "wfh" && (
+                <p className="rounded-lg bg-sky-50 px-3 py-2 text-[12px] text-sky-800 ring-1 ring-inset ring-sky-200/60">
+                  Monthly cap of <strong>2 WFH per employee</strong> is bypassed for HR-granted requests. One approved Work-From-Home is created per working day in the range — weekends are skipped and any day with an active WFH already on file stays untouched.
+                </p>
+              )}
+            </div>
+
+            <footer className="flex justify-end gap-2 border-t border-slate-100 px-6 py-3">
+              <button
+                onClick={() => setApplyOpen(false)}
+                disabled={applyBusy}
+                className="h-9 rounded-md border border-slate-200 px-4 text-[13px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitApply}
+                disabled={applyBusy}
+                className={`h-9 rounded-md px-4 text-[13px] font-semibold text-white shadow-sm disabled:opacity-60 ${
+                  applyMode === "wfh"
+                    ? "bg-[#008CFF] shadow-[#008CFF]/20 hover:bg-[#0070d4]"
+                    : "bg-emerald-500 shadow-emerald-500/20 hover:bg-emerald-600"
+                }`}
+              >
+                {applyBusy
+                  ? "Applying…"
+                  : applyMode === "wfh" ? "Grant WFH" : "Apply & approve"}
               </button>
             </footer>
           </div>
