@@ -157,8 +157,11 @@ export async function approverIdsForUser(actorId: number): Promise<number[]> {
       where: {
         isActive: true,
         OR: [
-          { orgLevel: { in: ["ceo", "hr_manager"] } },
-          { role: "admin" },
+          // CEO + Special Access + HR Manager (role) + Developers.
+          // EXCLUDES role=admin alone and orgLevel="hr_manager"-only
+          // members (HR-team folks like Vanshika are role=member).
+          { orgLevel: { in: ["ceo", "special_access"] } },
+          { role: "hr_manager" },
           ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
         ],
       },

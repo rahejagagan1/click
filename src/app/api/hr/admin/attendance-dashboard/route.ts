@@ -4,6 +4,7 @@ import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 import { istTodayDateOnly } from "@/lib/ist-date";
 import { parseAttLoc } from "@/lib/attendance-location";
 import { serializeBigInt } from "@/lib/utils";
+import { getPoliciesByUser } from "@/lib/hr/notification-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export async function GET() {
   try {
     const today = istTodayDateOnly();
 
-    const users = await prisma.user.findMany({
+    const usersAll = await prisma.user.findMany({
       where: { isActive: true },
       orderBy: { name: "asc" },
       select: {
@@ -30,6 +31,11 @@ export async function GET() {
         employeeProfile: { select: { department: true, designation: true, employeeId: true, workLocation: true } },
       },
     });
+    // Drop anyone whose Attendance toggle is OFF — they're "off the
+    // books" for attendance (CEO + developers default OFF). The whole
+    // dashboard, counts and rows, simply pretends they don't exist.
+    const policies = await getPoliciesByUser(usersAll.map((u) => u.id));
+    const users = usersAll.filter((u) => policies.get(u.id)?.attendanceEnabled !== false);
 
     const todayRows = await prisma.attendance.findMany({
       where: { date: today },
@@ -40,12 +46,30 @@ export async function GET() {
     });
     const byUser = new Map(todayRows.map((r) => [r.userId, r]));
 
+    // Anyone with a LeaveApplication that covers today, in any status that
+    // isn't rejected/cancelled, counts as "on_leave" even when there's no
+    // synthesised Attendance row yet. Mirrors /api/hr/attendance/board so
+    // the HR Dashboard agrees with the HR Home page's On Leave list.
+    const leaveTodayRows = await prisma.leaveApplication.findMany({
+      where: {
+        fromDate: { lte: today },
+        toDate:   { gte: today },
+        status:   { notIn: ["rejected", "cancelled"] },
+      },
+      select: { userId: true },
+    });
+    const onLeaveIds = new Set<number>(leaveTodayRows.map((r) => r.userId));
+
     const rows = users.map((u) => {
       const rec = byUser.get(u.id) ?? null;
       const loc = rec ? parseAttLoc(rec.location) : null;
       const mode = loc?.mode ?? null; // "office" | "remote" | null
+      // On-leave wins over a stray clock-in that day so an approved
+      // half-day still appears in the On Leave list. The Attendance.status
+      // check stays first so an explicit on_leave row is honored
+      // regardless of LeaveApplication state.
       const status =
-        rec?.status === "on_leave" ? "on_leave" :
+        rec?.status === "on_leave" || onLeaveIds.has(u.id) ? "on_leave" :
         rec?.clockIn ? (mode === "remote" ? "remote" : "office") :
         "absent";
       return {

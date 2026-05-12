@@ -1,7 +1,8 @@
 import prisma from "@/lib/prisma";
 import { sendEmail } from "@/lib/email/sender";
-import { attendanceReminderEmail } from "@/lib/email/templates";
-import { istTodayDateOnly } from "@/lib/ist-date";
+import { attendanceReminderEmail, hrLateSummaryEmail } from "@/lib/email/templates";
+import { istTodayDateOnly, istTimeOnDate } from "@/lib/ist-date";
+import { getPoliciesByUser } from "@/lib/hr/notification-policy";
 
 /**
  * Comma-separated env var of emails who should never receive attendance
@@ -18,25 +19,24 @@ function reminderExclusionSet(): Set<string> {
 }
 
 /**
- * Find every active user who has NOT clocked in for today (IST), is NOT
- * on approved leave, and was NOT marked as a holiday — then send each of
- * them a reminder email. Idempotent at the DB level (just SELECTs +
- * sends), so calling twice in the same minute will resend; the scheduler
- * is responsible for once-per-day gating via the cron-jobs config.
+ * Find every active user who has NOT clocked in for today (IST) AND has
+ * NOT applied for leave for today — then nudge each of them. WFH / OD
+ * users still need to clock in (they're working, just from elsewhere),
+ * so those statuses don't shield from the reminder anymore. Only an
+ * actual leave application keeps a user out of the list.
  *
  * Returns the number of emails actually sent.
  *
  * Skip rules (in order — earliest exit wins):
- *   1. Today is Saturday / Sunday → 0 emails. The org's standard work
- *      week is Mon–Fri; the previous version forgot this gate and
- *      blasted every employee with a "you forgot to clock in!" mail
- *      every weekend. If you ever onboard a 7-day team, swap this for
- *      a per-user `Shift.workDays` lookup.
+ *   1. Today is Saturday / Sunday → 0 emails.
  *   2. Today is in HolidayCalendar → 0 emails.
- *   3. Per-user filters: already clocked in / on approved leave (incl.
- *      stage-1 partially_approved — manager already green-lit the
- *      absence) / approved WFH / approved OD / no email / in
- *      EMAIL_REMINDER_EXCLUDE_EMAILS.
+ *   3. Per-user filters:
+ *      • Already clocked in today.
+ *      • Has ANY leave application covering today, in any status that
+ *        isn't rejected/cancelled (pending counts — if they bothered to
+ *        apply, don't nag them while HR is still reviewing it).
+ *      • No email on file.
+ *      • In EMAIL_REMINDER_EXCLUDE_EMAILS env list.
  */
 export async function sendMissedClockInReminders(): Promise<number> {
   const today = istTodayDateOnly();
@@ -53,34 +53,22 @@ export async function sendMissedClockInReminders(): Promise<number> {
     select: { id: true, name: true, email: true },
   });
 
-  // 2. Pull today's attendance + approved leave / WFH / OD + holiday
-  //    in bulk so we don't fire one query per user. The email body
-  //    explicitly mentions WFH / OD as valid alternatives — if the
-  //    user already filed and got those approved, we mustn't nag.
-  //    Leave filter accepts both "approved" (stage-2 / final) AND
-  //    "partially_approved" (stage-1 manager done, awaiting CEO/HR);
-  //    the employee is de-facto away once their direct manager said
-  //    yes and shouldn't be pinged because the second-stage signoff
-  //    hasn't landed yet.
-  const [todays, leaves, wfh, onDuty, holidayHit] = await Promise.all([
+  // 2. Pull today's attendance + leave + holiday in bulk so we don't
+  //    fire one query per user. WFH / OD are intentionally NOT in this
+  //    set — those folks are working, just remotely / off-site, and the
+  //    org policy is they must still record a clock-in. The reminder
+  //    therefore goes to them too if they forget.
+  const [todays, leaves, holidayHit] = await Promise.all([
     prisma.attendance.findMany({
       where: { date: today, clockIn: { not: null } },
       select: { userId: true },
     }),
     prisma.leaveApplication.findMany({
       where: {
-        status:   { in: ["approved", "partially_approved"] },
+        status:   { notIn: ["rejected", "cancelled"] },
         fromDate: { lte: today },
         toDate:   { gte: today },
       },
-      select: { userId: true },
-    }),
-    prisma.wFHRequest.findMany({
-      where: { status: "approved", date: today },
-      select: { userId: true },
-    }),
-    prisma.onDutyRequest.findMany({
-      where: { status: "approved", date: today },
       select: { userId: true },
     }),
     prisma.holidayCalendar.findFirst({ where: { date: today }, select: { id: true } }),
@@ -91,17 +79,19 @@ export async function sendMissedClockInReminders(): Promise<number> {
 
   const clockedInIds = new Set(todays.map(a => a.userId));
   const onLeaveIds   = new Set(leaves.map(l => l.userId));
-  const onWfhIds     = new Set(wfh.map(w => w.userId));
-  const onDutyIds    = new Set(onDuty.map(o => o.userId));
   const excluded     = reminderExclusionSet();
+
+  // Per-user attendance gate. CEO + developers default OFF and so are
+  // skipped automatically; HR can override per employee via the Payroll
+  // & Attendance toggles page.
+  const policies = await getPoliciesByUser(users.map((u) => u.id));
 
   const candidates = users.filter(u =>
     !clockedInIds.has(u.id)
     && !onLeaveIds.has(u.id)
-    && !onWfhIds.has(u.id)
-    && !onDutyIds.has(u.id)
     && !!u.email
     && !excluded.has(u.email.toLowerCase())
+    && (policies.get(u.id)?.attendanceEnabled !== false)
   );
 
   let sent = 0;
@@ -115,6 +105,140 @@ export async function sendMissedClockInReminders(): Promise<number> {
     }
   }
   return sent;
+}
+
+/**
+ * Builds and sends ONE consolidated email to the HR admin tier listing
+ * everyone who, by 10:05 IST, either:
+ *   • didn't clock in AND didn't apply for leave (WFH / OD don't shield —
+ *     those folks are expected to clock in too), or
+ *   • clocked in AFTER 10:00 IST (late).
+ *
+ * Returns 1 when an email was sent, 0 when there's nothing to report
+ * (or it's a weekend / holiday — same skip rules as the employee mail).
+ *
+ * Recipients: every active user in the HR admin tier — CEO, developers
+ * (DEVELOPER_EMAILS env), orgLevel=special_access, role=admin,
+ * orgLevel=hr_manager, role=hr_manager. Mirrors the gate used in the
+ * rest of the HR module.
+ */
+export async function sendHrLateClockInSummary(): Promise<number> {
+  const today = istTodayDateOnly();
+  const dow = new Date(today).getUTCDay();
+  if (dow === 0 || dow === 6) return 0;
+
+  const holidayHit = await prisma.holidayCalendar.findFirst({ where: { date: today } });
+  if (holidayHit) return 0;
+
+  // 10:00 IST as a UTC instant for the chosen IST calendar day — anything
+  // strictly past this is "late."
+  const tenAmIst = istTimeOnDate(today, 10, 0);
+
+  const [users, todays, leaves] = await Promise.all([
+    prisma.user.findMany({
+      where: { isActive: true },
+      select: {
+        id: true, name: true, email: true,
+        employeeProfile: { select: { department: true } },
+      },
+    }),
+    prisma.attendance.findMany({
+      where: { date: today },
+      select: { userId: true, clockIn: true },
+    }),
+    prisma.leaveApplication.findMany({
+      where: {
+        status:   { notIn: ["rejected", "cancelled"] },
+        fromDate: { lte: today },
+        toDate:   { gte: today },
+      },
+      select: { userId: true },
+    }),
+  ]);
+
+  const attByUser  = new Map(todays.map((a) => [a.userId, a]));
+  const onLeaveIds = new Set(leaves.map((l) => l.userId));
+  const excluded   = reminderExclusionSet();
+  // Skip anyone whose Attendance toggle is OFF — they're "off the books"
+  // for attendance (CEO + developers default OFF). HR shouldn't be told
+  // the CEO is absent.
+  const policies = await getPoliciesByUser(users.map((u) => u.id));
+
+  type Row = {
+    name: string; department: string | null; status: "absent" | "late";
+    clockIn: Date | null;
+  };
+  const absent: Row[] = [];
+  const late:   Row[] = [];
+
+  for (const u of users) {
+    if (!u.email || excluded.has(u.email.toLowerCase())) continue;
+    if (onLeaveIds.has(u.id)) continue;
+    if (policies.get(u.id)?.attendanceEnabled === false) continue;
+    const rec = attByUser.get(u.id);
+    if (!rec?.clockIn) {
+      absent.push({ name: u.name, department: u.employeeProfile?.department ?? null, status: "absent", clockIn: null });
+      continue;
+    }
+    if (rec.clockIn.getTime() > tenAmIst.getTime()) {
+      late.push({ name: u.name, department: u.employeeProfile?.department ?? null, status: "late", clockIn: rec.clockIn });
+    }
+  }
+
+  if (absent.length === 0 && late.length === 0) return 0;
+
+  absent.sort((a, b) => a.name.localeCompare(b.name));
+  late.sort((a, b) => (a.clockIn!.getTime() - b.clockIn!.getTime()));
+
+  // Recipients: CEO + Special Access + HR Manager (role) + Developers.
+  // EXCLUDED: role=admin alone, orgLevel="hr_manager" alone (HR-team
+  // members are role=member; they shouldn't get admin pings).
+  const devEmails = (process.env.DEVELOPER_EMAILS || "")
+    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const recipients = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      OR: [
+        { orgLevel: { in: ["ceo", "special_access"] } },
+        { role:     "hr_manager" },
+        ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+      ],
+    },
+    select: { email: true, name: true },
+  });
+  if (recipients.length === 0) {
+    console.warn("[hr-late-summary] No HR-admin recipients found — nothing sent.");
+    return 0;
+  }
+
+  // Headcount totals for the footer. WFH/OD are now folded into present/
+  // late/absent based on whether they actually clocked in, so the only
+  // separate bucket left is leave.
+  const totalCandidates = users.filter((u) => !!u.email && !excluded.has(u.email!.toLowerCase()) && !onLeaveIds.has(u.id)).length;
+  const onTime = Math.max(0, totalCandidates - absent.length - late.length);
+
+  const content = hrLateSummaryEmail({
+    today,
+    absent,
+    late,
+    totals: {
+      absent:  absent.length,
+      late:    late.length,
+      onTime,
+      onLeave: onLeaveIds.size,
+    },
+  });
+
+  let sent = 0;
+  for (const r of recipients) {
+    try {
+      await sendEmail({ to: r.email!, content });
+      sent++;
+    } catch (e) {
+      console.error(`[hr-late-summary] ${r.email}:`, e);
+    }
+  }
+  return sent > 0 ? 1 : 0;
 }
 
 /**
@@ -136,10 +260,12 @@ export async function sendMissedClockOutReminders(): Promise<number> {
   });
 
   const excluded = reminderExclusionSet();
+  const policies = await getPoliciesByUser(rows.map((r) => r.userId));
   let sent = 0;
   for (const r of rows) {
     if (!r.user?.isActive || !r.user?.email) continue;
     if (excluded.has(r.user.email.toLowerCase())) continue;
+    if (policies.get(r.userId)?.attendanceEnabled === false) continue;
     try {
       const content = attendanceReminderEmail({ userName: r.user.name, kind: "clock-out" });
       await sendEmail({ to: r.user.email, content });

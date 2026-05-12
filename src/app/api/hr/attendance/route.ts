@@ -71,13 +71,46 @@ export async function GET(req: NextRequest) {
       if (!sessionsByAttendance.has(s.attendanceId)) sessionsByAttendance.set(s.attendanceId, []);
       sessionsByAttendance.get(s.attendanceId)!.push(s);
     }
-    const recordsWithSessions = records.map((r) => ({
-      ...r,
-      sessions: sessionsByAttendance.get(r.id) ?? [],
-    }));
+    // Re-sum totalMinutes (and re-derive status) from the session rows on
+    // read — defensive against drift that happens when ops scripts edit a
+    // session's clockIn/clockOut directly without recomputing the parent
+    // Attendance row. The clock-out API does this server-side at write
+    // time, but historic data and out-of-band edits can leave the parent
+    // stale; matching the writer's math here keeps the UI honest.
+    //
+    // Open sessions (no clockOut) are skipped — that's "live time" the
+    // client renders on top of the stored snapshot, not committed work.
+    function rederive(sess: SessRow[], existingStatus: string): { totalMinutes: number; status: string } {
+      let secs = 0;
+      for (const s of sess) {
+        if (!s.clockOut) continue;
+        secs += Math.max(0, Math.floor((s.clockOut.getTime() - s.clockIn.getTime()) / 1000));
+      }
+      const totalMinutes = Math.floor(secs / 60);
+      // Status is derived only for clock-based statuses. Leave (on_leave,
+      // weekly_off, holiday, absent) statuses are preserved — those aren't
+      // about how much was worked.
+      const isClockStatus = existingStatus === "present"
+        || existingStatus === "late"
+        || existingStatus === "half_day"
+        || existingStatus === "missed_clock_out";
+      if (!isClockStatus) return { totalMinutes, status: existingStatus };
+      let status = existingStatus;
+      if      (totalMinutes >= 540) status = existingStatus === "late" ? "late" : "present";
+      else if (totalMinutes >= 270) status = "half_day";
+      return { totalMinutes, status };
+    }
 
+    const recordsWithSessions = records.map((r) => {
+      const sess = sessionsByAttendance.get(r.id) ?? [];
+      const fixed = rederive(sess, r.status);
+      return { ...r, totalMinutes: fixed.totalMinutes, status: fixed.status, sessions: sess };
+    });
+
+    // Summary rolls up the re-derived status (not the stale DB column) so
+    // the cards above the table match what each row actually shows.
     const summary = { present: 0, absent: 0, late: 0, halfDay: 0, onLeave: 0, totalOvertimeMinutes: 0 };
-    for (const r of records) {
+    for (const r of recordsWithSessions) {
       if (r.status === "present") summary.present++;
       else if (r.status === "absent") summary.absent++;
       else if (r.status === "late") { summary.late++; summary.present++; }
@@ -101,7 +134,13 @@ export async function GET(req: NextRequest) {
           ORDER BY "clockIn" ASC`,
         todayRecord.id,
       );
-      todayRecordWithSessions = { ...todayRecord, sessions: todaySessions };
+      const fixed = rederive(todaySessions, todayRecord.status);
+      todayRecordWithSessions = {
+        ...todayRecord,
+        totalMinutes: fixed.totalMinutes,
+        status: fixed.status,
+        sessions: todaySessions,
+      };
     }
 
     return NextResponse.json({ records: recordsWithSessions, summary, todayRecord: todayRecordWithSessions });

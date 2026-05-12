@@ -51,13 +51,41 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/hr/leaves — apply for leave
+//
+// Self-apply (default): creates a `pending` request that flows through L1/L2.
+// HR-admin "apply on behalf" (when `targetUserId` is set + caller is HR admin):
+//   • Allows ANY active leave type (including LWP) regardless of the
+//     subject's existing balance rows.
+//   • If `useLwpFallback: true` and the subject's chosen-type balance is
+//     missing OR insufficient, auto-switches to Leave Without Pay so the
+//     request still goes through without manual back-and-forth.
+//   • Auto-approves the application (status="approved") and writes the
+//     usual side effects — debit balance to `used`, mark each working day's
+//     attendance as `on_leave`. HR already has the authority to approve,
+//     so the extra L1/L2 round-trip would be friction with no policy benefit.
 export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   try {
+    const self = session!.user as any;
     const myId = await resolveUserId(session);
     if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
-    const { leaveTypeId, fromDate, toDate, reason, notifyUserIds } = await req.json();
+    const body = await req.json();
+    const fromDate = body.fromDate, toDate = body.toDate, reason = body.reason;
+    const notifyUserIds = body.notifyUserIds;
+    let leaveTypeId = Number(body.leaveTypeId);
+    const targetUserId    = typeof body.targetUserId === "number" ? body.targetUserId : null;
+    const useLwpFallback  = body.useLwpFallback === true;
+    const callerIsHRAdmin = isHRAdmin(self);
+    const onBehalf        = targetUserId !== null && targetUserId !== myId;
+    if (onBehalf && !callerIsHRAdmin) {
+      return NextResponse.json(
+        { error: "Only HR admins can apply for leave on behalf of another user." },
+        { status: 403 },
+      );
+    }
+    const subjectUserId = onBehalf ? targetUserId! : myId;
+
     if (!leaveTypeId || !fromDate || !toDate || !reason)
       return NextResponse.json({ error: "All fields are required" }, { status: 400 });
     const extras = Array.isArray(notifyUserIds) ? notifyUserIds.filter((x: any) => Number.isInteger(x)) : [];
@@ -67,7 +95,7 @@ export async function POST(req: NextRequest) {
 
     // Block balance-only types (e.g. Carry Over Leave) — the UI hides
     // them but a hand-crafted POST would otherwise sneak through.
-    const leaveType = await prisma.leaveType.findUnique({ where: { id: Number(leaveTypeId) } });
+    let leaveType = await prisma.leaveType.findUnique({ where: { id: leaveTypeId } });
     if (!leaveType || !leaveType.isActive) {
       return NextResponse.json({ error: "Unknown leave type" }, { status: 400 });
     }
@@ -86,32 +114,107 @@ export async function POST(req: NextRequest) {
     if (totalDays === 0) return NextResponse.json({ error: "Selected dates are all weekends/holidays" }, { status: 400 });
 
     const year = from.getFullYear();
-    const balance = await prisma.leaveBalance.findUnique({
-      where: { userId_leaveTypeId_year: { userId: myId, leaveTypeId, year } },
+    // Look up the subject's balance for the chosen type. May be missing
+    // (e.g. LWP never has a default row) — that's handled below.
+    let balance = await prisma.leaveBalance.findUnique({
+      where: { userId_leaveTypeId_year: { userId: subjectUserId, leaveTypeId, year } },
     });
-    if (!balance) return NextResponse.json({ error: "No leave balance found. Contact HR." }, { status: 400 });
+    const isLwp = leaveType.code === "LWP";
 
-    const available = parseFloat(balance.totalDays.toString()) - parseFloat(balance.usedDays.toString()) - parseFloat(balance.pendingDays.toString());
-    if (totalDays > available) return NextResponse.json({ error: `Insufficient balance. Available: ${available}, requested: ${totalDays}` }, { status: 400 });
+    // Helper: switch the application to Leave Without Pay, upserting a
+    // zero-totalDays balance row if needed so the usual increment math works.
+    async function switchToLwp() {
+      const lwp = await prisma.leaveType.findUnique({ where: { code: "LWP" } });
+      if (!lwp || !lwp.isActive) {
+        return NextResponse.json({ error: "Leave Without Pay type is not configured." }, { status: 400 });
+      }
+      leaveType   = lwp;
+      leaveTypeId = lwp.id;
+      balance = await prisma.leaveBalance.upsert({
+        where:  { userId_leaveTypeId_year: { userId: subjectUserId, leaveTypeId, year } },
+        create: { userId: subjectUserId, leaveTypeId, year, totalDays: 0, usedDays: 0, pendingDays: 0 },
+        update: {},
+      });
+      return null;
+    }
+
+    if (!balance) {
+      // No row at all. LWP intentionally has no default rows — upsert one.
+      // Other types: only HR admin gets the LWP-fallback path.
+      if (isLwp) {
+        await switchToLwp();
+      } else if (onBehalf && useLwpFallback) {
+        const fb = await switchToLwp();
+        if (fb) return fb;
+      } else {
+        return NextResponse.json({ error: "No leave balance found. Contact HR." }, { status: 400 });
+      }
+    } else if (!isLwp) {
+      // Standard balance check. HR-admin-on-behalf with LWP fallback can
+      // bypass by switching to LWP; everyone else has to stay within their
+      // balance.
+      const available = parseFloat(balance.totalDays.toString())
+                      - parseFloat(balance.usedDays.toString())
+                      - parseFloat(balance.pendingDays.toString());
+      if (totalDays > available) {
+        if (onBehalf && useLwpFallback) {
+          const fb = await switchToLwp();
+          if (fb) return fb;
+        } else {
+          return NextResponse.json({ error: `Insufficient balance. Available: ${available}, requested: ${totalDays}` }, { status: 400 });
+        }
+      }
+    }
 
     const overlap = await prisma.leaveApplication.findFirst({
-      where: { userId: myId, status: { in: ["pending", "approved"] }, fromDate: { lte: to }, toDate: { gte: from } },
+      where: { userId: subjectUserId, status: { in: ["pending", "approved"] }, fromDate: { lte: to }, toDate: { gte: from } },
     });
     if (overlap) return NextResponse.json({ error: "Overlapping leave exists" }, { status: 400 });
 
-    const [application] = await prisma.$transaction([
-      prisma.leaveApplication.create({
+    // HR-admin-on-behalf = auto-approved; self-apply (or HR applying for
+    // themselves) = pending → flows through normal L1/L2.
+    const finalStatus = onBehalf && callerIsHRAdmin ? "approved" : "pending";
+
+    const application = await prisma.$transaction(async (tx) => {
+      const app = await tx.leaveApplication.create({
         data: {
-          userId: myId, leaveTypeId, fromDate: from, toDate: to, totalDays, reason,
-          status: "pending", notifyUserIds: extras,
+          userId: subjectUserId, leaveTypeId, fromDate: from, toDate: to, totalDays, reason,
+          status: finalStatus,
+          approvedById: finalStatus === "approved" ? myId : null,
+          approvedAt:   finalStatus === "approved" ? new Date() : null,
+          notifyUserIds: extras,
         },
         include: { leaveType: true, user: { select: { managerId: true, name: true } } },
-      }),
-      prisma.leaveBalance.update({
-        where: { userId_leaveTypeId_year: { userId: myId, leaveTypeId, year } },
-        data: { pendingDays: { increment: totalDays } },
-      }),
-    ]);
+      });
+      // Balance debit. Approved → straight to `used`. Pending → reserve as `pending`.
+      await tx.leaveBalance.update({
+        where: { userId_leaveTypeId_year: { userId: subjectUserId, leaveTypeId, year } },
+        data: finalStatus === "approved"
+          ? { usedDays:    { increment: totalDays } }
+          : { pendingDays: { increment: totalDays } },
+      });
+      // Auto-approved: mark each working day in the range as on_leave so
+      // the attendance dashboards reflect the leave immediately. Mirrors
+      // the date-iteration logic in src/app/api/hr/leaves/[id]/route.ts
+      // (UTC-only arithmetic, IST-safe).
+      if (finalStatus === "approved") {
+        const cur = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
+        const end = new Date(Date.UTC(to.getUTCFullYear(),   to.getUTCMonth(),   to.getUTCDate()));
+        while (cur.getTime() <= end.getTime()) {
+          const dow = cur.getUTCDay();
+          if (dow !== 0 && dow !== 6) {
+            const dateOnly = new Date(cur);
+            await tx.attendance.upsert({
+              where:  { userId_date: { userId: subjectUserId, date: dateOnly } },
+              create: { userId: subjectUserId, date: dateOnly, status: "on_leave" },
+              update: { status: "on_leave" },
+            });
+          }
+          cur.setUTCDate(cur.getUTCDate() + 1);
+        }
+      }
+      return app;
+    });
 
     // Initial notification recipients: the applicant's direct manager (L1
     // approver), every CEO / HR manager / developer (L2 final approvers),
@@ -126,27 +229,55 @@ export async function POST(req: NextRequest) {
       where: {
         isActive: true,
         OR: [
-          { orgLevel: { in: ["ceo", "hr_manager"] } },
-          { role: "admin" },
+          // CEO + Special Access + HR Manager (role) + Developers.
+          // Excludes role=admin alone + orgLevel="hr_manager"-only members.
+          { orgLevel: { in: ["ceo", "special_access"] } },
+          { role: "hr_manager" },
           ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
         ],
       },
       select: { id: true },
     });
-    const initialRecipients = Array.from(new Set([
-      ...(managerId ? [managerId] : []),
-      ...finalApprovers.map((u) => u.id),
-      ...extras,
-    ]));
-    await notifyUsers({
-      actorId:  myId,
-      userIds:  initialRecipients,
-      type:     "leave",
-      entityId: application.id,
-      title:    `${requesterName} requested ${application.leaveType?.name || "leave"}`,
-      body:     `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} (${totalDays} day${totalDays === 1 ? "" : "s"}) — awaiting manager approval.`,
-      linkUrl:  "/dashboard/hr/approvals",
-    });
+    const dateLabel = `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}`;
+    const daysLabel = `${totalDays} day${totalDays === 1 ? "" : "s"}`;
+    const typeName  = application.leaveType?.name || "leave";
+
+    if (finalStatus === "approved" && onBehalf) {
+      // HR applied on behalf — notify the subject (their leave is on-record)
+      // plus the manager and other admins as a heads-up. No "awaiting
+      // approval" framing because nothing is pending.
+      const recipients = Array.from(new Set([
+        subjectUserId,
+        ...(managerId ? [managerId] : []),
+        ...finalApprovers.map((u) => u.id).filter((id) => id !== myId),
+        ...extras,
+      ]));
+      await notifyUsers({
+        actorId:  myId,
+        userIds:  recipients,
+        type:     "leave",
+        entityId: application.id,
+        title:    `HR applied ${typeName} for ${requesterName}`,
+        body:     `${dateLabel} (${daysLabel}) — on record.`,
+        linkUrl:  "/dashboard/hr/leaves",
+      });
+    } else {
+      // Standard self-apply flow: ping the L1 manager + L2 approvers.
+      const initialRecipients = Array.from(new Set([
+        ...(managerId ? [managerId] : []),
+        ...finalApprovers.map((u) => u.id),
+        ...extras,
+      ]));
+      await notifyUsers({
+        actorId:  myId,
+        userIds:  initialRecipients,
+        type:     "leave",
+        entityId: application.id,
+        title:    `${requesterName} requested ${typeName}`,
+        body:     `${dateLabel} (${daysLabel}) — awaiting manager approval.`,
+        linkUrl:  "/dashboard/hr/approvals",
+      });
+    }
 
     return NextResponse.json(application);
   } catch (e) { return serverError(e, "POST /api/hr/leaves"); }
