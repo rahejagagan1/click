@@ -151,12 +151,13 @@ export async function PUT(req: NextRequest) {
 
       const devEmails = (process.env.DEVELOPER_EMAILS || "")
         .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+      // CEO + Special Access + HR Manager (role) + Developers.
       const finalApprovers = await prisma.user.findMany({
         where: {
           isActive: true,
           OR: [
-            { orgLevel: { in: ["ceo", "hr_manager"] } },
-            { role: "admin" },
+            { orgLevel: { in: ["ceo", "special_access"] } },
+            { role: "hr_manager" },
             ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
           ],
         },

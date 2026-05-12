@@ -190,20 +190,16 @@ export async function sendHrLateClockInSummary(): Promise<number> {
   absent.sort((a, b) => a.name.localeCompare(b.name));
   late.sort((a, b) => (a.clockIn!.getTime() - b.clockIn!.getTime()));
 
-  // Recipients: a tight three-way set —
-  //   • CEO  (orgLevel="ceo")
-  //   • HR Manager  (role="hr_manager")
-  //   • Developers  (emails listed in DEVELOPER_EMAILS env)
-  // role=admin and orgLevel=special_access are intentionally EXCLUDED.
-  // The daily attendance summary is a focused operational report for the
-  // people who actually act on it; broader admins can read the dashboard.
+  // Recipients: CEO + Special Access + HR Manager (role) + Developers.
+  // EXCLUDED: role=admin alone, orgLevel="hr_manager" alone (HR-team
+  // members are role=member; they shouldn't get admin pings).
   const devEmails = (process.env.DEVELOPER_EMAILS || "")
     .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
   const recipients = await prisma.user.findMany({
     where: {
       isActive: true,
       OR: [
-        { orgLevel: "ceo" },
+        { orgLevel: { in: ["ceo", "special_access"] } },
         { role:     "hr_manager" },
         ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
       ],

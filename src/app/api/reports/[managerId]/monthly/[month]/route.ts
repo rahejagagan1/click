@@ -392,8 +392,12 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
                         where: {
                             isActive: true,
                             OR: [
-                                { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
-                                { role: "admin" },
+                                // CEO + Special Access + HR Manager (role) + Developers.
+                                // Drops orgLevel="hr_manager"-only members (HR-team
+                                // folks like Vanshika are role=member) and role="admin"
+                                // alone (covered via orgLevel=ceo / special_access).
+                                { orgLevel: { in: ["ceo", "special_access"] } },
+                                { role: "hr_manager" },
                                 ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
                             ],
                         },
