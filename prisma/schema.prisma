@@ -689,6 +689,13 @@ model MonthlyReport {
   videosPublishedActual       String?
   videosPublishedVariance     String?
   videosPublishedActualOverridden Boolean @default(false)
+  // Targets Completed (by Managers) — the manager-entered "what we actually
+  // achieved" number, distinct from the ClickUp-derived *Actual count. Sits
+  // between Actual ClickUp and Reason in the Section 2 / A Overall Output
+  // table; red-highlighted as a manual entry when filled.
+  totalVideoTargetAchieved        String?
+  heroContentTargetAchieved       String?
+  videosPublishedTargetAchieved   String?
   editorNotes         Json?   @db.JsonB  // { [editorId]: "note text" }
   writerNotes         Json?   @db.JsonB  // { [writerId]: "note text" }
   // Manager-added cases that don't appear in the auto-detected list — used
