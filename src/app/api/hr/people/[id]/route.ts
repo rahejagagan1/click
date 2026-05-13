@@ -185,38 +185,50 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const target = await prisma.user.findUnique({ where: { id }, select: { id: true, name: true, email: true } });
     if (!target) return NextResponse.json({ error: "Employee not found" }, { status: 404 });
     let existing = await prisma.employeeProfile.findUnique({ where: { userId: id } });
+    // Tracks whether we just allocated an HRM on this request — so the
+    // "HRM No. cannot be empty" guard below doesn't reject a save that
+    // came in with a blank HRM field but already got one assigned here.
+    let justAutoCreated = false;
 
     // Auto-create a minimal EmployeeProfile when the user has none.
-    // Users imported via ClickUp sync (and other non-wizard sources)
-    // start without a profile row, so the PUT used to silently no-op
-    // and HR's edits never persisted. Mint one on first edit using the
-    // submitted name fields (falling back to splitting user.name) and
-    // an auto-allocated employeeId from the first active number series.
+    // Users imported via ClickUp sync (and other non-wizard / legacy
+    // sources) start without a profile row, so every save below used
+    // to silently no-op — the route returned ok but no row existed to
+    // UPDATE, which is why HR's edits "disappeared on reload." Mint a
+    // profile on first edit using whatever the form sent, falling back
+    // to splitting user.name and finally the email local-part.
     if (!existing) {
       const series = await prisma.employeeNumberSeries.findFirst({
         where: { isActive: true },
         orderBy: { id: "asc" },
+        select: { id: true },
       });
       if (!series) {
         return NextResponse.json(
-          { error: "Cannot create profile: no active Employee Number Series configured. Ask HR admin to set one up." },
-          { status: 500 },
+          { error: "No active EmployeeNumberSeries — ask HR to create one before editing this profile." },
+          { status: 409 },
         );
       }
 
-      // Split user.name as a fallback when the Basic Details section
-      // wasn't the one being saved (e.g. HR saved Contact first).
-      const parts = (target.name ?? "").trim().split(/\s+/).filter(Boolean);
-      const fallbackFirst = parts[0] || target.email?.split("@")[0] || "Employee";
-      const fallbackLast  = parts.slice(1).join(" ") || "—";
-      const useFirst = (typeof firstName === "string" && firstName.trim()) || fallbackFirst;
-      const useLast  = (typeof lastName  === "string" && lastName.trim())  || fallbackLast;
+      // Name fallbacks: form firstName/lastName win; else split user.name;
+      // else use email local-part for first and "—" for last.
+      const fullName = (target.name ?? "").trim();
+      const firstSpace = fullName.indexOf(" ");
+      const splitFirst = firstSpace === -1 ? fullName : fullName.slice(0, firstSpace);
+      const splitLast  = firstSpace === -1 ? "—"      : fullName.slice(firstSpace + 1);
+      const fNameSeed = (typeof firstName === "string" && firstName.trim())
+        || splitFirst
+        || target.email?.split("@")[0]
+        || "Employee";
+      const lNameSeed = (typeof lastName === "string" && lastName.trim())
+        || splitLast
+        || "—";
 
       try {
         existing = await prisma.$transaction(async (tx) => {
           const bumped = await tx.employeeNumberSeries.update({
             where: { id: series.id },
-            data: { nextNumber: { increment: 1 } },
+            data:  { nextNumber: { increment: 1 } },
             select: { id: true, prefix: true, nextNumber: true },
           });
           const claimed = bumped.nextNumber - 1;
@@ -227,17 +239,18 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
           return tx.employeeProfile.create({
             data: {
-              userId: id,
-              employeeId: allocatedEmployeeId,
-              firstName: useFirst.trim(),
-              middleName: typeof middleName === "string" && middleName.trim() ? middleName.trim() : null,
-              lastName:   useLast.trim(),
-              workCountry: typeof workCountry === "string" && workCountry.trim() ? workCountry.trim() : "India",
-              nationality: typeof nationality === "string" && nationality.trim() ? nationality.trim() : "India",
+              userId:         id,
+              employeeId:     allocatedEmployeeId,
+              firstName:      fNameSeed.trim().slice(0, 60),
+              middleName:     typeof middleName === "string" && middleName.trim() ? middleName.trim().slice(0, 60) : null,
+              lastName:       lNameSeed.trim().slice(0, 60),
+              workCountry:    typeof workCountry === "string" && workCountry.trim() ? workCountry.trim() : "India",
+              nationality:    typeof nationality === "string" && nationality.trim() ? nationality.trim() : "Indian",
               numberSeriesId: bumped.id,
             },
           });
         });
+        justAutoCreated = true;
       } catch (e: any) {
         console.error("[people PUT] auto-create EmployeeProfile failed:", e);
         if (e?.code === "P2002") {
@@ -263,9 +276,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (employeeId !== undefined) {
       const trimmed = String(employeeId ?? "").trim();
       if (!trimmed) {
-        return NextResponse.json({ error: "HRM No. cannot be empty." }, { status: 400 });
-      }
-      if (existing && trimmed !== existing.employeeId) {
+        // If we just allocated an HRM during auto-create, accept the
+        // blank submission — the profile already has its assigned number.
+        if (justAutoCreated) {
+          // fall through; profileData.employeeId stays unset
+        } else {
+          return NextResponse.json({ error: "HRM No. cannot be empty." }, { status: 400 });
+        }
+      } else if (existing && trimmed !== existing.employeeId) {
         const clash = await prisma.employeeProfile.findUnique({
           where: { employeeId: trimmed },
           select: { userId: true },
