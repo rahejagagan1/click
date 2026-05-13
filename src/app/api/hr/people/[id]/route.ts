@@ -182,9 +182,76 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       role: newRole, orgLevel, managerId, inlineManagerId, teamCapsule,
     } = body;
 
-    const target = await prisma.user.findUnique({ where: { id }, select: { id: true } });
+    const target = await prisma.user.findUnique({ where: { id }, select: { id: true, name: true, email: true } });
     if (!target) return NextResponse.json({ error: "Employee not found" }, { status: 404 });
-    const existing = await prisma.employeeProfile.findUnique({ where: { userId: id } });
+    let existing = await prisma.employeeProfile.findUnique({ where: { userId: id } });
+
+    // Auto-create a minimal EmployeeProfile when the user has none.
+    // Users imported via ClickUp sync (and other non-wizard sources)
+    // start without a profile row, so the PUT used to silently no-op
+    // and HR's edits never persisted. Mint one on first edit using the
+    // submitted name fields (falling back to splitting user.name) and
+    // an auto-allocated employeeId from the first active number series.
+    if (!existing) {
+      const series = await prisma.employeeNumberSeries.findFirst({
+        where: { isActive: true },
+        orderBy: { id: "asc" },
+      });
+      if (!series) {
+        return NextResponse.json(
+          { error: "Cannot create profile: no active Employee Number Series configured. Ask HR admin to set one up." },
+          { status: 500 },
+        );
+      }
+
+      // Split user.name as a fallback when the Basic Details section
+      // wasn't the one being saved (e.g. HR saved Contact first).
+      const parts = (target.name ?? "").trim().split(/\s+/).filter(Boolean);
+      const fallbackFirst = parts[0] || target.email?.split("@")[0] || "Employee";
+      const fallbackLast  = parts.slice(1).join(" ") || "—";
+      const useFirst = (typeof firstName === "string" && firstName.trim()) || fallbackFirst;
+      const useLast  = (typeof lastName  === "string" && lastName.trim())  || fallbackLast;
+
+      try {
+        existing = await prisma.$transaction(async (tx) => {
+          const bumped = await tx.employeeNumberSeries.update({
+            where: { id: series.id },
+            data: { nextNumber: { increment: 1 } },
+            select: { id: true, prefix: true, nextNumber: true },
+          });
+          const claimed = bumped.nextNumber - 1;
+          const allocatedEmployeeId =
+            (typeof employeeId === "string" && employeeId.trim())
+              ? employeeId.trim()
+              : `${bumped.prefix}${claimed}`;
+
+          return tx.employeeProfile.create({
+            data: {
+              userId: id,
+              employeeId: allocatedEmployeeId,
+              firstName: useFirst.trim(),
+              middleName: typeof middleName === "string" && middleName.trim() ? middleName.trim() : null,
+              lastName:   useLast.trim(),
+              workCountry: typeof workCountry === "string" && workCountry.trim() ? workCountry.trim() : "India",
+              nationality: typeof nationality === "string" && nationality.trim() ? nationality.trim() : "India",
+              numberSeriesId: bumped.id,
+            },
+          });
+        });
+      } catch (e: any) {
+        console.error("[people PUT] auto-create EmployeeProfile failed:", e);
+        if (e?.code === "P2002") {
+          return NextResponse.json(
+            { error: "Could not allocate a new HRM No. — try again." },
+            { status: 409 },
+          );
+        }
+        return NextResponse.json(
+          { error: `Could not create profile: ${e?.message ?? "Unknown DB error"}` },
+          { status: 500 },
+        );
+      }
+    }
 
     // Build the EmployeeProfile patch using only the typed columns.
     // Each field is only included when explicitly sent (not undefined) so

@@ -180,7 +180,7 @@ export default function EmployeeDetailPage() {
                   {p.designation || getUserRoleLabel(user.role) || "Employee"}
                 </p>
                 {p.employeeId ? (
-                  <p className="mt-1 inline-flex items-center gap-1.5 font-mono text-[11.5px] text-slate-400">
+                  <p className="mt-1 ml-3 inline-flex items-center gap-1.5 font-mono text-[11.5px] text-slate-400">
                     <IdCard className="h-3 w-3" />
                     {p.employeeId}
                   </p>
@@ -340,7 +340,7 @@ export default function EmployeeDetailPage() {
                     <Compact label="Gender"       value={p.gender} capitalize />
                     <Compact label="Date of Birth" value={fmtDate(p.dateOfBirth)} />
                     <Compact label="Marital Status" value={p.maritalStatus} capitalize />
-                    <Compact label="Physically Handicapped" value={p.physicallyHandicapped ? "Yes" : "No"} />
+                    <Compact label="Physically Handicapped" value={p.physicallyHandicapped} />
                     <Compact label="Nationality"  value={p.nationality} />
                     <Compact label="Blood Group"  value={p.bloodGroup} />
                   </div>
@@ -375,19 +375,34 @@ export default function EmployeeDetailPage() {
                     <KV label="Blood Group"           value={p.bloodGroup} />
                     <KV label="Marital Status"        value={p.maritalStatus} capitalize />
                     <KV label="Nationality"           value={p.nationality} />
+                    <KV label="Physically Handicapped" value={p.physicallyHandicapped} />
                   </Grid3>
                 </DetailCard>
 
                 {/* ── Contact Details ── */}
                 <DetailCard title="Contact Details">
                   <Grid3>
-                    <KV label="Work Email"     value={user.email} />
-                    <KV label="Personal Email" value={p.personalEmail} />
-                    <KV label="Mobile Number"  value={p.phone} />
-                    <KV label="Work Number"    value={p.workPhone} />
-                    <KV label="Emergency Phone"   value={p.emergencyPhone} />
+                    <KV label="Work Email"      value={user.email} />
+                    <KV label="Personal Email"  value={p.personalEmail} />
+                    <KV label="Mobile Number"   value={p.phone} />
+                    <KV label="Work Number"     value={p.workPhone} />
+                    <KV label="Home Phone"      value={p.homePhone} />
+                    <KV label="Emergency Phone" value={p.emergencyPhone} />
+                    <KV label="Emergency Relationship" value={p.emergencyRelationship} capitalize />
                   </Grid3>
                 </DetailCard>
+
+                {/* ── Family ── */}
+                {(p.parentName || p.motherName || p.spouseName || p.childrenNames) && (
+                  <DetailCard title="Family">
+                    <Grid3>
+                      <KV label="Father's Name"   value={p.parentName} />
+                      <KV label="Mother's Name"   value={p.motherName} />
+                      <KV label="Spouse's Name"   value={p.spouseName} />
+                      <KV label="Children"        value={p.childrenNames} />
+                    </Grid3>
+                  </DetailCard>
+                )}
 
                 {/* ── Addresses ── */}
                 <DetailCard title="Addresses">
@@ -395,35 +410,37 @@ export default function EmployeeDetailPage() {
                     <div>
                       <p className="text-[10px] uppercase tracking-[0.1em] text-slate-400 font-semibold mb-1.5">Current Address</p>
                       <p className="text-[13px] text-slate-800 leading-relaxed">
-                        {p.address || "—"}
+                        {[p.address, p.addressLine2].filter(Boolean).join(", ") || "—"}
                       </p>
-                      {(p.city || p.state) && (
+                      {(p.city || p.state || p.addressPincode || p.addressCountry) && (
                         <p className="text-[12.5px] text-slate-600 mt-1">
-                          {[p.city, p.state, p.nationality].filter(Boolean).join(", ")}
+                          {[p.city, p.state, p.addressPincode, p.addressCountry].filter(Boolean).join(", ")}
                         </p>
                       )}
                     </div>
                     <div>
                       <p className="text-[10px] uppercase tracking-[0.1em] text-slate-400 font-semibold mb-1.5">Permanent Address</p>
                       <p className="text-[13px] text-slate-800 leading-relaxed">
-                        {p.address || "—"}
+                        {[p.permanentLine1, p.permanentLine2].filter(Boolean).join(", ") || "—"}
                       </p>
-                      {(p.city || p.state) && (
+                      {(p.permanentCity || p.permanentState || p.permanentPincode || p.permanentCountry) && (
                         <p className="text-[12.5px] text-slate-600 mt-1">
-                          {[p.city, p.state, p.nationality].filter(Boolean).join(", ")}
+                          {[p.permanentCity, p.permanentState, p.permanentPincode, p.permanentCountry].filter(Boolean).join(", ")}
                         </p>
                       )}
                     </div>
                   </div>
                 </DetailCard>
 
-                {/* ── Identity Information (PAN / Aadhaar) ── */}
-                {(p.panNumber || p.aadhaarNumber || p.parentName) && (
+                {/* ── Identity Information (PAN / Aadhaar / statutory IDs) ── */}
+                {(p.panNumber || p.aadhaarNumber || p.pfNumber || p.uanNumber || p.biometricId) && (
                   <DetailCard title="Identity Information">
                     <Grid3>
                       <KV label="PAN Number"     value={maskPan(p.panNumber)} />
                       <KV label="Aadhaar Number" value={maskAadhaar(p.aadhaarNumber)} />
-                      <KV label="Parent's Name"  value={p.parentName} />
+                      <KV label="PF Number"      value={p.pfNumber} />
+                      <KV label="UAN Number"     value={p.uanNumber} />
+                      <KV label="Biometric ID"   value={p.biometricId} />
                     </Grid3>
                     <p className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-slate-400">
                       <ShieldCheck size={12} />
@@ -435,19 +452,44 @@ export default function EmployeeDetailPage() {
             )}
 
             {activeTab === "Job" && (
-              <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
-                <h3 className="mb-4 text-[15px] font-semibold text-slate-800">Job Details</h3>
-                <div className="grid grid-cols-2 gap-x-8 gap-y-5">
-                  <Compact label="Department"      value={p.department} />
-                  <Compact label="Designation"     value={p.designation} />
-                  <Compact label="Employment Type" value={prettyEmp(p.employmentType)} capitalize />
-                  <Compact label="Work Location"   value={p.workLocation} />
-                  <Compact label="Joining Date"    value={fmtDate(p.joiningDate)} />
-                  <Compact label="Role"            value={getUserRoleLabel(user.role) || user.role} capitalize />
-                  <Compact label="Org Level"       value={prettyEmp(user.orgLevel)} capitalize />
-                  <Compact label="Team Capsule"    value={user.teamCapsule} />
-                </div>
-              </section>
+              <div className="space-y-5">
+                <DetailCard title="Job Details">
+                  <Grid3>
+                    <KV label="Designation"          value={p.designation} />
+                    <KV label="Secondary Job Title"  value={p.secondaryJobTitle} />
+                    <KV label="Department"           value={p.department} />
+                    <KV label="Business Unit"        value={p.businessUnit} />
+                    <KV label="Legal Entity"         value={p.legalEntity} />
+                    <KV label="Employment Type"      value={prettyEmp(p.employmentType)} capitalize />
+                    <KV label="Work Location"        value={p.workLocation} capitalize />
+                    <KV label="Job Location"         value={p.jobLocation} />
+                    <KV label="Work Country"         value={p.workCountry} />
+                    <KV label="Nationality"          value={p.nationality} />
+                    <KV label="Joining Date"         value={fmtDate(p.joiningDate)} />
+                    <KV label="Internship End Date"  value={fmtDate(p.internshipEndDate)} />
+                    <KV label="Notice Period (days)" value={p.noticePeriodDays != null ? String(p.noticePeriodDays) : null} />
+                    <KV label="Probation Policy"     value={p.probationPolicy} />
+                    <KV label="Role"                 value={getUserRoleLabel(user.role) || user.role} capitalize />
+                    <KV label="Org Level"            value={prettyEmp(user.orgLevel)} capitalize />
+                    <KV label="Team Capsule"         value={user.teamCapsule} />
+                  </Grid3>
+                </DetailCard>
+
+                {(p.leavePlan || p.holidayList || p.weeklyOff || p.attendanceNumber || p.timeTrackingPolicy || p.penalizationPolicy || p.attendanceCaptureScheme || p.costCenter) && (
+                  <DetailCard title="Work Settings">
+                    <Grid3>
+                      <KV label="Leave Plan"                value={p.leavePlan} />
+                      <KV label="Holiday List"              value={p.holidayList} />
+                      <KV label="Weekly Off"                value={p.weeklyOff} />
+                      <KV label="Attendance Number"         value={p.attendanceNumber} />
+                      <KV label="Time Tracking Policy"      value={p.timeTrackingPolicy} />
+                      <KV label="Penalization Policy"       value={p.penalizationPolicy} />
+                      <KV label="Attendance Capture Scheme" value={p.attendanceCaptureScheme} />
+                      <KV label="Cost Center"               value={p.costCenter} />
+                    </Grid3>
+                  </DetailCard>
+                )}
+              </div>
             )}
 
             {activeTab === "Attendance" && (
