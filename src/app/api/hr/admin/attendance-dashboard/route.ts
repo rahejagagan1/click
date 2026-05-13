@@ -60,6 +60,17 @@ export async function GET() {
     });
     const onLeaveIds = new Set<number>(leaveTodayRows.map((r) => r.userId));
 
+    // Anyone with a WFH request for today (any non-final status). Mirrors
+    // /api/hr/attendance/board. Tracked as its OWN tab on the dashboard —
+    // a WFH applicant shows up under WFH regardless of whether their
+    // clock-in was tagged office or remote, while the Remote Clock-in tab
+    // remains a pure "GPS said remote" view.
+    const wfhTodayRows = await prisma.wFHRequest.findMany({
+      where: { date: today, status: { notIn: ["rejected", "cancelled"] } },
+      select: { userId: true },
+    });
+    const wfhTodayIds = new Set<number>(wfhTodayRows.map((r) => r.userId));
+
     const rows = users.map((u) => {
       const rec = byUser.get(u.id) ?? null;
       const loc = rec ? parseAttLoc(rec.location) : null;
@@ -93,6 +104,7 @@ export async function GET() {
         locationLat:     loc?.lat   ?? null,
         locationLng:     loc?.lng   ?? null,
         status, // derived: on_leave | remote | office | absent
+        wfhToday: wfhTodayIds.has(u.id),
       };
     });
 
@@ -101,6 +113,10 @@ export async function GET() {
       present:      rows.filter((r) => r.status === "office" || r.status === "remote").length,
       office:       rows.filter((r) => r.status === "office").length,
       remote:       rows.filter((r) => r.status === "remote").length,
+      // WFH = anyone who applied for WFH today (intent). Can overlap with
+      // any other tab (e.g. a WFH applicant who clocked in remote counts
+      // toward both Remote Clock-in and WFH).
+      wfh:          rows.filter((r) => r.wfhToday).length,
       onLeave:      rows.filter((r) => r.status === "on_leave").length,
       notClockedIn: rows.filter((r) => r.status === "absent").length,
       late:         rows.filter((r) => r.rawStatus === "late").length,

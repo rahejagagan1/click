@@ -182,7 +182,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       role: newRole, orgLevel, managerId, inlineManagerId, teamCapsule,
     } = body;
 
-    const target = await prisma.user.findUnique({ where: { id }, select: { id: true, name: true } });
+    const target = await prisma.user.findUnique({ where: { id }, select: { id: true, name: true, email: true } });
     if (!target) return NextResponse.json({ error: "Employee not found" }, { status: 404 });
     let existing = await prisma.employeeProfile.findUnique({ where: { userId: id } });
     // Tracks whether we just allocated an HRM on this request — so the
@@ -190,14 +190,18 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     // came in with a blank HRM field but already got one assigned here.
     let justAutoCreated = false;
 
-    // Some users (legacy rows, manually-created accounts) have no
-    // EmployeeProfile. Without this, every save below silently no-ops
-    // (the route returns ok but no row exists to UPDATE), which is why
-    // HR's edits "disappear on reload." Mirror the auto-create pattern
-    // from /api/hr/profile so the first save materializes the profile.
+    // Auto-create a minimal EmployeeProfile when the user has none.
+    // Users imported via ClickUp sync (and other non-wizard / legacy
+    // sources) start without a profile row, so every save below used
+    // to silently no-op — the route returned ok but no row existed to
+    // UPDATE, which is why HR's edits "disappeared on reload." Mint a
+    // profile on first edit using whatever the form sent, falling back
+    // to splitting user.name and finally the email local-part.
     if (!existing) {
       const series = await prisma.employeeNumberSeries.findFirst({
-        where: { isActive: true }, select: { id: true },
+        where: { isActive: true },
+        orderBy: { id: "asc" },
+        select: { id: true },
       });
       if (!series) {
         return NextResponse.json(
@@ -205,12 +209,21 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           { status: 409 },
         );
       }
-      const fullName = (target.name ?? "User").trim();
+
+      // Name fallbacks: form firstName/lastName win; else split user.name;
+      // else use email local-part for first and "—" for last.
+      const fullName = (target.name ?? "").trim();
       const firstSpace = fullName.indexOf(" ");
-      const fNameSeed = (typeof firstName === "string" && firstName.trim()) ||
-                        (firstSpace === -1 ? fullName : fullName.slice(0, firstSpace)) || "User";
-      const lNameSeed = (typeof lastName === "string" && lastName.trim()) ||
-                        (firstSpace === -1 ? "—" : fullName.slice(firstSpace + 1)) || "—";
+      const splitFirst = firstSpace === -1 ? fullName : fullName.slice(0, firstSpace);
+      const splitLast  = firstSpace === -1 ? "—"      : fullName.slice(firstSpace + 1);
+      const fNameSeed = (typeof firstName === "string" && firstName.trim())
+        || splitFirst
+        || target.email?.split("@")[0]
+        || "Employee";
+      const lNameSeed = (typeof lastName === "string" && lastName.trim())
+        || splitLast
+        || "—";
+
       try {
         existing = await prisma.$transaction(async (tx) => {
           const bumped = await tx.employeeNumberSeries.update({
@@ -219,25 +232,35 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
             select: { id: true, prefix: true, nextNumber: true },
           });
           const claimed = bumped.nextNumber - 1;
-          const allocatedEmployeeId = (typeof employeeId === "string" && employeeId.trim())
-            || `${bumped.prefix}${claimed}`;
+          const allocatedEmployeeId =
+            (typeof employeeId === "string" && employeeId.trim())
+              ? employeeId.trim()
+              : `${bumped.prefix}${claimed}`;
+
           return tx.employeeProfile.create({
             data: {
               userId:         id,
               employeeId:     allocatedEmployeeId,
-              firstName:      fNameSeed.slice(0, 60),
-              lastName:       lNameSeed.slice(0, 60),
-              workCountry:    "India",
-              nationality:    "Indian",
+              firstName:      fNameSeed.trim().slice(0, 60),
+              middleName:     typeof middleName === "string" && middleName.trim() ? middleName.trim().slice(0, 60) : null,
+              lastName:       lNameSeed.trim().slice(0, 60),
+              workCountry:    typeof workCountry === "string" && workCountry.trim() ? workCountry.trim() : "India",
+              nationality:    typeof nationality === "string" && nationality.trim() ? nationality.trim() : "Indian",
               numberSeriesId: bumped.id,
             },
           });
         });
         justAutoCreated = true;
-      } catch (e) {
+      } catch (e: any) {
         console.error("[people PUT] auto-create EmployeeProfile failed:", e);
+        if (e?.code === "P2002") {
+          return NextResponse.json(
+            { error: "Could not allocate a new HRM No. — try again." },
+            { status: 409 },
+          );
+        }
         return NextResponse.json(
-          { error: "Could not create employee profile — try again or complete onboarding for this user." },
+          { error: `Could not create profile: ${e?.message ?? "Unknown DB error"}` },
           { status: 500 },
         );
       }
