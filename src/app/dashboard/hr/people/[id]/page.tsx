@@ -10,6 +10,7 @@ import { parseAttLoc, type AttLoc } from "@/lib/attendance-location";
 import {
   Mail, Phone, MapPin, Briefcase, Calendar, Building2, IdCard, FileText, Laptop,
   Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
+  MoreVertical,
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { isHRAdmin as canViewAsHRAdmin } from "@/lib/access";
@@ -179,7 +180,7 @@ export default function EmployeeDetailPage() {
                   {p.designation || getUserRoleLabel(user.role) || "Employee"}
                 </p>
                 {p.employeeId ? (
-                  <p className="mt-1 inline-flex items-center gap-1.5 font-mono text-[11.5px] text-slate-400">
+                  <p className="mt-1 ml-3 inline-flex items-center gap-1.5 font-mono text-[11.5px] text-slate-400">
                     <IdCard className="h-3 w-3" />
                     {p.employeeId}
                   </p>
@@ -339,7 +340,7 @@ export default function EmployeeDetailPage() {
                     <Compact label="Gender"       value={p.gender} capitalize />
                     <Compact label="Date of Birth" value={fmtDate(p.dateOfBirth)} />
                     <Compact label="Marital Status" value={p.maritalStatus} capitalize />
-                    <Compact label="Physically Handicapped" value={p.physicallyHandicapped ? "Yes" : "No"} />
+                    <Compact label="Physically Handicapped" value={p.physicallyHandicapped} />
                     <Compact label="Nationality"  value={p.nationality} />
                     <Compact label="Blood Group"  value={p.bloodGroup} />
                   </div>
@@ -374,19 +375,34 @@ export default function EmployeeDetailPage() {
                     <KV label="Blood Group"           value={p.bloodGroup} />
                     <KV label="Marital Status"        value={p.maritalStatus} capitalize />
                     <KV label="Nationality"           value={p.nationality} />
+                    <KV label="Physically Handicapped" value={p.physicallyHandicapped} />
                   </Grid3>
                 </DetailCard>
 
                 {/* ── Contact Details ── */}
                 <DetailCard title="Contact Details">
                   <Grid3>
-                    <KV label="Work Email"     value={user.email} />
-                    <KV label="Personal Email" value={p.personalEmail} />
-                    <KV label="Mobile Number"  value={p.phone} />
-                    <KV label="Work Number"    value={p.workPhone} />
-                    <KV label="Emergency Phone"   value={p.emergencyPhone} />
+                    <KV label="Work Email"      value={user.email} />
+                    <KV label="Personal Email"  value={p.personalEmail} />
+                    <KV label="Mobile Number"   value={p.phone} />
+                    <KV label="Work Number"     value={p.workPhone} />
+                    <KV label="Home Phone"      value={p.homePhone} />
+                    <KV label="Emergency Phone" value={p.emergencyPhone} />
+                    <KV label="Emergency Relationship" value={p.emergencyRelationship} capitalize />
                   </Grid3>
                 </DetailCard>
+
+                {/* ── Family ── */}
+                {(p.parentName || p.motherName || p.spouseName || p.childrenNames) && (
+                  <DetailCard title="Family">
+                    <Grid3>
+                      <KV label="Father's Name"   value={p.parentName} />
+                      <KV label="Mother's Name"   value={p.motherName} />
+                      <KV label="Spouse's Name"   value={p.spouseName} />
+                      <KV label="Children"        value={p.childrenNames} />
+                    </Grid3>
+                  </DetailCard>
+                )}
 
                 {/* ── Addresses ── */}
                 <DetailCard title="Addresses">
@@ -394,35 +410,37 @@ export default function EmployeeDetailPage() {
                     <div>
                       <p className="text-[10px] uppercase tracking-[0.1em] text-slate-400 font-semibold mb-1.5">Current Address</p>
                       <p className="text-[13px] text-slate-800 leading-relaxed">
-                        {p.address || "—"}
+                        {[p.address, p.addressLine2].filter(Boolean).join(", ") || "—"}
                       </p>
-                      {(p.city || p.state) && (
+                      {(p.city || p.state || p.addressPincode || p.addressCountry) && (
                         <p className="text-[12.5px] text-slate-600 mt-1">
-                          {[p.city, p.state, p.nationality].filter(Boolean).join(", ")}
+                          {[p.city, p.state, p.addressPincode, p.addressCountry].filter(Boolean).join(", ")}
                         </p>
                       )}
                     </div>
                     <div>
                       <p className="text-[10px] uppercase tracking-[0.1em] text-slate-400 font-semibold mb-1.5">Permanent Address</p>
                       <p className="text-[13px] text-slate-800 leading-relaxed">
-                        {p.address || "—"}
+                        {[p.permanentLine1, p.permanentLine2].filter(Boolean).join(", ") || "—"}
                       </p>
-                      {(p.city || p.state) && (
+                      {(p.permanentCity || p.permanentState || p.permanentPincode || p.permanentCountry) && (
                         <p className="text-[12.5px] text-slate-600 mt-1">
-                          {[p.city, p.state, p.nationality].filter(Boolean).join(", ")}
+                          {[p.permanentCity, p.permanentState, p.permanentPincode, p.permanentCountry].filter(Boolean).join(", ")}
                         </p>
                       )}
                     </div>
                   </div>
                 </DetailCard>
 
-                {/* ── Identity Information (PAN / Aadhaar) ── */}
-                {(p.panNumber || p.aadhaarNumber || p.parentName) && (
+                {/* ── Identity Information (PAN / Aadhaar / statutory IDs) ── */}
+                {(p.panNumber || p.aadhaarNumber || p.pfNumber || p.uanNumber || p.biometricId) && (
                   <DetailCard title="Identity Information">
                     <Grid3>
                       <KV label="PAN Number"     value={maskPan(p.panNumber)} />
                       <KV label="Aadhaar Number" value={maskAadhaar(p.aadhaarNumber)} />
-                      <KV label="Parent's Name"  value={p.parentName} />
+                      <KV label="PF Number"      value={p.pfNumber} />
+                      <KV label="UAN Number"     value={p.uanNumber} />
+                      <KV label="Biometric ID"   value={p.biometricId} />
                     </Grid3>
                     <p className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-slate-400">
                       <ShieldCheck size={12} />
@@ -434,19 +452,44 @@ export default function EmployeeDetailPage() {
             )}
 
             {activeTab === "Job" && (
-              <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
-                <h3 className="mb-4 text-[15px] font-semibold text-slate-800">Job Details</h3>
-                <div className="grid grid-cols-2 gap-x-8 gap-y-5">
-                  <Compact label="Department"      value={p.department} />
-                  <Compact label="Designation"     value={p.designation} />
-                  <Compact label="Employment Type" value={prettyEmp(p.employmentType)} capitalize />
-                  <Compact label="Work Location"   value={p.workLocation} />
-                  <Compact label="Joining Date"    value={fmtDate(p.joiningDate)} />
-                  <Compact label="Role"            value={getUserRoleLabel(user.role) || user.role} capitalize />
-                  <Compact label="Org Level"       value={prettyEmp(user.orgLevel)} capitalize />
-                  <Compact label="Team Capsule"    value={user.teamCapsule} />
-                </div>
-              </section>
+              <div className="space-y-5">
+                <DetailCard title="Job Details">
+                  <Grid3>
+                    <KV label="Designation"          value={p.designation} />
+                    <KV label="Secondary Job Title"  value={p.secondaryJobTitle} />
+                    <KV label="Department"           value={p.department} />
+                    <KV label="Business Unit"        value={p.businessUnit} />
+                    <KV label="Legal Entity"         value={p.legalEntity} />
+                    <KV label="Employment Type"      value={prettyEmp(p.employmentType)} capitalize />
+                    <KV label="Work Location"        value={p.workLocation} capitalize />
+                    <KV label="Job Location"         value={p.jobLocation} />
+                    <KV label="Work Country"         value={p.workCountry} />
+                    <KV label="Nationality"          value={p.nationality} />
+                    <KV label="Joining Date"         value={fmtDate(p.joiningDate)} />
+                    <KV label="Internship End Date"  value={fmtDate(p.internshipEndDate)} />
+                    <KV label="Notice Period (days)" value={p.noticePeriodDays != null ? String(p.noticePeriodDays) : null} />
+                    <KV label="Probation Policy"     value={p.probationPolicy} />
+                    <KV label="Role"                 value={getUserRoleLabel(user.role) || user.role} capitalize />
+                    <KV label="Org Level"            value={prettyEmp(user.orgLevel)} capitalize />
+                    <KV label="Team Capsule"         value={user.teamCapsule} />
+                  </Grid3>
+                </DetailCard>
+
+                {(p.leavePlan || p.holidayList || p.weeklyOff || p.attendanceNumber || p.timeTrackingPolicy || p.penalizationPolicy || p.attendanceCaptureScheme || p.costCenter) && (
+                  <DetailCard title="Work Settings">
+                    <Grid3>
+                      <KV label="Leave Plan"                value={p.leavePlan} />
+                      <KV label="Holiday List"              value={p.holidayList} />
+                      <KV label="Weekly Off"                value={p.weeklyOff} />
+                      <KV label="Attendance Number"         value={p.attendanceNumber} />
+                      <KV label="Time Tracking Policy"      value={p.timeTrackingPolicy} />
+                      <KV label="Penalization Policy"       value={p.penalizationPolicy} />
+                      <KV label="Attendance Capture Scheme" value={p.attendanceCaptureScheme} />
+                      <KV label="Cost Center"               value={p.costCenter} />
+                    </Grid3>
+                  </DetailCard>
+                )}
+              </div>
             )}
 
             {activeTab === "Attendance" && (
@@ -1294,6 +1337,128 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
   });
   const [submitting, setSubmitting] = useState(false);
 
+  // ── HR on-behalf actions: 3-dot menu, WFH modal, Leave modal ────────
+  // The kebab opens a small popover with three options that map to the
+  // three on-behalf POST endpoints (regularize, wfh, leaves). State below
+  // is HR-admin only — guarded at each call site by isHRAdmin.
+  const [menuOpenKey, setMenuOpenKey]   = useState<string | null>(null);
+  const [wfhOpen,     setWfhOpen]       = useState(false);
+  const [wfhForm,     setWfhForm]       = useState<{ date: string; reason: string }>({ date: "", reason: "" });
+  const [leaveOpen,   setLeaveOpen]     = useState(false);
+  const [leaveForm,   setLeaveForm]     = useState<{ leaveTypeId: number | ""; fromDate: string; toDate: string; reason: string }>({
+    leaveTypeId: "", fromDate: "", toDate: "", reason: "",
+  });
+  const [leaveTypes,  setLeaveTypes]    = useState<{ id: number; name: string }[]>([]);
+  // Per-type available balance for the target user, keyed by leaveTypeId.
+  // available = totalDays - usedDays - pendingDays. Refetched each time the
+  // modal opens so a stale draft doesn't show outdated numbers.
+  const [targetBalances, setTargetBalances] = useState<Record<number, number>>({});
+  useEffect(() => {
+    if (!isHRAdmin) return;
+    fetch("/api/hr/leaves/types").then(r => r.json()).then((d) => {
+      if (Array.isArray(d)) setLeaveTypes(d);
+    }).catch(() => {});
+  }, [isHRAdmin]);
+  useEffect(() => {
+    if (!leaveOpen || !isHRAdmin || !userId) return;
+    fetch(`/api/hr/leaves/balance?userId=${userId}`)
+      .then(r => r.json())
+      .then((rows) => {
+        if (!Array.isArray(rows)) return;
+        const map: Record<number, number> = {};
+        for (const b of rows) {
+          const total   = parseFloat(b.totalDays   ?? "0");
+          const used    = parseFloat(b.usedDays    ?? "0");
+          const pending = parseFloat(b.pendingDays ?? "0");
+          map[b.leaveTypeId] = total - used - pending;
+        }
+        setTargetBalances(map);
+      })
+      .catch(() => {});
+  }, [leaveOpen, isHRAdmin, userId]);
+  useEffect(() => {
+    if (menuOpenKey === null) return;
+    // Close on outside click. Using a data-attribute check is more reliable
+    // than React's e.stopPropagation() because React 17+ delegates to the
+    // root container — a synthetic stopPropagation doesn't always prevent
+    // the native event from reaching document-level listeners, which would
+    // unmount the menu before the option's click handler fired.
+    const close = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && !t.closest("[data-hr-menu]")) setMenuOpenKey(null);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menuOpenKey]);
+
+  const openWfhFor = (rec: any) => {
+    const dateOnly = String(rec.date).slice(0, 10);
+    setWfhForm({ date: dateOnly, reason: "" });
+    setMenuOpenKey(null);
+    setWfhOpen(true);
+  };
+  const openLeaveFor = (rec: any) => {
+    const dateOnly = String(rec.date).slice(0, 10);
+    setLeaveForm({ leaveTypeId: "", fromDate: dateOnly, toDate: dateOnly, reason: "" });
+    setMenuOpenKey(null);
+    setLeaveOpen(true);
+  };
+
+  const refreshAttendanceCaches = () => {
+    // Mirror submitReg's refresh set: the table + all three request lists
+    // so badges (Approved / Pending / on-leave) and the timeline bar update.
+    mutate(url);
+    mutate(regsUrl);
+    mutate(wfhUrl);
+    mutate(leavesUrl);
+  };
+
+  const submitWfh = async () => {
+    if (!wfhForm.date || !wfhForm.reason.trim()) { alert("Date and reason are required."); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/hr/attendance/wfh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetUserId: userId,
+          forceGrant:   true,
+          date:         wfhForm.date,
+          reason:       wfhForm.reason.trim(),
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { alert(d.error || "Failed to grant WFH"); return; }
+      setWfhOpen(false);
+      refreshAttendanceCaches();
+    } finally { setSubmitting(false); }
+  };
+
+  const submitLeave = async () => {
+    if (!leaveForm.leaveTypeId) { alert("Leave type is required."); return; }
+    if (!leaveForm.fromDate || !leaveForm.toDate) { alert("From and To dates are required."); return; }
+    if (!leaveForm.reason.trim()) { alert("Reason is required."); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/hr/leaves", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetUserId:    userId,
+          useLwpFallback:  true,  // HR-on-behalf auto-falls back to LWP if balance missing
+          leaveTypeId:     Number(leaveForm.leaveTypeId),
+          fromDate:        leaveForm.fromDate,
+          toDate:          leaveForm.toDate,
+          reason:          leaveForm.reason.trim(),
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { alert(d.error || "Failed to grant leave"); return; }
+      setLeaveOpen(false);
+      refreshAttendanceCaches();
+    } finally { setSubmitting(false); }
+  };
+
   // datetime-local <-> IST helpers. The native input is timezone-naive
   // (just "YYYY-MM-DDTHH:mm" text), so we have to format the stored UTC
   // instant in IST when pre-filling, and parse the entered IST string
@@ -1689,17 +1854,53 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                     ) : null}
                   </td>
 
-                  {/* Admin kebab */}
+                  {/* Admin kebab — 3-dot menu opens an on-behalf action picker:
+                      Regularization (existing modal), WFH (new modal), Leave (new modal).
+                      data-hr-menu lets the outside-click closer skip clicks on these
+                      elements so option onClick handlers actually fire. */}
                   {isHRAdmin ? (
-                    <td className="px-3 py-3 text-right align-middle">
+                    <td className="px-3 py-3 text-right align-middle relative">
                       {canRegularize ? (
-                        <button
-                          onClick={() => openRegFor(rec)}
-                          title="Regularize on behalf"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 transition hover:bg-sky-50 hover:text-sky-600"
-                        >
-                          <ShieldCheck className="h-4 w-4" />
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            data-hr-menu
+                            onClick={() => setMenuOpenKey(menuOpenKey === dateOnly ? null : dateOnly)}
+                            title="HR actions"
+                            aria-label="Open HR actions menu"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 transition hover:bg-sky-50 hover:text-sky-600"
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </button>
+                          {menuOpenKey === dateOnly ? (
+                            <div
+                              data-hr-menu
+                              className="absolute right-2 top-10 z-40 min-w-[160px] rounded-md border border-slate-200 bg-white shadow-lg text-left text-[12.5px]"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => { setMenuOpenKey(null); openRegFor(rec); }}
+                                className="block w-full px-3 py-2 text-slate-700 hover:bg-sky-50 hover:text-sky-700"
+                              >
+                                Regularization
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openWfhFor(rec)}
+                                className="block w-full px-3 py-2 text-slate-700 hover:bg-sky-50 hover:text-sky-700 border-t border-slate-100"
+                              >
+                                WFH
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openLeaveFor(rec)}
+                                className="block w-full px-3 py-2 text-slate-700 hover:bg-sky-50 hover:text-sky-700 border-t border-slate-100"
+                              >
+                                Leave
+                              </button>
+                            </div>
+                          ) : null}
+                        </>
                       ) : null}
                     </td>
                   ) : null}
@@ -1775,6 +1976,160 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                 className="h-8 rounded bg-[#008CFF] px-4 text-[12px] font-semibold text-white hover:bg-[#0070d4] disabled:opacity-60"
               >
                 {submitting ? "Submitting…" : "Grant regularization"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── HR on-behalf: WFH modal ───────────────────────────────────── */}
+      {wfhOpen && isHRAdmin ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <div>
+                <h3 className="text-[14px] font-semibold text-slate-800">Grant Work From Home</h3>
+                <p className="text-[11.5px] text-slate-500">For {userName} · on-behalf (auto-approved)</p>
+              </div>
+              <button onClick={() => setWfhOpen(false)} className="text-slate-400 hover:text-slate-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-3 px-5 py-4">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Date</label>
+                <input
+                  type="date"
+                  value={wfhForm.date}
+                  onChange={(e) => setWfhForm((f) => ({ ...f, date: e.target.value }))}
+                  className="mt-1 w-full rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Reason (visible in audit log)</label>
+                <textarea
+                  value={wfhForm.reason}
+                  onChange={(e) => setWfhForm((f) => ({ ...f, reason: e.target.value }))}
+                  rows={3}
+                  placeholder="Why is WFH being granted on behalf?"
+                  className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                />
+              </div>
+              <div className="rounded bg-emerald-50 px-3 py-2 text-[11.5px] text-emerald-800 ring-1 ring-inset ring-emerald-200">
+                HR on-behalf WFH is <strong>auto-approved</strong> and bypasses the monthly 2-of-2 cap.
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+              <button
+                onClick={() => setWfhOpen(false)}
+                className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitWfh}
+                disabled={submitting || !wfhForm.date || !wfhForm.reason.trim()}
+                className="h-8 rounded bg-[#008CFF] px-4 text-[12px] font-semibold text-white hover:bg-[#0070d4] disabled:opacity-60"
+              >
+                {submitting ? "Submitting…" : "Grant WFH"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── HR on-behalf: Leave modal ─────────────────────────────────── */}
+      {leaveOpen && isHRAdmin ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <div>
+                <h3 className="text-[14px] font-semibold text-slate-800">Apply Leave on behalf</h3>
+                <p className="text-[11.5px] text-slate-500">For {userName} · auto-approved · LWP fallback enabled</p>
+              </div>
+              <button onClick={() => setLeaveOpen(false)} className="text-slate-400 hover:text-slate-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-3 px-5 py-4">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Leave type</label>
+                <select
+                  value={leaveForm.leaveTypeId}
+                  onChange={(e) => setLeaveForm((f) => ({ ...f, leaveTypeId: e.target.value ? Number(e.target.value) : "" }))}
+                  className="mt-1 w-full rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                >
+                  <option value="">— Select type —</option>
+                  {leaveTypes.map((t) => {
+                    const bal = targetBalances[t.id];
+                    const balLabel = bal == null
+                      ? ""
+                      : `  ·  ${bal % 1 === 0 ? bal.toFixed(0) : bal.toFixed(1)} available`;
+                    return (
+                      <option key={t.id} value={t.id}>
+                        {t.name}{balLabel}
+                      </option>
+                    );
+                  })}
+                </select>
+                {leaveForm.leaveTypeId && targetBalances[Number(leaveForm.leaveTypeId)] != null && (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {userName} has{" "}
+                    <span className={`font-semibold ${targetBalances[Number(leaveForm.leaveTypeId)] > 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                      {targetBalances[Number(leaveForm.leaveTypeId)].toFixed(1)} day{targetBalances[Number(leaveForm.leaveTypeId)] === 1 ? "" : "s"}
+                    </span>{" "}
+                    available in this type.
+                    {targetBalances[Number(leaveForm.leaveTypeId)] <= 0 && " LWP fallback will kick in."}
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">From</label>
+                  <input
+                    type="date"
+                    value={leaveForm.fromDate}
+                    onChange={(e) => setLeaveForm((f) => ({ ...f, fromDate: e.target.value, toDate: f.toDate < e.target.value ? e.target.value : f.toDate }))}
+                    className="mt-1 w-full rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">To</label>
+                  <input
+                    type="date"
+                    value={leaveForm.toDate}
+                    onChange={(e) => setLeaveForm((f) => ({ ...f, toDate: e.target.value }))}
+                    className="mt-1 w-full rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Reason (visible in audit log)</label>
+                <textarea
+                  value={leaveForm.reason}
+                  onChange={(e) => setLeaveForm((f) => ({ ...f, reason: e.target.value }))}
+                  rows={3}
+                  placeholder="Why is leave being granted on behalf?"
+                  className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                />
+              </div>
+              <div className="rounded bg-emerald-50 px-3 py-2 text-[11.5px] text-emerald-800 ring-1 ring-inset ring-emerald-200">
+                HR on-behalf leave is <strong>auto-approved</strong>. If the selected leave type has no balance, the system falls back to Leave Without Pay automatically.
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+              <button
+                onClick={() => setLeaveOpen(false)}
+                className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitLeave}
+                disabled={submitting || !leaveForm.leaveTypeId || !leaveForm.fromDate || !leaveForm.toDate || !leaveForm.reason.trim()}
+                className="h-8 rounded bg-[#008CFF] px-4 text-[12px] font-semibold text-white hover:bg-[#0070d4] disabled:opacity-60"
+              >
+                {submitting ? "Submitting…" : "Grant leave"}
               </button>
             </div>
           </div>
