@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, requireHRAdmin, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
+import { isDeveloperEmail } from "@/lib/hr/notification-policy";
 
 // GET /api/hr/employees — list all employees with profiles
 export async function GET(req: NextRequest) {
-  const { errorResponse } = await requireAuth();
+  const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
 
   try {
@@ -14,6 +15,13 @@ export async function GET(req: NextRequest) {
     const department = searchParams.get("department") || "";
     const employmentType = searchParams.get("employmentType") || "";
     const isActive = searchParams.get("isActive");
+
+    // Developer invisibility: hide DEVELOPER_EMAILS rows from non-dev viewers.
+    const viewer = session!.user as any;
+    const viewerIsDev = isDeveloperEmail(viewer?.email ?? null);
+    const devEmails = (process.env.DEVELOPER_EMAILS || "")
+      .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const hideDevs = !viewerIsDev && devEmails.length > 0;
 
     const users = await prisma.user.findMany({
       where: {
@@ -27,6 +35,7 @@ export async function GET(req: NextRequest) {
           department ? { employeeProfile: { department: { contains: department, mode: "insensitive" } } } : {},
           employmentType ? { employeeProfile: { employmentType } } : {},
           isActive !== null && isActive !== undefined ? { isActive: isActive === "true" } : {},
+          hideDevs ? { NOT: { email: { in: devEmails } } } : {},
         ],
       },
       include: {
