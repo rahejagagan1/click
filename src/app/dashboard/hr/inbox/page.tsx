@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import {
-  TreePine, IndianRupee, Clock, CheckCircle2, Home, Briefcase, Gift,
+  TreePine, Clock, CheckCircle2, Home, Briefcase, Gift,
   Search, Bell, Archive as ArchiveIcon, Inbox as InboxIcon, XCircle,
   MessageSquare, Activity,
 } from "lucide-react";
@@ -91,7 +91,6 @@ type Cat = {
 
 const CATEGORIES: Cat[] = [
   { key: "leaves",          label: "Leave Requests",            Icon: TreePine,     color: "text-violet-500", bucket: "leaves",          prefix: "l"  },
-  { key: "expenses",        label: "Expense Claims",            Icon: IndianRupee,  color: "text-emerald-500",bucket: "expenses",        prefix: "e"  },
   { key: "regularizations", label: "Attendance Regularization", Icon: Clock,        color: "text-amber-500",  bucket: "regularizations", prefix: "r"  },
   { key: "wfh",             label: "Work From Home",            Icon: Home,         color: "text-cyan-500",   bucket: "wfh",             prefix: "w"  },
   { key: "onDuty",          label: "On Duty",                   Icon: Briefcase,    color: "text-indigo-500", bucket: "onDuty",          prefix: "od" },
