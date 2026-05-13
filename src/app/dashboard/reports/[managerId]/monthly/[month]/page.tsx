@@ -125,30 +125,80 @@ function EditableCell({
 
 /**
  * Manager-only "Add case" affordance for Section 3 contributor rows.
- * Renders a "+ Add case" button that flips into an inline input on click.
- * Submitting the input adds an extra case via `onAdd`.
+ *
+ * Three modes:
+ *   • Collapsed         → "+ Add case" pill
+ *   • Dropdown (default)→ Searchable list of eligible Cases for this role.
+ *                         Picking one adds an extra w/ caseId + qualityScore,
+ *                         so the bullet renders with the same score badge as
+ *                         auto-detected cases. Footer "+ Custom case" flips
+ *                         into the next mode.
+ *   • Custom            → Free-text input for cases that don't exist in
+ *                         ClickUp (completely offline work). Stored as
+ *                         { name, isCustom: true } — no score badge.
+ *
+ * Eligible cases are filtered live by case-name substring. Already-rendered
+ * extras (same `caseId`) are hidden from the list so a manager can't add the
+ * same case twice for the same contributor.
  */
-function AddExtraCase({ onAdd }: { onAdd: (name: string) => void }) {
-    const [open, setOpen] = React.useState(false);
-    const [value, setValue] = React.useState("");
-    const inputRef = React.useRef<HTMLInputElement>(null);
+function AddExtraCase({
+    onAdd,
+    eligibleCases,
+    excludeCaseIds = [],
+}: {
+    onAdd: (payload: string | { name: string; caseId?: number; qualityScore?: number | null; isCustom?: boolean }) => void;
+    eligibleCases: { id: number; name: string; qualityScore: number | null; currentOwnerName: string | null }[];
+    excludeCaseIds?: number[];
+}) {
+    type Mode = "closed" | "dropdown" | "custom";
+    const [mode, setMode] = React.useState<Mode>("closed");
+    const [query, setQuery] = React.useState("");
+    const [customName, setCustomName] = React.useState("");
+    const containerRef = React.useRef<HTMLDivElement>(null);
+    const searchRef    = React.useRef<HTMLInputElement>(null);
+    const customRef    = React.useRef<HTMLInputElement>(null);
 
     React.useEffect(() => {
-        if (open) inputRef.current?.focus();
-    }, [open]);
+        if (mode === "dropdown") searchRef.current?.focus();
+        if (mode === "custom")   customRef.current?.focus();
+    }, [mode]);
 
-    const submit = () => {
-        const trimmed = value.trim();
-        if (trimmed) onAdd(trimmed);
-        setValue("");
-        setOpen(false);
+    // Click-outside closes the panel without saving.
+    React.useEffect(() => {
+        if (mode === "closed") return;
+        const onDown = (e: MouseEvent) => {
+            if (!containerRef.current?.contains(e.target as Node)) {
+                setMode("closed"); setQuery(""); setCustomName("");
+            }
+        };
+        document.addEventListener("mousedown", onDown);
+        return () => document.removeEventListener("mousedown", onDown);
+    }, [mode]);
+
+    const exclude = new Set(excludeCaseIds);
+    const filtered = React.useMemo(() => {
+        const q = query.trim().toLowerCase();
+        return eligibleCases
+            .filter(c => !exclude.has(c.id))
+            .filter(c => !q || c.name.toLowerCase().includes(q) || (c.currentOwnerName ?? "").toLowerCase().includes(q));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [eligibleCases, query, excludeCaseIds.join(",")]);
+
+    const pickCase = (c: { id: number; name: string; qualityScore: number | null }) => {
+        onAdd({ name: c.name, caseId: c.id, qualityScore: c.qualityScore });
+        setMode("closed"); setQuery("");
+    };
+    const submitCustom = () => {
+        const trimmed = customName.trim();
+        if (trimmed) onAdd({ name: trimmed, isCustom: true });
+        setCustomName(""); setMode("closed");
     };
 
-    if (!open) {
+    if (mode === "closed") {
         return (
             <button
                 type="button"
-                onClick={() => setOpen(true)}
+                onClick={() => setMode("dropdown")}
                 className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 transition-colors"
             >
                 <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-amber-500 leading-none">+</span>
@@ -157,28 +207,82 @@ function AddExtraCase({ onAdd }: { onAdd: (name: string) => void }) {
         );
     }
 
+    if (mode === "custom") {
+        return (
+            <div ref={containerRef} className="mt-1 flex items-center gap-1.5">
+                <input
+                    ref={customRef}
+                    type="text"
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.preventDefault(); submitCustom(); }
+                        else if (e.key === "Escape") { setCustomName(""); setMode("closed"); }
+                    }}
+                    onBlur={submitCustom}
+                    placeholder="Offline case name…"
+                    className="flex-1 min-w-0 bg-transparent border-0 border-b border-dashed border-amber-400/60 px-1 py-0.5 text-xs text-amber-700 dark:text-amber-300 placeholder:text-amber-400/60 placeholder:italic focus:outline-none focus:border-amber-500"
+                />
+                <button
+                    type="button"
+                    onMouseDown={(e) => { e.preventDefault(); submitCustom(); }}
+                    className="text-[11px] font-medium text-amber-600 hover:text-amber-700"
+                >
+                    Add
+                </button>
+            </div>
+        );
+    }
+
+    // mode === "dropdown"
     return (
-        <div className="mt-1 flex items-center gap-1.5">
+        <div ref={containerRef} className="mt-1 relative">
             <input
-                ref={inputRef}
+                ref={searchRef}
                 type="text"
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {
-                    if (e.key === "Enter") { e.preventDefault(); submit(); }
-                    else if (e.key === "Escape") { setValue(""); setOpen(false); }
+                    if (e.key === "Escape") { setQuery(""); setMode("closed"); }
                 }}
-                onBlur={submit}
-                placeholder="Case name"
-                className="flex-1 min-w-0 bg-transparent border-0 border-b border-dashed border-amber-400/60 px-1 py-0.5 text-xs text-amber-700 dark:text-amber-300 placeholder:text-amber-400/60 placeholder:italic focus:outline-none focus:border-amber-500"
+                placeholder="Search team cases…"
+                className="w-full bg-white dark:bg-[#1a1a32] border border-amber-300 dark:border-amber-500/30 rounded-md px-2 py-1 text-xs text-slate-800 dark:text-slate-200 placeholder:text-slate-400 placeholder:italic focus:outline-none focus:ring-1 focus:ring-amber-400"
             />
-            <button
-                type="button"
-                onMouseDown={(e) => { e.preventDefault(); submit(); }}
-                className="text-[11px] font-medium text-amber-600 hover:text-amber-700"
-            >
-                Add
-            </button>
+            <div className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-md border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1a1a32] shadow-lg text-xs">
+                {filtered.length === 0 ? (
+                    <div className="px-2.5 py-2 text-slate-400 italic">
+                        {eligibleCases.length === 0 ? "No team cases found in this period." : "No matches."}
+                    </div>
+                ) : (
+                    filtered.map(c => (
+                        <button
+                            key={c.id}
+                            type="button"
+                            onMouseDown={(e) => { e.preventDefault(); pickCase(c); }}
+                            className="w-full text-left px-2.5 py-1.5 hover:bg-amber-50 dark:hover:bg-amber-500/10 border-b border-slate-100 dark:border-white/[0.04] last:border-b-0 flex items-center justify-between gap-2"
+                        >
+                            <span className="truncate text-slate-700 dark:text-slate-200">{c.name}</span>
+                            <span className="flex items-center gap-1.5 shrink-0">
+                                {c.currentOwnerName && (
+                                    <span className="text-[10px] text-slate-400">{c.currentOwnerName}</span>
+                                )}
+                                {c.qualityScore != null && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300 tabular-nums">
+                                        {c.qualityScore}
+                                    </span>
+                                )}
+                            </span>
+                        </button>
+                    ))
+                )}
+                <button
+                    type="button"
+                    onMouseDown={(e) => { e.preventDefault(); setMode("custom"); setQuery(""); }}
+                    className="w-full text-left px-2.5 py-1.5 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 border-t border-slate-200 dark:border-white/10 font-medium"
+                >
+                    + Custom case (offline)…
+                </button>
+            </div>
         </div>
     );
 }
@@ -626,6 +730,20 @@ export default function MonthlyReportPage() {
     const editorCases: Record<number, { id: number; name: string }[]> = contributorData?.editorCases ?? {};
     const writerCases: Record<number, { id: number; name: string }[]> = contributorData?.writerCases ?? {};
 
+    // Eligible cases for "+ Add case" dropdown — same key shape as contributor-stats
+    // but returns ALL team cases in the window, not grouped per editor/writer.
+    // Fetched only when the report is a production one (matches contributor-stats gate).
+    const { data: eligibleData } = useSWR(
+        (!isResearcherReport && !isQaReport && managerId)
+            ? `/api/reports/${managerId}/monthly/${monthIndex}/eligible-cases?year=${year}`
+            : null,
+        fetcher
+    );
+    useEffect(() => {
+        if (Array.isArray(eligibleData?.editorCases)) setEditorEligibleCases(eligibleData.editorCases);
+        if (Array.isArray(eligibleData?.writerCases)) setWriterEligibleCases(eligibleData.writerCases);
+    }, [eligibleData]);
+
     const editors = useMemo(() => {
         if (!data?.teamMembers) return [];
         return data.teamMembers.filter((u: any) => u.role === "editor");
@@ -663,9 +781,24 @@ export default function MonthlyReportPage() {
     const [videosPublishedTargetAchieved, setVideosPublishedTargetAchieved]     = useState("");
     const [editorNotes, setEditorNotes] = useState<Record<number, string>>({});
     const [writerNotes, setWriterNotes] = useState<Record<number, string>>({});
-    type ExtraCase = { id: string; name: string };
+    // ExtraCase now optionally carries `caseId` + `qualityScore` when picked
+    // from the dropdown of real Cases. Legacy custom additions only have
+    // { id, name } — kept compatible so older drafts still load.
+    type ExtraCase = {
+        id: string;
+        name: string;
+        caseId?: number;
+        qualityScore?: number | null;
+        isCustom?: boolean;
+    };
     const [editorExtraCases, setEditorExtraCases] = useState<Record<number, ExtraCase[]>>({});
     const [writerExtraCases, setWriterExtraCases] = useState<Record<number, ExtraCase[]>>({});
+    // Eligible cases for the "+ Add case" dropdown — populated lazily
+    // alongside contributor-stats. Empty arrays = no eligible options,
+    // dropdown then renders just the "Custom case" footer.
+    type EligibleCase = { id: number; name: string; qualityScore: number | null; currentOwnerName: string | null };
+    const [editorEligibleCases, setEditorEligibleCases] = useState<EligibleCase[]>([]);
+    const [writerEligibleCases, setWriterEligibleCases] = useState<EligibleCase[]>([]);
     const handleEditorNoteChange = (userId: number, value: string) => {
         setEditorNotes(prev => ({ ...prev, [userId]: value }));
     };
@@ -675,16 +808,31 @@ export default function MonthlyReportPage() {
     };
 
     const newCaseId = () => `mx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // Accepts either a plain name (legacy / custom-mode) or a full payload
+    // from the dropdown picker. The dropdown call carries caseId + score so
+    // the rendered bullet picks up the quality-score badge automatically.
     const addExtraCase = (
         setter: React.Dispatch<React.SetStateAction<Record<number, ExtraCase[]>>>,
         userId: number,
-        name: string,
+        payload: string | { name: string; caseId?: number; qualityScore?: number | null; isCustom?: boolean },
     ) => {
-        const trimmed = name.trim();
+        const incoming = typeof payload === "string"
+            ? { name: payload, isCustom: true }
+            : payload;
+        const trimmed = (incoming.name ?? "").trim();
         if (!trimmed) return;
         setter(prev => ({
             ...prev,
-            [userId]: [...(prev[userId] || []), { id: newCaseId(), name: trimmed }],
+            [userId]: [
+                ...(prev[userId] || []),
+                {
+                    id: newCaseId(),
+                    name: trimmed,
+                    caseId:       incoming.caseId,
+                    qualityScore: incoming.qualityScore,
+                    isCustom:     incoming.isCustom,
+                },
+            ],
         }));
     };
     const removeExtraCase = (
@@ -2351,12 +2499,24 @@ export default function MonthlyReportPage() {
                                                                 <span className="text-xs text-slate-400">—</span>
                                                             ) : (
                                                                 <ul className="text-xs text-slate-600 dark:text-slate-300 list-disc pl-4 space-y-0.5">
-                                                                    {autoCases.map((c) => (
-                                                                        <li key={c.id} className="break-words">{c.name}</li>
+                                                                    {autoCases.map((c: any) => (
+                                                                        <li key={c.id} className="break-words">
+                                                                            {c.name}
+                                                                            {c.qualityScore != null && (
+                                                                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[12px] font-bold bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300 tabular-nums">
+                                                                                    {c.qualityScore}
+                                                                                </span>
+                                                                            )}
+                                                                        </li>
                                                                     ))}
                                                                     {extras.map((c) => (
                                                                         <li key={c.id} className="break-words text-amber-600 dark:text-amber-400">
                                                                             {c.name}
+                                                                            {c.qualityScore != null && (
+                                                                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[12px] font-bold bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300 tabular-nums">
+                                                                                    {c.qualityScore}
+                                                                                </span>
+                                                                            )}
                                                                             {!viewOnly && (
                                                                                 <button
                                                                                     type="button"
@@ -2373,7 +2533,14 @@ export default function MonthlyReportPage() {
                                                                 </ul>
                                                             )}
                                                             {!viewOnly && (
-                                                                <AddExtraCase onAdd={(name) => addExtraCase(setEditorExtraCases, editor.id, name)} />
+                                                                <AddExtraCase
+                                                                    onAdd={(payload) => addExtraCase(setEditorExtraCases, editor.id, payload)}
+                                                                    eligibleCases={editorEligibleCases}
+                                                                    excludeCaseIds={[
+                                                                        ...autoCases.map((c: any) => c.id),
+                                                                        ...extras.map(c => c.caseId).filter((id): id is number => typeof id === "number"),
+                                                                    ]}
+                                                                />
                                                             )}
                                                         </>
                                                     )}
@@ -2447,12 +2614,24 @@ export default function MonthlyReportPage() {
                                                                 <span className="text-xs text-slate-400">—</span>
                                                             ) : (
                                                                 <ul className="text-xs text-slate-600 dark:text-slate-300 list-disc pl-4 space-y-0.5">
-                                                                    {autoCases.map((c) => (
-                                                                        <li key={c.id} className="break-words">{c.name}</li>
+                                                                    {autoCases.map((c: any) => (
+                                                                        <li key={c.id} className="break-words">
+                                                                            {c.name}
+                                                                            {c.qualityScore != null && (
+                                                                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[12px] font-bold bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300 tabular-nums">
+                                                                                    {c.qualityScore}
+                                                                                </span>
+                                                                            )}
+                                                                        </li>
                                                                     ))}
                                                                     {extras.map((c) => (
                                                                         <li key={c.id} className="break-words text-amber-600 dark:text-amber-400">
                                                                             {c.name}
+                                                                            {c.qualityScore != null && (
+                                                                                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[12px] font-bold bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300 tabular-nums">
+                                                                                    {c.qualityScore}
+                                                                                </span>
+                                                                            )}
                                                                             {!viewOnly && (
                                                                                 <button
                                                                                     type="button"
@@ -2469,7 +2648,14 @@ export default function MonthlyReportPage() {
                                                                 </ul>
                                                             )}
                                                             {!viewOnly && (
-                                                                <AddExtraCase onAdd={(name) => addExtraCase(setWriterExtraCases, writer.id, name)} />
+                                                                <AddExtraCase
+                                                                    onAdd={(payload) => addExtraCase(setWriterExtraCases, writer.id, payload)}
+                                                                    eligibleCases={writerEligibleCases}
+                                                                    excludeCaseIds={[
+                                                                        ...autoCases.map((c: any) => c.id),
+                                                                        ...extras.map(c => c.caseId).filter((id): id is number => typeof id === "number"),
+                                                                    ]}
+                                                                />
                                                             )}
                                                         </>
                                                     )}
