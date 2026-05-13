@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { Search, Sparkles, Plus, Minus, X, CalendarPlus, AlertTriangle, Home } from "lucide-react";
+import { Search, Sparkles, Plus, Minus, X, CalendarPlus, AlertTriangle, Home, Clock } from "lucide-react";
 
 type LeaveTypeRow = { id: number; name: string; code: string; daysPerYear: number; applicable?: boolean };
 type Bal          = { id: number | null; total: number; used: number; pending: number };
@@ -41,19 +41,44 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
 
   // ── Edit modal ────────────────────────────────────────────────
   const [editing, setEditing] = useState<{ emp: EmpRow; type: LeaveTypeRow; bal: Bal } | null>(null);
-  const [form, setForm] = useState({ total: "", used: "", pending: "" });
+  // `unused` is derived (total − used) but tracked in form state so HR can
+  // edit it directly. Editing total keeps used fixed and recomputes unused;
+  // editing unused keeps total fixed and recomputes used. Saved usedDays
+  // comes from form.used, which is always kept consistent with these rules.
+  const [form, setForm] = useState({ total: "", used: "", unused: "", pending: "" });
   const [busy, setBusy] = useState(false);
   const totalInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!editing) return;
+    const t = editing.bal.total;
+    const u = editing.bal.used;
     setForm({
-      total:   String(editing.bal.total),
-      used:    String(editing.bal.used),
+      total:   String(t),
+      used:    String(u),
+      unused:  String(Math.max(0, t - u)),
       pending: String(editing.bal.pending),
     });
     requestAnimationFrame(() => totalInputRef.current?.select());
   }, [editing]);
+
+  // Helpers that keep total/used/unused in sync when any one of them moves.
+  // Total changed → used stays, unused = total − used.
+  const setTotalKeepingUsed = (nextTotal: string) => {
+    setForm((f) => {
+      const t = Number(nextTotal || 0);
+      const u = Number(f.used || 0);
+      return { ...f, total: nextTotal, unused: String(Math.max(0, t - u)) };
+    });
+  };
+  // Unused changed → total stays, used = total − unused.
+  const setUnusedKeepingTotal = (nextUnused: string) => {
+    setForm((f) => {
+      const t = Number(f.total || 0);
+      const un = Number(nextUnused || 0);
+      return { ...f, unused: nextUnused, used: String(Math.max(0, t - un)) };
+    });
+  };
 
   const openEdit = (emp: EmpRow, type: LeaveTypeRow) =>
     setEditing({ emp, type, bal: emp.balances[type.id] });
@@ -87,7 +112,8 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
   const adjustTotal = (delta: number) => {
     setForm((f) => {
       const next = Math.max(0, Number(f.total || 0) + delta);
-      return { ...f, total: String(next) };
+      const u    = Number(f.used || 0);
+      return { ...f, total: String(next), unused: String(Math.max(0, next - u)) };
     });
   };
 
@@ -472,7 +498,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                     step="0.01"
                     min="0"
                     value={form.total}
-                    onChange={(e) => setForm((f) => ({ ...f, total: e.target.value }))}
+                    onChange={(e) => setTotalKeepingUsed(e.target.value)}
                     className="h-9 flex-1 rounded-md border border-slate-200 bg-white px-3 text-center text-[16px] font-semibold tabular-nums text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30"
                   />
                   <button onClick={() => adjustTotal( 1)} className="flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-100">
@@ -483,7 +509,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                   Policy default: <strong className="text-slate-600">{editing.type.daysPerYear} day(s)</strong>
                   {Number(form.total) !== editing.type.daysPerYear && form.total !== "" ? (
                     <button
-                      onClick={() => setForm((f) => ({ ...f, total: String(editing!.type.daysPerYear) }))}
+                      onClick={() => setTotalKeepingUsed(String(editing!.type.daysPerYear))}
                       className="ml-2 text-[11px] font-semibold text-[#008CFF] hover:underline"
                     >
                       Use policy
@@ -492,41 +518,48 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                 </p>
               </div>
 
-              {/* Used / Pending — secondary, less emphasis */}
-              <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                <p className="mb-2 text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-500">Already consumed (auto-managed)</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Used</label>
+              {/* Unused balance — read-only display. HR only edits the
+                  entitlement above; "used" is auto-managed by the leaves
+                  flow (created on approve, freed on reject). The number
+                  shown here = currentTotal − usedDaysFromDB, recomputed
+                  live so HR sees the impact of bumping the entitlement. */}
+              <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3.5">
+                <div className="flex items-center justify-between gap-3">
+                  <label
+                    htmlFor="unused-balance-input"
+                    className="flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-wider text-amber-700"
+                  >
+                    <Clock size={11} strokeWidth={2.5} />
+                    Unused balance
+                  </label>
+                  <div className="flex items-center gap-1 shrink-0">
                     <input
-                      type="number" step="0.01" min="0"
-                      value={form.used}
-                      onChange={(e) => setForm((f) => ({ ...f, used: e.target.value }))}
-                      className="mt-1 w-full rounded border border-slate-200 bg-white px-2.5 py-1.5 text-center text-[13px] tabular-nums text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30"
+                      id="unused-balance-input"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={form.unused}
+                      onChange={(e) => setUnusedKeepingTotal(e.target.value)}
+                      aria-label="Unused balance"
+                      className="w-20 rounded-md border border-amber-200 bg-white px-2 py-1.5 text-center text-[18px] font-bold tabular-nums text-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
                     />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Pending</label>
-                    <input
-                      type="number" step="0.01" min="0"
-                      value={form.pending}
-                      onChange={(e) => setForm((f) => ({ ...f, pending: e.target.value }))}
-                      className="mt-1 w-full rounded border border-slate-200 bg-white px-2.5 py-1.5 text-center text-[13px] tabular-nums text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30"
-                    />
+                    <span className="text-[12px] text-amber-700/70 tabular-nums">
+                      / {(() => {
+                        const t = Number(form.total || 0);
+                        return t % 1 === 0 ? t.toFixed(0) : t.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+                      })()}
+                    </span>
                   </div>
                 </div>
-                <p className="mt-2 text-[10.5px] leading-snug text-slate-500">
-                  These update automatically when leaves are approved. Edit them manually only to fix bad data.
-                </p>
               </div>
 
-              {/* Preview chip */}
-              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2.5">
-                <span className="text-[11.5px] font-medium uppercase tracking-wider text-slate-500">After save</span>
-                <PreviewChip
+              {/* Preview — what saves to the DB. Used stays as it was
+                  loaded (auto-managed); only the entitlement changes. */}
+              <div className="rounded-lg bg-slate-50 px-3 py-2.5">
+                <p className="mb-1.5 text-[11.5px] font-medium uppercase tracking-wider text-slate-500">After save</p>
+                <PreviewBreakdown
                   total={Number(form.total || 0)}
                   used={Number(form.used || 0)}
-                  pending={Number(form.pending || 0)}
                 />
               </div>
             </div>
@@ -848,18 +881,38 @@ function BalanceChip({ bal, onClick }: { bal: Bal; onClick: () => void }) {
   );
 }
 
-function PreviewChip({ total, used, pending }: { total: number; used: number; pending: number }) {
-  const remaining = total - used - pending;
-  const tone =
-    total <= 0      ? "bg-slate-100 text-slate-600" :
-    remaining < 0   ? "bg-red-100 text-red-700"      :
-    remaining < 1   ? "bg-amber-100 text-amber-700"  :
-                      "bg-emerald-100 text-emerald-700";
+function PreviewBreakdown({ total, used }: { total: number; used: number }) {
+  const unused = Math.max(0, total - used);
+  const fmt = (n: number) => (n % 1 === 0 ? n.toFixed(0) : n.toFixed(2).replace(/0+$/, "").replace(/\.$/, ""));
+  const unusedTone =
+    total <= 0    ? "bg-slate-100 text-slate-600" :
+    unused < 1    ? "bg-amber-100 text-amber-700"  :
+                    "bg-emerald-100 text-emerald-700";
   return (
-    <span className={`inline-flex items-baseline gap-1 rounded-md px-3 py-1 ${tone}`}>
-      <span className="text-[15px] font-bold tabular-nums">{remaining}</span>
-      <span className="text-[11px] font-medium tabular-nums opacity-70">remaining</span>
-      <span className="ml-2 text-[11px] tabular-nums opacity-50">/ {total} total</span>
-    </span>
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2 text-[12px] tabular-nums">
+        <span className="flex items-center gap-1.5 text-slate-700">
+          <span className="inline-block h-2 w-2 rounded-full bg-slate-400" />
+          Total entitlement
+        </span>
+        <span className="font-semibold text-slate-800">{fmt(total)}</span>
+      </div>
+      <div className="flex items-center justify-between gap-2 text-[12px] tabular-nums">
+        <span className="flex items-center gap-1.5 text-emerald-700">
+          <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+          − Used (already taken)
+        </span>
+        <span className="font-semibold text-emerald-700">{fmt(used)}</span>
+      </div>
+      {/* Final unused balance — emphasized; shown as X / Y for clarity. */}
+      <div className={`mt-1 flex items-center justify-between gap-2 rounded-md px-2 py-1.5 ${unusedTone}`}>
+        <span className="text-[11.5px] font-bold uppercase tracking-wider opacity-80">
+          = Unused (leave balance)
+        </span>
+        <span className="text-[14px] font-bold tabular-nums">
+          {fmt(unused)} <span className="opacity-60 font-normal">/ {fmt(total)}</span>
+        </span>
+      </div>
+    </div>
   );
 }
