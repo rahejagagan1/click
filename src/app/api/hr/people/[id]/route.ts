@@ -182,9 +182,66 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       role: newRole, orgLevel, managerId, inlineManagerId, teamCapsule,
     } = body;
 
-    const target = await prisma.user.findUnique({ where: { id }, select: { id: true } });
+    const target = await prisma.user.findUnique({ where: { id }, select: { id: true, name: true } });
     if (!target) return NextResponse.json({ error: "Employee not found" }, { status: 404 });
-    const existing = await prisma.employeeProfile.findUnique({ where: { userId: id } });
+    let existing = await prisma.employeeProfile.findUnique({ where: { userId: id } });
+    // Tracks whether we just allocated an HRM on this request — so the
+    // "HRM No. cannot be empty" guard below doesn't reject a save that
+    // came in with a blank HRM field but already got one assigned here.
+    let justAutoCreated = false;
+
+    // Some users (legacy rows, manually-created accounts) have no
+    // EmployeeProfile. Without this, every save below silently no-ops
+    // (the route returns ok but no row exists to UPDATE), which is why
+    // HR's edits "disappear on reload." Mirror the auto-create pattern
+    // from /api/hr/profile so the first save materializes the profile.
+    if (!existing) {
+      const series = await prisma.employeeNumberSeries.findFirst({
+        where: { isActive: true }, select: { id: true },
+      });
+      if (!series) {
+        return NextResponse.json(
+          { error: "No active EmployeeNumberSeries — ask HR to create one before editing this profile." },
+          { status: 409 },
+        );
+      }
+      const fullName = (target.name ?? "User").trim();
+      const firstSpace = fullName.indexOf(" ");
+      const fNameSeed = (typeof firstName === "string" && firstName.trim()) ||
+                        (firstSpace === -1 ? fullName : fullName.slice(0, firstSpace)) || "User";
+      const lNameSeed = (typeof lastName === "string" && lastName.trim()) ||
+                        (firstSpace === -1 ? "—" : fullName.slice(firstSpace + 1)) || "—";
+      try {
+        existing = await prisma.$transaction(async (tx) => {
+          const bumped = await tx.employeeNumberSeries.update({
+            where: { id: series.id },
+            data:  { nextNumber: { increment: 1 } },
+            select: { id: true, prefix: true, nextNumber: true },
+          });
+          const claimed = bumped.nextNumber - 1;
+          const allocatedEmployeeId = (typeof employeeId === "string" && employeeId.trim())
+            || `${bumped.prefix}${claimed}`;
+          return tx.employeeProfile.create({
+            data: {
+              userId:         id,
+              employeeId:     allocatedEmployeeId,
+              firstName:      fNameSeed.slice(0, 60),
+              lastName:       lNameSeed.slice(0, 60),
+              workCountry:    "India",
+              nationality:    "Indian",
+              numberSeriesId: bumped.id,
+            },
+          });
+        });
+        justAutoCreated = true;
+      } catch (e) {
+        console.error("[people PUT] auto-create EmployeeProfile failed:", e);
+        return NextResponse.json(
+          { error: "Could not create employee profile — try again or complete onboarding for this user." },
+          { status: 500 },
+        );
+      }
+    }
 
     // Build the EmployeeProfile patch using only the typed columns.
     // Each field is only included when explicitly sent (not undefined) so
@@ -196,9 +253,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (employeeId !== undefined) {
       const trimmed = String(employeeId ?? "").trim();
       if (!trimmed) {
-        return NextResponse.json({ error: "HRM No. cannot be empty." }, { status: 400 });
-      }
-      if (existing && trimmed !== existing.employeeId) {
+        // If we just allocated an HRM during auto-create, accept the
+        // blank submission — the profile already has its assigned number.
+        if (justAutoCreated) {
+          // fall through; profileData.employeeId stays unset
+        } else {
+          return NextResponse.json({ error: "HRM No. cannot be empty." }, { status: 400 });
+        }
+      } else if (existing && trimmed !== existing.employeeId) {
         const clash = await prisma.employeeProfile.findUnique({
           where: { employeeId: trimmed },
           select: { userId: true },
