@@ -6,19 +6,32 @@ import { getMonthlyReportWindow } from "@/lib/reports/monthly-window";
 export const dynamic = "force-dynamic";
 
 type Params = Promise<{ managerId: string; month: string }>;
-// Reporting window: 4th of month M through end of day 3 of month M+1. See
-// src/lib/reports/monthly-window.ts for the canonical definition.
 
+// GET /api/reports/{managerId}/monthly/{month}/eligible-cases?year=Y
+//
+// Returns the universe of cases a manager could pick from when using
+// "+ Add case" in Section 3. Broader than contributor-stats — that one is
+// scoped to "auto-detected cases per team member"; this one returns ALL
+// cases the manager's team could have worked on in the reporting window,
+// so a manager can credit one of their reports for work that was missed
+// or mis-attributed by the auto-detector.
+//
+// Scope:
+//   - role=editor → cases with an "Editing" subtask done in the window,
+//     where Case.editorUserId is in the manager's team
+//   - role=writer → cases with a "Scripting" subtask done in the window,
+//     where Case.writerUserId is in the manager's team
+//
+// Per-case payload: id, name, qualityScore (role-appropriate), currentOwnerName.
 export async function GET(req: NextRequest, { params }: { params: Params }) {
     try {
         const { errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
 
-
         const { managerId: managerIdRaw, month: monthRaw } = await params;
-        const managerId = parseInt(managerIdRaw);
-        const monthIndex = parseInt(monthRaw); // 0-based
-        const year = parseInt(req.nextUrl.searchParams.get("year") ?? "");
+        const managerId  = parseInt(managerIdRaw);
+        const monthIndex = parseInt(monthRaw);
+        const year       = parseInt(req.nextUrl.searchParams.get("year") ?? "");
 
         if (isNaN(managerId) || isNaN(monthIndex) || isNaN(year)) {
             return NextResponse.json({ error: "Invalid parameters" }, { status: 400 });
@@ -26,35 +39,21 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
 
         const { windowStart, windowEnd } = getMonthlyReportWindow(year, monthIndex);
 
-        // Get all team members (editors + writers) under this manager
         const manager = await prisma.user.findUnique({
             where: { id: managerId },
             include: {
                 teamMembers: {
-                    where: {
-                        role: { in: ["editor", "writer"] },
-                        isActive: true,
-                    },
+                    where: { role: { in: ["editor", "writer"] }, isActive: true },
                     select: { id: true, name: true, role: true },
                 },
             },
         });
-
-        if (!manager) {
-            return NextResponse.json({ error: "Manager not found" }, { status: 404 });
-        }
+        if (!manager) return NextResponse.json({ error: "Manager not found" }, { status: 404 });
 
         const editorIds = manager.teamMembers.filter((m) => m.role === "editor").map((m) => m.id);
         const writerIds = manager.teamMembers.filter((m) => m.role === "writer").map((m) => m.id);
 
-        if (editorIds.length === 0 && writerIds.length === 0) {
-            return NextResponse.json({
-                editorStats: {}, writerStats: {},
-                editorCases: {}, writerCases: {},
-            });
-        }
-
-        // Find the Editing/Scripting subtasks finished in this month (with grace)
+        // Resolve the team's caseIds via the relevant subtask kind done in window.
         const [editingSubtasks, scriptingSubtasks] = await Promise.all([
             editorIds.length
                 ? prisma.subtask.findMany({
@@ -81,44 +80,48 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         const editorCaseIds = [...new Set(editingSubtasks.map((s) => s.caseId))];
         const writerCaseIds = [...new Set(scriptingSubtasks.map((s) => s.caseId))];
 
-        const [editorCaseRows, writerCaseRows] = await Promise.all([
+        const [editorRows, writerRows] = await Promise.all([
             editorCaseIds.length
                 ? prisma.case.findMany({
                     where: { id: { in: editorCaseIds }, editorUserId: { in: editorIds } },
-                    select: { id: true, name: true, editorUserId: true, editorQualityScore: true },
+                    select: {
+                        id: true,
+                        name: true,
+                        editorQualityScore: true,
+                        editor: { select: { name: true } },
+                    },
                     orderBy: { name: "asc" },
                 })
-                : Promise.resolve([] as { id: number; name: string; editorUserId: number | null; editorQualityScore: number | null }[]),
+                : Promise.resolve([] as any[]),
             writerCaseIds.length
                 ? prisma.case.findMany({
                     where: { id: { in: writerCaseIds }, writerUserId: { in: writerIds } },
-                    select: { id: true, name: true, writerUserId: true, writerQualityScore: true },
+                    select: {
+                        id: true,
+                        name: true,
+                        writerQualityScore: true,
+                        writer: { select: { name: true } },
+                    },
                     orderBy: { name: "asc" },
                 })
-                : Promise.resolve([] as { id: number; name: string; writerUserId: number | null; writerQualityScore: number | null }[]),
+                : Promise.resolve([] as any[]),
         ]);
 
-        // Group case names per editor / writer (with quality score for inline display).
-        const editorCases: Record<number, { id: number; name: string; qualityScore: number | null }[]> = {};
-        const writerCases: Record<number, { id: number; name: string; qualityScore: number | null }[]> = {};
+        const editorCases = editorRows.map((c: any) => ({
+            id:               c.id,
+            name:             c.name,
+            qualityScore:     c.editorQualityScore,
+            currentOwnerName: c.editor?.name ?? null,
+        }));
+        const writerCases = writerRows.map((c: any) => ({
+            id:               c.id,
+            name:             c.name,
+            qualityScore:     c.writerQualityScore,
+            currentOwnerName: c.writer?.name ?? null,
+        }));
 
-        for (const c of editorCaseRows) {
-            if (c.editorUserId == null) continue;
-            (editorCases[c.editorUserId] ??= []).push({ id: c.id, name: c.name, qualityScore: c.editorQualityScore });
-        }
-        for (const c of writerCaseRows) {
-            if (c.writerUserId == null) continue;
-            (writerCases[c.writerUserId] ??= []).push({ id: c.id, name: c.name, qualityScore: c.writerQualityScore });
-        }
-
-        // Build count maps from the case lists so count and names always agree.
-        const editorStats: Record<number, number> = {};
-        const writerStats: Record<number, number> = {};
-        for (const [uid, list] of Object.entries(editorCases)) editorStats[Number(uid)] = list.length;
-        for (const [uid, list] of Object.entries(writerCases)) writerStats[Number(uid)] = list.length;
-
-        return NextResponse.json({ editorStats, writerStats, editorCases, writerCases });
-    } catch (error) {
-        return serverError(error, "contributor-stats");
+        return NextResponse.json({ editorCases, writerCases });
+    } catch (e) {
+        return serverError(e, "eligible-cases");
     }
 }

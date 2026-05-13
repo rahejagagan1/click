@@ -18,11 +18,12 @@ type Row = {
   rawStatus: string; locationAddress: string | null; locationMode: string | null;
   locationLat: number | null; locationLng: number | null;
   status: "office" | "remote" | "on_leave" | "absent";
+  wfhToday: boolean;
 };
 
 type Counts = {
   total: number; present: number; office: number; remote: number;
-  onLeave: number; notClockedIn: number; late: number;
+  wfh: number; onLeave: number; notClockedIn: number; late: number;
 };
 
 const fmtTime = (iso: string | null) =>
@@ -435,7 +436,7 @@ export default function AttendanceDashboardPanel() {
     { refreshInterval: 60_000 }
   );
 
-  const [tab, setTab] = useState<"all" | "office" | "remote" | "on_leave" | "absent">("all");
+  const [tab, setTab] = useState<"all" | "office" | "remote" | "wfh" | "on_leave" | "absent">("all");
   const [search, setSearch] = useState("");
   const [fDept, setFDept] = useState<Set<string>>(new Set());
 
@@ -454,7 +455,7 @@ export default function AttendanceDashboardPanel() {
   const monthRows = monthData?.rows ?? [];
 
   const rows: Row[] = data?.rows ?? [];
-  const counts: Counts = data?.counts ?? { total: 0, present: 0, office: 0, remote: 0, onLeave: 0, notClockedIn: 0, late: 0 };
+  const counts: Counts = data?.counts ?? { total: 0, present: 0, office: 0, remote: 0, wfh: 0, onLeave: 0, notClockedIn: 0, late: 0 };
 
   const deptOpts = useMemo(() => {
     const dSet = new Set<string>();
@@ -465,7 +466,14 @@ export default function AttendanceDashboardPanel() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
-      if (tab !== "all" && r.status !== tab) return false;
+      // WFH is an overlay tab — gated on the wfhToday flag, not status,
+      // so a WFH applicant who clocked in remote still appears here even
+      // though their status is "remote".
+      if (tab === "wfh") {
+        if (!r.wfhToday) return false;
+      } else if (tab !== "all" && r.status !== tab) {
+        return false;
+      }
       if (fDept.size > 0 && (!r.department || !fDept.has(r.department))) return false;
       if (q) {
         const hay = `${r.name} ${r.email} ${r.employeeId ?? ""} ${r.designation ?? ""}`.toLowerCase();
@@ -505,6 +513,7 @@ export default function AttendanceDashboardPanel() {
     { key: "all",      label: "All",              n: counts.total        },
     { key: "office",   label: "In Office",        n: counts.office       },
     { key: "remote",   label: "Remote Clock-in",  n: counts.remote       },
+    { key: "wfh",      label: "WFH",              n: counts.wfh          },
     { key: "on_leave", label: "On Leave",         n: counts.onLeave      },
     { key: "absent",   label: "Not Clocked In",   n: counts.notClockedIn },
   ];
