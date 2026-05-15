@@ -233,8 +233,9 @@ export default function HRAdminPage() {
   return (
     <div className="min-h-screen bg-[#f4f7f8] dark:bg-[#011627]">
 
-      {/* Header */}
-      <div className="bg-white dark:bg-[#001529] border-b border-slate-200 dark:border-white/[0.06] px-6 py-4">
+      {/* Header — sticky below the global app header (h-[68px]) so it
+          stays visible while the right-side content scrolls. */}
+      <div className="sticky top-[68px] z-20 bg-white dark:bg-[#001529] border-b border-slate-200 dark:border-white/[0.06] px-6 py-4">
         <div className="flex items-center gap-3">
           <Settings className="w-5 h-5 text-[#008CFF]" />
           <div>
@@ -244,10 +245,15 @@ export default function HRAdminPage() {
         </div>
       </div>
 
-      <div className="flex gap-0 h-full">
+      <div className="flex gap-0 h-full items-start">
 
-        {/* Sidebar tabs — every section is an in-page state tab. */}
-        <div className="w-[240px] shrink-0 p-4 space-y-1 border-r border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/40">
+        {/* Sidebar tabs — every section is an in-page state tab.
+            `sticky top-[145px]` (= global header 68px + HR header ~77px)
+            keeps the rail pinned just below the two stacked headers.
+            `max-h-[calc(100vh-145px)] overflow-y-auto` lets the rail
+            itself scroll internally when its list is taller than the
+            remaining viewport (e.g. with Permissions flyout expanded). */}
+        <div className="w-[240px] shrink-0 p-4 space-y-1 border-r border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/40 sticky top-[145px] z-10 max-h-[calc(100vh-145px)] overflow-y-auto">
           {visibleTabs.map((t) => {
             const active = tab === t.key;
             const base = `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left ${
@@ -696,7 +702,7 @@ export default function HRAdminPage() {
                   <Plus className="w-3.5 h-3.5" />Add Holiday
                 </button>
               </div>
-              <div className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+              <div className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-slate-100 dark:border-white/[0.04]">
