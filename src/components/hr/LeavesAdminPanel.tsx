@@ -375,9 +375,9 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
       {/* ── Matrix ─────────────────────────────────────────────────── */}
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
         <table className="w-full min-w-[760px]">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50/70">
-              <th className="sticky left-0 z-[1] bg-slate-50/70 px-5 py-3 text-left text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-500 min-w-[260px]">
+          <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur-sm">
+            <tr className="border-b border-slate-100">
+              <th className="sticky left-0 z-20 bg-slate-50/95 px-5 py-3 text-left text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-500 min-w-[260px]">
                 Employee
               </th>
               {leaveTypes.map((lt) => (

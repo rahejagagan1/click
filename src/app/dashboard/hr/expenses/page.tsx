@@ -296,7 +296,7 @@ export default function ExpensesPage() {
       {/* Expense Claims Table */}
       {mainTab === "expenses" && (
         <div className="px-6 pb-8">
-          <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+          <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-white/[0.06]">
@@ -374,7 +374,7 @@ export default function ExpensesPage() {
       {/* Travel Requests Table */}
       {mainTab === "travel" && (
         <div className="px-6 pb-8">
-          <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+          <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-white/[0.06]">
