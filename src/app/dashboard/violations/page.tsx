@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import UserAvatar from "@/components/ui/user-avatar";
 import SearchableSelect from "@/components/ui/searchable-select";
+import { DateField } from "@/components/ui/date-field";
 
 interface ViolationUser {
     id: number;
@@ -875,9 +876,8 @@ export default function ViolationsPage() {
                         </div>
                         <div>
                             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Date of Violation</label>
-                            <input type="date" value={newViolation.violationDate} onChange={e => setNewViolation(p => ({ ...p, violationDate: e.target.value }))}
-                                onClick={e => (e.target as HTMLInputElement).showPicker()}
-                                className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30 cursor-pointer" />
+                            <DateField value={newViolation.violationDate} onChange={(v) => setNewViolation(p => ({ ...p, violationDate: v }))}
+                                className="w-full" />
                         </div>
                     </div>
 

@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import SalaryStructurePanel from "@/components/hr/SalaryStructurePanel";
 import CustomSelect from "@/components/ui/CustomSelect";
+import { DateField } from "@/components/ui/date-field";
 import { DEPARTMENTS } from "@/lib/departments";
 
 type Manager = { id: number; name: string };
@@ -415,8 +416,10 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
           </div>
           <div>
             <label className={cls.label}>Date of Birth</label>
-            <input type="date" className={cls.field} value={basic.dateOfBirth}
-              onChange={(e) => setBasic({ ...basic, dateOfBirth: e.target.value })} />
+            <DateField value={basic.dateOfBirth}
+              onChange={(v) => setBasic({ ...basic, dateOfBirth: v })}
+              max={new Date().toISOString().slice(0,10)}
+              className="w-full" />
           </div>
           <div>
             <label className={cls.label}>Gender</label>
@@ -753,14 +756,16 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
             <label className={cls.label}>
               {job.employmentType === "intern" ? "Internship Start Date" : "Joining Date"}
             </label>
-            <input type="date" className={cls.field} value={job.joiningDate}
-              onChange={(e) => setJob({ ...job, joiningDate: e.target.value })} />
+            <DateField value={job.joiningDate}
+              onChange={(v) => setJob({ ...job, joiningDate: v })}
+              className="w-full" />
           </div>
           {job.employmentType === "intern" && (
             <div>
               <label className={cls.label}>Internship End Date</label>
-              <input type="date" className={cls.field} value={job.internshipEndDate}
-                onChange={(e) => setJob({ ...job, internshipEndDate: e.target.value })} />
+              <DateField value={job.internshipEndDate}
+                onChange={(v) => setJob({ ...job, internshipEndDate: v })}
+                className="w-full" />
             </div>
           )}
           <div>

@@ -10,6 +10,7 @@ import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
 import LeavesAdminPanel from "@/components/hr/LeavesAdminPanel";
+import { DateField } from "@/components/ui/date-field";
 import {
   isHRAdmin,
   isFullHRAdmin,
@@ -114,7 +115,11 @@ export default function HRAdminPage() {
 
   const { data: leaveTypes = [] } = useSWR("/api/hr/admin/leave-types", fetcher);
   const { data: shifts = [] }     = useSWR("/api/hr/admin/shifts", fetcher);
-  const { data: employees = [] }  = useSWR("/api/hr/employees", fetcher);
+  // Admin tabs use this for headcount + department / manager breakdowns —
+  // only active employees should be counted, otherwise offboarded folks
+  // would inflate the totals and "Show inactive" toggle on the People
+  // directory becomes the single place HR sees inactive people.
+  const { data: employees = [] }  = useSWR("/api/hr/employees?isActive=true", fetcher);
   const { data: holidays = [] }   = useSWR("/api/hr/admin/holidays", fetcher);
   // Pending approvals count — feeds the badge on the "Approvals" rail item.
   const { data: approvalsSummary } = useSWR<{ byTab: Record<string, number>; total: number }>(
@@ -813,8 +818,8 @@ export default function HRAdminPage() {
               </div>
               <div>
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Date *</label>
-                <input type="date" value={holidayForm.date} onChange={e => setHolidayForm(f => ({ ...f, date: e.target.value }))}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-[13px] text-slate-800 dark:text-white focus:outline-none" />
+                <DateField value={holidayForm.date} onChange={(v) => setHolidayForm(f => ({ ...f, date: v }))}
+                  className="mt-1 w-full" />
               </div>
               <label className="flex items-center gap-2 text-[13px] text-slate-700 dark:text-slate-300 cursor-pointer">
                 <input type="checkbox" checked={holidayForm.isOptional} onChange={e => setHolidayForm(f => ({ ...f, isOptional: e.target.checked }))} className="w-4 h-4 accent-[#008CFF]" />
