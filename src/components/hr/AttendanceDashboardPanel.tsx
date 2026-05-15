@@ -619,9 +619,10 @@ export default function AttendanceDashboardPanel() {
           ) : filtered.length === 0 ? (
             <p className="py-16 text-center text-[13px] text-slate-400">No employees match the current filters</p>
           ) : (
+            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
             <table className="w-full">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/60">
+              <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur-sm">
+                <tr className="border-b border-slate-200">
                   {["EMPLOYEE","EMP #","DEPARTMENT","TEAM CAPSULE","CLOCK IN","CLOCK OUT","DURATION","LOCATION","STATUS"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">{h}</th>
                   ))}
@@ -680,6 +681,7 @@ export default function AttendanceDashboardPanel() {
                 ))}
               </tbody>
             </table>
+            </div>
           )
         ) : (
           monthLoading ? (
@@ -687,9 +689,10 @@ export default function AttendanceDashboardPanel() {
           ) : filteredMonth.length === 0 ? (
             <p className="py-16 text-center text-[13px] text-slate-400">No employees match the current filters</p>
           ) : (
+            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
             <table className="w-full">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/60">
+              <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur-sm">
+                <tr className="border-b border-slate-200">
                   {["EMPLOYEE","EMP #","DEPARTMENT","PRESENT","ON LEAVE","LATE","HALF-DAY","ABSENT","AVG HRS"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">{h}</th>
                   ))}
@@ -721,6 +724,7 @@ export default function AttendanceDashboardPanel() {
                 ))}
               </tbody>
             </table>
+            </div>
           )
         )}
       </div>

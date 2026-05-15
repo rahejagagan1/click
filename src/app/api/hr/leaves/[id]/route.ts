@@ -167,6 +167,75 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (application.status === "pending") {
       if (!isDirectManager && !isFinalApprover) return NextResponse.json({ error: "Not authorised" }, { status: 403 });
 
+      // CEO fast-path: when the L1 approver is the CEO (and they're the
+      // direct manager — i.e. the report-to chain ends at the CEO), the
+      // L2 stage is them too. Collapse both stages into a single click so
+      // the CEO doesn't approve, then have to come back and approve their
+      // own decision. Strictly orgLevel="ceo" — other final-approver roles
+      // (HR Manager, Special Access, Developer) still go through the
+      // normal two-step flow.
+      const isCeoAsDirectManager = self.orgLevel === "ceo" && isDirectManager;
+      if (isCeoAsDirectManager) {
+        const result = await prisma.$transaction(async (tx) => {
+          const { count } = await tx.leaveApplication.updateMany({
+            where: { id: appId, status: "pending" },
+            data:  {
+              status:            "approved",
+              approvedById:      myId,
+              approvedAt:        new Date(),
+              approvalNote,
+              finalApprovedById: myId,
+              finalApprovedAt:   new Date(),
+              finalApprovalNote: approvalNote,
+            },
+          });
+          if (count === 0) return { raced: true as const };
+          // Balance: pending → used (same as the L2 finaliser).
+          await tx.leaveBalance.updateMany({
+            where: { userId: application.userId, leaveTypeId: application.leaveTypeId, year },
+            data: { pendingDays: { decrement: totalDays }, usedDays: { increment: totalDays } },
+          });
+          return { raced: false as const };
+        });
+        if (result.raced) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
+
+        // Mark each working day in the range as on_leave (mirrors the L2 path).
+        const from = new Date(application.fromDate);
+        const to   = new Date(application.toDate);
+        const cur  = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
+        const end  = new Date(Date.UTC(to.getUTCFullYear(),   to.getUTCMonth(),   to.getUTCDate()));
+        while (cur.getTime() <= end.getTime()) {
+          const dow = cur.getUTCDay();
+          if (dow !== 0 && dow !== 6) {
+            const dateOnly = new Date(cur);
+            await prisma.attendance.upsert({
+              where:  { userId_date: { userId: application.userId, date: dateOnly } },
+              create: { userId: application.userId, date: dateOnly, status: "on_leave" },
+              update: { status: "on_leave" },
+            });
+          }
+          cur.setUTCDate(cur.getUTCDate() + 1);
+        }
+
+        await writeAuditLog({
+          req, actorId: myId, actorEmail: self?.email ?? null,
+          action: "leave.approve_ceo_direct", entityType: "LeaveApplication", entityId: appId,
+          before: { status: "pending" }, after: { status: "approved", approvalNote },
+        });
+
+        const extrasCeo = application.notifyUserIds ?? [];
+        await notifyUsers({
+          actorId:  myId,
+          userIds:  [application.userId, ...extrasCeo],
+          type:     "leave",
+          entityId: appId,
+          title:    `${application.user?.name || "An employee"}'s ${application.leaveType?.name || "leave"} is approved`,
+          body:     `${rangeLabel} — approved directly by the CEO.${noteSuffix(approvalNote)}`,
+          linkUrl:  "/dashboard/hr/leaves",
+        });
+        return NextResponse.json({ success: true });
+      }
+
       // Race-safe: only one stage-1 approval wins. Notifications only fire for the winner.
       const { count } = await prisma.leaveApplication.updateMany({
         where: { id: appId, status: "pending" },
