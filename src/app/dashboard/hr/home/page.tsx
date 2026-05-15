@@ -2316,7 +2316,7 @@ export default function HRHomePage() {
                       <button
                         onClick={isMobileDevice ? undefined : clockIn}
                         disabled={clockingIn || isMobileDevice}
-                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 bg-green-600 text-white text-[11px] font-semibold transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{
                           background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
                           boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
@@ -2343,7 +2343,7 @@ export default function HRHomePage() {
                             finally { setClockingOut(false); setConfirmingClockOut(false); }
                           }}
                           disabled={clockingOut || isMobileDevice}
-                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3 bg-red-600 text-white text-[11px] font-semibold transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
                           style={{
                             background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
                             boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
@@ -2354,7 +2354,7 @@ export default function HRHomePage() {
                         <button
                           onClick={() => setConfirmingClockOut(false)}
                           disabled={clockingOut}
-                          className="h-[24px] whitespace-nowrap rounded-[3px] px-2.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
+                          className="h-[24px] whitespace-nowrap rounded-[3px] px-2.5 bg-slate-700 text-white text-[11px] font-semibold transition hover:brightness-110 disabled:opacity-50"
                           style={{
                             background: "linear-gradient(180deg, #334155 0%, #1e293b 100%)",
                             boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.12), 0 1px 2px rgba(0,0,0,0.10)",
@@ -2368,7 +2368,7 @@ export default function HRHomePage() {
                         <button
                           onClick={isMobileDevice ? undefined : () => setConfirmingClockOut(true)}
                           disabled={isMobileDevice}
-                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 bg-red-600 text-white text-[11px] font-semibold transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
                           style={{
                             background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
                             boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
@@ -2391,7 +2391,7 @@ export default function HRHomePage() {
                       <button
                         onClick={isMobileDevice ? undefined : clockIn}
                         disabled={clockingIn || isMobileDevice}
-                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 bg-green-600 text-white text-[11px] font-semibold transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{
                           background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
                           boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
