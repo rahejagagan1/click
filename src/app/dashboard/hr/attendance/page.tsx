@@ -439,7 +439,7 @@ function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefil
   const balanceUrl = form.date
     ? `/api/hr/attendance/regularize/balance?date=${form.date}`
     : `/api/hr/attendance/regularize/balance`;
-  const { data: balance } = useSWR<{ used: number; limit: number; remaining: number; month: string }>(
+  const { data: balance } = useSWR<{ used: number; limit: number | null; remaining: number | null; unlimited?: boolean; month: string }>(
     balanceUrl, fetcher, { keepPreviousData: true, revalidateOnFocus: false }
   );
 
@@ -473,16 +473,23 @@ function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefil
         <div className="px-6 py-5 space-y-4">
           {err && <p className="text-[12px] text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
           {balance && (
-            <div className={`flex items-center justify-between px-3 py-2 rounded-lg text-[12px] ${
-              balance.remaining === 0
-                ? "bg-red-500/10 text-red-500"
-                : balance.remaining === 1
-                ? "bg-amber-500/10 text-amber-600"
-                : "bg-[#008CFF]/10 text-[#008CFF]"
-            }`}>
-              <span className="font-semibold">{balance.used} of {balance.limit} used · {balance.month}</span>
-              <span>{balance.remaining} left</span>
-            </div>
+            balance.unlimited ? (
+              <div className="flex items-center justify-between px-3 py-2 rounded-lg text-[12px] bg-emerald-500/10 text-emerald-600">
+                <span className="font-semibold">{balance.used} used · {balance.month}</span>
+                <span>Unlimited</span>
+              </div>
+            ) : (
+              <div className={`flex items-center justify-between px-3 py-2 rounded-lg text-[12px] ${
+                balance.remaining === 0
+                  ? "bg-red-500/10 text-red-500"
+                  : balance.remaining === 1
+                  ? "bg-amber-500/10 text-amber-600"
+                  : "bg-[#008CFF]/10 text-[#008CFF]"
+              }`}>
+                <span className="font-semibold">{balance.used} of {balance.limit} used · {balance.month}</span>
+                <span>{balance.remaining} left</span>
+              </div>
+            )
           )}
           <div>
             <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>

@@ -1002,6 +1002,10 @@ model EmployeeProfile {
   attendanceNumber   String?
   timeTrackingPolicy String?
   penalizationPolicy String?
+  // ── ABOUT-tab bios (user-editable on /dashboard/hr/profile) ──
+  about              String?
+  jobLove            String?
+  hobbies            String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 

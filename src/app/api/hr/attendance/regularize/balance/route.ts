@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { istMonthRange, istTodayDateOnly } from "@/lib/ist-date";
+import { isRegularizationUnlimited } from "@/app/api/hr/policy/regularization-unlimited/route";
 
 export const dynamic = "force-dynamic";
 
@@ -29,18 +30,22 @@ export async function GET(req: NextRequest) {
     const ref = dateParam ? new Date(dateParam) : istTodayDateOnly();
     const { start, end } = istMonthRange(ref);
 
-    const used = await prisma.attendanceRegularization.count({
-      where: {
-        userId: myId,
-        date: { gte: start, lte: end },
-        status: { in: ["pending", "approved"] },
-      },
-    });
+    const [used, unlimited] = await Promise.all([
+      prisma.attendanceRegularization.count({
+        where: {
+          userId: myId,
+          date: { gte: start, lte: end },
+          status: { in: ["pending", "approved"] },
+        },
+      }),
+      isRegularizationUnlimited(),
+    ]);
 
     return NextResponse.json({
       used,
-      limit: REGULARIZATION_MONTHLY_QUOTA,
-      remaining: Math.max(0, REGULARIZATION_MONTHLY_QUOTA - used),
+      limit: unlimited ? null : REGULARIZATION_MONTHLY_QUOTA,
+      remaining: unlimited ? null : Math.max(0, REGULARIZATION_MONTHLY_QUOTA - used),
+      unlimited,
       month: start.toLocaleDateString("en-IN", { month: "long", year: "numeric" }),
       start: start.toISOString(),
       end:   end.toISOString(),
