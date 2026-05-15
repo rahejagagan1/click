@@ -1785,6 +1785,10 @@ model EmployeeExit {
   finalSettlementDone Boolean @default(false)
   exitInterviewDone   Boolean @default(false)
 
+  // Whether the company would re-hire this person. Used by HR to filter
+  // past employees who could re-join (e.g. via the onboard wizard).
+  okToRehire          Boolean @default(false)
+
   initiatedById   Int?
   initiatedBy     User?     @relation("ExitInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
 

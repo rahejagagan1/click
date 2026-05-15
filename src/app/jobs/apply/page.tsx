@@ -12,6 +12,7 @@ import React, { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import { DatePicker } from "@/components/ui/date-picker";
+import { DateField } from "@/components/ui/date-field";
 import {
   CheckCircle2, AlertCircle, User, Mail, Phone, Briefcase,
   Building2, Clock, Link as LinkIcon, FileText, Upload, X,
@@ -532,11 +533,11 @@ export default function JobApplyPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Date of Birth</label>
-                <input
-                  type="date"
-                  className={inputClsNoIcon.replace("h-11", "h-10")}
+                <DateField
                   value={form.dateOfBirth ?? ""}
-                  onChange={(e) => set("dateOfBirth", e.target.value)}
+                  onChange={(v) => set("dateOfBirth", v)}
+                  max={new Date().toISOString().slice(0, 10)}
+                  className="w-full"
                 />
               </div>
               <div>

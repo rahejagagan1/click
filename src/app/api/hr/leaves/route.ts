@@ -233,6 +233,18 @@ export async function POST(req: NextRequest) {
       ...finalApprovers.map((u) => u.id).filter((id) => id !== myId),
       ...extras,
     ]));
+    // Structured email payload — feeds the leave type, real dates, total
+    // days, half-day flag, and reason into the templated email so the
+    // notification renders concrete details instead of placeholders.
+    const leaveEmailData = {
+      applicantName: requesterName,
+      leaveType:     typeName,
+      fromDate:      from,
+      toDate:        to,
+      totalDays,
+      isHalfDay,
+      reason:        reason || undefined,
+    };
     await notifyUsers({
       actorId:  myId,
       userIds:  approverRecipients,
@@ -243,6 +255,7 @@ export async function POST(req: NextRequest) {
         : `${requesterName} requested ${typeName}`,
       body:     `${dateLabel} (${daysLabel}) — awaiting manager approval.`,
       linkUrl:  "/dashboard/hr/approvals",
+      emailData: leaveEmailData,
     });
     if (onBehalf) {
       // Heads-up to the subject so they know a leave was filed for them.
@@ -254,6 +267,7 @@ export async function POST(req: NextRequest) {
         title:    `HR applied ${typeName} for you`,
         body:     `${dateLabel} (${daysLabel}) — awaiting manager approval.`,
         linkUrl:  "/dashboard/hr/leaves",
+        emailData: leaveEmailData,
       });
     }
 
