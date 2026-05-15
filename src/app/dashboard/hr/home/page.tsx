@@ -2309,15 +2309,20 @@ export default function HRHomePage() {
 
                 <div className="flex items-center gap-1.5">
                   {!todayRec?.clockIn ? (
-                    // ── Not clocked in yet → green "Clock-in" ──
+                    // ── Not clocked in yet → green "Web Clock-In" ──
+                    //    Colors + labels match the attendance page: always
+                    //    green regardless of office/remote mode.
                     <div className="flex flex-col items-center gap-1">
                       <button
                         onClick={isMobileDevice ? undefined : clockIn}
                         disabled={clockingIn || isMobileDevice}
-                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{ background: isRemoteMode ? "#008CFF" : "#ff6a63" }}
+                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{
+                          background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
+                          boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
+                        }}
                       >
-                        {clockingIn ? "Getting location…" : isRemoteMode ? "Remote Clock-in" : "Clock-in"}
+                        {clockingIn ? "Getting location…" : "Web Clock-In"}
                       </button>
                       {isMobileDevice && (
                         <span className="text-center text-[9.5px] leading-tight text-white/70">
@@ -2326,9 +2331,8 @@ export default function HRHomePage() {
                       )}
                     </div>
                   ) : !todayRec?.clockOut ? (
-                    // ── Clocked in, no clock-out yet → two-step confirm. ──
-                    // First click flips to a Confirm/Cancel pair so a stray
-                    // click can't accidentally end the day.
+                    // ── Clocked in, no clock-out yet → red "Web Clock-Out"
+                    //    with two-step confirm (matches the attendance page).
                     confirmingClockOut ? (
                       <div className="flex items-center gap-1">
                         <button
@@ -2339,15 +2343,22 @@ export default function HRHomePage() {
                             finally { setClockingOut(false); setConfirmingClockOut(false); }
                           }}
                           disabled={clockingOut || isMobileDevice}
-                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                          style={{ background: "linear-gradient(180deg,#ef4444 0%,#b91c1c 100%)" }}
+                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{
+                            background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
+                            boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
+                          }}
                         >
-                          {clockingOut ? "Clocking out…" : "Confirm Clock-out"}
+                          {clockingOut ? "Clocking out…" : "Confirm Web Clock-Out"}
                         </button>
                         <button
                           onClick={() => setConfirmingClockOut(false)}
                           disabled={clockingOut}
-                          className="h-[24px] whitespace-nowrap rounded-[3px] bg-white/15 px-2.5 text-[11px] font-semibold text-white transition hover:bg-white/25 disabled:opacity-50"
+                          className="h-[24px] whitespace-nowrap rounded-[3px] px-2.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
+                          style={{
+                            background: "linear-gradient(180deg, #334155 0%, #1e293b 100%)",
+                            boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.12), 0 1px 2px rgba(0,0,0,0.10)",
+                          }}
                         >
                           Cancel
                         </button>
@@ -2357,10 +2368,13 @@ export default function HRHomePage() {
                         <button
                           onClick={isMobileDevice ? undefined : () => setConfirmingClockOut(true)}
                           disabled={isMobileDevice}
-                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                          style={{ background: todayLoc.mode === "remote" ? "#008CFF" : "#ff6a63" }}
+                          className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{
+                            background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
+                            boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
+                          }}
                         >
-                          {todayLoc.mode === "remote" ? "Remote Clock-out" : "Clock-out"}
+                          Web Clock-Out
                         </button>
                         {isMobileDevice && (
                           <span className="text-center text-[9.5px] leading-tight text-white/70">
@@ -2370,18 +2384,20 @@ export default function HRHomePage() {
                       </div>
                     )
                   ) : (
-                    // ── Clocked out (multi-session day) → another Clock-in,
-                    //    so users on break can resume. No "Day complete"
-                    //    pill here — the Attendance tab already shows it
-                    //    and HR didn't want a duplicate on the home tile.
+                    // ── Clocked out (multi-session day) → another Web
+                    //    Clock-In so users on break can resume. Same green
+                    //    gradient as the first clock-in.
                     <div className="flex flex-col items-center gap-1">
                       <button
                         onClick={isMobileDevice ? undefined : clockIn}
                         disabled={clockingIn || isMobileDevice}
-                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{ background: isRemoteMode ? "#008CFF" : "#22c55e" }}
+                        className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{
+                          background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
+                          boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
+                        }}
                       >
-                        {clockingIn ? "Getting location…" : isRemoteMode ? "Remote Clock-in" : "Clock-in"}
+                        {clockingIn ? "Getting location…" : "Web Clock-In"}
                       </button>
                       {isMobileDevice && (
                         <span className="text-center text-[9.5px] leading-tight text-white/70">
