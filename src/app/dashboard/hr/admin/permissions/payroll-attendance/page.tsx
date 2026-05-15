@@ -157,7 +157,7 @@ export default function PayrollAttendancePermissionsPage() {
         </div>
 
         {/* Table */}
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
           {error && (
             <div className="p-4 text-[12.5px] text-red-700 bg-red-50 border-b border-red-200 flex items-center gap-2">
               <AlertCircle size={14} /> Failed to load: {String(error.message ?? error)}
