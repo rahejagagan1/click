@@ -11,6 +11,7 @@ import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
 import { isHRAdmin } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
+import { DateField } from "@/components/ui/date-field";
 
 // ── Form copy per kind ───────────────────────────────────────────────────────
 const FORM_TITLE: Record<LeaveRequestKind, string> = {
@@ -493,8 +494,7 @@ function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefil
           )}
           <div>
             <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>
-            <input type="date" value={form.date} onChange={e => set("date", e.target.value)}
-              className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]" />
+            <DateField value={form.date} onChange={(v) => set("date", v)} className="mt-1 w-full" />
           </div>
           {/* Reason category dropdown — required */}
           <div>
@@ -587,8 +587,7 @@ function WFHModal({ onClose }: { onClose: () => void }) {
           )}
           <div>
             <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>
-            <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
-              className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]" />
+            <DateField value={form.date} onChange={(v) => setForm(f => ({ ...f, date: v }))} className="mt-1 w-full" />
           </div>
           <div>
             <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Reason *</label>
@@ -638,8 +637,7 @@ function OnDutyModal({ onClose }: { onClose: () => void }) {
           {err && <p className="text-[12px] text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
           <div>
             <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>
-            <input type="date" value={form.date} onChange={e => set("date", e.target.value)}
-              className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]" />
+            <DateField value={form.date} onChange={(v) => set("date", v)} className="mt-1 w-full" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

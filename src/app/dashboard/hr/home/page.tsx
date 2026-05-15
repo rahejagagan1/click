@@ -10,6 +10,7 @@ import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import { isHRAdmin } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { PageShell } from "@/components/layout";
+import { DateField } from "@/components/ui/date-field";
 import {
   ChevronDown,
   ChevronLeft,
@@ -2959,11 +2960,9 @@ export default function HRHomePage() {
                           <div className="flex flex-wrap items-center gap-x-6 gap-y-3 pt-1">
                             <div className="flex items-center gap-2">
                               <span className={`text-[12.5px] ${C.t3}`}>Poll Expires on</span>
-                              <input
-                                type="date"
+                              <DateField
                                 value={pollExpires}
-                                onChange={(e) => setPollExpires(e.target.value)}
-                                className={`h-8 rounded-[4px] border ${C.div} bg-transparent px-2 text-[12.5px] ${C.t2} focus:outline-none focus:ring-1 focus:ring-[#008CFF]/30`}
+                                onChange={setPollExpires}
                               />
                             </div>
                             <label className={`flex items-center gap-2 text-[12.5px] ${C.t2} cursor-pointer`}>
