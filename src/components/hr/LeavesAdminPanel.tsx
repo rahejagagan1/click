@@ -593,7 +593,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                 <p className="mt-0.5 text-[11.5px] text-slate-500">
                   {applyMode === "wfh"
                     ? "Auto-approved. The monthly 2-of-2 cap is bypassed when HR grants on behalf."
-                    : "Auto-approved. If balance is insufficient and LWP fallback is on, switches to Leave Without Pay."}
+                    : "Goes through normal approval — lands in the manager's L1 queue. If balance is insufficient and LWP fallback is on, switches to Leave Without Pay."}
                 </p>
               </div>
               <button onClick={() => !applyBusy && setApplyOpen(false)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
