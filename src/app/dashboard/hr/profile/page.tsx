@@ -128,6 +128,13 @@ export default function ProfilePage() {
   const [bioAbout, setBioAbout] = useState("");
   const [bioLove, setBioLove]   = useState("");
   const [bioHobbies, setBioHobbies] = useState("");
+  // Which bio card is currently open in the editor (null = closed).
+  // Keys match the EmployeeProfile column names so the save payload
+  // is just `{ [bioEditing]: text }`.
+  const [bioEditing, setBioEditing] = useState<null | "about" | "jobLove" | "hobbies">(null);
+  const [bioDraft, setBioDraft] = useState("");
+  const [bioSaving, setBioSaving] = useState(false);
+  const [bioErr, setBioErr] = useState("");
 
   const user = session?.user as any;
   const ep   = profile?.employeeProfile;
@@ -169,8 +176,57 @@ export default function ProfilePage() {
         joiningDate: dateISO(p.joiningDate),
         workCountry: p.workCountry ?? "", nationality: p.nationality ?? "",
       });
+      // Hydrate the ABOUT-tab bios from the EmployeeProfile row. Stored
+      // as NULL when blank, so coerce to "" for the UI's empty state.
+      setBioAbout(p.about ?? "");
+      setBioLove(p.jobLove ?? "");
+      setBioHobbies(p.hobbies ?? "");
     }
   }, [profile]);
+
+  const bioConfig: Record<"about" | "jobLove" | "hobbies", { title: string; placeholder: string; current: string }> = {
+    about:   { title: "About",                       placeholder: "Tell your team a bit about yourself…",       current: bioAbout },
+    jobLove: { title: "What I love about my job?",   placeholder: "Share what excites you about your role…",   current: bioLove },
+    hobbies: { title: "My interests and hobbies",    placeholder: "Movies, music, sports, side projects…",     current: bioHobbies },
+  };
+
+  const openBioEditor = (key: "about" | "jobLove" | "hobbies") => {
+    setBioErr("");
+    setBioDraft(bioConfig[key].current);
+    setBioEditing(key);
+  };
+
+  const saveBio = async () => {
+    if (!bioEditing) return;
+    setBioErr("");
+    setBioSaving(true);
+    const key = bioEditing;
+    const value = bioDraft;
+    try {
+      const res = await fetch("/api/hr/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: value }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        let err: any = {};
+        try { err = JSON.parse(text); } catch {}
+        throw new Error(err.error || text.slice(0, 200) || res.statusText);
+      }
+      // Optimistic local state — also re-fetch so the new value
+      // comes from the DB on the next render.
+      if (key === "about")   setBioAbout(value);
+      if (key === "jobLove") setBioLove(value);
+      if (key === "hobbies") setBioHobbies(value);
+      await mutate("/api/hr/profile", undefined, { revalidate: true });
+      setBioEditing(null);
+    } catch (e: any) {
+      setBioErr(e?.message || "Failed to save");
+    } finally {
+      setBioSaving(false);
+    }
+  };
 
   const save = async (patch: Record<string, string>) => {
     const merged = { ...form, ...patch };
@@ -293,36 +349,36 @@ export default function ProfilePage() {
               <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl p-5">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-[14px] font-semibold text-slate-800 dark:text-white">About</h3>
-                  <button onClick={() => {}} className="text-slate-400 hover:text-[#008CFF]"><Pencil size={14} /></button>
+                  <button onClick={() => openBioEditor("about")} className="text-slate-400 hover:text-[#008CFF]"><Pencil size={14} /></button>
                 </div>
                 {bioAbout ? (
-                  <p className="text-[13px] text-slate-600 dark:text-slate-300 leading-relaxed">{bioAbout}</p>
+                  <p className="text-[13px] text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">{bioAbout}</p>
                 ) : (
-                  <button onClick={() => setBioAbout(" ")} className="text-[13px] text-[#008CFF] hover:underline">Add your response</button>
+                  <button onClick={() => openBioEditor("about")} className="text-[13px] text-[#008CFF] hover:underline">Add your response</button>
                 )}
               </div>
 
               <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl p-5">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-[14px] font-semibold text-slate-800 dark:text-white">What I love about my job?</h3>
-                  <button className="text-slate-400 hover:text-[#008CFF]"><Pencil size={14} /></button>
+                  <button onClick={() => openBioEditor("jobLove")} className="text-slate-400 hover:text-[#008CFF]"><Pencil size={14} /></button>
                 </div>
                 {bioLove ? (
-                  <p className="text-[13px] text-slate-600 dark:text-slate-300 leading-relaxed">{bioLove}</p>
+                  <p className="text-[13px] text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">{bioLove}</p>
                 ) : (
-                  <button onClick={() => setBioLove(" ")} className="text-[13px] text-[#008CFF] hover:underline">Add your response</button>
+                  <button onClick={() => openBioEditor("jobLove")} className="text-[13px] text-[#008CFF] hover:underline">Add your response</button>
                 )}
               </div>
 
               <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl p-5">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-[14px] font-semibold text-slate-800 dark:text-white">My interests and hobbies</h3>
-                  <button className="text-slate-400 hover:text-[#008CFF]"><Pencil size={14} /></button>
+                  <button onClick={() => openBioEditor("hobbies")} className="text-slate-400 hover:text-[#008CFF]"><Pencil size={14} /></button>
                 </div>
                 {bioHobbies ? (
-                  <p className="text-[13px] text-slate-600 dark:text-slate-300 leading-relaxed">{bioHobbies}</p>
+                  <p className="text-[13px] text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">{bioHobbies}</p>
                 ) : (
-                  <button onClick={() => setBioHobbies(" ")} className="text-[13px] text-[#008CFF] hover:underline">Add your response</button>
+                  <button onClick={() => openBioEditor("hobbies")} className="text-[13px] text-[#008CFF] hover:underline">Add your response</button>
                 )}
               </div>
 
@@ -635,6 +691,48 @@ export default function ProfilePage() {
           onSave={save}
         />
       )}
+
+      {/* ── Bio editor (About / What I love / Hobbies) ─────────────── */}
+      {bioEditing && (() => {
+        const cfg = bioConfig[bioEditing];
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.08] rounded-2xl w-full max-w-lg shadow-2xl">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06]">
+                <h3 className="text-[15px] font-semibold text-slate-800 dark:text-white">Edit {cfg.title}</h3>
+                <button onClick={() => setBioEditing(null)}><X size={18} className="text-slate-400 hover:text-slate-700 dark:hover:text-white" /></button>
+              </div>
+              <div className="px-6 py-5 space-y-3">
+                {bioErr && (
+                  <p className="text-[12px] text-red-500 bg-red-500/10 px-3 py-2 rounded-lg">{bioErr}</p>
+                )}
+                <textarea
+                  value={bioDraft}
+                  onChange={(e) => setBioDraft(e.target.value)}
+                  placeholder={cfg.placeholder}
+                  rows={6}
+                  maxLength={1000}
+                  className="w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#008CFF] resize-none"
+                />
+                <div className="flex justify-between text-[11px] text-slate-400">
+                  <span>Leave blank to clear.</span>
+                  <span>{bioDraft.length} / 1000</span>
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-white/[0.06]">
+                <button onClick={() => setBioEditing(null)} className="h-9 px-4 text-[13px] text-slate-500 hover:text-slate-800 dark:text-white">Cancel</button>
+                <button
+                  onClick={saveBio}
+                  disabled={bioSaving}
+                  className="h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50"
+                >
+                  {bioSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -52,6 +52,9 @@ export async function PUT(req: NextRequest) {
       // Sensitive fields — encrypted at rest before insert.
       bankName, bankAccountNumber, bankIfsc, bankBranch, accountHolderName,
       panNumber, parentName, aadhaarNumber, aadhaarEnrollment,
+      // ABOUT-tab bios — recently added columns, written via raw SQL
+      // below so a stale Prisma client doesn't choke on unknown fields.
+      about, jobLove, hobbies,
     } = body;
 
     // EmployeeProfile is normally HR-onboarded via the Add Employee
@@ -145,16 +148,25 @@ export async function PUT(req: NextRequest) {
         data: profileData as any,
       }));
     }
-    if (txOps.length === 0) {
+    // Late-added columns (workPhone / personalEmail / maritalStatus / bios)
+    // are written via the raw-SQL block below, not via the typed Prisma
+    // update — so a body that only edits one of them would otherwise be
+    // rejected here as "no changes". Treat those as valid edits too.
+    const hasLateUpdates =
+      workPhone !== undefined || personalEmail !== undefined || maritalStatus !== undefined ||
+      about !== undefined || jobLove !== undefined || hobbies !== undefined;
+    if (txOps.length === 0 && !hasLateUpdates) {
       return NextResponse.json({ error: "No changes to save" }, { status: 400 });
     }
-    try {
-      await prisma.$transaction(txOps);
-    } catch (e: any) {
-      console.error("[profile PUT] main transaction failed:", e);
-      return NextResponse.json({
-        error: `Save failed: ${e?.message ?? "Unknown DB error"}`,
-      }, { status: 500 });
+    if (txOps.length > 0) {
+      try {
+        await prisma.$transaction(txOps);
+      } catch (e: any) {
+        console.error("[profile PUT] main transaction failed:", e);
+        return NextResponse.json({
+          error: `Save failed: ${e?.message ?? "Unknown DB error"}`,
+        }, { status: 500 });
+      }
     }
 
     // Patch the new columns via raw SQL — works even when the typed
@@ -176,6 +188,19 @@ export async function PUT(req: NextRequest) {
       if (maritalStatus !== undefined) {
         setParts.push(`"maritalStatus" = $${i++}`);
         args.push(maritalStatus || null);
+      }
+      // ABOUT-tab bios — empty string clears the field (stored as NULL).
+      if (about !== undefined) {
+        setParts.push(`"about" = $${i++}`);
+        args.push(typeof about === "string" && about.trim().length > 0 ? about : null);
+      }
+      if (jobLove !== undefined) {
+        setParts.push(`"jobLove" = $${i++}`);
+        args.push(typeof jobLove === "string" && jobLove.trim().length > 0 ? jobLove : null);
+      }
+      if (hobbies !== undefined) {
+        setParts.push(`"hobbies" = $${i++}`);
+        args.push(typeof hobbies === "string" && hobbies.trim().length > 0 ? hobbies : null);
       }
       if (setParts.length > 0) {
         args.push(myId);
