@@ -6,6 +6,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
+import { DateField } from "@/components/ui/date-field";
 
 const CATEGORIES = ["All", "Laptop", "Monitor", "Keyboard", "Mouse", "Headset", "Phone", "Other"];
 
@@ -295,7 +296,7 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Purchase Date</label>
-                  <input type="date" value={assetForm.purchaseDate} onChange={e => setF("purchaseDate", e.target.value)} className={FIELD_CLS} />
+                  <DateField value={assetForm.purchaseDate} onChange={(v) => setF("purchaseDate", v)} className="mt-1 w-full" />
                 </div>
                 <div>
                   <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Value (₹)</label>

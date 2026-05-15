@@ -80,21 +80,21 @@ function requestEmail(opts: { typeLabel: string; verb: "submitted" | "approved" 
       <strong>${escape(opts.applicantName)}</strong> ${verbWord} a
       ${escape(opts.typeLabel)} request.
     </p>
-    <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">${detailsTable}</table>
     ${opts.reason ? `
-      <div style="margin-top:14px;padding:12px;background:#f8fafc;border-left:3px solid #0f6ecd;border-radius:4px">
+      <div style="margin:0 0 14px;padding:12px;background:#f8fafc;border-left:3px solid #0f6ecd;border-radius:4px">
         <p style="margin:0 0 4px;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.06em">Reason</p>
         <p style="margin:0;font-size:14px;color:#1f2937;line-height:1.55;white-space:pre-wrap">${escape(opts.reason)}</p>
       </div>
     ` : ""}
+    <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">${detailsTable}</table>
     ${ctaButton(opts.verb === "submitted" ? "Open in inbox" : "View in dashboard", link)}
   `;
 
   const textLines = [
     `${opts.applicantName} ${verbWord} a ${opts.typeLabel} request.`,
     "",
+    ...(opts.reason ? [`Reason: ${opts.reason}`, ""] : []),
     ...opts.details.map(([k, v]) => `${k}: ${v}`),
-    ...(opts.reason ? ["", `Reason: ${opts.reason}`] : []),
     "",
     `Open: ${link}`,
   ];
@@ -111,17 +111,43 @@ export function leaveRequestEmail(args: {
   toDate: string | Date;
   totalDays: number | string;
   reason?: string;
+  /** Optional: who acted (L1 manager or L2 finaliser) and what stage. */
+  approverName?: string;
+  stageLabel?:   string;
+  approvalNote?: string;
+  /** L1 approver name + their note. Surfaced as separate rows on the
+   *  L2 / final-approval email so recipients see the full chain
+   *  (manager + finaliser) without losing context. */
+  l1ApproverName?: string;
+  l1ApprovalNote?: string;
+  /** Pre-formatted day label so callers can flag half-day requests. */
+  dayLabel?: string;
 }): EmailContent {
+  const dayText = args.dayLabel
+    ?? `${args.totalDays} day${Number(args.totalDays) === 1 ? "" : "s"}`;
+  const details: Array<[string, string]> = [
+    ["Leave Type", args.leaveType],
+    ["From",       fmtDate(args.fromDate)],
+    ["To",         fmtDate(args.toDate)],
+    ["Total Days", dayText],
+  ];
+  if (args.l1ApproverName) {
+    details.push(["Manager Approved By", args.l1ApproverName]);
+  }
+  if (args.l1ApprovalNote) {
+    details.push(["Manager Note", args.l1ApprovalNote]);
+  }
+  if (args.approverName) {
+    details.push([args.stageLabel || "Approved by", args.approverName]);
+  }
+  if (args.approvalNote) {
+    details.push(["Approver Note", args.approvalNote]);
+  }
   return requestEmail({
     typeLabel: "leave",
     verb: "submitted",
     applicantName: args.applicantName,
-    details: [
-      ["Leave Type", args.leaveType],
-      ["From",       fmtDate(args.fromDate)],
-      ["To",         fmtDate(args.toDate)],
-      ["Total Days", `${args.totalDays} day${Number(args.totalDays) === 1 ? "" : "s"}`],
-    ],
+    details,
     reason: args.reason,
   });
 }
@@ -129,13 +155,39 @@ export function leaveRequestEmail(args: {
 export function wfhRequestEmail(args: {
   applicantName: string;
   date: string | Date;
+  toDate?: string | Date;
   reason?: string;
+  /** Optional approver context — same shape as the leave email. */
+  approverName?: string;
+  stageLabel?:   string;
+  approvalNote?: string;
+  l1ApproverName?: string;
+  l1ApprovalNote?: string;
 }): EmailContent {
+  const details: Array<[string, string]> = [];
+  if (args.toDate && fmtDate(args.toDate) !== fmtDate(args.date)) {
+    details.push(["From", fmtDate(args.date)]);
+    details.push(["To",   fmtDate(args.toDate)]);
+  } else {
+    details.push(["Date", fmtDate(args.date)]);
+  }
+  if (args.l1ApproverName) {
+    details.push(["Manager Approved By", args.l1ApproverName]);
+  }
+  if (args.l1ApprovalNote) {
+    details.push(["Manager Note", args.l1ApprovalNote]);
+  }
+  if (args.approverName) {
+    details.push([args.stageLabel || "Approved by", args.approverName]);
+  }
+  if (args.approvalNote) {
+    details.push(["Approver Note", args.approvalNote]);
+  }
   return requestEmail({
     typeLabel: "WFH",
     verb: "submitted",
     applicantName: args.applicantName,
-    details: [["Date", fmtDate(args.date)]],
+    details,
     reason: args.reason,
   });
 }

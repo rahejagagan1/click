@@ -40,8 +40,15 @@ export default function PeoplePage() {
   const [fCost,     setFCost]     = useState<Set<string>>(new Set());
   const [fLegal,    setFLegal]    = useState<Set<string>>(new Set());
   const [fRole,     setFRole]     = useState<Set<string>>(new Set());
+  // Show only currently-active employees by default. HR can flip this on
+  // to look at offboarded people (their data stays in the DB even after
+  // exit; the user is just deactivated).
+  const [showInactive, setShowInactive] = useState(false);
 
-  const { data: employees = [] } = useSWR("/api/hr/employees", fetcher);
+  const { data: employees = [] } = useSWR(
+    showInactive ? "/api/hr/employees" : "/api/hr/employees?isActive=true",
+    fetcher,
+  );
 
   const { bizUnitOpts, deptOpts, locOpts, costOpts, legalOpts, rolesOpts } = useMemo(() => {
     const ents = entityOptions(employees);
@@ -146,6 +153,20 @@ export default function PeoplePage() {
                 <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search"
                   className="w-full h-9 pl-9 pr-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-800 dark:text-white placeholder-slate-500 focus:outline-none focus:border-[#008CFF]/40" />
               </div>
+              {/* Inactive-employee toggle. Off = hide offboarded folks
+                  (the default — directory should reflect current staff).
+                  On = include them so HR can look up past employees. */}
+              <label className="inline-flex items-center gap-2 h-9 px-3 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1e3a] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showInactive}
+                  onChange={(e) => setShowInactive(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-[#008CFF] focus:ring-[#008CFF]"
+                />
+                <span className="text-[12px] font-medium text-slate-600 dark:text-slate-300">
+                  Show inactive
+                </span>
+              </label>
             </div>
 
             {/* Count */}
