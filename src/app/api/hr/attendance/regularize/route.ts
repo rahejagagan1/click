@@ -7,6 +7,7 @@ import { notifyUsers } from "@/lib/notifications";
 import { writeAuditLog } from "@/lib/audit-log";
 import { istTimeOnDate, istMonthRange, istTodayDateOnly, istDateOnlyFrom } from "@/lib/ist-date";
 import { isRegularizationWindowEnforced } from "@/app/api/hr/policy/regularization-window/route";
+import { isRegularizationUnlimited } from "@/app/api/hr/policy/regularization-unlimited/route";
 
 // Schema covers both self-apply and admin-grant flavours of regularize POST.
 const RegularizePost = z.object({
@@ -181,10 +182,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 48-hour window — bypassed on admin grant. The window itself is gated
-    // by an org-wide HR policy flag (SyncConfig.regularization_window_enforced).
-    // When the flag is OFF, employees can self-apply for any past IST date;
-    // future dates are still rejected, and admin grants still bypass.
+    // Org-wide "unlimited" override: when ON, self-apply skips BOTH the
+    // 2-day window AND the monthly quota — any past IST date is allowed,
+    // with no per-month cap. Future dates and admin-grant rules are
+    // unaffected. Read once and reuse for both gates below.
+    const unlimited = isAdminGrant ? false : await isRegularizationUnlimited();
+
+    // 48-hour window — bypassed on admin grant or when unlimited is on.
+    // The window itself is gated by an org-wide HR policy flag
+    // (SyncConfig.regularization_window_enforced). When the flag is OFF,
+    // employees can self-apply for any past IST date; future dates are
+    // still rejected, and admin grants still bypass.
     if (!isAdminGrant) {
       const todayIst = istTodayDateOnly();
       const diff = dayDiff(todayIst, targetDateOnly);
@@ -194,25 +202,28 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      const windowEnforced = await isRegularizationWindowEnforced();
-      if (windowEnforced && diff > REGULARIZATION_WINDOW_DAYS) {
-        const dateLabel = targetDateOnly.toLocaleDateString("en-IN", {
-          day: "2-digit", month: "short", year: "numeric", timeZone: "UTC",
-        });
-        return NextResponse.json(
-          {
-            error: `Regularization window closed. You can only apply within ${REGULARIZATION_WINDOW_DAYS} days after the missed date (${dateLabel}).`,
-            code: "date_too_old",
-            windowDays: REGULARIZATION_WINDOW_DAYS,
-          },
-          { status: 422 }
-        );
+      if (!unlimited) {
+        const windowEnforced = await isRegularizationWindowEnforced();
+        if (windowEnforced && diff > REGULARIZATION_WINDOW_DAYS) {
+          const dateLabel = targetDateOnly.toLocaleDateString("en-IN", {
+            day: "2-digit", month: "short", year: "numeric", timeZone: "UTC",
+          });
+          return NextResponse.json(
+            {
+              error: `Regularization window closed. You can only apply within ${REGULARIZATION_WINDOW_DAYS} days after the missed date (${dateLabel}).`,
+              code: "date_too_old",
+              windowDays: REGULARIZATION_WINDOW_DAYS,
+            },
+            { status: 422 }
+          );
+        }
       }
     }
 
     // Monthly quota — self-apply only. Admin grants bypass the cap but still
-    // count toward the visible monthly total (on-book).
-    if (!isAdminGrant) {
+    // count toward the visible monthly total (on-book). Skipped entirely
+    // when the org-wide "unlimited" override is on.
+    if (!isAdminGrant && !unlimited) {
       const { start, end } = istMonthRange(targetDateOnly);
       const usedThisMonth = await prisma.attendanceRegularization.count({
         where: {
