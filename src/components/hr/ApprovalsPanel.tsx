@@ -235,7 +235,11 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
     fetcher,
     { refreshInterval: 30_000 }
   );
-  const [scope, setScope] = useState<"pending" | "all">("pending");
+  // Default to "active" — shows pending + partially-approved + approved
+  // (incl. upcoming/future-dated approved leaves), but hides rejected /
+  // cancelled history. "Pending" narrows to actionable only; "All history"
+  // adds the rejected / cancelled audit rows.
+  const [scope, setScope] = useState<"pending" | "active" | "all">("active");
   const { data: tabData, isLoading, error } = useSWR(
     `/api/hr/approvals?tab=${tab}&scope=${scope}`,
     fetcher,
@@ -428,35 +432,17 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
       <div className={embedded ? "py-5" : "px-6 py-5"}>
         <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
           <h1 className="text-[17px] font-semibold text-slate-800 dark:text-white">
-            {scope === "all" ? "History — " : "Pending "}
-            {tab === "leave"      ? "leave approvals"             :
-             tab === "regularize" ? "regularization requests"     :
+            {tab === "leave"      ? "Leave approvals"             :
+             tab === "regularize" ? "Regularization requests"     :
              tab === "wfh"        ? "WFH / On-Duty requests"      :
-             tab === "comp_off"   ? "comp-off requests"           :
-                                    "requests"}
+             tab === "comp_off"   ? "Comp-off requests"           :
+                                    "Requests"}
           </h1>
-          {/* Pending vs History toggle — lets approvers see past decisions. */}
-          {(tab === "leave" || tab === "regularize" || tab === "wfh" || tab === "comp_off") && (
-            <div className="inline-flex rounded-lg border border-slate-200 dark:border-white/[0.08] overflow-hidden text-[12px] font-semibold">
-              <button type="button" onClick={() => setScope("pending")}
-                className={`h-8 px-3 transition-colors ${
-                  scope === "pending"
-                    ? "bg-[#008CFF] text-white"
-                    : "bg-white dark:bg-transparent text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5"
-                }`}>Pending</button>
-              <button type="button" onClick={() => setScope("all")}
-                className={`h-8 px-3 border-l border-slate-200 dark:border-white/[0.08] transition-colors ${
-                  scope === "all"
-                    ? "bg-[#008CFF] text-white border-[#008CFF]"
-                    : "bg-white dark:bg-transparent text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5"
-                }`}>All history</button>
-            </div>
-          )}
         </div>
 
         {/* Simple read/act table for regularize / wfh / on_duty / comp_off tabs */}
         {(tab === "regularize" || tab === "wfh" || tab === "comp_off") && (
-          <div className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+          <div className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-x-auto">
             {isLoading ? (
               <div className="py-16 text-center"><div className="inline-block w-7 h-7 border-2 border-[#008CFF] border-t-transparent rounded-full animate-spin" /></div>
             ) : error ? (
@@ -465,8 +451,8 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
               <p className="py-16 text-center text-[13px] text-slate-400">No pending requests</p>
             ) : (
               <table className="w-full">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-white/[0.06] bg-slate-50/60 dark:bg-white/[0.02]">
+                <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-[#0a1e3a]/95 backdrop-blur-sm">
+                  <tr className="border-b border-slate-200 dark:border-white/[0.06]">
                     {(tab === "regularize"
                       // Regularization: single-stage HR-only — no L1/L2 split.
                       ? ["EMPLOYEE", "DATE", "REQUESTED IN / OUT", "REASON", "STATUS", "APPROVAL NOTE", "ACTIONS"]
@@ -607,6 +593,40 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
 
         {tab === "leave" && (
           <>
+            {/* Quick status chips — one-click shortcuts over the
+                multi-select Leave Status dropdown below. Clicking toggles
+                the chip and writes to the same fStatus Set the dropdown
+                reads, so the table updates instantly. */}
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              {[
+                { key: "approved",            label: "Approved",   activeCls: "bg-emerald-500 text-white border-emerald-500" },
+                { key: "pending",             label: "Pending L1", activeCls: "bg-amber-500  text-white border-amber-500"  },
+                { key: "partially_approved",  label: "Pending L2", activeCls: "bg-[#008CFF]  text-white border-[#008CFF]"  },
+              ].map((c) => {
+                const active = fStatus.has(c.key);
+                return (
+                  <button
+                    key={c.key}
+                    type="button"
+                    onClick={() => {
+                      setFStatus((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(c.key)) next.delete(c.key); else next.add(c.key);
+                        return next;
+                      });
+                    }}
+                    className={`h-7 px-3 rounded-full border text-[11.5px] font-semibold transition-colors ${
+                      active
+                        ? c.activeCls
+                        : "bg-white dark:bg-transparent border-slate-200 dark:border-white/[0.1] text-slate-600 dark:text-slate-300 hover:border-[#008CFF]/40 hover:text-[#008CFF]"
+                    }`}
+                  >
+                    {c.label}
+                  </button>
+                );
+              })}
+            </div>
+
             {/* Filter bar */}
             <div className="flex items-center gap-2 mb-3 flex-wrap">
               <FilterDropdown label="Business Unit" options={buOpts}        selected={fBU}        onChange={setFBU}        />
@@ -658,8 +678,11 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
               <span className="text-[11.5px] text-slate-500 dark:text-slate-400">Total: {filtered.length}</span>
             </div>
 
-            {/* Table */}
-            <div className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+            {/* Table — its own scroll region so vertical scrolling stays
+                inside the panel rather than scrolling the whole page.
+                Header is sticky so column labels stay visible while
+                scrolling rows. */}
+            <div className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-x-auto">
               {isLoading ? (
                 <div className="py-16 text-center"><div className="inline-block w-7 h-7 border-2 border-[#008CFF] border-t-transparent rounded-full animate-spin" /></div>
               ) : error ? (
@@ -668,8 +691,8 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                 <p className="py-16 text-center text-[13px] text-slate-400">No pending leave approvals</p>
               ) : (
                 <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-slate-200 dark:border-white/[0.06] bg-slate-50/60 dark:bg-white/[0.02]">
+                  <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-[#0a1e3a]/95 backdrop-blur-sm">
+                    <tr className="border-b border-slate-200 dark:border-white/[0.06]">
                       <th className="px-4 py-3 text-left">
                         <input type="checkbox"
                           checked={filtered.length > 0 && filtered.every((r) => picked.has(r.id))}

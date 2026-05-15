@@ -265,7 +265,7 @@ export default function LeavesPage() {
           {applications.filter((a: any) => a.status !== "pending").length > 0 && (
             <div>
               <h3 className="text-[15px] font-semibold text-slate-800 dark:text-white mb-3">Leave History</h3>
-              <div className="bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+              <div className="bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-x-auto">
                 <table className="w-full">
                   <thead><tr className="border-b border-slate-200 dark:border-white/[0.06]">{[...(view === "team" ? ["Employee"] : []), "Leave Type", "Date Range", "Days", "Reason", "Status"].map((h) => <th key={h} className="px-5 py-3 text-left text-[10px] uppercase tracking-wider text-slate-500 font-medium">{h}</th>)}</tr></thead>
                   <tbody>{applications.filter((a: any) => a.status !== "pending").map((app: any, i: number) => (
