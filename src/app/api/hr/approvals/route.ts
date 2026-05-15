@@ -42,8 +42,12 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const tab   = (searchParams.get("tab") || "leave").toLowerCase();
-    // scope: "pending" (default — only actionable rows) or "all" (history audit
-    // trail — includes approved, rejected, cancelled, partially_approved).
+    // scope:
+    //   - "pending" — only actionable rows (pending + partially_approved).
+    //   - "active"  — pending + partially_approved + approved. Used to
+    //                surface upcoming/already-approved requests in the
+    //                same view, with rejected/cancelled rows filtered out.
+    //   - "all"     — every status (history / audit trail).
     const scope = (searchParams.get("scope") || "pending").toLowerCase();
 
     // Team scope for managers (self excluded). Final approvers see everything.
@@ -59,10 +63,14 @@ export async function GET(req: NextRequest) {
       approver: { select: { id: true, name: true } },
     };
 
-    // Status filter — "all" shows the full history for audit; "pending"
-    // shows only actionable rows.
-    const statusFilter = (pendingStatuses: string[]) =>
-      scope === "all" ? {} : { status: { in: pendingStatuses } };
+    // Status filter — "all" shows the full history for audit; "active" adds
+    // "approved" to the actionable list so upcoming-approved leaves are
+    // visible alongside pending ones; "pending" shows only actionable rows.
+    const statusFilter = (pendingStatuses: string[]) => {
+      if (scope === "all")    return {};
+      if (scope === "active") return { status: { in: [...pendingStatuses, "approved"] } };
+      return { status: { in: pendingStatuses } };
+    };
 
     if (tab === "leave") {
       const rows = await prisma.leaveApplication.findMany({
