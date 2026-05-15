@@ -5,6 +5,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { CalendarDays, Pencil, Trash2, Plus, X, Check } from "lucide-react";
+import { DateField } from "@/components/ui/date-field";
 
 type Holiday = { id: number; name: string; date: string; type: string; year: number };
 
@@ -214,11 +215,10 @@ export default function HolidaysAdminPage() {
               </div>
               <div>
                 <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Date</label>
-                <input
-                  type="date"
+                <DateField
                   value={editing.date ?? ""}
-                  onChange={(e) => setEditing({ ...editing, date: e.target.value })}
-                  className="mt-1.5 w-full h-10 px-3 rounded-lg border border-slate-200 bg-white text-[13px] text-slate-800 focus:outline-none focus:border-[#008CFF]"
+                  onChange={(v) => setEditing({ ...editing, date: v })}
+                  className="mt-1.5 w-full"
                 />
               </div>
               <div>

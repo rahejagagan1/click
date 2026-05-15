@@ -59,8 +59,10 @@ export default function HeaderSearch() {
 
   const shouldFetch = open && debounced.length >= 2;
 
+  // Only suggest active employees — offboarded users stay in the DB for
+  // history but shouldn't be discoverable from the global search bar.
   const { data: peopleData, error: peopleErr } = useSWR(
-    shouldFetch ? `/api/hr/employees?search=${encodeURIComponent(debounced)}` : null,
+    shouldFetch ? `/api/hr/employees?search=${encodeURIComponent(debounced)}&isActive=true` : null,
     fetcher,
     { dedupingInterval: 500, keepPreviousData: true },
   );

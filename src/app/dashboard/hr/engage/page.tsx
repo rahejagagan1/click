@@ -351,7 +351,9 @@ export default function EngagePage() {
   const sessionUserId = user?.dbId;
 
   const { data: posts = [], isLoading } = useSWR("/api/hr/engage/posts", fetcher);
-  const { data: employees = [] } = useSWR("/api/hr/employees", fetcher);
+  // Only active employees show up in the @mention picker — offboarded
+  // people stay in the DB but shouldn't be addressable in new posts.
+  const { data: employees = [] } = useSWR("/api/hr/employees?isActive=true", fetcher);
 
   const [feedTab, setFeedTab]   = useState<"post"|"poll"|"praise">("post");
   const [scopeTab, setScopeTab] = useState("Organization");

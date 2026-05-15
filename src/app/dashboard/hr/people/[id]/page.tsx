@@ -13,6 +13,7 @@ import {
   MoreVertical,
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
+import { DateField } from "@/components/ui/date-field";
 import { isHRAdmin as canViewAsHRAdmin } from "@/lib/access";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
 
@@ -1998,11 +1999,10 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
             <div className="space-y-3 px-5 py-4">
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Date</label>
-                <input
-                  type="date"
+                <DateField
                   value={wfhForm.date}
-                  onChange={(e) => setWfhForm((f) => ({ ...f, date: e.target.value }))}
-                  className="mt-1 w-full rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                  onChange={(v) => setWfhForm((f) => ({ ...f, date: v }))}
+                  className="mt-1 w-full"
                 />
               </div>
               <div>
@@ -2045,7 +2045,7 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <div>
                 <h3 className="text-[14px] font-semibold text-slate-800">Apply Leave on behalf</h3>
-                <p className="text-[11.5px] text-slate-500">For {userName} · auto-approved · LWP fallback enabled</p>
+                <p className="text-[11.5px] text-slate-500">For {userName} · routed through L1 → L2 · LWP fallback enabled</p>
               </div>
               <button onClick={() => setLeaveOpen(false)} className="text-slate-400 hover:text-slate-700">
                 <X className="h-4 w-4" />
@@ -2086,20 +2086,18 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">From</label>
-                  <input
-                    type="date"
+                  <DateField
                     value={leaveForm.fromDate}
-                    onChange={(e) => setLeaveForm((f) => ({ ...f, fromDate: e.target.value, toDate: f.toDate < e.target.value ? e.target.value : f.toDate }))}
-                    className="mt-1 w-full rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                    onChange={(v) => setLeaveForm((f) => ({ ...f, fromDate: v, toDate: f.toDate < v ? v : f.toDate }))}
+                    className="mt-1 w-full"
                   />
                 </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">To</label>
-                  <input
-                    type="date"
+                  <DateField
                     value={leaveForm.toDate}
-                    onChange={(e) => setLeaveForm((f) => ({ ...f, toDate: e.target.value }))}
-                    className="mt-1 w-full rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                    onChange={(v) => setLeaveForm((f) => ({ ...f, toDate: v }))}
+                    className="mt-1 w-full"
                   />
                 </div>
               </div>
@@ -2113,8 +2111,8 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                   className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
                 />
               </div>
-              <div className="rounded bg-emerald-50 px-3 py-2 text-[11.5px] text-emerald-800 ring-1 ring-inset ring-emerald-200">
-                HR on-behalf leave is <strong>auto-approved</strong>. If the selected leave type has no balance, the system falls back to Leave Without Pay automatically.
+              <div className="rounded bg-[#008CFF]/10 px-3 py-2 text-[11.5px] text-[#0064b6] ring-1 ring-inset ring-[#008CFF]/30">
+                HR on-behalf leave goes through <strong>normal approval</strong> — lands in {userName}&apos;s manager&apos;s L1 queue, then CEO/HR finalises. If the selected leave type has no balance, the system falls back to Leave Without Pay automatically.
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
@@ -2129,7 +2127,7 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                 disabled={submitting || !leaveForm.leaveTypeId || !leaveForm.fromDate || !leaveForm.toDate || !leaveForm.reason.trim()}
                 className="h-8 rounded bg-[#008CFF] px-4 text-[12px] font-semibold text-white hover:bg-[#0070d4] disabled:opacity-60"
               >
-                {submitting ? "Submitting…" : "Grant leave"}
+                {submitting ? "Submitting…" : "Apply leave"}
               </button>
             </div>
           </div>
