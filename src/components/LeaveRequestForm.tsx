@@ -321,7 +321,7 @@ export default function LeaveRequestForm({
     setErr("");
     if (!fromDate || !toDate) return setErr("Please select From and To dates");
     if (new Date(fromDate) > new Date(toDate)) return setErr("From date must be on/before To date");
-    if (!note.trim()) return setErr("Please add a note / reason");
+    if (!note.trim()) return setErr("Reason is required.");
     if (kind === "leave" && !leaveTypeId) return setErr("Please choose a leave type");
 
     setSaving(true);
@@ -539,14 +539,18 @@ export default function LeaveRequestForm({
             </label>
           )}
 
-          {/* Note */}
+          {/* Reason — required. Submit blocks an empty value. */}
           <div>
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">Note</label>
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+              Reason <span className="text-rose-500">*</span>
+            </label>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={3}
-              placeholder="Type here"
+              required
+              aria-required="true"
+              placeholder="Why are you applying?"
               className="mt-1.5 w-full px-3 py-2 rounded-lg border bg-white dark:bg-[#0a1526] border-slate-200 dark:border-white/[0.08] text-[13px] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#008CFF] dark:focus:border-[#4a9cff] resize-none"
             />
           </div>
