@@ -5,6 +5,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { isHRAdmin } from "@/lib/access";
+import { DateField } from "@/components/ui/date-field";
 
 const TOP_TABS = [
   { key: "home",        label: "HOME",              href: "/dashboard/hr/home"  },
@@ -344,8 +345,7 @@ function CompOffModal({ onClose }: { onClose: () => void }) {
           {err && <p className="text-[12px] text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
           <div>
             <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Date You Worked Extra *</label>
-            <input type="date" value={form.workedDate} onChange={e => set("workedDate", e.target.value)}
-              className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]/40" />
+            <DateField value={form.workedDate} onChange={(v) => set("workedDate", v)} className="w-full" />
           </div>
           <div>
             <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Credit Days</label>
@@ -451,18 +451,15 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
           <div className="grid grid-cols-3 gap-0">
             <div>
               <span className="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">From</span>
-              <input
-                type="date"
+              <DateField
                 value={form.fromDate}
-                onChange={(e) => setForm((p) => ({
+                onChange={(v) => setForm((p) => ({
                   ...p,
-                  fromDate: e.target.value,
+                  fromDate: v,
                   // Half-day must stay on a single date; keep To pinned to From.
-                  toDate: isHalfLeave ? e.target.value : (!p.toDate || new Date(e.target.value) > new Date(p.toDate) ? e.target.value : p.toDate),
+                  toDate: isHalfLeave ? v : (!p.toDate || new Date(v) > new Date(p.toDate) ? v : p.toDate),
                 }))}
-                onClick={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
-                onFocus={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
-                className="w-full bg-transparent text-[13px] text-[#008CFF] focus:outline-none cursor-pointer"
+                className="w-full"
               />
             </div>
             <div className="text-center flex items-center justify-center">
@@ -470,14 +467,11 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
             </div>
             <div className="text-right">
               <span className="text-[10px] text-slate-500 uppercase tracking-wider block mb-1 text-right">To</span>
-              <input
-                type="date"
+              <DateField
                 value={isHalfLeave ? form.fromDate : form.toDate}
                 disabled={isHalfLeave}
-                onChange={(e) => setForm((p) => ({ ...p, toDate: e.target.value }))}
-                onClick={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
-                onFocus={(e) => (e.currentTarget as HTMLInputElement).showPicker?.()}
-                className="w-full bg-transparent text-[13px] text-[#008CFF] focus:outline-none text-right cursor-pointer disabled:text-slate-400 disabled:cursor-not-allowed"
+                onChange={(v) => setForm((p) => ({ ...p, toDate: v }))}
+                className="w-full"
               />
             </div>
           </div>
@@ -583,10 +577,22 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
           </div>
         </div>
 
-        {/* Note */}
+        {/* Reason — required. Submit blocks an empty reason via the
+            client-side check above (`if (!form.reason)`) and the API
+            does the same defensively. */}
         <div>
-          <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Note</label>
-          <textarea value={form.reason} onChange={(e) => setForm((p) => ({ ...p, reason: e.target.value }))} placeholder="Type here" rows={4} className="w-full px-3 py-2.5 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white placeholder-slate-600 focus:outline-none focus:border-[#008CFF]/40 resize-none" />
+          <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">
+            Reason <span className="text-rose-500">*</span>
+          </label>
+          <textarea
+            value={form.reason}
+            onChange={(e) => setForm((p) => ({ ...p, reason: e.target.value }))}
+            placeholder="Why are you applying for this leave?"
+            rows={4}
+            required
+            aria-required="true"
+            className="w-full px-3 py-2.5 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white placeholder-slate-600 focus:outline-none focus:border-[#008CFF]/40 resize-none"
+          />
         </div>
 
         {/* Notify */}

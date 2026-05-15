@@ -31,10 +31,42 @@ export type NotificationType =
  *   "Your regularization was approved" / "rejected"
  *   etc.
  */
+/**
+ * Optional structured payload that lets callers feed real values into the
+ * outbound email instead of relying on title/body parsing. When omitted,
+ * buildEmailFor() falls back to the legacy title-regex behaviour.
+ */
+export type EmailData = {
+  applicantName?: string;
+  // Leave-specific
+  leaveType?:    string;
+  fromDate?:     string | Date;
+  toDate?:       string | Date;
+  totalDays?:    number | string;
+  isHalfDay?:    boolean;
+  // Single-day requests
+  date?:         string | Date;
+  // On-duty
+  location?:     string;
+  // Comp-off
+  workedDate?:   string | Date;
+  creditDays?:   number | string;
+  // Approval context
+  approverName?: string;
+  stageLabel?:   string;     // e.g. "Manager approved" / "CEO approved"
+  approvalNote?: string;
+  /** L1 approver name + note — surfaced on the L2/final email so the
+   *  finaliser's row sits alongside the manager's row. */
+  l1ApproverName?: string;
+  l1ApprovalNote?: string;
+  reason?:       string;     // override the body-as-reason fallback
+};
+
 function buildEmailFor(
   type: NotificationType,
   title: string,
-  body?: string
+  body?: string,
+  emailData?: EmailData,
 ): EmailContent | null {
   // ── Anonymous feedback (sent to CEO / HR / admins / devs) ─────────
   // The submitter is never disclosed. Title carries the category, body
@@ -89,26 +121,58 @@ function buildEmailFor(
   }
 
   // ── Submitter → approver request emails ────────────────────────────
-  // Pull the actor's name out of "<name> requested ___" / "<name> applied for ___".
+  // Prefer structured emailData when caller passed it. Falls back to
+  // parsing "<name> requested ___" / "<name> applied for ___" from the
+  // title so legacy callers keep working.
   const submitterMatch = /^(.+?)\s+(?:requested|applied for)/i.exec(title);
-  const applicantName = submitterMatch?.[1] ?? "An employee";
+  const possessiveMatch = /^(.+?)['']s\s+/i.exec(title);
+  const applicantName =
+    emailData?.applicantName
+    ?? submitterMatch?.[1]
+    ?? possessiveMatch?.[1]
+    ?? "An employee";
 
   // Most fields (dates, etc.) live in the notification's body line —
-  // we surface the body as the "reason" so approvers see the context.
+  // we surface the body as the "reason" so approvers see the context
+  // when emailData isn't provided. With emailData, the reason is the
+  // real applicant-supplied reason, and stage/note become extra rows.
+  const reasonText = emailData?.reason ?? body;
+
   switch (type) {
-    case "leave":
+    case "leave": {
+      const dayLabel =
+        emailData?.totalDays != null
+          ? `${emailData.totalDays} day${Number(emailData.totalDays) === 1 ? "" : "s"}${emailData.isHalfDay ? " (half day)" : ""}`
+          : "—";
       return leaveRequestEmail({
         applicantName,
-        leaveType: "Leave",
-        fromDate: new Date(),
-        toDate: new Date(),
-        totalDays: "—",
-        reason: body,
+        leaveType: emailData?.leaveType   ?? "Leave",
+        fromDate:  emailData?.fromDate    ?? new Date(),
+        toDate:    emailData?.toDate      ?? new Date(),
+        totalDays: emailData?.totalDays  ?? "—",
+        reason:    reasonText,
+        approverName:   emailData?.approverName,
+        stageLabel:     emailData?.stageLabel,
+        approvalNote:   emailData?.approvalNote,
+        l1ApproverName: emailData?.l1ApproverName,
+        l1ApprovalNote: emailData?.l1ApprovalNote,
+        dayLabel,
       });
-    case "wfh":             return wfhRequestEmail({ applicantName, date: new Date(), reason: body });
-    case "on_duty":         return onDutyRequestEmail({ applicantName, date: new Date(), reason: body });
-    case "regularization":  return regularizationRequestEmail({ applicantName, date: new Date(), reason: body });
-    case "comp_off":        return compOffRequestEmail({ applicantName, workedDate: new Date(), creditDays: "—", reason: body });
+    }
+    case "wfh":             return wfhRequestEmail({
+      applicantName,
+      date:           emailData?.date     ?? new Date(),
+      toDate:         emailData?.toDate,
+      reason:         reasonText,
+      approverName:   emailData?.approverName,
+      stageLabel:     emailData?.stageLabel,
+      approvalNote:   emailData?.approvalNote,
+      l1ApproverName: emailData?.l1ApproverName,
+      l1ApprovalNote: emailData?.l1ApprovalNote,
+    });
+    case "on_duty":         return onDutyRequestEmail({ applicantName, date: emailData?.date ?? new Date(), location: emailData?.location, reason: reasonText });
+    case "regularization":  return regularizationRequestEmail({ applicantName, date: emailData?.date ?? new Date(), reason: reasonText });
+    case "comp_off":        return compOffRequestEmail({ applicantName, workedDate: emailData?.workedDate ?? new Date(), creditDays: emailData?.creditDays ?? "—", reason: reasonText });
     default:                return null;
   }
 }
@@ -122,10 +186,11 @@ async function dispatchEmails(
   userIds: number[],
   type: NotificationType,
   title: string,
-  body?: string
+  body?: string,
+  emailData?: EmailData,
 ): Promise<void> {
   try {
-    const content = buildEmailFor(type, title, body);
+    const content = buildEmailFor(type, title, body, emailData);
     if (!content) return;
     const to = await emailsForUserIds(userIds);
     if (to.length === 0) return;
@@ -188,6 +253,10 @@ export async function notifyUsers(params: {
   body?:    string;
   entityId?: number;
   linkUrl?:  string;
+  /** Structured payload — fills in the email's leave type, dates, total
+   *  days, approver name, etc. so the template doesn't fall back to
+   *  parsing the title/body. */
+  emailData?: EmailData;
 }): Promise<void> {
   try {
     const actor = params.actorId ?? null;
@@ -206,7 +275,7 @@ export async function notifyUsers(params: {
       })),
     });
     // Mirror the in-app notification as an email — fire-and-forget.
-    void dispatchEmails(ids, params.type, params.title, params.body);
+    void dispatchEmails(ids, params.type, params.title, params.body, params.emailData);
   } catch (e) {
     console.error("notifyUsers failed:", e);
   }
