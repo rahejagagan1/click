@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import OrgTree from "@/components/admin/org-tree";
 import RegularizationPolicyCard from "@/components/admin/RegularizationPolicyCard";
+import UnlimitedRegularizationPolicyCard from "@/components/admin/UnlimitedRegularizationPolicyCard";
 import UserAvatar from "@/components/ui/user-avatar";
 import {
     type TeamCapsuleCatalog,
@@ -1918,10 +1919,11 @@ export default function AdminPage() {
                     <div>
                         <h2 className="text-base font-semibold text-white">Regularization Policy</h2>
                         <p className="text-xs text-slate-400 mt-1">
-                            Control whether the 2-day self-apply window for attendance regularization is enforced organization-wide.
+                            Control the org-wide attendance regularization policy: the 2-day self-apply window and the unlimited override.
                         </p>
                     </div>
                     <RegularizationPolicyCard />
+                    <UnlimitedRegularizationPolicyCard />
                 </div>
             )}
         </div>
