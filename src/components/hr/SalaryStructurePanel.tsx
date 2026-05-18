@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import CustomSelect from "@/components/ui/CustomSelect";
 import { DatePicker } from "@/components/ui/date-picker";
+import { DateField } from "@/components/ui/date-field";
 
 type Props = {
   userId: number;
@@ -318,16 +319,12 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
           </div>
           <div>
             <label className={cls.label}>Effective From</label>
-            <div className="relative">
-              <Calendar className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-              <input
-                type="date"
-                value={form.effectiveFrom}
-                onChange={(e) => set("effectiveFrom", e.target.value)}
-                disabled={!canEdit}
-                className={`${cls.field} pl-8`}
-              />
-            </div>
+            <DateField
+              value={form.effectiveFrom}
+              onChange={(v) => set("effectiveFrom", v)}
+              disabled={!canEdit}
+              className="w-full"
+            />
           </div>
         </div>
 

@@ -36,6 +36,7 @@ export async function GET() {
         status: string;
         assetsReturned: boolean; documentsHandled: boolean;
         finalSettlementDone: boolean; exitInterviewDone: boolean;
+        okToRehire: boolean;
         createdAt: Date;
       }>
     >(
@@ -44,7 +45,8 @@ export async function GET() {
               e."exitType", e."resignationDate", e."lastWorkingDay",
               e."noticePeriodDays", e.reason, e.notes, e.status,
               e."assetsReturned", e."documentsHandled",
-              e."finalSettlementDone", e."exitInterviewDone", e."createdAt"
+              e."finalSettlementDone", e."exitInterviewDone",
+              e."okToRehire", e."createdAt"
          FROM "EmployeeExit" e
          JOIN "User" u ON u.id = e."userId"
     LEFT JOIN "EmployeeProfile" ep ON ep."userId" = e."userId"
@@ -71,6 +73,7 @@ export async function POST(req: NextRequest) {
     const noticePeriodDays = Number.isFinite(Number(body?.noticePeriodDays)) ? Number(body.noticePeriodDays) : 30;
     const reason          = body?.reason ? String(body.reason) : null;
     const notes           = body?.notes  ? String(body.notes)  : null;
+    const okToRehire      = body?.okToRehire === true;
 
     if (!Number.isFinite(userId)) return NextResponse.json({ error: "userId is required" }, { status: 400 });
     if (!EXIT_TYPES.has(exitType)) return NextResponse.json({ error: "Invalid exit type" }, { status: 400 });
@@ -94,30 +97,28 @@ export async function POST(req: NextRequest) {
 
     const initiatedBy = (session!.user as any)?.dbId ?? null;
 
-    // Insert the exit row + flip isActive in a single transaction so we
-    // don't leave one of them dangling on partial failure.
-    await prisma.$transaction([
-      prisma.$executeRawUnsafe(
-        `INSERT INTO "EmployeeExit"
-           ("userId", "exitType", "resignationDate", "lastWorkingDay", "noticePeriodDays",
-            reason, notes, "initiatedById", "updatedAt")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
-         ON CONFLICT ("userId") DO UPDATE
-            SET "exitType" = EXCLUDED."exitType",
-                "resignationDate" = EXCLUDED."resignationDate",
-                "lastWorkingDay" = EXCLUDED."lastWorkingDay",
-                "noticePeriodDays" = EXCLUDED."noticePeriodDays",
-                reason = EXCLUDED.reason,
-                notes = EXCLUDED.notes,
-                "updatedAt" = now()`,
-        userId, exitType, resignationDate, lastWorkingDay, noticePeriodDays,
-        reason, notes, initiatedBy,
-      ),
-      prisma.user.update({
-        where: { id: userId },
-        data:  { isActive: false },
-      }),
-    ]);
+    // Create (or update) the exit row. The employee STAYS active through
+    // the notice period — their account is fully usable until HR flips
+    // the exit status to "offboarded" via PATCH /api/hr/exits/[id],
+    // which then sets User.isActive=false. So search bars, the People
+    // directory, and the @-mention picker still show them until then.
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "EmployeeExit"
+         ("userId", "exitType", "resignationDate", "lastWorkingDay", "noticePeriodDays",
+          reason, notes, "okToRehire", "initiatedById", "updatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
+       ON CONFLICT ("userId") DO UPDATE
+          SET "exitType" = EXCLUDED."exitType",
+              "resignationDate" = EXCLUDED."resignationDate",
+              "lastWorkingDay" = EXCLUDED."lastWorkingDay",
+              "noticePeriodDays" = EXCLUDED."noticePeriodDays",
+              reason = EXCLUDED.reason,
+              notes = EXCLUDED.notes,
+              "okToRehire" = EXCLUDED."okToRehire",
+              "updatedAt" = now()`,
+      userId, exitType, resignationDate, lastWorkingDay, noticePeriodDays,
+      reason, notes, okToRehire, initiatedBy,
+    );
 
     // Fire emails — fire-and-forget so SMTP hiccups don't block save.
     if (target.email) {

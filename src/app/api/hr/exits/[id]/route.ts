@@ -33,17 +33,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         return NextResponse.json({ error: "Invalid status" }, { status: 400 });
       sets.push(`status = $${i++}`); args.push(body.status);
     }
-    for (const k of ["assetsReturned", "documentsHandled", "finalSettlementDone", "exitInterviewDone"]) {
+    for (const k of ["assetsReturned", "documentsHandled", "finalSettlementDone", "exitInterviewDone", "okToRehire"]) {
       if (body[k] !== undefined) { sets.push(`"${k}" = $${i++}`); args.push(!!body[k]); }
     }
     if (body.notes !== undefined) { sets.push(`notes = $${i++}`); args.push(body.notes || null); }
     if (sets.length === 0) return NextResponse.json({ ok: true });
     sets.push(`"updatedAt" = now()`);
     args.push(id);
-    await prisma.$executeRawUnsafe(
-      `UPDATE "EmployeeExit" SET ${sets.join(", ")} WHERE id = $${i}`,
-      ...args,
-    );
+
+    // Status drives User.isActive — the employee stays active through the
+    // notice_period (and cleared) stages so they remain visible in
+    // search / directory / mention pickers. Only when HR flips status to
+    // "offboarded" do we deactivate the account. Flipping back to an
+    // earlier status reactivates them. Done in one transaction so the
+    // exit row and the user flag never get out of sync.
+    const ops: any[] = [
+      prisma.$executeRawUnsafe(
+        `UPDATE "EmployeeExit" SET ${sets.join(", ")} WHERE id = $${i}`,
+        ...args,
+      ),
+    ];
+    if (body.status !== undefined) {
+      const shouldDeactivate = String(body.status) === "offboarded";
+      ops.push(prisma.$executeRawUnsafe(
+        `UPDATE "User" SET "isActive" = $1
+           WHERE id = (SELECT "userId" FROM "EmployeeExit" WHERE id = $2)`,
+        !shouldDeactivate, id,
+      ));
+    }
+    await prisma.$transaction(ops);
+
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     console.error("[PATCH /api/hr/exits/:id] failed:", e);
