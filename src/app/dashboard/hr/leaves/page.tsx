@@ -4,6 +4,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import SelectField from "@/components/ui/SelectField";
 import { isHRAdmin } from "@/lib/access";
 import { DateField } from "@/components/ui/date-field";
 
@@ -349,14 +350,18 @@ function CompOffModal({ onClose }: { onClose: () => void }) {
           </div>
           <div>
             <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Credit Days</label>
-            <select value={form.creditDays} onChange={e => set("creditDays", e.target.value)}
-              className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white focus:outline-none">
-              <option value="0.5">Half Day (0.5)</option>
-              <option value="1">Full Day (1.0)</option>
-            </select>
+            <SelectField
+              value={form.creditDays}
+              onChange={(v) => set("creditDays", v)}
+              options={[
+                { value: "0.5", label: "Half Day (0.5)" },
+                { value: "1",   label: "Full Day (1.0)" },
+              ]}
+              className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white"
+            />
           </div>
           <div>
-            <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Reason *</label>
+            <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Reason <span className="text-rose-500">*</span></label>
             <textarea value={form.reason} onChange={e => set("reason", e.target.value)} rows={3}
               placeholder="Describe the extra work done..."
               className="w-full px-3 py-2.5 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none resize-none" />
