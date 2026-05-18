@@ -8,11 +8,15 @@ import AddEmployeeWizard from "@/components/hr/add-employee-wizard";
 import OrgTreeView from "@/components/hr/OrgTreeView";
 import FilterDropdown from "@/components/hr/FilterDropdown";
 import {
-  deriveEntity,
+  deriveBusinessUnit,
+  deriveCostCenter,
+  deriveLegalEntity,
   deriveDepartment,
   deriveLocation,
   deriveRole,
-  entityOptions,
+  businessUnitOptions,
+  costCenterOptions,
+  legalEntityOptions,
   departmentOptions,
   locationOptions,
   roleOptions,
@@ -50,37 +54,29 @@ export default function PeoplePage() {
     fetcher,
   );
 
-  const { bizUnitOpts, deptOpts, locOpts, costOpts, legalOpts, rolesOpts } = useMemo(() => {
-    const ents = entityOptions(employees);
-    return {
-      bizUnitOpts: ents,
-      legalOpts:   ents,
-      costOpts:    ents,
-      deptOpts:    departmentOptions(employees),
-      locOpts:     locationOptions(employees),
-      rolesOpts:   roleOptions(employees),
-    };
-  }, [employees]);
+  const { bizUnitOpts, deptOpts, locOpts, costOpts, legalOpts, rolesOpts } = useMemo(() => ({
+    bizUnitOpts: businessUnitOptions(employees),
+    legalOpts:   legalEntityOptions(employees),
+    costOpts:    costCenterOptions(employees),
+    deptOpts:    departmentOptions(employees),
+    locOpts:     locationOptions(employees),
+    rolesOpts:   roleOptions(employees),
+  }), [employees]);
 
   const filtered = useMemo(() => {
     // When a filter has any selection, only users whose derived value is in
-    // the set pass. Users with empty values are excluded (no more UNASSIGNED
-    // pseudo-match since the option itself was removed).
+    // the set pass. Users with empty values are excluded.
     const matches = (selected: Set<string>, derived: string) => {
       if (selected.size === 0) return true;
       return !!derived && selected.has(derived);
     };
     return employees.filter((e: any) => {
-      const en = deriveEntity(e);
-      const dp = deriveDepartment(e);
-      const lc = deriveLocation(e);
-      const rl = deriveRole(e);
-      if (!matches(fBizUnit,  en)) return false;
-      if (!matches(fLegal,    en)) return false;
-      if (!matches(fCost,     en)) return false;
-      if (!matches(fDept,     dp)) return false;
-      if (!matches(fLocation, lc)) return false;
-      if (!matches(fRole,     rl)) return false;
+      if (!matches(fBizUnit,  deriveBusinessUnit(e))) return false;
+      if (!matches(fLegal,    deriveLegalEntity(e)))  return false;
+      if (!matches(fCost,     deriveCostCenter(e)))   return false;
+      if (!matches(fDept,     deriveDepartment(e)))   return false;
+      if (!matches(fLocation, deriveLocation(e)))     return false;
+      if (!matches(fRole,     deriveRole(e)))         return false;
       if (search && !(
         e.name?.toLowerCase().includes(search.toLowerCase()) ||
         (e.email || "").toLowerCase().includes(search.toLowerCase())
@@ -201,10 +197,12 @@ export default function PeoplePage() {
                         <span className="text-[11px] text-[#008CFF] font-medium">{emp.employeeProfile.department}</span>
                       </div>
                     )}
-                    {(emp.employeeProfile?.workLocation) && (
+                    {(emp.employeeProfile?.jobLocation || emp.employeeProfile?.workLocation) && (
                       <div className="flex items-start gap-2">
                         <span className="text-[11px] text-slate-600 min-w-[80px]">Location :</span>
-                        <span className="text-[11px] text-slate-800 dark:text-white">{emp.employeeProfile.workLocation}</span>
+                        <span className="text-[11px] text-slate-800 dark:text-white">
+                          {emp.employeeProfile.jobLocation || emp.employeeProfile.workLocation}
+                        </span>
                       </div>
                     )}
                     <div className="flex items-start gap-2">

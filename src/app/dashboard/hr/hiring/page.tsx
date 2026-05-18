@@ -13,6 +13,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { isHRAdmin } from "@/lib/access";
+import SelectField from "@/components/ui/SelectField";
 import {
   Briefcase, Mail, Phone, ExternalLink, FileText, Plus, X, Trash2,
   CheckCircle2, Clock, Star, MessageSquare, XCircle, Trophy,
@@ -491,11 +492,16 @@ function AddOpeningModal({ onClose, onCreated }: { onClose: () => void; onCreate
         </div>
         <div className="px-6 py-5 space-y-4">
           <Lbl label="Title*">
-            <select className={ipt} value={title} onChange={e => setTitle(e.target.value)}>
-              <option value="">— Select a role —</option>
-              {JOB_TITLES.map(t => <option key={t} value={t}>{t}</option>)}
-              <option value="__custom">Other (type custom title)…</option>
-            </select>
+            <SelectField
+              value={title}
+              onChange={setTitle}
+              placeholder="— Select a role —"
+              options={[
+                ...JOB_TITLES.map((t) => ({ value: t, label: t })),
+                { value: "__custom", label: "Other (type custom title)…" },
+              ]}
+              className={ipt}
+            />
             {isCustom && (
               <input
                 className={`${ipt} mt-2`}
