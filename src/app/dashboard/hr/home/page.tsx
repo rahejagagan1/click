@@ -1963,10 +1963,22 @@ export default function HRHomePage() {
     return () => clearTimeout(t);
   }, [confirmingClockOut, clockingOut]);
 
+  // Mobile clock-in is policy-blocked by default (attendance is meant
+  // to be captured from the workstation). Two escape hatches:
+  //   1. Developers (`DEVELOPER_EMAILS` in env → `user.isDeveloper`) —
+  //      stable bypass for the platform team; tied to identity, not
+  //      knowledge of a URL trick.
+  //   2. `?desktop=1` query param — short-term emergency override for
+  //      anyone whose laptop is unavailable. NOT a secret; treat it
+  //      as "I know what I'm doing, let me through" and follow up
+  //      with regularization if used.
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   useEffect(() => {
-    setIsMobileDevice(detectMobileDevice());
-  }, []);
+    const isDev = user?.isDeveloper === true;
+    const bypassParam = typeof window !== "undefined"
+      && new URLSearchParams(window.location.search).get("desktop") === "1";
+    setIsMobileDevice(detectMobileDevice() && !isDev && !bypassParam);
+  }, [user]);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.permissions?.query) {
