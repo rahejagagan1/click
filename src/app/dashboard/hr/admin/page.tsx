@@ -10,6 +10,7 @@ import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
 import LeavesAdminPanel from "@/components/hr/LeavesAdminPanel";
+import LeavePoliciesPanel from "@/components/hr/LeavePoliciesPanel";
 import { DateField } from "@/components/ui/date-field";
 import {
   isHRAdmin,
@@ -34,6 +35,7 @@ const ADMIN_TABS: Array<AdminTabDef & { permKey: string }> = [
   { key: "holidays",             label: "Holidays & Calendar",  icon: CalendarDays,    permKey: "hr_admin_holidays"       },
   { key: "assets",               label: "Assets",               icon: Package,         permKey: "hr_admin_assets"         },
   { key: "leave-types",          label: "Leave Types",          icon: Calendar,        permKey: "hr_admin_leave_types"    },
+  { key: "leave-policies",       label: "Leave Policies",       icon: Calendar,        permKey: "hr_admin_leave_types"    },
   { key: "shifts",               label: "Shift Templates",      icon: Clock,           permKey: "hr_admin_shifts"         },
   { key: "departments",          label: "Departments",          icon: Users,           permKey: "hr_admin_departments"    },
 ];
@@ -433,6 +435,9 @@ export default function HRAdminPage() {
               </div>
             </>
           )}
+
+          {/* ── Leave Policies ── */}
+          {tab === "leave-policies" && <LeavePoliciesPanel />}
 
           {/* ── Shift Templates ── */}
           {tab === "shifts" && (
