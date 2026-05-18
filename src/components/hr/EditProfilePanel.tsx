@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import SalaryStructurePanel from "@/components/hr/SalaryStructurePanel";
 import CustomSelect from "@/components/ui/CustomSelect";
+import SelectField from "@/components/ui/SelectField";
 import { DateField } from "@/components/ui/date-field";
 import { DEPARTMENTS } from "@/lib/departments";
 
@@ -31,8 +32,8 @@ type Props = {
 };
 
 const cls = {
-  field:    "h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-800 placeholder-slate-400 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15",
-  textarea: "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 placeholder-slate-400 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 resize-none",
+  field:    "h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-800 placeholder-slate-400 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed",
+  textarea: "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 placeholder-slate-400 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 resize-none disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed",
   label:    "block text-[11.5px] font-semibold text-slate-600 mb-1",
 };
 
@@ -186,6 +187,38 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
     permanentCountry: p.permanentCountry ?? "India",
   });
   const addressHook = useSaveSection(userId);
+  // "Same as Current Address" — when checked, the permanent address fields
+  // mirror the current ones live (any edit to current also updates permanent),
+  // and the permanent inputs are disabled so it's obvious why they can't be
+  // typed into. Unchecking releases the inputs and keeps the last synced
+  // values so HR doesn't lose what was just copied.
+  const [sameAsCurrent, setSameAsCurrent] = useState(false);
+  useEffect(() => {
+    if (!sameAsCurrent) return;
+    setAddress((a) => {
+      const inSync =
+        a.permanentLine1   === a.address &&
+        a.permanentLine2   === a.addressLine2 &&
+        a.permanentCity    === a.city &&
+        a.permanentState   === a.state &&
+        a.permanentPincode === a.addressPincode &&
+        a.permanentCountry === a.addressCountry;
+      if (inSync) return a;
+      return {
+        ...a,
+        permanentLine1:   a.address,
+        permanentLine2:   a.addressLine2,
+        permanentCity:    a.city,
+        permanentState:   a.state,
+        permanentPincode: a.addressPincode,
+        permanentCountry: a.addressCountry,
+      };
+    });
+  }, [
+    sameAsCurrent,
+    address.address, address.addressLine2, address.city,
+    address.state, address.addressPincode, address.addressCountry,
+  ]);
 
   // ── Section: Job & Work ───────────────────────────────────────────
   const [job, setJob] = useState({
@@ -220,7 +253,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
     timeTrackingPolicy:      p.timeTrackingPolicy ?? "On-Site Capture",
     penalizationPolicy:      p.penalizationPolicy ?? "Default",
     attendanceCaptureScheme: p.attendanceCaptureScheme ?? "On-Site",
-    costCenter:              p.costCenter ?? "",
+    costCenter:              p.costCenter || "NB Media",
   });
   const workHook = useSaveSection(userId);
 
@@ -307,7 +340,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
       timeTrackingPolicy:      p.timeTrackingPolicy ?? "On-Site Capture",
       penalizationPolicy:      p.penalizationPolicy ?? "Default",
       attendanceCaptureScheme: p.attendanceCaptureScheme ?? "On-Site",
-      costCenter:              p.costCenter ?? "",
+      costCenter:              p.costCenter || "NB Media",
     });
     setIdentity((s) => ({
       ...s,
@@ -599,36 +632,47 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
         </div>
 
         {/* ── Permanent address ── */}
-        <p className="text-[10.5px] uppercase tracking-wider font-semibold text-slate-500 mt-5 mb-2 pt-3 border-t border-slate-200/70">Permanent Address</p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="mt-5 pt-3 border-t border-slate-200/70 flex items-center justify-between gap-4">
+          <p className="text-[10.5px] uppercase tracking-wider font-semibold text-slate-500">Permanent Address</p>
+          <label className="inline-flex items-center gap-2 text-[12px] text-slate-700 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={sameAsCurrent}
+              onChange={(e) => setSameAsCurrent(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-[#3b82f6] focus:ring-[#3b82f6]/30"
+            />
+            Same as Current Address
+          </label>
+        </div>
+        <div className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <label className={cls.label}>Address Line 1</label>
-            <textarea rows={2} className={cls.textarea} value={address.permanentLine1}
+            <textarea rows={2} disabled={sameAsCurrent} className={cls.textarea} value={address.permanentLine1}
               onChange={(e) => setAddress({ ...address, permanentLine1: e.target.value })} />
           </div>
           <div className="sm:col-span-2">
             <label className={cls.label}>Address Line 2 <span className="text-[10px] text-slate-400">(optional)</span></label>
-            <input className={cls.field} value={address.permanentLine2}
+            <input disabled={sameAsCurrent} className={cls.field} value={address.permanentLine2}
               onChange={(e) => setAddress({ ...address, permanentLine2: e.target.value })} />
           </div>
           <div>
             <label className={cls.label}>City</label>
-            <input className={cls.field} value={address.permanentCity}
+            <input disabled={sameAsCurrent} className={cls.field} value={address.permanentCity}
               onChange={(e) => setAddress({ ...address, permanentCity: e.target.value })} />
           </div>
           <div>
             <label className={cls.label}>State</label>
-            <input className={cls.field} value={address.permanentState}
+            <input disabled={sameAsCurrent} className={cls.field} value={address.permanentState}
               onChange={(e) => setAddress({ ...address, permanentState: e.target.value })} />
           </div>
           <div>
             <label className={cls.label}>Pincode</label>
-            <input className={cls.field} value={address.permanentPincode}
+            <input disabled={sameAsCurrent} className={cls.field} value={address.permanentPincode}
               onChange={(e) => setAddress({ ...address, permanentPincode: e.target.value })} />
           </div>
           <div>
             <label className={cls.label}>Country</label>
-            <input className={cls.field} value={address.permanentCountry}
+            <input disabled={sameAsCurrent} className={cls.field} value={address.permanentCountry}
               onChange={(e) => setAddress({ ...address, permanentCountry: e.target.value })} />
           </div>
         </div>
@@ -707,22 +751,26 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
           </div>
           <div>
             <label className={cls.label}>Employment Type</label>
-            <select className={cls.field} value={job.employmentType}
-              onChange={(e) => setJob({ ...job, employmentType: e.target.value })}>
-              <option value="fulltime">Full-time</option>
-              <option value="parttime">Part-time</option>
-              <option value="contract">Contract</option>
-              <option value="intern">Intern</option>
-            </select>
+            <SelectField
+              value={job.employmentType}
+              onChange={(v) => setJob({ ...job, employmentType: v })}
+              options={[
+                { value: "fulltime", label: "Regular" },
+                { value: "intern",   label: "Intern" },
+              ]}
+            />
           </div>
           <div>
             <label className={cls.label}>Work Location</label>
-            <select className={cls.field} value={job.workLocation}
-              onChange={(e) => setJob({ ...job, workLocation: e.target.value })}>
-              <option value="office">Office</option>
-              <option value="remote">Remote</option>
-              <option value="hybrid">Hybrid</option>
-            </select>
+            <SelectField
+              value={job.workLocation}
+              onChange={(v) => setJob({ ...job, workLocation: v })}
+              options={[
+                { value: "office", label: "Office" },
+                { value: "remote", label: "Remote" },
+                { value: "hybrid", label: "Hybrid" },
+              ]}
+            />
           </div>
           <div>
             <label className={cls.label}>Job Location (City)</label>
@@ -752,22 +800,38 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
               onChange={(v) => setJob({ ...job, nationality: v })}
             />
           </div>
-          <div>
-            <label className={cls.label}>
-              {job.employmentType === "intern" ? "Internship Start Date" : "Joining Date"}
-            </label>
-            <DateField value={job.joiningDate}
-              onChange={(v) => setJob({ ...job, joiningDate: v })}
-              className="w-full" />
-          </div>
-          {job.employmentType === "intern" && (
-            <div>
-              <label className={cls.label}>Internship End Date</label>
-              <DateField value={job.internshipEndDate}
-                onChange={(v) => setJob({ ...job, internshipEndDate: v })}
-                className="w-full" />
-            </div>
-          )}
+          {/* Internship-history rule:
+              • Currently an intern → show the date as "Internship Start Date"
+                + the "Internship End Date" field underneath.
+              • Was an intern earlier (internshipEndDate is filled) and is
+                now Regular → STILL show both as "Internship Start/End Date"
+                so HR keeps that history at a glance.
+              • Direct Regular hire (no internshipEndDate, never an intern) →
+                show the date as plain "Joining Date" only. */}
+          {(() => {
+            const hasInternshipHistory =
+              job.employmentType === "intern" || !!job.internshipEndDate;
+            return (
+              <>
+                <div>
+                  <label className={cls.label}>
+                    {hasInternshipHistory ? "Internship Start Date" : "Joining Date"}
+                  </label>
+                  <DateField value={job.joiningDate}
+                    onChange={(v) => setJob({ ...job, joiningDate: v })}
+                    className="w-full" />
+                </div>
+                {hasInternshipHistory && (
+                  <div>
+                    <label className={cls.label}>Internship End Date</label>
+                    <DateField value={job.internshipEndDate}
+                      onChange={(v) => setJob({ ...job, internshipEndDate: v })}
+                      className="w-full" />
+                  </div>
+                )}
+              </>
+            );
+          })()}
           <div>
             <label className={cls.label}>Notice Period (days)</label>
             <input type="number" min={0} className={cls.field} value={job.noticePeriodDays}
@@ -784,37 +848,40 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
           </div>
           <div>
             <label className={cls.label}>Role</label>
-            <select className={cls.field} value={job.role}
-              onChange={(e) => setJob({ ...job, role: e.target.value })}>
-              {[
+            <SelectField
+              value={job.role}
+              onChange={(v) => setJob({ ...job, role: v })}
+              options={[
                 "admin","manager","lead","sub_lead","writer","editor","qa","researcher","gc",
                 "vo_artist","publisher","production_manager","hr_manager","researcher_manager","member",
-              ].map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
+              ]}
+            />
           </div>
           <div>
             <label className={cls.label}>Org Level</label>
-            <select className={cls.field} value={job.orgLevel}
-              onChange={(e) => setJob({ ...job, orgLevel: e.target.value })}>
-              {["ceo","special_access","hod","manager","hr_manager","lead","sub_lead","member"]
-                .map(o => <option key={o} value={o}>{o}</option>)}
-            </select>
+            <SelectField
+              value={job.orgLevel}
+              onChange={(v) => setJob({ ...job, orgLevel: v })}
+              options={["ceo","special_access","hod","manager","hr_manager","lead","sub_lead","member"]}
+            />
           </div>
           <div>
             <label className={cls.label}>Reporting Manager</label>
-            <select className={cls.field} value={job.managerId}
-              onChange={(e) => setJob({ ...job, managerId: e.target.value })}>
-              <option value="">— No manager —</option>
-              {managerOpts.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
+            <SelectField
+              value={job.managerId}
+              onChange={(v) => setJob({ ...job, managerId: v })}
+              placeholder="— No manager —"
+              options={[{ value: "", label: "— No manager —" }, ...managerOpts.map((m) => ({ value: String(m.id), label: m.name }))]}
+            />
           </div>
           <div>
             <label className={cls.label}>Inline Manager</label>
-            <select className={cls.field} value={job.inlineManagerId}
-              onChange={(e) => setJob({ ...job, inlineManagerId: e.target.value })}>
-              <option value="">— No inline manager —</option>
-              {managerOpts.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
+            <SelectField
+              value={job.inlineManagerId}
+              onChange={(v) => setJob({ ...job, inlineManagerId: v })}
+              placeholder="— No inline manager —"
+              options={[{ value: "", label: "— No inline manager —" }, ...managerOpts.map((m) => ({ value: String(m.id), label: m.name }))]}
+            />
           </div>
           <div>
             <label className={cls.label}>Team Capsule</label>
@@ -840,7 +907,9 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
           timeTrackingPolicy:      work.timeTrackingPolicy.trim() || null,
           penalizationPolicy:      work.penalizationPolicy.trim() || null,
           attendanceCaptureScheme: work.attendanceCaptureScheme.trim() || null,
-          costCenter:              work.costCenter.trim()              || null,
+          // Cost Centre is locked org-wide to "NB Media" — never let
+          // a stale local-state value blank it out on save.
+          costCenter:              "NB Media",
         })}
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -911,9 +980,11 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
           </div>
           <div>
             <label className={cls.label}>Cost Center</label>
-            <input className={cls.field} value={work.costCenter}
-              onChange={(e) => setWork({ ...work, costCenter: e.target.value })}
-              placeholder="e.g. NB Media" />
+            {/* Locked org-wide value. Every employee belongs to the
+                "NB Media" cost centre — HR does not edit this per-row.
+                Kept as a read-only field (rather than hidden) so HR can
+                see at a glance which centre the employee rolls up to. */}
+            <input className={cls.field} value="NB Media" disabled readOnly />
           </div>
         </div>
       </Section>

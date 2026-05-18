@@ -4,6 +4,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import SelectField from "@/components/ui/SelectField";
 import { isAdmin as isAdminUser } from "@/lib/access";
 
 export default function AnnouncementsPage() {
@@ -117,9 +118,16 @@ function CreateAnnouncementPanel({ onClose }: { onClose: () => void }) {
         </div>
         <div>
           <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Target Audience</label>
-          <select value={form.targetAudience} onChange={(e) => setForm((p) => ({ ...p, targetAudience: e.target.value }))} className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white focus:outline-none">
-            <option value="all">Everyone</option><option value="department">Department</option><option value="team">Team Only</option>
-          </select>
+          <SelectField
+            value={form.targetAudience}
+            onChange={(v) => setForm((p) => ({ ...p, targetAudience: v }))}
+            options={[
+              { value: "all",        label: "Everyone" },
+              { value: "department", label: "Department" },
+              { value: "team",       label: "Team Only" },
+            ]}
+            className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white"
+          />
         </div>
         <label className="flex items-center gap-2 cursor-pointer">
           <input type="checkbox" checked={form.isPinned} onChange={(e) => setForm((p) => ({ ...p, isPinned: e.target.checked }))} className="w-4 h-4 rounded bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08]" />
