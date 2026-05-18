@@ -97,7 +97,8 @@ type Form = {
   // Step 3 — Work
   inviteToLogin:    boolean;
   enableOnboarding: boolean;
-  leavePlan:        string;
+  leavePolicyId:    number | "";   // assigned LeavePolicy.id — drives entitlements
+  leavePlan:        string;        // legacy free-text; kept for back-compat
   holidayList:      string;
   attendanceTracking: boolean;
   shiftId:          string;
@@ -162,6 +163,7 @@ const EMPTY: Form = {
   probationPolicy: "Regular Employees", noticePeriodDays: "30",
   jobLocation: "Mohali", internshipEndDate: "",
   inviteToLogin: true, enableOnboarding: true,
+  leavePolicyId: "" as number | "",
   leavePlan: "Regular Leave Plan", holidayList: "Default Holiday List",
   attendanceTracking: true, shiftId: "", weeklyOff: "Standard Weekly Off",
   attendanceNumber: "", timeTrackingPolicy: "On-Site Capture",
@@ -295,6 +297,20 @@ export default function OnboardEmployeePage() {
   // Pull the active EmployeeNumberSeries so the form can show the
   // next-allocatable employee number as a hint ("Next: HRM47").
   const { data: numberSeries } = useSWR<any[]>("/api/hr/number-series", fetcher);
+  const { data: leavePolicies = [] } = useSWR<Array<{ id: number; name: string; isActive: boolean }>>(
+    "/api/hr/admin/leave-policies",
+    fetcher,
+  );
+  // Auto-pick the first active leave policy for new users — onboarding
+  // should never leave leavePolicyId blank if a policy is configured, so
+  // accrual + Apply work out of the box. HR can still change the choice
+  // before submitting, or pick "None" explicitly.
+  useEffect(() => {
+    if (form.leavePolicyId !== "") return;
+    const def = leavePolicies.find((p) => p.isActive);
+    if (def) setForm((f) => ({ ...f, leavePolicyId: def.id }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leavePolicies]);
   const activeSeries = (Array.isArray(numberSeries) ? numberSeries : []).find((s: any) => s.isActive) ?? (Array.isArray(numberSeries) ? numberSeries[0] : null);
   const nextEmployeeId = activeSeries
     ? `${activeSeries.prefix}${activeSeries.nextNumber}`
@@ -471,6 +487,7 @@ export default function OnboardEmployeePage() {
         inlineManagerId: form.dottedLineManagerId ? Number(form.dottedLineManagerId) : null,
         inviteToLogin:    form.inviteToLogin,
         enableOnboarding: form.enableOnboarding,
+        leavePolicyId:    form.leavePolicyId === "" ? null : Number(form.leavePolicyId),
         profile: {
           employeeId: form.employeeNumber || undefined,
           designation: form.jobTitle || undefined,
@@ -1039,9 +1056,21 @@ export default function OnboardEmployeePage() {
 
             <SectionTitle>Leave Settings</SectionTitle>
             <Grid>
-              <Field label="Leave Plan">
-                <CustomSelect listKey="leavePlan" defaults={["Regular Leave Plan", "Intern Leave Plan"]}
-                  value={form.leavePlan} onChange={v => set("leavePlan", v)} />
+              <Field label="Leave Policy">
+                <select
+                  value={form.leavePolicyId === "" ? "" : String(form.leavePolicyId)}
+                  onChange={(e) => set("leavePolicyId", e.target.value === "" ? "" : Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30"
+                >
+                  <option value="">— None (manual balances) —</option>
+                  {leavePolicies
+                    .filter((p) => p.isActive || p.id === form.leavePolicyId)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}{!p.isActive ? " (inactive)" : ""}
+                      </option>
+                    ))}
+                </select>
               </Field>
               <Field label="Holiday List">
                 <CustomSelect listKey="holidayList" defaults={["Default Holiday List"]}

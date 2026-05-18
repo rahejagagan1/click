@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { calcBusinessDaysTat, formatTatDays } from "@/lib/utils";
 import { getWeeklyReportPeriod } from "@/lib/reports/weekly-period";
+import { resolveReportTeam } from "@/lib/reports/team-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -63,22 +64,16 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         }
         const { weekStart, weekEnd } = period;
 
-        // Editors under this manager
-        const manager = await prisma.user.findUnique({
-            where: { id: managerId },
-            include: {
-                teamMembers: {
-                    where: { role: "editor", isActive: true },
-                    select: { id: true, name: true },
-                },
-            },
-        });
-
+        // Editors under this manager — prefer the locked report's team
+        // snapshot so a user who edited cases in this week still appears
+        // even if they later moved managers. Falls back to live team
+        // for drafts / legacy reports.
+        const manager = await prisma.user.findUnique({ where: { id: managerId }, select: { id: true } });
         if (!manager) {
             return NextResponse.json({ error: "Manager not found" }, { status: 404 });
         }
-
-        const editorIds = manager.teamMembers.map((e) => e.id);
+        const team = await resolveReportTeam(managerId, { kind: "weekly", week, month, year });
+        const editorIds = team.filter((m) => m.role === "editor").map((m) => m.id);
         if (editorIds.length === 0) {
             return NextResponse.json({ editorCases: [] });
         }

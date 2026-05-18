@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
 import { getManagerReportFormat, isManagerReportEligible } from "@/lib/reports/manager-report-format";
+import { resolveReportTeamWithSource } from "@/lib/reports/team-snapshot";
 
 export const dynamic = 'force-dynamic';
 
@@ -60,21 +61,45 @@ export async function GET(
             reportEligible: isManagerReportEligible(row),
         };
 
-        // Get team members under this manager
-        const teamMembers = await prisma.user.findMany({
-            where: { managerId: managerId, isActive: true },
-            select: {
-                id: true,
-                name: true,
-                email: true,
-                role: true,
-                orgLevel: true,
-                profilePictureUrl: true,
-            },
-            orderBy: { name: "asc" },
-        });
+        // Period-aware team lookup. When the caller passes ?month=&year=
+        // (monthly view) or ?week=&month=&year= (weekly view), prefer the
+        // frozen teamSnapshot on the matching locked report so historical
+        // reports keep showing who was on the team that period. Without
+        // those params, fall back to the current live team (used by the
+        // sidebar / manager-list views that are NOT scoped to a period).
+        const monthParam = request.nextUrl.searchParams.get("month");
+        const yearParam  = request.nextUrl.searchParams.get("year");
+        const weekParam  = request.nextUrl.searchParams.get("week");
+        const monthNum = monthParam !== null ? parseInt(monthParam) : NaN;
+        const yearNum  = yearParam  !== null ? parseInt(yearParam)  : NaN;
+        const weekNum  = weekParam  !== null ? parseInt(weekParam)  : NaN;
 
-        return NextResponse.json({ manager, teamMembers });
+        let team;
+        let teamSource: "snapshot" | "live" = "live";
+        if (!isNaN(weekNum) && !isNaN(monthNum) && !isNaN(yearNum)) {
+            const r = await resolveReportTeamWithSource(managerId, { kind: "weekly", week: weekNum, month: monthNum, year: yearNum });
+            team = r.team;
+            teamSource = r.source;
+        } else if (!isNaN(monthNum) && !isNaN(yearNum)) {
+            const r = await resolveReportTeamWithSource(managerId, { kind: "monthly", month: monthNum, year: yearNum });
+            team = r.team;
+            teamSource = r.source;
+        } else {
+            // No period passed — live team query (sidebar / manager list).
+            // Returns the same shape + `email` (kept for back-compat).
+            const rows = await prisma.user.findMany({
+                where: { managerId: managerId, isActive: true },
+                select: {
+                    id: true, name: true, email: true,
+                    role: true, orgLevel: true, profilePictureUrl: true,
+                },
+                orderBy: { name: "asc" },
+            });
+            team = rows;
+            teamSource = "live";
+        }
+
+        return NextResponse.json({ manager, teamMembers: team, teamSource });
     } catch (error) {
         return serverError(error, "route");
     }

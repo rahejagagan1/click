@@ -128,7 +128,30 @@ export async function syncSpaces(): Promise<number> {
     // Always include TARGET_SPACE_IDS; admin config can add more but never removes the baseline.
     const config = await prisma.syncConfig.findUnique({ where: { key: "selected_spaces" } });
     const configIds: string[] = Array.isArray(config?.value) ? (config!.value as string[]) : [];
-    const filterIds = [...new Set([...TARGET_SPACE_IDS, ...configIds])];
+
+    // Also auto-include any space that contains a list in `selected_lists`.
+    // Without this, picking a list in the admin UI silently no-ops because
+    // the list's parent space wasn't enabled. We walk each selected list
+    // via /list/{id} (it returns the parent space + folder), collect the
+    // distinct space IDs, and union them into the filter set for this run.
+    // Best-effort: any list that errors (deleted / permissions) is skipped.
+    const listsCfg = await prisma.syncConfig.findUnique({ where: { key: "selected_lists" } });
+    const selectedListIds: string[] = Array.isArray(listsCfg?.value)
+        ? (listsCfg!.value as string[])
+        : [];
+    const derivedSpaceIds = new Set<string>();
+    for (const listId of selectedListIds) {
+        await delay(150);
+        try {
+            const list = await clickupApi<any>(`/list/${listId}`);
+            const sid = list?.space?.id;
+            if (typeof sid === "string" && sid) derivedSpaceIds.add(sid);
+        } catch (e) {
+            console.warn(`[Sync] could not resolve parent space for list ${listId}:`, (e as Error).message);
+        }
+    }
+
+    const filterIds = [...new Set([...TARGET_SPACE_IDS, ...configIds, ...derivedSpaceIds])];
 
     for (const space of response.spaces || []) {
         if (filterIds.includes(space.id)) {
