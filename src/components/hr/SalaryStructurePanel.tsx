@@ -16,6 +16,7 @@ import {
   MoreVertical, Plus, X,
 } from "lucide-react";
 import CustomSelect from "@/components/ui/CustomSelect";
+import SelectField from "@/components/ui/SelectField";
 import { DatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
 
@@ -307,15 +308,13 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className={cls.label}>Salary Type</label>
-            <select
+            <SelectField
               value={form.salaryType}
-              onChange={(e) => set("salaryType", e.target.value as FormState["salaryType"])}
+              onChange={(v) => set("salaryType", v as FormState["salaryType"])}
               disabled={!canEdit}
+              options={["Regular Employee", "Intern"]}
               className={cls.field}
-            >
-              <option>Regular Employee</option>
-              <option>Intern</option>
-            </select>
+            />
           </div>
           <div>
             <label className={cls.label}>Effective From</label>
