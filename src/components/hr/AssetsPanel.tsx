@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
+import SelectField from "@/components/ui/SelectField";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
@@ -278,15 +279,21 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Category *</label>
-                  <select value={assetForm.category} onChange={e => setF("category", e.target.value)} className={FIELD_CLS}>
-                    {CATEGORIES.filter(c => c !== "All").map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <SelectField
+                    value={assetForm.category}
+                    onChange={(v) => setF("category", v)}
+                    options={CATEGORIES.filter((c) => c !== "All")}
+                    className={FIELD_CLS}
+                  />
                 </div>
                 <div>
                   <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Condition</label>
-                  <select value={assetForm.condition} onChange={e => setF("condition", e.target.value)} className={FIELD_CLS}>
-                    {["new","good","fair","poor"].map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase()+c.slice(1)}</option>)}
-                  </select>
+                  <SelectField
+                    value={assetForm.condition}
+                    onChange={(v) => setF("condition", v)}
+                    options={["new","good","fair","poor"].map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) }))}
+                    className={FIELD_CLS}
+                  />
                 </div>
               </div>
               <div>

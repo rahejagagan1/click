@@ -856,7 +856,7 @@ export default function Sidebar() {
                                     className={panelCls} {...teamHandlers}>
                                     <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">My Team</p>
                                     {fl("/dashboard/hr/my-team", "Team Overview")}
-                                    {fl("/dashboard/hr/inbox",   "Inbox",
+                                    {fl("/dashboard/hr/inbox",   "Approval Request",
                                         inboxCount > 0 ? (
                                             <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[#008CFF] text-white text-[10px] font-bold flex items-center justify-center leading-none tabular-nums">
                                                 {inboxCount > 99 ? "99+" : inboxCount}

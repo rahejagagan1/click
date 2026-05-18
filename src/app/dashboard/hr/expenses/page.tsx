@@ -4,6 +4,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import SelectField from "@/components/ui/SelectField";
 import { Receipt, Plus, Plane, Utensils, Monitor, Phone, Car, Package, X, CheckCircle2, XCircle, Clock, IndianRupee } from "lucide-react";
 import { isHRAdmin } from "@/lib/access";
 import { DateField } from "@/components/ui/date-field";
@@ -53,10 +54,12 @@ function NewExpenseModal({ onClose, onSave }: { onClose: () => void; onSave: (d:
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Category</label>
-              <select value={form.category} onChange={e => set("category", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none">
-                {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-              </select>
+              <SelectField
+                value={form.category}
+                onChange={(v) => set("category", v)}
+                options={CATEGORIES}
+                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white"
+              />
             </div>
             <div>
               <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>
