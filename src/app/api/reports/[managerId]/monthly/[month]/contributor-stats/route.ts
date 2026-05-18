@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { getMonthlyReportWindow } from "@/lib/reports/monthly-window";
+import { resolveReportTeam } from "@/lib/reports/team-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -26,26 +27,17 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
 
         const { windowStart, windowEnd } = getMonthlyReportWindow(year, monthIndex);
 
-        // Get all team members (editors + writers) under this manager
-        const manager = await prisma.user.findUnique({
-            where: { id: managerId },
-            include: {
-                teamMembers: {
-                    where: {
-                        role: { in: ["editor", "writer"] },
-                        isActive: true,
-                    },
-                    select: { id: true, name: true, role: true },
-                },
-            },
-        });
-
+        // Get all team members (editors + writers) — prefer the frozen
+        // teamSnapshot on locked reports so contributors who later moved
+        // managers still appear under the period they were rated for.
+        const manager = await prisma.user.findUnique({ where: { id: managerId }, select: { id: true } });
         if (!manager) {
             return NextResponse.json({ error: "Manager not found" }, { status: 404 });
         }
-
-        const editorIds = manager.teamMembers.filter((m) => m.role === "editor").map((m) => m.id);
-        const writerIds = manager.teamMembers.filter((m) => m.role === "writer").map((m) => m.id);
+        const team = await resolveReportTeam(managerId, { kind: "monthly", month: monthIndex, year });
+        const editorWriters = team.filter((m) => m.role === "editor" || m.role === "writer");
+        const editorIds = editorWriters.filter((m) => m.role === "editor").map((m) => m.id);
+        const writerIds = editorWriters.filter((m) => m.role === "writer").map((m) => m.id);
 
         if (editorIds.length === 0 && writerIds.length === 0) {
             return NextResponse.json({
