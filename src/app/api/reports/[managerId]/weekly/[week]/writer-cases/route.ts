@@ -4,6 +4,7 @@ import { requireAuth, serverError } from "@/lib/api-auth";
 import { calcBusinessDaysTat, formatTatDays } from "@/lib/utils";
 import { getWeeklyReportPeriod } from "@/lib/reports/weekly-period";
 import { isWriterFirstDraftMilestone } from "@/lib/clickup/subtask-milestones";
+import { resolveReportTeam } from "@/lib/reports/team-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -52,22 +53,15 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         }
         const { weekStart, weekEnd } = period;
 
-        // Writers under this manager
-        const manager = await prisma.user.findUnique({
-            where: { id: managerId },
-            include: {
-                teamMembers: {
-                    where: { role: "writer", isActive: true },
-                    select: { id: true, name: true },
-                },
-            },
-        });
-
+        // Writers under this manager — prefer the locked report's team
+        // snapshot so writers who later moved managers still appear
+        // under the week when they actually did the work.
+        const manager = await prisma.user.findUnique({ where: { id: managerId }, select: { id: true } });
         if (!manager) {
             return NextResponse.json({ error: "Manager not found" }, { status: 404 });
         }
-
-        const writerIds = manager.teamMembers.map((w) => w.id);
+        const team = await resolveReportTeam(managerId, { kind: "weekly", week, month, year });
+        const writerIds = team.filter((m) => m.role === "writer").map((m) => m.id);
         if (writerIds.length === 0) {
             return NextResponse.json({ writerCases: [] });
         }
