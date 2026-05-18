@@ -63,6 +63,9 @@ model User {
   /// when "Enable onboarding flow" is toggled on.
   onboardingPending Boolean    @default(false)
   profilePictureUrl String?
+  /// Which LeavePolicy this user is assigned to. Null = no policy (HR
+  /// must set balances manually). Used by accrual + "Apply policy" flows.
+  leavePolicyId     Int?
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
@@ -101,6 +104,7 @@ model User {
   employeeProfile        EmployeeProfile?
   attendances            Attendance[]
   userShift              UserShift?
+  leavePolicy            LeavePolicy?      @relation(fields: [leavePolicyId], references: [id])
   leaveBalances          LeaveBalance[]
   leaveApplications      LeaveApplication[]   @relation("LeaveApplicant")
   leaveApprovals         LeaveApplication[]   @relation("LeaveApprover")
@@ -645,6 +649,13 @@ model WeeklyReport {
   overviewRows   Json?   @db.JsonB   // Section B: Quick overview rows
   viewsRows      Json?   @db.JsonB   // Section D: Views and Changes rows (Andrew)
   dataJson     Json?   @db.JsonB   // Legacy fallback (kept for old records)
+  /// Frozen team roster at submit/lock time so historical reports
+  /// keep showing who was on the team that week even if those users
+  /// later move to a different manager. Shape:
+  ///   Array<{ id: number, name: string, role: string, orgLevel: string | null, profilePictureUrl: string | null }>
+  /// Null on legacy rows submitted before this column existed — those
+  /// fall back to the live `manager.teamMembers` query.
+  teamSnapshot   Json?   @db.JsonB
   isLocked    Boolean  @default(true)
   submittedAt DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -737,6 +748,13 @@ model MonthlyReport {
 
   // Tanvi Dogra HR Manager monthly report
   hrMonthlyData Json?  @db.JsonB  // All HR monthly report sections
+
+  /// Frozen team roster at submit/lock time so historical reports
+  /// keep showing who was on the team that month even if those users
+  /// later move to a different manager. Shape matches WeeklyReport.teamSnapshot.
+  /// Null on legacy rows submitted before this column existed — those fall
+  /// back to the live `manager.teamMembers` query.
+  teamSnapshot Json?  @db.JsonB
 
   manager     User     @relation("ManagerMonthlyReports", fields: [managerId], references: [id])
 
@@ -1101,6 +1119,44 @@ model LeaveType {
 
   balances            LeaveBalance[]
   applications        LeaveApplication[]
+  policyEntries       LeavePolicyEntry[]
+}
+
+// LeavePolicy + LeavePolicyEntry: configurable per-(policy × leave-type)
+// rules. Each user can be assigned to one LeavePolicy. When HR applies the
+// policy, the policy's entries become the user's LeaveBalance.totalDays
+// for the year. Monthly accrual reads the per-entry monthlyAccrual value
+// (replacing the old hardcoded SL +1 rule).
+model LeavePolicy {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entries     LeavePolicyEntry[]
+  users       User[]
+}
+
+model LeavePolicyEntry {
+  id              Int      @id @default(autoincrement())
+  policyId        Int
+  leaveTypeId     Int
+  // Lump-sum entitlement granted at year start when HR applies the policy.
+  daysPerYear     Decimal  @default(0) @db.Decimal(5, 2)
+  // Additional days credited at the start of each calendar month, on top of
+  // whatever totalDays is. Zero = pure lump-sum type.
+  monthlyAccrual  Decimal  @default(0) @db.Decimal(5, 2)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  policy          LeavePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  leaveType       LeaveType   @relation(fields: [leaveTypeId], references: [id])
+
+  @@unique([policyId, leaveTypeId])
+  @@index([policyId])
+  @@index([leaveTypeId])
 }
 
 model HolidayCalendar {

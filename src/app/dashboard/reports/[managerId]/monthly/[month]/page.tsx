@@ -8,6 +8,8 @@ import { useSession } from "next-auth/react";
 import useSWR from "swr";
 import type { ManagerReportFormat } from "@/lib/reports/manager-report-format";
 import dynamic from "next/dynamic";
+import RefreshTeamSnapshotButton from "@/components/reports/RefreshTeamSnapshotButton";
+import CasePicker from "@/components/reports/CasePicker";
 import "react-quill-new/dist/quill.snow.css";
 
 const FONT_WHITELIST = [
@@ -501,6 +503,24 @@ const defaultNishantOverview = (): NishantOverview => ({
     totalFOIAPitched: "", totalFOIAReceived: "", monthlyDeadlineMet: "",
 });
 
+/* ── Section B: Researchers Monthly Overview ──
+   Two fixed rows (RTC + FOIA). Each row stores the list of cases the
+   manager picked from a specific folder in the researcher space:
+     RTC  → "Ready To Cover 2026"
+     FOIA → "FOIA Worksheet 2026"
+   Cases are persisted as { id, name } so the saved report keeps the
+   case names even if a case is later renamed in ClickUp. */
+interface NishantBRow {
+    id:            string;
+    kind:          "RTC" | "FOIA";
+    folder:        string;
+    selectedCases: Array<{ id: number; name: string }>;
+}
+const NISHANT_B_DEFAULT_ROWS: NishantBRow[] = [
+    { id: "nb-rtc",  kind: "RTC",  folder: "Ready To Cover 2026", selectedCases: [] },
+    { id: "nb-foia", kind: "FOIA", folder: "FOIA Worksheet 2026", selectedCases: [] },
+];
+
 /* ──────────────── Drag-scroll wrapper (module-level to avoid remount on every render) ── */
 function DragScrollDiv({ children, className }: { children: React.ReactNode; className?: string }) {
     const ref      = React.useRef<HTMLDivElement>(null);
@@ -704,7 +724,12 @@ export default function MonthlyReportPage() {
 
     // Data Fetching
     const fetcher = (url: string) => fetch(url).then((res) => res.json());
-    const { data, error, isLoading } = useSWR(`/api/reports/${managerId}`, fetcher);
+    // Pass the report's period so the API can return the FROZEN team
+    // (teamSnapshot) for locked reports — see src/lib/reports/team-snapshot.ts.
+    const { data, error, isLoading } = useSWR(
+        `/api/reports/${managerId}?month=${monthIndex}&year=${year}`,
+        fetcher,
+    );
 
     const manager = data?.manager;
     const reportFmt = (manager?.reportFormat ?? "production") as ManagerReportFormat;
@@ -923,6 +948,11 @@ export default function MonthlyReportPage() {
     const [nishantRows, setNishantRows] = useState<NishantResearcherRow[] | null>(null);
     const nRows = nishantRows ?? defaultNishantRows;
     const [nishantOverview, setNishantOverview] = useState<NishantOverview>(defaultNishantOverview());
+
+    // Section B — fixed 2-row picker (RTC / FOIA). No add/remove.
+    const [nishantBRows, setNishantBRows] = useState<NishantBRow[]>(NISHANT_B_DEFAULT_ROWS);
+    const setNBCases = (kind: "RTC" | "FOIA", picks: Array<{ id: number; name: string }>) =>
+        setNishantBRows((p) => p.map((r) => r.kind === kind ? { ...r, selectedCases: picks } : r));
     const setNR = useCallback((idx: number, f: keyof NishantResearcherRow, v: string) =>
         setNishantRows(p => (p ?? defaultNishantRows).map((r, i) => i === idx ? { ...r, [f]: v } : r)),
     [defaultNishantRows]);
@@ -994,6 +1024,19 @@ export default function MonthlyReportPage() {
                     if (saved?.remark)             setRemark(saved.remark);
                     if (saved?.nishantResearcherRows) setNishantRows(saved.nishantResearcherRows);
                     if (saved?.nishantOverview)       setNishantOverview(saved.nishantOverview);
+                    // Section B is stashed inside nishantOverview.bRows so we
+                    // don't need a new DB column. Merge saved picks into the
+                    // fixed 2-row template so renaming/reordering is robust.
+                    if (Array.isArray((saved?.nishantOverview as any)?.bRows)) {
+                        const saved_b = (saved.nishantOverview as any).bRows as any[];
+                        setNishantBRows(NISHANT_B_DEFAULT_ROWS.map((row) => {
+                            const match = saved_b.find((b) => b?.kind === row.kind);
+                            const cases = Array.isArray(match?.selectedCases)
+                                ? match.selectedCases.filter((c: any) => c && typeof c.id === "number" && typeof c.name === "string")
+                                : [];
+                            return { ...row, selectedCases: cases };
+                        }));
+                    }
                     if (saved?.andrewA1Rows?.length)  setAndrewA1Rows(saved.andrewA1Rows);
                     if (saved?.andrewA2Rows?.length)  setAndrewA2Rows(saved.andrewA2Rows);
                     if (saved?.andrewBRows?.length)   setAndrewBRows(saved.andrewBRows);
@@ -1115,7 +1158,11 @@ export default function MonthlyReportPage() {
                     keyLearning2: keyLearnings[1],
                     keyLearning3: keyLearnings[2],
                     nishantResearcherRows: isResearcherReport ? nRows        : undefined,
-                    nishantOverview:       isResearcherReport ? nishantOverview : undefined,
+                    // Nest Section B rows inside nishantOverview so the new
+                    // placeholder table persists without a schema change.
+                    nishantOverview:       isResearcherReport
+                        ? { ...nishantOverview, bRows: nishantBRows }
+                        : undefined,
                     andrewBRows:  isQaReport ? andrewBRows  : undefined,
                     andrewSBRows: isQaReport ? andrewSBRows : undefined,
                     andrewSCRows: isQaReport ? andrewSCRows : undefined,
@@ -1509,7 +1556,18 @@ export default function MonthlyReportPage() {
                             </span>
                         )}
                         {isLocked ? (
-                            <div className="flex items-center gap-2 px-4 py-[7px] rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-[13px] font-semibold">Submitted</div>
+                            <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 px-4 py-[7px] rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-[13px] font-semibold">Submitted</div>
+                                {/* Show to the same admin tier the API allows (matches
+                                    canRefreshSnapshot in /api/reports/.../refresh-team-snapshot):
+                                    CEO + special_access + role=admin + developer. */}
+                                {(isAdmin || isCeo || sessionUser?.role === "admin") && (
+                                    <RefreshTeamSnapshotButton
+                                        managerId={String(managerId)}
+                                        period={{ kind: "monthly", month: monthIndex, year }}
+                                    />
+                                )}
+                            </div>
                         ) : !viewOnly ? (
                             <>
                                 {isDraftSaved && (showDeleteConfirm ? (
@@ -1691,6 +1749,69 @@ export default function MonthlyReportPage() {
                         Add researcher row
                     </button>
                 )}
+
+                {/* ── Section B: Cases Published This Month ──
+                    Two fixed rows (RTC + FOIA). Each row's "Cases published"
+                    column is a cascading multi-select picker scoped to a
+                    specific researcher-space folder (see NISHANT_B_DEFAULT_ROWS). */}
+                <div className="mt-6 rounded-t-xl overflow-hidden shadow-md">
+                    <div className="bg-slate-700 text-white px-6 py-3 flex items-center gap-2">
+                        <h2 className="text-base font-bold">Section B: Cases Published This Month</h2>
+                    </div>
+                </div>
+                <div className="rounded-b-xl border border-t-0 border-slate-300 dark:border-white/10 shadow-sm overflow-hidden">
+                    <table className="border-collapse w-full" style={{ tableLayout: "fixed" }}>
+                        <thead>
+                            <tr>
+                                <NTh colIndex={0} colCount={2}>Case</NTh>
+                                <NTh colIndex={1}>Cases published this month</NTh>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {nishantBRows.map((row) => {
+                                const setPicks = (picks: Array<{ id: number; name: string }>) =>
+                                    setNBCases(row.kind, picks);
+                                return (
+                                    <tr key={row.id} className="group hover:bg-slate-50/60 dark:hover:bg-white/[0.03] transition-colors">
+                                        <NCell colored="bg-slate-50 dark:bg-[#2a2a42] text-slate-700 dark:text-slate-300 font-semibold">
+                                            {row.kind}
+                                        </NCell>
+                                        <NCell>
+                                            <CasePicker
+                                                folder={row.folder}
+                                                month={monthIndex}
+                                                year={year}
+                                                selected={row.selectedCases}
+                                                onChange={setPicks}
+                                                disabled={isLocked && !isAdmin}
+                                                placeholder={`Pick cases from "${row.folder}"…`}
+                                            />
+                                            {row.selectedCases.length > 0 && (
+                                                <div className="mt-1.5 flex flex-wrap gap-1">
+                                                    {row.selectedCases.map((c) => (
+                                                        <span key={c.id} className="inline-flex items-center gap-1 bg-violet-50 dark:bg-violet-500/10 text-violet-700 dark:text-violet-300 px-2 py-0.5 rounded-full text-[10.5px]">
+                                                            <span className="truncate max-w-[200px]">{c.name}</span>
+                                                            {(!isLocked || isAdmin) && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setPicks(row.selectedCases.filter((s) => s.id !== c.id))}
+                                                                    className="text-violet-400 hover:text-rose-500"
+                                                                    title="Remove"
+                                                                >
+                                                                    ×
+                                                                </button>
+                                                            )}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </NCell>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
 
 
                 {/* Footer buttons */}
@@ -2302,9 +2423,24 @@ export default function MonthlyReportPage() {
             <div className="bg-white dark:bg-[#0f0f23] border border-slate-300 dark:border-white/20 rounded-xl shadow-xl overflow-hidden">
                 {/* ── Header ─────────────────────────────────── */}
                 <div className="px-6 py-5 border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02]">
-                    <h1 className="text-xl font-bold text-slate-900 dark:text-white">
-                        Production Monthly Report — {monthName} {year}
-                    </h1>
+                    <div className="flex items-start justify-between gap-3">
+                        <h1 className="text-xl font-bold text-slate-900 dark:text-white">
+                            Production Monthly Report — {monthName} {year}
+                        </h1>
+                        {/* Top-right team-source pill: "Snapshot" (frozen at submit
+                            time) vs "Live" (fallback when no snapshot exists). */}
+                        {data?.teamSource && (
+                            data.teamSource === "snapshot" ? (
+                                <span title="Team list is frozen from the snapshot saved when this report was submitted" className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase tracking-wider">
+                                    <span className="h-1 w-1 rounded-full bg-emerald-500" /> Snapshot
+                                </span>
+                            ) : (
+                                <span title="No snapshot saved yet — showing current team. Admin can click Refresh to freeze." className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[9px] font-bold uppercase tracking-wider">
+                                    <span className="h-1 w-1 rounded-full bg-amber-500 animate-pulse" /> Live
+                                </span>
+                            )
+                        )}
+                    </div>
                     <div className="mt-3 space-y-1 text-sm">
                         <div>
                             <span className="text-slate-500 dark:text-slate-400 font-medium">To: </span>
@@ -2859,12 +2995,21 @@ export default function MonthlyReportPage() {
                             </span>
                         )}
                         {!viewOnly && isLocked ? (
-                            <div className="flex items-center gap-2 px-4 py-[7px] rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-[13px] font-semibold">
-                                <svg className="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                </svg>
-                                Submitted
-                            </div>
+                            <>
+                                <div className="flex items-center gap-2 px-4 py-[7px] rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-[13px] font-semibold">
+                                    <svg className="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    Submitted
+                                </div>
+                                {/* Admin-only — match the API's canRefreshSnapshot gate */}
+                                {(isAdmin || isCeo || sessionUser?.role === "admin") && (
+                                    <RefreshTeamSnapshotButton
+                                        managerId={String(managerId)}
+                                        period={{ kind: "monthly", month: monthIndex, year }}
+                                    />
+                                )}
+                            </>
                         ) : !viewOnly ? (
                             <>
                                 {/* Delete Draft — only visible when a draft exists */}

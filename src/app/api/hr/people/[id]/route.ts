@@ -40,6 +40,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         teamMembers: { select: { id: true, name: true, profilePictureUrl: true, role: true } },
         userShift: { include: { shift: true } },
         leaveBalances: { include: { leaveType: true } },
+        leavePolicy: { select: { id: true, name: true, isActive: true } },
         heldAssets: { where: { returnedAt: null }, include: { asset: true } },
         ownedDocuments: true,
       },
@@ -180,6 +181,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       pfNumber, uanNumber, biometricId,
       // User row fields — role / orgLevel / manager / team membership.
       role: newRole, orgLevel, managerId, inlineManagerId, teamCapsule,
+      // Leave policy assignment — drives accrual + "Apply policy" balances.
+      leavePolicyId,
     } = body;
 
     const target = await prisma.user.findUnique({ where: { id }, select: { id: true, name: true, email: true } });
@@ -346,6 +349,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       userPatch.managerId = managerId === null || managerId === "" ? null : parseInt(String(managerId), 10);
     }
     if (teamCapsule !== undefined) userPatch.teamCapsule = teamCapsule || null;
+    if (leavePolicyId !== undefined) {
+      userPatch.leavePolicyId = leavePolicyId === null || leavePolicyId === ""
+        ? null
+        : parseInt(String(leavePolicyId), 10);
+    }
 
     const txOps: any[] = [];
     if (Object.keys(userPatch).length > 0) {
