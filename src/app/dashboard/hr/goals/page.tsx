@@ -4,6 +4,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import Link from "next/link";
 import { Target, Plus, ChevronDown, TrendingUp, AlertTriangle, Clock, CheckCircle2, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
+import SelectField from "@/components/ui/SelectField";
 
 const TOP_TABS = [
   { key: "home",        label: "HOME",              href: "/dashboard/hr/home"  },
@@ -164,19 +165,25 @@ function NewGoalModal({ cycles, onClose, onSave }: { cycles: any[]; onClose: () 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Goal Cycle</label>
-              <select value={form.cycleId} onChange={e => set("cycleId", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white bg-white dark:bg-[#0a1526] focus:outline-none">
-                {cycles.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <SelectField
+                value={String(form.cycleId ?? "")}
+                onChange={(v) => set("cycleId", v)}
+                options={cycles.map((c: any) => ({ value: String(c.id), label: c.name }))}
+                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white bg-white dark:bg-[#0a1526]"
+              />
             </div>
             <div>
               <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Visibility</label>
-              <select value={form.visibility} onChange={e => set("visibility", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white bg-white dark:bg-[#0a1526] focus:outline-none">
-                <option value="personal">Personal</option>
-                <option value="team">Team</option>
-                <option value="company">Company</option>
-              </select>
+              <SelectField
+                value={form.visibility}
+                onChange={(v) => set("visibility", v)}
+                options={[
+                  { value: "personal", label: "Personal" },
+                  { value: "team",     label: "Team" },
+                  { value: "company",  label: "Company" },
+                ]}
+                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white bg-white dark:bg-[#0a1526]"
+              />
             </div>
           </div>
           <div>
@@ -203,10 +210,12 @@ function NewGoalModal({ cycles, onClose, onSave }: { cycles: any[]; onClose: () 
                     placeholder={`Key Result ${i + 1}`} />
                   <input type="number" value={kr.targetValue} onChange={e => setKRs(k => k.map((r, j) => j === i ? { ...r, targetValue: parseFloat(e.target.value) } : r))}
                     className="w-14 h-8 text-center border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-800 dark:text-white bg-white dark:bg-[#0a1526] focus:outline-none" />
-                  <select value={kr.unit} onChange={e => setKRs(k => k.map((r, j) => j === i ? { ...r, unit: e.target.value } : r))}
-                    className="w-14 h-8 px-1 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-800 dark:text-white bg-white dark:bg-[#0a1526] focus:outline-none">
-                    <option>%</option><option>count</option><option>₹</option><option>bool</option>
-                  </select>
+                  <SelectField
+                    value={kr.unit}
+                    onChange={(v) => setKRs(k => k.map((r, j) => j === i ? { ...r, unit: v } : r))}
+                    options={["%", "count", "₹", "bool"]}
+                    className="w-16 h-8 px-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-800 dark:text-white bg-white dark:bg-[#0a1526]"
+                  />
                   {krs.length > 1 && (
                     <button onClick={() => setKRs(k => k.filter((_, j) => j !== i))} className="text-red-400"><X size={13} /></button>
                   )}
@@ -297,10 +306,12 @@ export default function GoalsPage() {
           </div>
           <div className="flex items-center gap-3">
             {/* Cycle selector */}
-            <select value={activeCycleId || activeCycle?.id || ""} onChange={e => setActiveCycleId(e.target.value)}
-              className="h-8 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-800 dark:text-white bg-white dark:bg-[#0a1526] focus:outline-none">
-              {cycles.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <SelectField
+              value={String(activeCycleId || activeCycle?.id || "")}
+              onChange={(v) => setActiveCycleId(v)}
+              options={cycles.map((c: any) => ({ value: String(c.id), label: c.name }))}
+              className="h-8 w-[160px] px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-800 dark:text-white bg-white dark:bg-[#0a1526]"
+            />
             <button onClick={() => setShowNew(true)}
               className="h-8 px-4 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12px] font-semibold flex items-center gap-1.5 transition-colors">
               <Plus size={14} strokeWidth={2} /> Add Goal
