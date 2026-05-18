@@ -2,6 +2,7 @@
 import { useState, useMemo, useEffect } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
+import SelectField from "@/components/ui/SelectField";
 import {
   TreePine, Clock, CheckCircle2, Home, Briefcase, Gift,
   Search, Bell, Archive as ArchiveIcon, Inbox as InboxIcon, XCircle,
@@ -324,14 +325,15 @@ export default function InboxPage() {
               <p className={`text-[10px] font-bold tracking-widest ${C.t2} uppercase flex-1 truncate`}>
                 {activeCat.label}
               </p>
-              <select
+              <SelectField
                 value={sort}
-                onChange={e => setSort(e.target.value as any)}
-                className={`text-[10px] font-semibold tracking-wider uppercase bg-transparent ${C.t2} border-0 focus:outline-none cursor-pointer`}
-              >
-                <option value="newest">Newest</option>
-                <option value="oldest">Oldest</option>
-              </select>
+                onChange={(v) => setSort(v as any)}
+                options={[
+                  { value: "newest", label: "NEWEST" },
+                  { value: "oldest", label: "OLDEST" },
+                ]}
+                className={`h-7 w-[110px] text-[10px] font-semibold tracking-wider uppercase bg-transparent ${C.t2} border-0`}
+              />
             </div>
             <div className={`px-4 py-2.5 border-b ${C.divider}`}>
               <div className="flex items-center gap-2 bg-slate-50 dark:bg-white/[0.03] px-3 h-8 rounded-lg">

@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
+import SelectField from "@/components/ui/SelectField";
 import { ThumbsUp, MessageSquare, Send, BarChart2, Award, MoreHorizontal, X, ChevronDown, Pencil, Trash2, Link2, Check } from "lucide-react";
 import Link from "next/link";
 import { isHRAdmin } from "@/lib/access";
@@ -410,11 +411,15 @@ export default function EngagePage() {
             </div>
 
             {feedTab === "praise" && (
-              <select value={praiseToId} onChange={e => setPraiseToId(e.target.value)}
-                className="w-full mb-3 px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-[13px] text-slate-700 dark:text-slate-300">
-                <option value="">Select someone to praise…</option>
-                {employees.map((e: any) => <option key={e.id} value={e.id}>{e.name}</option>)}
-              </select>
+              <div className="mb-3">
+                <SelectField
+                  value={praiseToId}
+                  onChange={setPraiseToId}
+                  placeholder="Select someone to praise…"
+                  options={employees.map((e: any) => ({ value: String(e.id), label: e.name }))}
+                  className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-[13px] text-slate-700 dark:text-slate-300"
+                />
+              </div>
             )}
 
             <div className="flex items-start gap-3">

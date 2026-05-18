@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
 import { fetcher } from "@/lib/swr";
+import SelectField from "@/components/ui/SelectField";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
@@ -3116,14 +3117,15 @@ export default function HRHomePage() {
                       <div className={`mt-4 flex items-center justify-between border-t ${C.div} pt-3`}>
                         <div className="flex items-center gap-2 text-[12px]">
                           <span className={C.t3}>Posting to</span>
-                          <select
+                          <SelectField
                             value={postScope}
-                            onChange={(e) => setPostScope(e.target.value as "org"|"team")}
-                            className={`h-7 rounded-[4px] border ${C.div} bg-white px-2 text-[12px] ${C.t2} focus:outline-none focus:ring-1 focus:ring-[#008CFF]`}
-                          >
-                            <option value="org">Organization</option>
-                            <option value="team">{teamLabel}</option>
-                          </select>
+                            onChange={(v) => setPostScope(v as "org"|"team")}
+                            options={[
+                              { value: "org",  label: "Organization" },
+                              { value: "team", label: teamLabel },
+                            ]}
+                            className={`h-7 w-[140px] rounded-[4px] border ${C.div} bg-white px-2 text-[12px] ${C.t2}`}
+                          />
                         </div>
                         <div className="flex items-center gap-2">
                           <button
