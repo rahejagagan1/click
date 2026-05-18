@@ -9,6 +9,7 @@ import Link from "next/link";
 import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, MoreVertical, Coffee, AlertCircle, CheckCircle2, XCircle, Calendar, CalendarDays, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
+import SelectField from "@/components/ui/SelectField";
 import { isHRAdmin } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { DateField } from "@/components/ui/date-field";
@@ -498,17 +499,14 @@ function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefil
           </div>
           {/* Reason category dropdown — required */}
           <div>
-            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Reason for Regularisation *</label>
-            <select
+            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Reason for Regularisation <span className="text-rose-500">*</span></label>
+            <SelectField
               value={form.reasonCategory}
-              onChange={e => set("reasonCategory", e.target.value)}
-              className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]"
-            >
-              <option value="">Select a reason…</option>
-              {REGULARIZATION_REASONS.map(r => (
-                <option key={r} value={r}>{r}</option>
-              ))}
-            </select>
+              onChange={(v) => set("reasonCategory", v)}
+              placeholder="Select a reason…"
+              options={REGULARIZATION_REASONS.map((r) => ({ value: r, label: r }))}
+              className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white"
+            />
           </div>
           {/* Optional free-text note for the approver */}
           <div>
@@ -590,7 +588,7 @@ function WFHModal({ onClose }: { onClose: () => void }) {
             <DateField value={form.date} onChange={(v) => setForm(f => ({ ...f, date: v }))} className="mt-1 w-full" />
           </div>
           <div>
-            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Reason *</label>
+            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Reason <span className="text-rose-500">*</span></label>
             <textarea value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} rows={3}
               placeholder="Why are you working from home today?"
               className="mt-1 w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none resize-none" />
