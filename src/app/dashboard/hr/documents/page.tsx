@@ -4,6 +4,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import SelectField from "@/components/ui/SelectField";
 import { isHRAdmin } from "@/lib/access";
 
 const DOC_CATEGORIES = ["All", "Identity", "Education", "Experience", "Finance", "Legal", "Other"];
@@ -133,9 +134,12 @@ export default function DocumentsPage() {
               </div>
               <div>
                 <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Category</label>
-                <select className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white focus:outline-none">
-                  {DOC_CATEGORIES.filter(c => c !== "All").map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <SelectField
+                  value=""
+                  onChange={() => { /* unwired in this stub modal */ }}
+                  options={DOC_CATEGORIES.filter((c) => c !== "All")}
+                  className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white"
+                />
               </div>
               <div>
                 <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Select File</label>

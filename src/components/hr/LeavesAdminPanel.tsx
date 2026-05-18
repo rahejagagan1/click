@@ -5,6 +5,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { Search, Sparkles, Plus, Minus, X, CalendarPlus, AlertTriangle, Home, Clock } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
+import SelectField from "@/components/ui/SelectField";
 
 type LeaveTypeRow = { id: number; name: string; code: string; daysPerYear: number; applicable?: boolean };
 type Bal          = { id: number | null; total: number; used: number; pending: number };
@@ -159,9 +160,10 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
 
   // ── Apply On Behalf modal ──────────────────────────────────────
   // HR admins can grant any active leave type — or a Work From Home —
-  // for any active user. When applying leave: an insufficient/missing
-  // balance auto-routes to LWP if the toggle is on. When applying WFH:
-  // the monthly 2-of-2 cap is bypassed (HR is overriding intentionally).
+  // for any active user. Both flows route through normal approval
+  // (the target user's manager's L1 queue, then CEO/HR finalises).
+  // When applying leave: an insufficient/missing balance auto-routes
+  // to LWP if the toggle is on.
   type ApplyMode = "leave" | "wfh";
   const [applyOpen, setApplyOpen] = useState(false);
   const [applyMode, setApplyMode] = useState<ApplyMode>("leave");
@@ -315,15 +317,15 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
         });
       } else {
         // WFH range: the API iterates working days between date and
-        // toDate, creating one approved WFHRequest per day. Weekends
-        // are skipped server-side; days that already have an active
-        // WFH are quietly skipped too.
+        // toDate, creating one WFHRequest per day. Weekends are skipped
+        // server-side; days that already have an active WFH are quietly
+        // skipped too. Goes through normal approval (no forceGrant) —
+        // routed to the target user's manager's L1 queue.
         res = await fetch("/api/hr/attendance/wfh", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             targetUserId: applyForm.userId,
-            forceGrant:   true,
             date:         applyForm.fromDate,
             toDate:       applyForm.toDate,
             reason:       applyForm.reason.trim(),
@@ -381,14 +383,12 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                 </button>
               ) : null}
             </div>
-            <select
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              aria-label="Year"
-              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
-            >
-              {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
+            <SelectField
+              value={String(year)}
+              onChange={(v) => setYear(Number(v))}
+              options={yearOptions.map((y) => ({ value: String(y), label: String(y) }))}
+              className="h-9 w-[110px] rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-800"
+            />
             {/* Tonal divider so action buttons feel grouped */}
             <div className="hidden h-7 w-px bg-slate-200 sm:block" aria-hidden />
             <button
@@ -631,7 +631,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                 </h3>
                 <p className="mt-0.5 text-[11.5px] text-slate-500">
                   {applyMode === "wfh"
-                    ? "Auto-approved. The monthly 2-of-2 cap is bypassed when HR grants on behalf."
+                    ? "Goes through normal approval — lands in the manager's L1 queue, then CEO/HR finalises. Weekends are skipped on multi-day ranges."
                     : "Goes through normal approval — lands in the manager's L1 queue. If balance is insufficient and LWP fallback is on, switches to Leave Without Pay."}
                 </p>
               </div>
@@ -729,16 +729,13 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Leave type</label>
-                  <select
+                  <SelectField
                     value={applyForm.leaveTypeId === "" ? "" : String(applyForm.leaveTypeId)}
-                    onChange={(e) => setApplyForm((f) => ({ ...f, leaveTypeId: e.target.value ? Number(e.target.value) : "" }))}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
-                  >
-                    <option value="">— Select type —</option>
-                    {applicableTypes.map((t) => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
+                    onChange={(v) => setApplyForm((f) => ({ ...f, leaveTypeId: v ? Number(v) : "" }))}
+                    placeholder="— Select type —"
+                    options={applicableTypes.map((t) => ({ value: String(t.id), label: t.name }))}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 h-10 text-[13px] text-slate-800"
+                  />
                 </div>
                 <div>
                   <div className="flex items-center justify-between">
@@ -889,7 +886,9 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
               </div>
 
               <div>
-                <label className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Reason</label>
+                <label className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
+                  Reason <span className="text-rose-500">*</span>
+                </label>
                 <textarea
                   value={applyForm.reason}
                   onChange={(e) => setApplyForm((f) => ({ ...f, reason: e.target.value }))}
