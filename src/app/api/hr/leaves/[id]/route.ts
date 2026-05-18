@@ -53,6 +53,21 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const year = new Date(application.fromDate).getFullYear();
     const totalDays = parseFloat(application.totalDays.toString());
     const rangeLabel = fmtRange(new Date(application.fromDate), new Date(application.toDate), totalDays);
+    // Half-day requests carry a marker in the reason field (see POST flow).
+    const isHalfDay = /^\s*\[(Half Day|First Half|Second Half)\]/i.test(String(application.reason ?? ""));
+    // Approver display name — used by the email template so recipients
+    // can see WHO took the action at each stage.
+    const approverName = (self?.name as string) || (self?.email as string) || "An approver";
+    // Base structured payload shared across reject / approve emails.
+    const leaveEmailBase = {
+      applicantName: application.user?.name || "An employee",
+      leaveType:     application.leaveType?.name || "leave",
+      fromDate:      application.fromDate,
+      toDate:        application.toDate,
+      totalDays,
+      isHalfDay,
+      reason:        application.reason || undefined,
+    } as const;
 
     // ── EDIT (HR admin only) ─────────────────────────────────────────
     // Lets HR admins fix mistakes after a leave is filed — change the
@@ -159,6 +174,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         title:    `Your ${application.leaveType?.name || "leave"} request was rejected`,
         body:     `${rangeLabel}${noteSuffix(approvalNote)}`,
         linkUrl:  "/dashboard/hr/leaves",
+        emailData: { ...leaveEmailBase, approverName, stageLabel: "Rejected by", approvalNote: approvalNote ?? undefined },
       });
       return NextResponse.json({ success: true });
     }
@@ -166,6 +182,76 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     // ── APPROVE — stage 1: manager → partially_approved ───────────────────
     if (application.status === "pending") {
       if (!isDirectManager && !isFinalApprover) return NextResponse.json({ error: "Not authorised" }, { status: 403 });
+
+      // CEO fast-path: when the L1 approver is the CEO (and they're the
+      // direct manager — i.e. the report-to chain ends at the CEO), the
+      // L2 stage is them too. Collapse both stages into a single click so
+      // the CEO doesn't approve, then have to come back and approve their
+      // own decision. Strictly orgLevel="ceo" — other final-approver roles
+      // (HR Manager, Special Access, Developer) still go through the
+      // normal two-step flow.
+      const isCeoAsDirectManager = self.orgLevel === "ceo" && isDirectManager;
+      if (isCeoAsDirectManager) {
+        const result = await prisma.$transaction(async (tx) => {
+          const { count } = await tx.leaveApplication.updateMany({
+            where: { id: appId, status: "pending" },
+            data:  {
+              status:            "approved",
+              approvedById:      myId,
+              approvedAt:        new Date(),
+              approvalNote,
+              finalApprovedById: myId,
+              finalApprovedAt:   new Date(),
+              finalApprovalNote: approvalNote,
+            },
+          });
+          if (count === 0) return { raced: true as const };
+          // Balance: pending → used (same as the L2 finaliser).
+          await tx.leaveBalance.updateMany({
+            where: { userId: application.userId, leaveTypeId: application.leaveTypeId, year },
+            data: { pendingDays: { decrement: totalDays }, usedDays: { increment: totalDays } },
+          });
+          return { raced: false as const };
+        });
+        if (result.raced) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
+
+        // Mark each working day in the range as on_leave (mirrors the L2 path).
+        const from = new Date(application.fromDate);
+        const to   = new Date(application.toDate);
+        const cur  = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
+        const end  = new Date(Date.UTC(to.getUTCFullYear(),   to.getUTCMonth(),   to.getUTCDate()));
+        while (cur.getTime() <= end.getTime()) {
+          const dow = cur.getUTCDay();
+          if (dow !== 0 && dow !== 6) {
+            const dateOnly = new Date(cur);
+            await prisma.attendance.upsert({
+              where:  { userId_date: { userId: application.userId, date: dateOnly } },
+              create: { userId: application.userId, date: dateOnly, status: "on_leave" },
+              update: { status: "on_leave" },
+            });
+          }
+          cur.setUTCDate(cur.getUTCDate() + 1);
+        }
+
+        await writeAuditLog({
+          req, actorId: myId, actorEmail: self?.email ?? null,
+          action: "leave.approve_ceo_direct", entityType: "LeaveApplication", entityId: appId,
+          before: { status: "pending" }, after: { status: "approved", approvalNote },
+        });
+
+        const extrasCeo = application.notifyUserIds ?? [];
+        await notifyUsers({
+          actorId:  myId,
+          userIds:  [application.userId, ...extrasCeo],
+          type:     "leave",
+          entityId: appId,
+          title:    `${application.user?.name || "An employee"}'s ${application.leaveType?.name || "leave"} is approved`,
+          body:     `${rangeLabel} — approved directly by the CEO.${noteSuffix(approvalNote)}`,
+          linkUrl:  "/dashboard/hr/leaves",
+          emailData: { ...leaveEmailBase, approverName, stageLabel: "Approved by (CEO direct)", approvalNote: approvalNote ?? undefined },
+        });
+        return NextResponse.json({ success: true });
+      }
 
       // Race-safe: only one stage-1 approval wins. Notifications only fire for the winner.
       const { count } = await prisma.leaveApplication.updateMany({
@@ -204,6 +290,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         title:    `${application.user?.name || "An employee"}'s ${application.leaveType?.name || "leave"} needs final approval`,
         body:     `${rangeLabel} — manager approved, awaiting CEO / HR.${noteSuffix(approvalNote)}`,
         linkUrl:  "/dashboard/hr/approvals",
+        // L1-stage email: surface as "Manager Approved By" + note so the
+        // row label matches the L2-stage layout downstream.
+        emailData: { ...leaveEmailBase, l1ApproverName: approverName, l1ApprovalNote: approvalNote ?? undefined },
       });
       await notifyUsers({
         actorId:  myId,
@@ -213,6 +302,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         title:    `Your ${application.leaveType?.name || "leave"} is partially approved`,
         body:     `${rangeLabel} — awaiting final approval from CEO / HR.${noteSuffix(approvalNote)}`,
         linkUrl:  "/dashboard/hr/leaves",
+        emailData: { ...leaveEmailBase, l1ApproverName: approverName, l1ApprovalNote: approvalNote ?? undefined },
       });
       return NextResponse.json({ success: true });
     }
@@ -270,6 +360,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       }
 
       const extras = application.notifyUserIds ?? [];
+      // Look up the L1 manager's name so the final-approval email shows
+      // both the manager AND the L2 finaliser. The L1 note lives on
+      // application.approvalNote (set at the L1 stage above).
+      let l1ApproverName: string | undefined;
+      if (application.approvedById) {
+        const l1 = await prisma.user.findUnique({
+          where: { id: application.approvedById },
+          select: { name: true },
+        });
+        l1ApproverName = l1?.name ?? undefined;
+      }
       await notifyUsers({
         actorId:  myId,
         userIds:  [application.userId, ...extras, ...(application.approvedById ? [application.approvedById] : [])],
@@ -278,6 +379,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         title:    `${application.user?.name || "An employee"}'s ${application.leaveType?.name || "leave"} is approved`,
         body:     `${rangeLabel} — final approval granted.${noteSuffix(approvalNote)}`,
         linkUrl:  "/dashboard/hr/leaves",
+        emailData: {
+          ...leaveEmailBase,
+          approverName,
+          stageLabel:     "Final approval by",
+          approvalNote:   approvalNote ?? undefined,
+          l1ApproverName,
+          l1ApprovalNote: application.approvalNote ?? undefined,
+        },
       });
       return NextResponse.json({ success: true });
     }

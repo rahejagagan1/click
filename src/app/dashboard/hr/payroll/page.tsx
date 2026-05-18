@@ -11,6 +11,7 @@ import {
   Download, FileText, Play, CheckCircle2, Clock, Plus, X, TrendingUp, ChevronRight,
   ChevronDown, Lightbulb,
 } from "lucide-react";
+import { DateField } from "@/components/ui/date-field";
 
 const MODULE_TABS = [
   { key: "home",         label: "HOME",        href: "/dashboard/hr/home"            },
@@ -630,9 +631,9 @@ export default function PayrollPage() {
               ))}
               <div className="col-span-2">
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Effective From</label>
-                <input type="date" value={structureForm.effectiveFrom}
-                  onChange={e => setStructureForm(f => ({ ...f, effectiveFrom: e.target.value }))}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-800 text-[13px]" />
+                <DateField value={structureForm.effectiveFrom}
+                  onChange={(v) => setStructureForm(f => ({ ...f, effectiveFrom: v }))}
+                  className="mt-1 w-full" />
               </div>
             </div>
             <div className="flex gap-3 mt-5">
