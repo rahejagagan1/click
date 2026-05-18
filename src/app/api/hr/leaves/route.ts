@@ -59,10 +59,11 @@ export async function GET(req: NextRequest) {
 //   • If `useLwpFallback: true` and the subject's chosen-type balance is
 //     missing OR insufficient, auto-switches to Leave Without Pay so the
 //     request still goes through without manual back-and-forth.
-//   • Auto-approves the application (status="approved") and writes the
-//     usual side effects — debit balance to `used`, mark each working day's
-//     attendance as `on_leave`. HR already has the authority to approve,
-//     so the extra L1/L2 round-trip would be friction with no policy benefit.
+//   • Routed through the same L1 (manager) → L2 (CEO/HR) queue as a
+//     self-applied leave — i.e. it lands as `pending`, not auto-approved.
+//     Originally HR-on-behalf was auto-approved, but HR asked to keep
+//     every leave on the same approval flow so nothing slips past the
+//     direct manager. The subject is notified that HR filed it for them.
 export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
@@ -175,48 +176,29 @@ export async function POST(req: NextRequest) {
     });
     if (overlap) return NextResponse.json({ error: "Overlapping leave exists" }, { status: 400 });
 
-    // HR-admin-on-behalf = auto-approved; self-apply (or HR applying for
-    // themselves) = pending → flows through normal L1/L2.
-    const finalStatus = onBehalf && callerIsHRAdmin ? "approved" : "pending";
+    // Every leave starts as "pending" — including HR applying on behalf
+    // of someone else. The on-behalf path used to auto-approve, but HR
+    // now wants it routed through the same L1 (manager) → L2 (CEO/HR)
+    // approval queue as a self-applied leave so nothing slips past the
+    // direct manager.
+    const finalStatus = "pending";
 
     const application = await prisma.$transaction(async (tx) => {
       const app = await tx.leaveApplication.create({
         data: {
           userId: subjectUserId, leaveTypeId, fromDate: from, toDate: to, totalDays, reason,
           status: finalStatus,
-          approvedById: finalStatus === "approved" ? myId : null,
-          approvedAt:   finalStatus === "approved" ? new Date() : null,
           notifyUserIds: extras,
         },
         include: { leaveType: true, user: { select: { managerId: true, name: true } } },
       });
-      // Balance debit. Approved → straight to `used`. Pending → reserve as `pending`.
+      // Balance debit: reserve as `pending`. It moves to `used` when the
+      // request is finalised by L2 (or when the CEO direct-approve
+      // fast-path fires in /api/hr/leaves/[id] PUT).
       await tx.leaveBalance.update({
         where: { userId_leaveTypeId_year: { userId: subjectUserId, leaveTypeId, year } },
-        data: finalStatus === "approved"
-          ? { usedDays:    { increment: totalDays } }
-          : { pendingDays: { increment: totalDays } },
+        data:  { pendingDays: { increment: totalDays } },
       });
-      // Auto-approved: mark each working day in the range as on_leave so
-      // the attendance dashboards reflect the leave immediately. Mirrors
-      // the date-iteration logic in src/app/api/hr/leaves/[id]/route.ts
-      // (UTC-only arithmetic, IST-safe).
-      if (finalStatus === "approved") {
-        const cur = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
-        const end = new Date(Date.UTC(to.getUTCFullYear(),   to.getUTCMonth(),   to.getUTCDate()));
-        while (cur.getTime() <= end.getTime()) {
-          const dow = cur.getUTCDay();
-          if (dow !== 0 && dow !== 6) {
-            const dateOnly = new Date(cur);
-            await tx.attendance.upsert({
-              where:  { userId_date: { userId: subjectUserId, date: dateOnly } },
-              create: { userId: subjectUserId, date: dateOnly, status: "on_leave" },
-              update: { status: "on_leave" },
-            });
-          }
-          cur.setUTCDate(cur.getUTCDate() + 1);
-        }
-      }
       return app;
     });
 
@@ -246,40 +228,50 @@ export async function POST(req: NextRequest) {
     const daysLabel = `${totalDays} day${totalDays === 1 ? "" : "s"}`;
     const typeName  = application.leaveType?.name || "leave";
 
-    if (finalStatus === "approved" && onBehalf) {
-      // HR applied on behalf — notify the subject (their leave is on-record)
-      // plus the manager and other admins as a heads-up. No "awaiting
-      // approval" framing because nothing is pending.
-      const recipients = Array.from(new Set([
-        subjectUserId,
-        ...(managerId ? [managerId] : []),
-        ...finalApprovers.map((u) => u.id).filter((id) => id !== myId),
-        ...extras,
-      ]));
+    // Approval-queue ping: L1 manager + L2 approvers + any tagged extras.
+    // On the HR-on-behalf path we ALSO ping the subject so they know HR
+    // filed it for them, and skip the HR caller from the L2 list to
+    // avoid notifying themselves.
+    const approverRecipients = Array.from(new Set([
+      ...(managerId ? [managerId] : []),
+      ...finalApprovers.map((u) => u.id).filter((id) => id !== myId),
+      ...extras,
+    ]));
+    // Structured email payload — feeds the leave type, real dates, total
+    // days, half-day flag, and reason into the templated email so the
+    // notification renders concrete details instead of placeholders.
+    const leaveEmailData = {
+      applicantName: requesterName,
+      leaveType:     typeName,
+      fromDate:      from,
+      toDate:        to,
+      totalDays,
+      isHalfDay,
+      reason:        reason || undefined,
+    };
+    await notifyUsers({
+      actorId:  myId,
+      userIds:  approverRecipients,
+      type:     "leave",
+      entityId: application.id,
+      title:    onBehalf
+        ? `HR applied ${typeName} for ${requesterName} — awaiting manager approval`
+        : `${requesterName} requested ${typeName}`,
+      body:     `${dateLabel} (${daysLabel}) — awaiting manager approval.`,
+      linkUrl:  "/dashboard/hr/approvals",
+      emailData: leaveEmailData,
+    });
+    if (onBehalf) {
+      // Heads-up to the subject so they know a leave was filed for them.
       await notifyUsers({
         actorId:  myId,
-        userIds:  recipients,
+        userIds:  [subjectUserId],
         type:     "leave",
         entityId: application.id,
-        title:    `HR applied ${typeName} for ${requesterName}`,
-        body:     `${dateLabel} (${daysLabel}) — on record.`,
-        linkUrl:  "/dashboard/hr/leaves",
-      });
-    } else {
-      // Standard self-apply flow: ping the L1 manager + L2 approvers.
-      const initialRecipients = Array.from(new Set([
-        ...(managerId ? [managerId] : []),
-        ...finalApprovers.map((u) => u.id),
-        ...extras,
-      ]));
-      await notifyUsers({
-        actorId:  myId,
-        userIds:  initialRecipients,
-        type:     "leave",
-        entityId: application.id,
-        title:    `${requesterName} requested ${typeName}`,
+        title:    `HR applied ${typeName} for you`,
         body:     `${dateLabel} (${daysLabel}) — awaiting manager approval.`,
-        linkUrl:  "/dashboard/hr/approvals",
+        linkUrl:  "/dashboard/hr/leaves",
+        emailData: leaveEmailData,
       });
     }
 

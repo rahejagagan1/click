@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { Receipt, Plus, Plane, Utensils, Monitor, Phone, Car, Package, X, CheckCircle2, XCircle, Clock, IndianRupee } from "lucide-react";
 import { isHRAdmin } from "@/lib/access";
+import { DateField } from "@/components/ui/date-field";
 
 const TOP_TABS = [
   { key: "home",        label: "HOME",              href: "/dashboard/hr/home"  },
@@ -59,8 +60,7 @@ function NewExpenseModal({ onClose, onSave }: { onClose: () => void; onSave: (d:
             </div>
             <div>
               <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>
-              <input type="date" value={form.expenseDate} onChange={e => set("expenseDate", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none" />
+              <DateField value={form.expenseDate} onChange={(v) => set("expenseDate", v)} className="mt-1 w-full" />
             </div>
           </div>
           <div>
@@ -122,13 +122,11 @@ function NewTravelModal({ onClose, onSave }: { onClose: () => void; onSave: (d: 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Travel Date *</label>
-              <input type="date" value={form.travelDate} onChange={e => set("travelDate", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none" />
+              <DateField value={form.travelDate} onChange={(v) => set("travelDate", v)} className="mt-1 w-full" />
             </div>
             <div>
               <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Return Date</label>
-              <input type="date" value={form.returnDate} onChange={e => set("returnDate", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none" />
+              <DateField value={form.returnDate} onChange={(v) => set("returnDate", v)} className="mt-1 w-full" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -296,7 +294,7 @@ export default function ExpensesPage() {
       {/* Expense Claims Table */}
       {mainTab === "expenses" && (
         <div className="px-6 pb-8">
-          <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+          <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-white/[0.06]">
@@ -374,7 +372,7 @@ export default function ExpensesPage() {
       {/* Travel Requests Table */}
       {mainTab === "travel" && (
         <div className="px-6 pb-8">
-          <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+          <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-white/[0.06]">

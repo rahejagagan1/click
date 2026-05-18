@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { Search, Sparkles, Plus, Minus, X, CalendarPlus, AlertTriangle, Home, Clock } from "lucide-react";
+import { DateField } from "@/components/ui/date-field";
 
 type LeaveTypeRow = { id: number; name: string; code: string; daysPerYear: number; applicable?: boolean };
 type Bal          = { id: number | null; total: number; used: number; pending: number };
@@ -174,6 +175,35 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
   });
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyError, setApplyError] = useState("");
+  // Day-kind toggle for the apply-on-behalf form (mirrors the regular
+  // leave application form). full → standard range; first/second half
+  // collapse to one date and tag the reason so attendance reports the
+  // correct fraction.
+  const [applyDayKind, setApplyDayKind] = useState<"full" | "first_half" | "second_half">("full");
+  const isApplyHalf = applyDayKind !== "full";
+  // Employee picker: typed search + outside-click close. Replaces the
+  // native <select> which became unwieldy with 60+ active employees.
+  const [empQuery, setEmpQuery] = useState("");
+  const [empOpen,  setEmpOpen]  = useState(false);
+  const empPickerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!empOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (empPickerRef.current && !empPickerRef.current.contains(e.target as Node)) setEmpOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [empOpen]);
+  const filteredEmps = useMemo(() => {
+    if (!empQuery.trim()) return employees.slice(0, 12);
+    const q = empQuery.trim().toLowerCase();
+    return employees
+      .filter((e) => e.name?.toLowerCase().includes(q) || e.email?.toLowerCase().includes(q))
+      .slice(0, 12);
+  }, [employees, empQuery]);
+  const selectedEmployee = typeof applyForm.userId === "number"
+    ? employees.find((e) => e.id === applyForm.userId)
+    : null;
   // Pickable leave types — only active + applicable. Reuses the data
   // already loaded for the matrix so no extra fetch is needed.
   const applicableTypes = useMemo(
@@ -262,6 +292,15 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
     try {
       let res: Response;
       if (applyMode === "leave") {
+        // Half-day requests tag the reason with [First Half] / [Second Half]
+        // so the API's 0.5-day rule kicks in. Full-day passes the reason
+        // verbatim. The toDate is always pinned to fromDate when half-day.
+        const reasonText = applyForm.reason.trim();
+        const reasonOut =
+          applyDayKind === "first_half"  ? `[First Half] ${reasonText}`  :
+          applyDayKind === "second_half" ? `[Second Half] ${reasonText}` :
+                                            reasonText;
+        const toDateOut = isApplyHalf ? applyForm.fromDate : applyForm.toDate;
         res = await fetch("/api/hr/leaves", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -269,8 +308,8 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
             targetUserId:    applyForm.userId,
             leaveTypeId:     applyForm.leaveTypeId,
             fromDate:        applyForm.fromDate,
-            toDate:          applyForm.toDate,
-            reason:          applyForm.reason.trim(),
+            toDate:          toDateOut,
+            reason:          reasonOut,
             useLwpFallback:  applyForm.useLwpFallback,
           }),
         });
@@ -375,9 +414,9 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
       {/* ── Matrix ─────────────────────────────────────────────────── */}
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
         <table className="w-full min-w-[760px]">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50/70">
-              <th className="sticky left-0 z-[1] bg-slate-50/70 px-5 py-3 text-left text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-500 min-w-[260px]">
+          <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur-sm">
+            <tr className="border-b border-slate-100">
+              <th className="sticky left-0 z-20 bg-slate-50/95 px-5 py-3 text-left text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-500 min-w-[260px]">
                 Employee
               </th>
               {leaveTypes.map((lt) => (
@@ -582,7 +621,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
       {applyOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4" onClick={() => !applyBusy && setApplyOpen(false)}>
           <div
-            className="w-full max-w-lg rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200/60"
+            className="w-full max-w-xl rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200/60 max-h-[calc(100vh-48px)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <header className="flex items-start justify-between border-b border-slate-100 px-6 py-4">
@@ -593,7 +632,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                 <p className="mt-0.5 text-[11.5px] text-slate-500">
                   {applyMode === "wfh"
                     ? "Auto-approved. The monthly 2-of-2 cap is bypassed when HR grants on behalf."
-                    : "Auto-approved. If balance is insufficient and LWP fallback is on, switches to Leave Without Pay."}
+                    : "Goes through normal approval — lands in the manager's L1 queue. If balance is insufficient and LWP fallback is on, switches to Leave Without Pay."}
                 </p>
               </div>
               <button onClick={() => !applyBusy && setApplyOpen(false)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
@@ -631,7 +670,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
               </div>
             </div>
 
-            <div className="space-y-3 px-6 pb-5 pt-4">
+            <div className="space-y-4 px-6 pb-5 pt-4">
               {applyError && (
                 <p className="inline-flex w-full items-center gap-1.5 rounded-md bg-red-50 px-2.5 py-1.5 text-[12px] text-red-700 ring-1 ring-inset ring-red-200">
                   <AlertTriangle size={12} />
@@ -641,16 +680,49 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
 
               <div>
                 <label className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Employee</label>
-                <select
-                  value={applyForm.userId === "" ? "" : String(applyForm.userId)}
-                  onChange={(e) => setApplyForm((f) => ({ ...f, userId: e.target.value ? Number(e.target.value) : "" }))}
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
-                >
-                  <option value="">— Select an employee —</option>
-                  {employees.map((e) => (
-                    <option key={e.id} value={e.id}>{e.name} ({e.email})</option>
-                  ))}
-                </select>
+                <div ref={empPickerRef} className="relative mt-1">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={selectedEmployee && !empOpen
+                      ? `${selectedEmployee.name} (${selectedEmployee.email})`
+                      : empQuery}
+                    onFocus={() => setEmpOpen(true)}
+                    onChange={(e) => { setEmpQuery(e.target.value); setEmpOpen(true); }}
+                    placeholder="Search by name or email…"
+                    className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
+                  />
+                  {empOpen && (
+                    <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
+                      {filteredEmps.length === 0 ? (
+                        <p className="px-3 py-2.5 text-[12.5px] text-slate-500">
+                          {empQuery ? "No matching employees." : "No active employees."}
+                        </p>
+                      ) : (
+                        filteredEmps.map((e) => {
+                          const active = applyForm.userId === e.id;
+                          return (
+                            <button
+                              key={e.id}
+                              type="button"
+                              onClick={() => {
+                                setApplyForm((f) => ({ ...f, userId: e.id }));
+                                setEmpQuery("");
+                                setEmpOpen(false);
+                              }}
+                              className={`w-full text-left px-3 py-2 border-b border-slate-50 last:border-0 ${
+                                active ? "bg-[#008CFF]/10" : "hover:bg-[#008CFF]/5"
+                              }`}
+                            >
+                              <p className="text-[13px] font-semibold text-slate-800">{e.name}</p>
+                              <p className="text-[11.5px] text-slate-500 truncate">{e.email}</p>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {applyMode === "leave" && (
@@ -748,26 +820,70 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
               </div>
               )}
 
+              {/* Full / Half day pill — leave mode only. Picking a half
+                  day pins toDate to fromDate and prepends the reason with
+                  the [First Half] / [Second Half] / [Half Day] marker
+                  that the API uses to count as 0.5 days. */}
+              {applyMode === "leave" && (
+                <div>
+                  <label className="block text-[10.5px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Day type</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { k: "full",         label: "Full Day"    },
+                      { k: "first_half",   label: "First Half"  },
+                      { k: "second_half",  label: "Second Half" },
+                    ].map((opt) => {
+                      const active = applyDayKind === opt.k;
+                      return (
+                        <button
+                          key={opt.k}
+                          type="button"
+                          onClick={() => {
+                            const next = opt.k as typeof applyDayKind;
+                            setApplyDayKind(next);
+                            if (next !== "full") {
+                              // Half-day collapses the range to a single date.
+                              setApplyForm((f) => ({ ...f, toDate: f.fromDate }));
+                            }
+                          }}
+                          className={`h-8 px-3.5 rounded-full border text-[11.5px] font-semibold transition-colors ${
+                            active
+                              ? "bg-[#008CFF] text-white border-[#008CFF] shadow-sm"
+                              : "bg-white text-slate-600 border-slate-200 hover:border-[#008CFF]/40 hover:text-[#008CFF]"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Date range — both leave and WFH use From/To. HR-grant
                   WFH iterates working days in the range; weekends are
                   skipped server-side. */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">From date</label>
-                  <input
-                    type="date"
+                  <DateField
                     value={applyForm.fromDate}
-                    onChange={(e) => setApplyForm((f) => ({ ...f, fromDate: e.target.value }))}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
+                    onChange={(v) => setApplyForm((f) => ({
+                      ...f,
+                      fromDate: v,
+                      // Half-day always pins toDate to fromDate.
+                      toDate: isApplyHalf ? v : (!f.toDate || new Date(v) > new Date(f.toDate) ? v : f.toDate),
+                    }))}
+                    className="mt-1 w-full"
                   />
                 </div>
                 <div>
                   <label className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">To date</label>
-                  <input
-                    type="date"
-                    value={applyForm.toDate}
-                    onChange={(e) => setApplyForm((f) => ({ ...f, toDate: e.target.value }))}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
+                  <DateField
+                    value={isApplyHalf ? applyForm.fromDate : applyForm.toDate}
+                    disabled={isApplyHalf}
+                    onChange={(v) => setApplyForm((f) => ({ ...f, toDate: v }))}
+                    className="mt-1 w-full"
                   />
                 </div>
               </div>
@@ -825,7 +941,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
               >
                 {applyBusy
                   ? "Applying…"
-                  : applyMode === "wfh" ? "Grant WFH" : "Apply & approve"}
+                  : applyMode === "wfh" ? "Grant WFH" : "Apply leave"}
               </button>
             </footer>
           </div>
