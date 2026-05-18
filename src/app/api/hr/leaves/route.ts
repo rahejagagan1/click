@@ -103,6 +103,10 @@ export async function POST(req: NextRequest) {
     if (leaveType.applicable === false) {
       return NextResponse.json({ error: "This leave type is not applicable — balance is encashed at exit." }, { status: 400 });
     }
+    // Note: we intentionally do NOT gate applications by user.leavePolicyId.
+    // HR manages balances manually in the Leave Balances matrix and can
+    // grant any type to any user; the balance check below is the canonical
+    // "do you have enough days" guard. Policy only drives monthly accrual.
 
     // Half-day requests carry a marker in the reason field — the apply form
     // adds `[Half Day]`, `[First Half]`, or `[Second Half]` so the API

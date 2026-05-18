@@ -4,8 +4,10 @@ import { useState, useEffect } from "react";
 import useSWR from "swr";
 import { fetcher, swrConfig } from "@/lib/swr";
 import CasesTable from "@/components/dashboard/cases-table";
-import { STATUSES } from "@/lib/constants";
+import { STATUSES as FALLBACK_STATUSES } from "@/lib/constants";
 import { Skeleton } from "@/components/ui/loading-spinner";
+
+type StatusOption = { value: string; label: string; count?: number };
 
 export default function CasesListPage() {
     const [capsules, setCapsules] = useState<{ id: number; name: string; capsule: string | null }[]>([]);
@@ -31,6 +33,19 @@ export default function CasesListPage() {
         fetcher,
         { ...swrConfig, keepPreviousData: true }
     );
+
+    // Fetch the live status list — pulled from distinct values in the
+    // Case table so any new status syncing in from ClickUp auto-shows
+    // here. Falls back to the hardcoded list on first paint / failure.
+    const { data: statusData } = useSWR<{ statuses: StatusOption[] }>(
+        "/api/cases/statuses",
+        fetcher,
+        { ...swrConfig, dedupingInterval: 60000 }, // 1 min — cheap query
+    );
+    const statusOptions: StatusOption[] =
+        statusData?.statuses && statusData.statuses.length > 0
+            ? statusData.statuses
+            : FALLBACK_STATUSES.map((s) => ({ value: s.value, label: s.label }));
 
     // Fetch capsules for filter dropdown (one-time)
     const { data: capsuleData } = useSWR("/api/capsules", fetcher, {
@@ -78,8 +93,10 @@ export default function CasesListPage() {
                     className="px-3 py-2 bg-[#12122a] border border-white/10 rounded-xl text-sm text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
                 >
                     <option value="">All Statuses</option>
-                    {STATUSES.map((s) => (
-                        <option key={s.value} value={s.value}>{s.label}</option>
+                    {statusOptions.map((s) => (
+                        <option key={s.value} value={s.value}>
+                            {s.label}{typeof s.count === "number" ? ` (${s.count})` : ""}
+                        </option>
                     ))}
                 </select>
 
