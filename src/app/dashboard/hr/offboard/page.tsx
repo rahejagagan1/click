@@ -15,6 +15,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import { isHRAdmin } from "@/lib/access";
 import {
   UserMinus, Search, AlertCircle, CheckCircle2, X, Save, Paperclip, HelpCircle,
@@ -126,6 +127,17 @@ function InitiateExitTab() {
   const [query, setQuery]   = useState("");
   const [open, setOpen]     = useState(false);
   const [success, setSuccess] = useState("");
+
+  // Pre-select an employee when ?userId=<id> is in the URL — used by
+  // the "Initiate Offboarding" link in the user-profile kebab so HR
+  // lands directly on the exit form for that person.
+  const searchParams = useSearchParams();
+  const preselectId  = Number(searchParams.get("userId") || 0) || null;
+  useEffect(() => {
+    if (!preselectId || picked || !employees) return;
+    const match = employees.find((e) => e.id === preselectId);
+    if (match) setPicked(match);
+  }, [preselectId, picked, employees]);
 
   const filtered = useMemo(() => {
     const list = (employees ?? []).filter(e => e.id);

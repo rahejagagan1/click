@@ -4,6 +4,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import SelectField from "@/components/ui/SelectField";
 import { CalendarDays, Pencil, Trash2, Plus, X, Check } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 
@@ -103,13 +104,12 @@ export default function HolidaysAdminPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            value={year}
-            onChange={(e) => setYear(parseInt(e.target.value, 10))}
-            className="h-9 px-3 rounded-lg border border-slate-200 bg-white text-[13px] text-slate-700 focus:outline-none focus:border-[#008CFF]"
-          >
-            {years.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
+          <SelectField
+            value={String(year)}
+            onChange={(v) => setYear(parseInt(v, 10))}
+            options={years.map((y) => ({ value: String(y), label: String(y) }))}
+            className="h-9 w-[110px] px-3 rounded-lg border border-slate-200 bg-white text-[13px] text-slate-700"
+          />
           <button
             onClick={openCreate}
             className="h-9 px-4 rounded-lg bg-[#008CFF] text-white text-[13px] font-semibold hover:bg-[#0070cc] flex items-center gap-1.5"
@@ -223,15 +223,16 @@ export default function HolidaysAdminPage() {
               </div>
               <div>
                 <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Type</label>
-                <select
+                <SelectField
                   value={editing.type ?? "public"}
-                  onChange={(e) => setEditing({ ...editing, type: e.target.value })}
-                  className="mt-1.5 w-full h-10 px-3 rounded-lg border border-slate-200 bg-white text-[13px] text-slate-800 focus:outline-none focus:border-[#008CFF]"
-                >
-                  <option value="public">Public — gazetted national holiday</option>
-                  <option value="company">Company — paid day off set by NB Media</option>
-                  <option value="optional">Floater — regional / employee choice</option>
-                </select>
+                  onChange={(v) => setEditing({ ...editing, type: v })}
+                  options={[
+                    { value: "public",   label: "Public — gazetted national holiday" },
+                    { value: "company",  label: "Company — paid day off set by NB Media" },
+                    { value: "optional", label: "Floater — regional / employee choice" },
+                  ]}
+                  className="mt-1.5 w-full h-10 px-3 rounded-lg border border-slate-200 bg-white text-[13px] text-slate-800"
+                />
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-200">

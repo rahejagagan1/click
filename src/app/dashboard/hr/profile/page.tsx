@@ -5,6 +5,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { Loader2, Pencil, X, ChevronDown } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
+import SelectField from "@/components/ui/SelectField";
 
 const F = "w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]";
 
@@ -35,10 +36,13 @@ function EditModal({ title, fields, values, onSave, onClose }: {
               {f.type === "dob" ? (
                 <SharedDatePicker value={form[f.key] ?? ""} onChange={(v) => set(f.key, v)} />
               ) : f.options ? (
-                <select value={form[f.key] ?? ""} onChange={e => set(f.key, e.target.value)} className={F}>
-                  <option value="">Select…</option>
-                  {f.options.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
+                <SelectField
+                  value={form[f.key] ?? ""}
+                  onChange={(v) => set(f.key, v)}
+                  options={f.options}
+                  placeholder="Select…"
+                  className={F}
+                />
               ) : (
                 <input
                   type={f.type ?? "text"}
