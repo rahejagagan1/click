@@ -5,6 +5,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import SelectField from "@/components/ui/SelectField";
 import { useSearchParams } from "next/navigation";
 import { isHRAdmin } from "@/lib/access";
 import {
@@ -570,10 +571,12 @@ export default function PayrollPage() {
             <div className="space-y-3">
               <div>
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Month</label>
-                <select value={form.month} onChange={e => setForm(f => ({ ...f, month: parseInt(e.target.value) }))}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-800 text-[13px]">
-                  {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
-                </select>
+                <SelectField
+                  value={String(form.month)}
+                  onChange={(v) => setForm(f => ({ ...f, month: parseInt(v) }))}
+                  options={MONTHS.map((m, i) => ({ value: String(i), label: m }))}
+                  className="mt-1 h-9 w-full px-3 rounded-lg border border-slate-200 bg-white text-slate-800 text-[13px]"
+                />
               </div>
               <div>
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Year</label>
@@ -606,11 +609,13 @@ export default function PayrollPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Employee</label>
-                <select value={structureForm.userId} onChange={e => setStructureForm(f => ({ ...f, userId: e.target.value }))}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-800 text-[13px]">
-                  <option value="">Select employee…</option>
-                  {employees.map((e: any) => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
+                <SelectField
+                  value={String(structureForm.userId ?? "")}
+                  onChange={(v) => setStructureForm(f => ({ ...f, userId: v }))}
+                  placeholder="Select employee…"
+                  options={employees.map((e: any) => ({ value: String(e.id), label: e.name }))}
+                  className="mt-1 h-9 w-full px-3 rounded-lg border border-slate-200 bg-white text-slate-800 text-[13px]"
+                />
               </div>
               {[
                 { field: "ctc",              label: "Annual CTC (₹)"         },
@@ -727,16 +732,12 @@ function PaySlipsView({ payslips, structure }: { payslips: any[]; structure: any
         {/* Left: year dropdown + month list */}
         <aside className="col-span-12 md:col-span-3 space-y-4">
           <div className="relative">
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-              className="w-full appearance-none rounded-lg border border-slate-200 bg-white px-4 py-2.5 pr-9 text-[13px] font-medium text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-200"
-            >
-              {years.map((y) => (
-                <option key={y} value={y}>Year {y}</option>
-              ))}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <SelectField
+              value={String(selectedYear)}
+              onChange={(v) => setSelectedYear(parseInt(v))}
+              options={years.map((y) => ({ value: String(y), label: `Year ${y}` }))}
+              className="w-full rounded-lg border border-slate-200 bg-white h-10 px-4 text-[13px] font-medium text-slate-800 shadow-sm"
+            />
           </div>
 
           <div className="rounded-lg bg-white overflow-hidden shadow-[0_1px_3px_rgba(15,23,42,0.04)] border border-slate-200">

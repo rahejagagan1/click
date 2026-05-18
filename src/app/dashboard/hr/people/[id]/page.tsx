@@ -4,18 +4,19 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { getUserRoleLabel } from "@/lib/user-role-options";
 import { parseAttLoc, type AttLoc } from "@/lib/attendance-location";
 import {
   Mail, Phone, MapPin, Briefcase, Calendar, Building2, IdCard, FileText, Laptop,
   Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
-  MoreVertical,
+  MoreVertical, UserMinus, TreePine,
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
 import { isHRAdmin as canViewAsHRAdmin } from "@/lib/access";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
+import SelectField from "@/components/ui/SelectField";
 
 // "Edit Profile" is HR-admin-only — the canonical place to update any
 // employee field, including salary (which the panel embeds). The
@@ -137,6 +138,22 @@ export default function EmployeeDetailPage() {
   const { data: user, isLoading } = useSWR(`/api/hr/people/${id}`, fetcher);
   const [activeTab, setActiveTab] = useState<Tab>("About");
   const [teamQuery, setTeamQuery] = useState("");
+  // Header kebab popover (HR-admin only). "Initiate Offboarding" pushes
+  // to the offboard page with this user pre-selected; "Apply Leave"
+  // jumps to the Attendance tab and tells EmployeeTimePanel to open
+  // its existing leave-on-behalf modal via a window event so we don't
+  // duplicate the form here.
+  const router = useRouter();
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!headerMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && !t.closest("[data-hr-header-menu]")) setHeaderMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [headerMenuOpen]);
   const { data: session } = useSession();
   const me = session?.user as any;
   // Manager list for the Edit Profile → Job & Work section. Only fetched
@@ -251,18 +268,62 @@ export default function EmployeeDetailPage() {
                   <span className={`h-1.5 w-1.5 rounded-full ${isActive ? "bg-emerald-500" : "bg-slate-400"}`} />
                   {isActive ? "Active" : "Inactive"}
                 </span>
-                <button
-                  type="button"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                  title="More"
-                  aria-label="More actions"
-                >
-                  <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                    <circle cx="5" cy="12" r="1.6" />
-                    <circle cx="12" cy="12" r="1.6" />
-                    <circle cx="19" cy="12" r="1.6" />
-                  </svg>
-                </button>
+                {isHRAdmin && (
+                  <div className="relative" data-hr-header-menu>
+                    <button
+                      type="button"
+                      onClick={() => setHeaderMenuOpen((v) => !v)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      title="More"
+                      aria-label="More actions"
+                    >
+                      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                        <circle cx="5" cy="12" r="1.6" />
+                        <circle cx="12" cy="12" r="1.6" />
+                        <circle cx="19" cy="12" r="1.6" />
+                      </svg>
+                    </button>
+                    {headerMenuOpen && (
+                      <div
+                        data-hr-header-menu
+                        className="absolute right-0 top-9 z-30 w-56 rounded-lg border border-slate-200 bg-white py-1 shadow-xl"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHeaderMenuOpen(false);
+                            // Switch to Attendance tab so the leave modal
+                            // shows up in the user's flow, then dispatch
+                            // a window event the EmployeeTimePanel listens
+                            // for. The slight delay lets the tab content
+                            // mount before we toggle the modal.
+                            setActiveTab("Attendance");
+                            setTimeout(() => {
+                              window.dispatchEvent(new CustomEvent("hr:apply-leave-on-behalf"));
+                            }, 50);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-slate-700 hover:bg-slate-50"
+                        >
+                          <TreePine className="h-4 w-4 text-violet-500" />
+                          Apply Leave
+                        </button>
+                        {isActive && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setHeaderMenuOpen(false);
+                              router.push(`/dashboard/hr/offboard?userId=${userId}`);
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-slate-700 hover:bg-slate-50"
+                          >
+                            <UserMinus className="h-4 w-4 text-rose-500" />
+                            Initiate Offboarding
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -981,14 +1042,13 @@ function ProfileEditModal({
               {f.type === "dob" ? (
                 <SharedDatePicker value={form[f.key] ?? ""} onChange={(v) => set(f.key, v)} />
               ) : f.options ? (
-                <select
+                <SelectField
                   value={form[f.key] ?? ""}
-                  onChange={(e) => set(f.key, e.target.value)}
-                  className="w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]"
-                >
-                  <option value="">Select…</option>
-                  {f.options.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
+                  onChange={(v) => set(f.key, v)}
+                  options={f.options}
+                  placeholder="Select…"
+                  className="w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800"
+                />
               ) : (
                 <input
                   type={f.type ?? "text"}
@@ -1404,7 +1464,15 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
   // is HR-admin only — guarded at each call site by isHRAdmin.
   const [menuOpenKey, setMenuOpenKey]   = useState<string | null>(null);
   const [wfhOpen,     setWfhOpen]       = useState(false);
-  const [wfhForm,     setWfhForm]       = useState<{ date: string; reason: string }>({ date: "", reason: "" });
+  // Tab inside the Apply-Leave-on-behalf modal — switches between
+  // submitting a Leave application and granting WFH for the same user
+  // without forcing HR to close one modal and open another.
+  const [leaveModalTab, setLeaveModalTab] = useState<"leave" | "wfh">("leave");
+  // WFH on-behalf form: `date` is the FROM date, `toDate` is the TO date.
+  // The API treats a missing/equal `toDate` as a single-day grant; when a
+  // later toDate is supplied (HR-on-behalf only) it grants WFH for every
+  // working day in the range.
+  const [wfhForm,     setWfhForm]       = useState<{ date: string; toDate: string; reason: string }>({ date: "", toDate: "", reason: "" });
   const [leaveOpen,   setLeaveOpen]     = useState(false);
   const [leaveForm,   setLeaveForm]     = useState<{ leaveTypeId: number | ""; fromDate: string; toDate: string; reason: string }>({
     leaveTypeId: "", fromDate: "", toDate: "", reason: "",
@@ -1419,6 +1487,16 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
     fetch("/api/hr/leaves/types").then(r => r.json()).then((d) => {
       if (Array.isArray(d)) setLeaveTypes(d);
     }).catch(() => {});
+  }, [isHRAdmin]);
+  // External trigger: the profile-page kebab dispatches
+  // "hr:apply-leave-on-behalf" so HR can open the leave modal without
+  // first clicking through to the per-row kebab. Only honored for HR
+  // admins (who'd see the option anyway).
+  useEffect(() => {
+    if (!isHRAdmin) return;
+    const open = () => setLeaveOpen(true);
+    window.addEventListener("hr:apply-leave-on-behalf", open);
+    return () => window.removeEventListener("hr:apply-leave-on-behalf", open);
   }, [isHRAdmin]);
   useEffect(() => {
     if (!leaveOpen || !isHRAdmin || !userId) return;
@@ -1454,7 +1532,7 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
 
   const openWfhFor = (rec: any) => {
     const dateOnly = String(rec.date).slice(0, 10);
-    setWfhForm({ date: dateOnly, reason: "" });
+    setWfhForm({ date: dateOnly, toDate: dateOnly, reason: "" });
     setMenuOpenKey(null);
     setWfhOpen(true);
   };
@@ -1475,16 +1553,20 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
   };
 
   const submitWfh = async () => {
-    if (!wfhForm.date || !wfhForm.reason.trim()) { alert("Date and reason are required."); return; }
+    if (!wfhForm.date || !wfhForm.reason.trim()) { alert("From date and reason are required."); return; }
+    const effectiveTo = wfhForm.toDate && wfhForm.toDate >= wfhForm.date ? wfhForm.toDate : wfhForm.date;
     setSubmitting(true);
     try {
+      // No forceGrant — route through normal approval (same flow as
+      // apply-on-behalf on the HR dashboard). The target user's manager
+      // sees the request in their L1 queue.
       const res = await fetch("/api/hr/attendance/wfh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           targetUserId: userId,
-          forceGrant:   true,
           date:         wfhForm.date,
+          toDate:       effectiveTo,
           reason:       wfhForm.reason.trim(),
         }),
       });
@@ -2009,7 +2091,9 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
               </div>
 
               <div>
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Reason (visible in audit log)</label>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Reason <span className="text-rose-500">*</span> <span className="font-normal normal-case tracking-normal text-slate-400">(visible in audit log)</span>
+                </label>
                 <textarea
                   value={regForm.reason}
                   onChange={(e) => setRegForm((f) => ({ ...f, reason: e.target.value }))}
@@ -2050,7 +2134,7 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <div>
                 <h3 className="text-[14px] font-semibold text-slate-800">Grant Work From Home</h3>
-                <p className="text-[11.5px] text-slate-500">For {userName} · on-behalf (auto-approved)</p>
+                <p className="text-[11.5px] text-slate-500">For {userName} · routed through L1 → L2</p>
               </div>
               <button onClick={() => setWfhOpen(false)} className="text-slate-400 hover:text-slate-700">
                 <X className="h-4 w-4" />
@@ -2066,7 +2150,9 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                 />
               </div>
               <div>
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Reason (visible in audit log)</label>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Reason <span className="text-rose-500">*</span> <span className="font-normal normal-case tracking-normal text-slate-400">(visible in audit log)</span>
+                </label>
                 <textarea
                   value={wfhForm.reason}
                   onChange={(e) => setWfhForm((f) => ({ ...f, reason: e.target.value }))}
@@ -2075,8 +2161,8 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                   className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
                 />
               </div>
-              <div className="rounded bg-emerald-50 px-3 py-2 text-[11.5px] text-emerald-800 ring-1 ring-inset ring-emerald-200">
-                HR on-behalf WFH is <strong>auto-approved</strong> and bypasses the monthly 2-of-2 cap.
+              <div className="rounded bg-[#008CFF]/10 px-3 py-2 text-[11.5px] text-[#0064b6] ring-1 ring-inset ring-[#008CFF]/30">
+                HR on-behalf WFH goes through <strong>normal approval</strong> — lands in {userName}&apos;s manager&apos;s L1 queue, then CEO/HR finalises.
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
@@ -2098,83 +2184,145 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
         </div>
       ) : null}
 
-      {/* ── HR on-behalf: Leave modal ─────────────────────────────────── */}
+      {/* ── HR on-behalf: Leave + WFH unified modal ───────────────────── */}
       {leaveOpen && isHRAdmin ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <div>
-                <h3 className="text-[14px] font-semibold text-slate-800">Apply Leave on behalf</h3>
-                <p className="text-[11.5px] text-slate-500">For {userName} · routed through L1 → L2 · LWP fallback enabled</p>
+                <h3 className="text-[14px] font-semibold text-slate-800">
+                  {leaveModalTab === "leave" ? "Apply Leave on behalf" : "Grant Work From Home"}
+                </h3>
+                <p className="text-[11.5px] text-slate-500">
+                  For {userName}{" "}
+                  {leaveModalTab === "leave"
+                    ? "· routed through L1 → L2 · LWP fallback enabled"
+                    : "· routed through L1 → L2 · weekends skipped"}
+                </p>
               </div>
               <button onClick={() => setLeaveOpen(false)} className="text-slate-400 hover:text-slate-700">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-3 px-5 py-4">
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Leave type</label>
-                <select
-                  value={leaveForm.leaveTypeId}
-                  onChange={(e) => setLeaveForm((f) => ({ ...f, leaveTypeId: e.target.value ? Number(e.target.value) : "" }))}
-                  className="mt-1 w-full rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+
+            {/* Tab strip */}
+            <div className="flex border-b border-slate-100 px-2">
+              {(["leave", "wfh"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setLeaveModalTab(t)}
+                  className={`px-4 py-2.5 text-[12px] font-semibold border-b-2 -mb-px transition-colors ${
+                    leaveModalTab === t
+                      ? "border-[#008CFF] text-[#008CFF]"
+                      : "border-transparent text-slate-500 hover:text-slate-800"
+                  }`}
                 >
-                  <option value="">— Select type —</option>
-                  {leaveTypes.map((t) => {
-                    const bal = targetBalances[t.id];
-                    const balLabel = bal == null
-                      ? ""
-                      : `  ·  ${bal % 1 === 0 ? bal.toFixed(0) : bal.toFixed(1)} available`;
-                    return (
-                      <option key={t.id} value={t.id}>
-                        {t.name}{balLabel}
-                      </option>
-                    );
-                  })}
-                </select>
-                {leaveForm.leaveTypeId && targetBalances[Number(leaveForm.leaveTypeId)] != null && (
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    {userName} has{" "}
-                    <span className={`font-semibold ${targetBalances[Number(leaveForm.leaveTypeId)] > 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                      {targetBalances[Number(leaveForm.leaveTypeId)].toFixed(1)} day{targetBalances[Number(leaveForm.leaveTypeId)] === 1 ? "" : "s"}
-                    </span>{" "}
-                    available in this type.
-                    {targetBalances[Number(leaveForm.leaveTypeId)] <= 0 && " LWP fallback will kick in."}
-                  </p>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">From</label>
-                  <DateField
-                    value={leaveForm.fromDate}
-                    onChange={(v) => setLeaveForm((f) => ({ ...f, fromDate: v, toDate: f.toDate < v ? v : f.toDate }))}
-                    className="mt-1 w-full"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">To</label>
-                  <DateField
-                    value={leaveForm.toDate}
-                    onChange={(v) => setLeaveForm((f) => ({ ...f, toDate: v }))}
-                    className="mt-1 w-full"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Reason (visible in audit log)</label>
-                <textarea
-                  value={leaveForm.reason}
-                  onChange={(e) => setLeaveForm((f) => ({ ...f, reason: e.target.value }))}
-                  rows={3}
-                  placeholder="Why is leave being granted on behalf?"
-                  className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
-                />
-              </div>
-              <div className="rounded bg-[#008CFF]/10 px-3 py-2 text-[11.5px] text-[#0064b6] ring-1 ring-inset ring-[#008CFF]/30">
-                HR on-behalf leave goes through <strong>normal approval</strong> — lands in {userName}&apos;s manager&apos;s L1 queue, then CEO/HR finalises. If the selected leave type has no balance, the system falls back to Leave Without Pay automatically.
-              </div>
+                  {t === "leave" ? "Leave" : "WFH"}
+                </button>
+              ))}
             </div>
+
+            {leaveModalTab === "leave" ? (
+              <div className="space-y-3 px-5 py-4">
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Leave type</label>
+                  <SelectField
+                    value={leaveForm.leaveTypeId === "" ? "" : String(leaveForm.leaveTypeId)}
+                    onChange={(v) => setLeaveForm((f) => ({ ...f, leaveTypeId: v ? Number(v) : "" }))}
+                    placeholder="— Select type —"
+                    options={leaveTypes.map((t) => {
+                      const bal = targetBalances[t.id];
+                      const balLabel = bal == null
+                        ? ""
+                        : `  ·  ${bal % 1 === 0 ? bal.toFixed(0) : bal.toFixed(1)} available`;
+                      return { value: String(t.id), label: `${t.name}${balLabel}` };
+                    })}
+                    className="mt-1 w-full rounded border border-slate-200 h-9 px-2.5 text-[12.5px]"
+                  />
+                  {leaveForm.leaveTypeId && targetBalances[Number(leaveForm.leaveTypeId)] != null && (
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {userName} has{" "}
+                      <span className={`font-semibold ${targetBalances[Number(leaveForm.leaveTypeId)] > 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                        {targetBalances[Number(leaveForm.leaveTypeId)].toFixed(1)} day{targetBalances[Number(leaveForm.leaveTypeId)] === 1 ? "" : "s"}
+                      </span>{" "}
+                      available in this type.
+                      {targetBalances[Number(leaveForm.leaveTypeId)] <= 0 && " LWP fallback will kick in."}
+                    </p>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">From</label>
+                    <DateField
+                      value={leaveForm.fromDate}
+                      onChange={(v) => setLeaveForm((f) => ({ ...f, fromDate: v, toDate: f.toDate < v ? v : f.toDate }))}
+                      className="mt-1 w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">To</label>
+                    <DateField
+                      value={leaveForm.toDate}
+                      onChange={(v) => setLeaveForm((f) => ({ ...f, toDate: v }))}
+                      className="mt-1 w-full"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Reason <span className="text-rose-500">*</span> <span className="font-normal normal-case tracking-normal text-slate-400">(visible in audit log)</span>
+                  </label>
+                  <textarea
+                    value={leaveForm.reason}
+                    onChange={(e) => setLeaveForm((f) => ({ ...f, reason: e.target.value }))}
+                    rows={3}
+                    placeholder="Why is leave being granted on behalf?"
+                    className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                  />
+                </div>
+                <div className="rounded bg-[#008CFF]/10 px-3 py-2 text-[11.5px] text-[#0064b6] ring-1 ring-inset ring-[#008CFF]/30">
+                  HR on-behalf leave goes through <strong>normal approval</strong> — lands in {userName}&apos;s manager&apos;s L1 queue, then CEO/HR finalises. If the selected leave type has no balance, the system falls back to Leave Without Pay automatically.
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3 px-5 py-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">From</label>
+                    <DateField
+                      value={wfhForm.date}
+                      onChange={(v) => setWfhForm((f) => ({ ...f, date: v, toDate: f.toDate && f.toDate >= v ? f.toDate : v }))}
+                      className="mt-1 w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">To</label>
+                    <DateField
+                      value={wfhForm.toDate}
+                      onChange={(v) => setWfhForm((f) => ({ ...f, toDate: v }))}
+                      className="mt-1 w-full"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Reason <span className="text-rose-500">*</span> <span className="font-normal normal-case tracking-normal text-slate-400">(visible in audit log)</span>
+                  </label>
+                  <textarea
+                    value={wfhForm.reason}
+                    onChange={(e) => setWfhForm((f) => ({ ...f, reason: e.target.value }))}
+                    rows={3}
+                    placeholder="Why is WFH being granted on behalf?"
+                    className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                  />
+                </div>
+                <div className="rounded bg-[#008CFF]/10 px-3 py-2 text-[11.5px] text-[#0064b6] ring-1 ring-inset ring-[#008CFF]/30">
+                  HR on-behalf WFH goes through <strong>normal approval</strong> — lands in {userName}&apos;s manager&apos;s L1 queue, then CEO/HR finalises. Multi-day ranges create one request per working day (weekends skipped).
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
               <button
                 onClick={() => setLeaveOpen(false)}
@@ -2182,13 +2330,23 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
               >
                 Cancel
               </button>
-              <button
-                onClick={submitLeave}
-                disabled={submitting || !leaveForm.leaveTypeId || !leaveForm.fromDate || !leaveForm.toDate || !leaveForm.reason.trim()}
-                className="h-8 rounded bg-[#008CFF] px-4 text-[12px] font-semibold text-white hover:bg-[#0070d4] disabled:opacity-60"
-              >
-                {submitting ? "Submitting…" : "Apply leave"}
-              </button>
+              {leaveModalTab === "leave" ? (
+                <button
+                  onClick={submitLeave}
+                  disabled={submitting || !leaveForm.leaveTypeId || !leaveForm.fromDate || !leaveForm.toDate || !leaveForm.reason.trim()}
+                  className="h-8 rounded bg-[#008CFF] px-4 text-[12px] font-semibold text-white hover:bg-[#0070d4] disabled:opacity-60"
+                >
+                  {submitting ? "Submitting…" : "Apply leave"}
+                </button>
+              ) : (
+                <button
+                  onClick={submitWfh}
+                  disabled={submitting || !wfhForm.date || !wfhForm.reason.trim()}
+                  className="h-8 rounded bg-[#008CFF] px-4 text-[12px] font-semibold text-white hover:bg-[#0070d4] disabled:opacity-60"
+                >
+                  {submitting ? "Submitting…" : "Grant WFH"}
+                </button>
+              )}
             </div>
           </div>
         </div>

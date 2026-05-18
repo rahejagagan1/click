@@ -2,6 +2,7 @@
 import { useState } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
+import SelectField from "@/components/ui/SelectField";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { isAdmin as isAdminUser } from "@/lib/access";
@@ -89,11 +90,12 @@ export default function TicketsPage() {
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search"
                 className="h-8 pl-9 pr-3 w-[200px] bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-800 dark:text-white placeholder-slate-600 focus:outline-none focus:border-[#008CFF]/40" />
             </div>
-            <select className="h-8 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-500 dark:text-slate-400 focus:outline-none">
-              <option>{timeFilter}</option>
-              <option>Last 6 months</option>
-              <option>All time</option>
-            </select>
+            <SelectField
+              value={timeFilter}
+              onChange={() => { /* unwired filter — kept for visual parity */ }}
+              options={[timeFilter, "Last 6 months", "All time"]}
+              className="h-8 w-[140px] px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-500 dark:text-slate-400"
+            />
           </div>
 
           {/* Table */}
@@ -139,9 +141,12 @@ export default function TicketsPage() {
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
               <input placeholder="Search" className="h-8 pl-9 pr-3 w-[200px] bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-800 dark:text-white placeholder-slate-600 focus:outline-none focus:border-[#008CFF]/40" />
             </div>
-            <select className="h-8 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-500 dark:text-slate-400 focus:outline-none">
-              <option>Last 3 months</option>
-            </select>
+            <SelectField
+              value="Last 3 months"
+              onChange={() => { /* unwired filter — kept for visual parity */ }}
+              options={["Last 3 months"]}
+              className="h-8 w-[140px] px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[12px] text-slate-500 dark:text-slate-400"
+            />
           </div>
 
           <div className="bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-x-auto">
@@ -220,22 +225,22 @@ function NewTicketPanel({ onClose }: { onClose: () => void }) {
 
         <div>
           <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Category</label>
-          <select value={form.category} onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))}
-            className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]/40">
-            {["general", "it_support", "hr", "finance", "facilities", "other"].map((c) => (
-              <option key={c} value={c}>{c.replace("_", " ")}</option>
-            ))}
-          </select>
+          <SelectField
+            value={form.category}
+            onChange={(v) => setForm((p) => ({ ...p, category: v }))}
+            options={["general", "it_support", "hr", "finance", "facilities", "other"].map((c) => ({ value: c, label: c.replace("_", " ") }))}
+            className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white"
+          />
         </div>
 
         <div>
           <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Priority</label>
-          <select value={form.priority} onChange={(e) => setForm((p) => ({ ...p, priority: e.target.value }))}
-            className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]/40">
-            {["low", "medium", "high", "urgent"].map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
+          <SelectField
+            value={form.priority}
+            onChange={(v) => setForm((p) => ({ ...p, priority: v }))}
+            options={["low", "medium", "high", "urgent"]}
+            className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white"
+          />
         </div>
 
         <div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { DatePicker } from "@/components/ui/date-picker";
+import SelectField from "@/components/ui/SelectField";
 
 interface NumberSeries {
     id: number;
@@ -338,14 +339,12 @@ function Page1({
                 <h2 className="text-[17px] font-semibold text-slate-900 dark:text-white mb-6">Employee details</h2>
 
                 <Field label="Work Country" required>
-                    <select
+                    <SelectField
                         value={form.workCountry}
-                        onChange={e => updateField("workCountry", e.target.value)}
-                        className={inputClass}>
-                        {["India", "United States", "United Kingdom", "United Arab Emirates", "Canada", "Australia", "Singapore"].map(c => (
-                            <option key={c} value={c}>{c}</option>
-                        ))}
-                    </select>
+                        onChange={(v) => updateField("workCountry", v)}
+                        options={["India", "United States", "United Kingdom", "United Arab Emirates", "Canada", "Australia", "Singapore"]}
+                        className={inputClass}
+                    />
                 </Field>
 
                 <div className="grid grid-cols-2 gap-6">
@@ -365,12 +364,17 @@ function Page1({
                             className={inputClass} />
                     </Field>
                     <Field label="Gender" required>
-                        <select value={form.gender} onChange={e => updateField("gender", e.target.value)} className={inputClass}>
-                            <option value="">Select gender</option>
-                            <option value="Male">Male</option>
-                            <option value="Female">Female</option>
-                            <option value="Other">Other</option>
-                        </select>
+                        <SelectField
+                            value={form.gender}
+                            onChange={(v) => updateField("gender", v)}
+                            placeholder="Select gender"
+                            options={[
+                                { value: "Male",   label: "Male" },
+                                { value: "Female", label: "Female" },
+                                { value: "Other",  label: "Other" },
+                            ]}
+                            className={inputClass}
+                        />
                     </Field>
                     <Field label="Date of Birth" required>
                         <DatePicker value={form.dateOfBirth} onChange={(v) => updateField("dateOfBirth", v)} />
@@ -383,10 +387,13 @@ function Page1({
                             className={inputClass} />
                     </Field>
                     <Field label="Number Series" required>
-                        <select value={form.numberSeriesId} onChange={e => updateField("numberSeriesId", e.target.value)} className={inputClass}>
-                            {series.length === 0 && <option value="">Loading…</option>}
-                            {series.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
+                        <SelectField
+                            value={String(form.numberSeriesId ?? "")}
+                            onChange={(v) => updateField("numberSeriesId", v)}
+                            placeholder={series.length === 0 ? "Loading…" : "Select series"}
+                            options={series.map((s) => ({ value: String(s.id), label: s.name }))}
+                            className={inputClass}
+                        />
                     </Field>
                 </div>
 

@@ -8,6 +8,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { JOB_TITLES } from "@/lib/job-titles";
 import { DEPARTMENTS } from "@/lib/departments";
 import CustomSelect from "@/components/ui/CustomSelect";
+import SelectField from "@/components/ui/SelectField";
 import KekaImportModal from "@/components/hr/KekaImportModal";
 import type { KekaRow, KekaFormPatch } from "@/lib/keka-import";
 import { Upload as UploadIcon } from "lucide-react";
@@ -169,7 +170,7 @@ const EMPTY: Form = {
   attendanceNumber: "", timeTrackingPolicy: "On-Site Capture",
   penalizationPolicy: "Default",
   orgLevel: "member", role: "member",
-  attendanceCaptureScheme: "On-Site", costCenter: "",
+  attendanceCaptureScheme: "On-Site", costCenter: "NB Media",
   salaryType: "Regular Employee",
   payGroup: "NB Media", annualSalary: "",
   basicPay: "",
@@ -200,6 +201,32 @@ export default function OnboardEmployeePage() {
   const [importOpen, setImportOpen] = useState(false);
   const [importedFrom, setImportedFrom] = useState<{ hrm: string; name: string } | null>(null);
   const [importDoneIds, setImportDoneIds] = useState<Set<string>>(() => new Set());
+
+  // "Same as Current Address" — when checked, the permanent address fields
+  // mirror the current ones live and the permanent inputs are disabled.
+  const [sameAsCurrent, setSameAsCurrent] = useState(false);
+  useEffect(() => {
+    if (!sameAsCurrent) return;
+    setForm((f) => {
+      const inSync =
+        f.permanentLine1   === f.addressLine1 &&
+        f.permanentLine2   === f.addressLine2 &&
+        f.permanentCity    === f.city &&
+        f.permanentState   === f.state &&
+        f.permanentPincode === f.addressPincode &&
+        f.permanentCountry === f.addressCountry;
+      if (inSync) return f;
+      return {
+        ...f,
+        permanentLine1:   f.addressLine1,
+        permanentLine2:   f.addressLine2,
+        permanentCity:    f.city,
+        permanentState:   f.state,
+        permanentPincode: f.addressPincode,
+        permanentCountry: f.addressCountry,
+      };
+    });
+  }, [sameAsCurrent, form.addressLine1, form.addressLine2, form.city, form.state, form.addressPincode, form.addressCountry]);
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm(f => ({ ...f, [k]: v }));
 
@@ -1120,8 +1147,8 @@ export default function OnboardEmployeePage() {
               <Field label="Attendance Capture Scheme">
                 <Select v={form.attendanceCaptureScheme} set={v => set("attendanceCaptureScheme", v)} opts={["On-Site", "Remote", "Hybrid"]} />
               </Field>
-              <Field label="Cost Center">
-                <Input v={form.costCenter} set={v => set("costCenter", v)} placeholder="e.g. NB Media" />
+              <Field label="Cost Center" hint="Locked org-wide to NB Media">
+                <Input v="NB Media" set={() => { /* locked */ }} disabled />
               </Field>
             </Grid>
           </StepCard>
@@ -1279,24 +1306,33 @@ export default function OnboardEmployeePage() {
             </StepCard>
 
             <StepCard title="Permanent Address">
+              <label className="mb-3 inline-flex items-center gap-2 text-[12.5px] text-slate-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={sameAsCurrent}
+                  onChange={(e) => setSameAsCurrent(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-[#3b82f6] focus:ring-[#3b82f6]/30"
+                />
+                Same as Current Address
+              </label>
               <Grid>
                 <Field label="Address Line 1">
-                  <Input v={form.permanentLine1} set={v => set("permanentLine1", v)} placeholder="House / street" />
+                  <Input v={form.permanentLine1} set={v => set("permanentLine1", v)} placeholder="House / street" disabled={sameAsCurrent} />
                 </Field>
                 <Field label="Address Line 2">
-                  <Input v={form.permanentLine2} set={v => set("permanentLine2", v)} placeholder="Area / landmark (optional)" />
+                  <Input v={form.permanentLine2} set={v => set("permanentLine2", v)} placeholder="Area / landmark (optional)" disabled={sameAsCurrent} />
                 </Field>
                 <Field label="City">
-                  <Input v={form.permanentCity} set={v => set("permanentCity", v)} placeholder="City" />
+                  <Input v={form.permanentCity} set={v => set("permanentCity", v)} placeholder="City" disabled={sameAsCurrent} />
                 </Field>
                 <Field label="State">
-                  <Input v={form.permanentState} set={v => set("permanentState", v)} placeholder="State" />
+                  <Input v={form.permanentState} set={v => set("permanentState", v)} placeholder="State" disabled={sameAsCurrent} />
                 </Field>
                 <Field label="Pincode">
-                  <Input v={form.permanentPincode} set={v => set("permanentPincode", v)} placeholder="6-digit pincode" />
+                  <Input v={form.permanentPincode} set={v => set("permanentPincode", v)} placeholder="6-digit pincode" disabled={sameAsCurrent} />
                 </Field>
                 <Field label="Country">
-                  <Input v={form.permanentCountry} set={v => set("permanentCountry", v)} placeholder="India" />
+                  <Input v={form.permanentCountry} set={v => set("permanentCountry", v)} placeholder="India" disabled={sameAsCurrent} />
                 </Field>
               </Grid>
             </StepCard>
@@ -1374,24 +1410,18 @@ function Field({ label, required, hint, children }: { label: string; required?: 
     </div>
   );
 }
-function Input({ v, set, type = "text", placeholder }: {
+function Input({ v, set, type = "text", placeholder, disabled }: {
   v: string;
   set: (value: string) => void;
   type?: string;
   placeholder?: string;
+  disabled?: boolean;
 }) {
-  return <input type={type} value={v} onChange={e => set(e.target.value)} placeholder={placeholder} className={C.input} />;
+  return <input type={type} value={v} disabled={disabled} onChange={e => set(e.target.value)} placeholder={placeholder} className={`${C.input} disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed`} />;
 }
 
 function Select({ v, set, opts }: { v: string; set: (v: string) => void; opts: (string | { value: string; label: string })[] }) {
-  return (
-    <select value={v} onChange={e => set(e.target.value)} className={C.input}>
-      {opts.map(o => {
-        const { value, label } = typeof o === "string" ? { value: o, label: o } : o;
-        return <option key={value} value={value}>{label}</option>;
-      })}
-    </select>
-  );
+  return <SelectField value={v} onChange={set} options={opts} className={C.input} />;
 }
 function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
   return (

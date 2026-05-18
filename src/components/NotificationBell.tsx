@@ -3,8 +3,42 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { Bell, CheckCheck, Activity, Home, Briefcase, ShieldCheck, Coffee } from "lucide-react";
+import { Bell, CheckCheck, Activity, Home, Briefcase, ShieldCheck, Coffee, MoreHorizontal, BellOff, Trash2 } from "lucide-react";
 import Link from "next/link";
+
+/**
+ * Tiny "bing" via the Web Audio API. Two short tones (E5 then C6) so it
+ * sounds like a soft chime without needing an .mp3 asset. AudioContext
+ * is lazily created and cached. Browsers gate AudioContext.start() on
+ * a prior user gesture — we wrap in try/catch so a blocked play just
+ * silently no-ops on the first poll after page load.
+ */
+let _notifAudioCtx: AudioContext | null = null;
+function playNotificationSound() {
+  try {
+    const Ctx = (window.AudioContext || (window as any).webkitAudioContext) as typeof AudioContext | undefined;
+    if (!Ctx) return;
+    if (!_notifAudioCtx) _notifAudioCtx = new Ctx();
+    const ctx = _notifAudioCtx;
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    const now = ctx.currentTime;
+    const tone = (freq: number, start: number, dur = 0.18) => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      // Short fade in/out so it sounds like a chime, not a click.
+      gain.gain.setValueAtTime(0, now + start);
+      gain.gain.linearRampToValueAtTime(0.18, now + start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + dur + 0.02);
+    };
+    tone(659.25, 0);     // E5
+    tone(1046.5, 0.12);  // C6
+  } catch { /* autoplay-blocked or no audio support — silent */ }
+}
 
 function timeAgo(iso: string): string {
   const t  = new Date(iso).getTime();
@@ -40,6 +74,52 @@ export default function NotificationBell() {
   const { data } = useSWR("/api/hr/notifications?limit=10", fetcher, { refreshInterval: 30_000 });
   const items = (data?.items as any[]) || [];
   const unread = data?.unreadCount ?? 0;
+
+  // Per-user mute toggle, persisted across reloads. Seeded synchronously
+  // from localStorage so the bell never plays a chime in the brief window
+  // before a useEffect would have set it.
+  const [muted, setMuted] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("nbm:notif:muted") === "1";
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem("nbm:notif:muted", muted ? "1" : "0"); } catch { /* private mode */ }
+  }, [muted]);
+
+  // Chime on unread-count increase (i.e. a new notification just arrived).
+  // First load seeds the ref without playing — we only want to chime on
+  // *deltas* once the bell is already mounted, otherwise every page nav
+  // would replay the sound for the same backlog.
+  const prevUnreadRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (data == null) return;            // wait for first SWR resolution
+    const prev = prevUnreadRef.current;
+    if (prev !== null && unread > prev && !muted) playNotificationSound();
+    prevUnreadRef.current = unread;
+  }, [unread, data, muted]);
+
+  // Overflow (3-dots) menu inside the panel header — Mute/Unmute + Delete read.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t)) return;
+      setMenuOpen(false);
+    };
+    document.addEventListener("click", onDoc);
+    return () => document.removeEventListener("click", onDoc);
+  }, [menuOpen]);
+
+  const readCount = items.filter((n: any) => n.isRead).length;
+  const deleteRead = async () => {
+    setMenuOpen(false);
+    if (readCount === 0) return;
+    if (!confirm(`Delete all read notifications? This cannot be undone.`)) return;
+    await fetch("/api/hr/notifications?scope=read", { method: "DELETE" });
+    mutate((k: any) => typeof k === "string" && k.startsWith("/api/hr/notifications"));
+  };
 
   // Close on outside click. Use click (not mousedown) so the button's own
   // onClick can run first and flip state without racing a close.
@@ -117,19 +197,71 @@ export default function NotificationBell() {
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-white/[0.06]">
             <span className="text-[14px] font-semibold text-slate-900 dark:text-white">Notifications</span>
-            <button
-              type="button"
-              onClick={markAllRead}
-              disabled={unread === 0}
-              aria-disabled={unread === 0}
-              className={`text-[12px] font-medium flex items-center gap-1 transition-colors ${
-                unread === 0
-                  ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
-                  : "text-[#008CFF] hover:underline cursor-pointer"
-              }`}
-            >
-              <CheckCheck size={13} /> Mark all as read
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={markAllRead}
+                disabled={unread === 0}
+                aria-disabled={unread === 0}
+                className={`text-[12px] font-medium flex items-center gap-1 transition-colors ${
+                  unread === 0
+                    ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
+                    : "text-[#008CFF] hover:underline cursor-pointer"
+                }`}
+              >
+                <CheckCheck size={13} /> Mark all as read
+              </button>
+              <div ref={menuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((v) => !v)}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/[0.06] dark:hover:text-white"
+                  aria-label="Notification options"
+                  aria-expanded={menuOpen}
+                >
+                  <MoreHorizontal size={15} strokeWidth={2} />
+                </button>
+                {menuOpen && (
+                  <div className="absolute right-0 top-8 z-10 w-56 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] py-1 shadow-xl">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMuted((m) => {
+                          const next = !m;
+                          // Play a sample chime when turning sound back ON.
+                          // Doubles as the user-gesture that unlocks audio
+                          // on browsers that block autoplay until the user
+                          // has interacted with the page.
+                          if (!next) playNotificationSound();
+                          return next;
+                        });
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12.5px] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04]"
+                    >
+                      {muted ? <Bell size={13} className="text-emerald-500" /> : <BellOff size={13} className="text-slate-500" />}
+                      {muted ? "Unmute notification sound" : "Mute notification sound"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={deleteRead}
+                      disabled={readCount === 0}
+                      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[12.5px] ${
+                        readCount === 0
+                          ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
+                          : "text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04]"
+                      }`}
+                    >
+                      <Trash2 size={13} className={readCount === 0 ? "text-slate-300 dark:text-slate-600" : "text-rose-500"} />
+                      Delete read notifications
+                      {readCount > 0 && (
+                        <span className="ml-auto text-[10.5px] font-semibold text-slate-400 dark:text-slate-500">{readCount}</span>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
           <div className="overflow-y-auto flex-1">
             {items.length === 0 ? (
