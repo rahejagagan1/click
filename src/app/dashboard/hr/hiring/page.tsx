@@ -151,7 +151,7 @@ function ApplicationsTab() {
           No applications yet.
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-[10.5px] font-bold uppercase tracking-[0.08em] text-slate-500">
@@ -397,7 +397,7 @@ function OpeningsTab() {
           No openings yet — click "Add Role".
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-[10.5px] font-bold uppercase tracking-[0.08em] text-slate-500">
@@ -595,7 +595,7 @@ function FormSettingsTab() {
         You can toggle the rest, and rename their labels here too.
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-[10.5px] font-bold uppercase tracking-[0.08em] text-slate-500">

@@ -6,6 +6,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
+import { DateField } from "@/components/ui/date-field";
 
 const CATEGORIES = ["All", "Laptop", "Monitor", "Keyboard", "Mouse", "Headset", "Phone", "Other"];
 
@@ -228,7 +229,7 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
         {isLoading ? (
           <div className="flex items-center justify-center h-40"><div className="w-8 h-8 border-2 border-[#008CFF] border-t-transparent rounded-full animate-spin" /></div>
         ) : (
-          <div className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+          <div className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-x-auto">
             <table className="w-full">
               <thead><tr className="border-b border-slate-200 dark:border-white/[0.06]">{["Asset Name", "Type", "Serial No.", "Assigned To", "Condition", "Status", "Date"].map((h) => <th key={h} className="px-5 py-3 text-left text-[11px] uppercase tracking-wider text-slate-500 font-medium">{h}</th>)}</tr></thead>
               <tbody>
@@ -295,7 +296,7 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Purchase Date</label>
-                  <input type="date" value={assetForm.purchaseDate} onChange={e => setF("purchaseDate", e.target.value)} className={FIELD_CLS} />
+                  <DateField value={assetForm.purchaseDate} onChange={(v) => setF("purchaseDate", v)} className="mt-1 w-full" />
                 </div>
                 <div>
                   <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Value (₹)</label>
