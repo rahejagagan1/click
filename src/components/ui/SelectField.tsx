@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, Check } from "lucide-react";
 
 /**
@@ -104,45 +105,63 @@ export default function SelectField({
         <ChevronDown size={14} strokeWidth={2} className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
-      {open && rect && (
-        <div
-          ref={panelRef}
-          className="bg-white border border-slate-200 rounded-lg shadow-2xl overflow-hidden"
-          style={{
-            position: "fixed",
-            top:   rect.bottom + 4,
-            left:  rect.left,
-            width: width ?? rect.width,
-            maxHeight: 280,
-            zIndex: 10000,
-          }}
-        >
-          <div className="overflow-y-auto" style={{ maxHeight: 280 }}>
-            {items.length === 0 ? (
-              <p className="text-[12px] text-slate-400 text-center py-5">No options</p>
-            ) : (
-              items.map((o) => {
-                const isSel = o.value === value;
-                return (
-                  <button
-                    key={o.value}
-                    type="button"
-                    onClick={() => { onChange(o.value); setOpen(false); }}
-                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-[13px] transition-colors ${
-                      isSel
-                        ? "bg-[#3b82f6]/10 text-[#1e40af] font-medium"
-                        : "text-slate-700 hover:bg-slate-100"
-                    }`}
-                  >
-                    <span className="truncate">{o.label}</span>
-                    {isSel && <Check size={14} strokeWidth={2.5} className="text-[#3b82f6] shrink-0" />}
-                  </button>
-                );
-              })
-            )}
+      {open && rect && typeof document !== "undefined" && createPortal((() => {
+        // Compute available space below vs above the trigger; flip when
+        // there's not enough room below so the list stays fully visible
+        // (and doesn't poke past the bottom of the viewport / card).
+        const POPUP_MAX = 280;
+        const GAP       = 4;
+        const vh        = typeof window !== "undefined" ? window.innerHeight : 0;
+        const spaceBelow = vh - rect.bottom;
+        const spaceAbove = rect.top;
+        // Desired = exactly what the rows need. Clamp to viewport. Cap
+        // popupMaxH at `desired` so a short list flipped above the
+        // trigger hugs it instead of stretching to fill space-above.
+        const desired   = Math.min(POPUP_MAX, items.length * 36 + 12);
+        const flipUp    = spaceBelow < desired && spaceAbove > spaceBelow;
+        const avail     = (flipUp ? spaceAbove : spaceBelow) - GAP - 8;
+        const popupMaxH = Math.max(120, Math.min(desired, avail));
+        const top       = flipUp ? Math.max(8, rect.top - popupMaxH - GAP) : rect.bottom + GAP;
+        return (
+          <div
+            ref={panelRef}
+            className="bg-white border border-slate-200 rounded-lg shadow-2xl overflow-hidden"
+            style={{
+              position: "fixed",
+              top,
+              left:  rect.left,
+              width: width ?? rect.width,
+              maxHeight: popupMaxH,
+              zIndex: 10000,
+            }}
+          >
+            <div className="overflow-y-auto" style={{ maxHeight: popupMaxH }}>
+              {items.length === 0 ? (
+                <p className="text-[12px] text-slate-400 text-center py-5">No options</p>
+              ) : (
+                items.map((o) => {
+                  const isSel = o.value === value;
+                  return (
+                    <button
+                      key={o.value}
+                      type="button"
+                      onClick={() => { onChange(o.value); setOpen(false); }}
+                      className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-[13px] transition-colors ${
+                        isSel
+                          ? "bg-[#3b82f6]/10 text-[#1e40af] font-medium"
+                          : "text-slate-700 hover:bg-slate-100"
+                      }`}
+                    >
+                      <span className="truncate">{o.label}</span>
+                      {isSel && <Check size={14} strokeWidth={2.5} className="text-[#3b82f6] shrink-0" />}
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })(), document.body)}
     </>
   );
 }

@@ -69,7 +69,10 @@ function requestEmail(opts: { typeLabel: string; verb: "submitted" | "approved" 
   const verbWord = opts.verb === "submitted" ? "submitted" : opts.verb === "approved" ? "was approved" : "was rejected";
   const link = `${appUrl()}${opts.inboxPath ?? "/dashboard/hr/inbox"}`;
 
-  const subject = `${opts.applicantName} ${verbWord} a ${opts.typeLabel} request`;
+  // a / an based on the first letter of the type label so we don't say
+  // "submitted a On-Duty request". Vowel-sound check covers most cases.
+  const article = /^[aeiouAEIOU]/.test(opts.typeLabel) ? "an" : "a";
+  const subject = `${opts.applicantName} ${verbWord} ${article} ${opts.typeLabel} request`;
 
   const detailsTable = opts.details
     .map(([k, v]) => detailRow(escape(k), escape(v)))
@@ -77,7 +80,7 @@ function requestEmail(opts: { typeLabel: string; verb: "submitted" | "approved" 
 
   const body = `
     <p style="margin:0 0 16px;font-size:14px;line-height:1.6">
-      <strong>${escape(opts.applicantName)}</strong> ${verbWord} a
+      <strong>${escape(opts.applicantName)}</strong> ${verbWord} ${article}
       ${escape(opts.typeLabel)} request.
     </p>
     ${opts.reason ? `
@@ -197,15 +200,25 @@ export function onDutyRequestEmail(args: {
   date: string | Date;
   location?: string;
   reason?: string;
+  /** Optional approver context — same shape as the leave / WFH emails so
+   *  L1 / L2 stages surface the manager + finaliser rows. */
+  approverName?: string;
+  stageLabel?:   string;
+  approvalNote?: string;
+  l1ApproverName?: string;
+  l1ApprovalNote?: string;
 }): EmailContent {
+  const details: Array<[string, string]> = [["Date", fmtDate(args.date)]];
+  if (args.location) details.push(["Location", args.location]);
+  if (args.l1ApproverName) details.push(["Manager Approved By", args.l1ApproverName]);
+  if (args.l1ApprovalNote) details.push(["Manager Note",        args.l1ApprovalNote]);
+  if (args.approverName)   details.push([args.stageLabel || "Approved by", args.approverName]);
+  if (args.approvalNote)   details.push(["Approver Note",       args.approvalNote]);
   return requestEmail({
     typeLabel: "On-Duty",
     verb: "submitted",
     applicantName: args.applicantName,
-    details: [
-      ["Date", fmtDate(args.date)],
-      ...(args.location ? [["Location", args.location] as [string, string]] : []),
-    ],
+    details,
     reason: args.reason,
   });
 }
@@ -214,12 +227,24 @@ export function regularizationRequestEmail(args: {
   applicantName: string;
   date: string | Date;
   reason?: string;
+  /** Optional approver context — same shape as the leave / WFH / on-duty
+   *  emails so L1 / L2 stages surface the manager + finaliser rows. */
+  approverName?: string;
+  stageLabel?:   string;
+  approvalNote?: string;
+  l1ApproverName?: string;
+  l1ApprovalNote?: string;
 }): EmailContent {
+  const details: Array<[string, string]> = [["Date", fmtDate(args.date)]];
+  if (args.l1ApproverName) details.push(["Manager Approved By", args.l1ApproverName]);
+  if (args.l1ApprovalNote) details.push(["Manager Note",        args.l1ApprovalNote]);
+  if (args.approverName)   details.push([args.stageLabel || "Approved by", args.approverName]);
+  if (args.approvalNote)   details.push(["Approver Note",       args.approvalNote]);
   return requestEmail({
     typeLabel: "attendance regularization",
     verb: "submitted",
     applicantName: args.applicantName,
-    details: [["Date", fmtDate(args.date)]],
+    details,
     reason: args.reason,
   });
 }
@@ -229,15 +254,27 @@ export function compOffRequestEmail(args: {
   workedDate: string | Date;
   creditDays: number | string;
   reason?: string;
+  /** Approver chain — same shape as leave / WFH / on-duty / regularize so
+   *  the L1 / L2 stages surface manager + finaliser rows. */
+  approverName?: string;
+  stageLabel?:   string;
+  approvalNote?: string;
+  l1ApproverName?: string;
+  l1ApprovalNote?: string;
 }): EmailContent {
+  const details: Array<[string, string]> = [
+    ["Worked Date", fmtDate(args.workedDate)],
+    ["Credit",      `${args.creditDays} day${Number(args.creditDays) === 1 ? "" : "s"}`],
+  ];
+  if (args.l1ApproverName) details.push(["Manager Approved By", args.l1ApproverName]);
+  if (args.l1ApprovalNote) details.push(["Manager Note",        args.l1ApprovalNote]);
+  if (args.approverName)   details.push([args.stageLabel || "Approved by", args.approverName]);
+  if (args.approvalNote)   details.push(["Approver Note",       args.approvalNote]);
   return requestEmail({
     typeLabel: "comp-off credit",
     verb: "submitted",
     applicantName: args.applicantName,
-    details: [
-      ["Worked Date", fmtDate(args.workedDate)],
-      ["Credit",      `${args.creditDays} day${Number(args.creditDays) === 1 ? "" : "s"}`],
-    ],
+    details,
     reason: args.reason,
   });
 }
