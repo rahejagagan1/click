@@ -55,6 +55,10 @@ export async function PUT(req: NextRequest) {
       // ABOUT-tab bios — recently added columns, written via raw SQL
       // below so a stale Prisma client doesn't choke on unknown fields.
       about, jobLove, hobbies,
+      // Family + emergency contact — used to be HR-onboarded but is
+      // now self-edited from the ABOUT tab. Late-added columns, raw SQL.
+      motherName, spouseName, childrenNames, physicallyHandicapped,
+      emergencyRelationship,
     } = body;
 
     // EmployeeProfile is normally HR-onboarded via the Add Employee
@@ -154,7 +158,9 @@ export async function PUT(req: NextRequest) {
     // rejected here as "no changes". Treat those as valid edits too.
     const hasLateUpdates =
       workPhone !== undefined || personalEmail !== undefined || maritalStatus !== undefined ||
-      about !== undefined || jobLove !== undefined || hobbies !== undefined;
+      about !== undefined || jobLove !== undefined || hobbies !== undefined ||
+      motherName !== undefined || spouseName !== undefined || childrenNames !== undefined ||
+      physicallyHandicapped !== undefined || emergencyRelationship !== undefined;
     if (txOps.length === 0 && !hasLateUpdates) {
       return NextResponse.json({ error: "No changes to save" }, { status: 400 });
     }
@@ -202,6 +208,15 @@ export async function PUT(req: NextRequest) {
         setParts.push(`"hobbies" = $${i++}`);
         args.push(typeof hobbies === "string" && hobbies.trim().length > 0 ? hobbies : null);
       }
+      // Family + emergency-contact columns (self-edited from the
+      // ABOUT tab). Same null-on-blank convention as the bios.
+      const nullable = (v: unknown) =>
+        typeof v === "string" && v.trim().length > 0 ? v : null;
+      if (motherName            !== undefined) { setParts.push(`"motherName" = $${i++}`);            args.push(nullable(motherName)); }
+      if (spouseName            !== undefined) { setParts.push(`"spouseName" = $${i++}`);            args.push(nullable(spouseName)); }
+      if (childrenNames         !== undefined) { setParts.push(`"childrenNames" = $${i++}`);         args.push(nullable(childrenNames)); }
+      if (physicallyHandicapped !== undefined) { setParts.push(`"physicallyHandicapped" = $${i++}`); args.push(nullable(physicallyHandicapped)); }
+      if (emergencyRelationship !== undefined) { setParts.push(`"emergencyRelationship" = $${i++}`); args.push(nullable(emergencyRelationship)); }
       if (setParts.length > 0) {
         args.push(myId);
         try {

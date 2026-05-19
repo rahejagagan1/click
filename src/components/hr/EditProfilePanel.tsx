@@ -646,7 +646,25 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
             <input
               type="checkbox"
               checked={sameAsCurrent}
-              onChange={(e) => setSameAsCurrent(e.target.checked)}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setSameAsCurrent(next);
+                // When the box is UN-ticked, clear every permanent field
+                // so HR starts from blank (synced values shouldn't linger
+                // and pose as user-entered data). Country falls back to
+                // the same default the form starts with.
+                if (!next) {
+                  setAddress((a) => ({
+                    ...a,
+                    permanentLine1:   "",
+                    permanentLine2:   "",
+                    permanentCity:    "",
+                    permanentState:   "",
+                    permanentPincode: "",
+                    permanentCountry: "India",
+                  }));
+                }
+              }}
               className="h-4 w-4 rounded border-slate-300 text-[#3b82f6] focus:ring-[#3b82f6]/30"
             />
             Same as Current Address

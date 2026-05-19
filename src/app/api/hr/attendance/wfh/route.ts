@@ -83,9 +83,11 @@ export async function POST(req: NextRequest) {
     if (toIst.getTime() < fromIst.getTime()) {
       return NextResponse.json({ error: "toDate must be on or after fromDate" }, { status: 400 });
     }
-    // Range support is HR-grant-only. Self-apply ignores toDate.
-    const isRange = isHRGrant && toIst.getTime() > fromIst.getTime();
-    if (!isHRGrant && toDateRaw && toIst.getTime() !== fromIst.getTime()) {
+    // Range support is HR-on-behalf only (forceGrant not required —
+    // ranges go through normal L1→L2 approval like single days).
+    // Self-apply ignores toDate.
+    const isRange = onBehalf && callerIsHRAdmin && toIst.getTime() > fromIst.getTime();
+    if (!onBehalf && toDateRaw && toIst.getTime() !== fromIst.getTime()) {
       return NextResponse.json(
         { error: "Date ranges are only available when HR applies on behalf." },
         { status: 400 },
@@ -170,6 +172,15 @@ export async function POST(req: NextRequest) {
       ? ` (skipped ${existingKeys.size} day(s) that already had WFH)`
       : "";
 
+    // Structured emailData so the WFH email mirrors leave / on-duty —
+    // Reason block = just the typed reason, Date / From-To shows the
+    // user's chosen dates (not the submission day).
+    const wfhEmailBase = {
+      applicantName: subject?.name || "An employee",
+      date:          fromIst,
+      toDate:        isRange ? toIst : undefined,
+      reason:        String(reason || "").trim() || undefined,
+    };
     if (finalStatus === "approved" && onBehalf) {
       await notifyApprovers({
         actorId:  myId,
@@ -181,6 +192,7 @@ export async function POST(req: NextRequest) {
         body:     `${rangeLabel}${skippedNote} · ${String(reason).slice(0, 120)}`,
         linkUrl:  "/dashboard/hr/approvals?tab=wfh",
         extraUserIds: [subjectUserId, ...extras],
+        emailData: wfhEmailBase,
       });
     } else {
       await Promise.all([
@@ -192,6 +204,7 @@ export async function POST(req: NextRequest) {
           body:     `Date: ${rangeLabel} — ${String(reason).slice(0, 120)}`,
           linkUrl:  "/dashboard/hr/approvals?tab=wfh",
           extraUserIds: extras,
+          emailData: wfhEmailBase,
         }),
         notifyUsers({
           actorId:  null,
@@ -201,6 +214,7 @@ export async function POST(req: NextRequest) {
           title:    `Work From Home request submitted`,
           body:     `Your request for ${rangeLabel} is awaiting approval.`,
           linkUrl:  "/dashboard/hr/attendance",
+          emailData: wfhEmailBase,
         }),
       ]);
     }
@@ -254,6 +268,17 @@ export async function PUT(req: NextRequest) {
 
     const dateLabel = new Date(record.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     const requesterName = record.user?.name || "An employee";
+    const approver = await prisma.user.findUnique({ where: { id: myId }, select: { name: true } });
+    const approverName = approver?.name || "An approver";
+
+    // Shared payload — mirrors leave / on-duty / regularize so every
+    // stage email shows the requester, the actual WFH date, and the
+    // user-typed reason instead of falling back to the body line.
+    const wfhEmailBase = {
+      applicantName: requesterName,
+      date:          record.date,
+      reason:        record.reason || undefined,
+    };
 
     // ── REJECT (any open stage) ────────────────────────────────────
     if (action === "reject") {
@@ -270,6 +295,7 @@ export async function PUT(req: NextRequest) {
         title:    `Your Work From Home for ${dateLabel} was rejected`,
         body:     approvalNote ? String(approvalNote).slice(0, 160) : undefined,
         linkUrl:  "/dashboard/hr/attendance",
+        emailData: { ...wfhEmailBase, approverName, stageLabel: "Rejected by", approvalNote: approvalNote ?? undefined },
       });
       return NextResponse.json(await prisma.wFHRequest.findUnique({ where: { id } }));
     }
@@ -305,6 +331,7 @@ export async function PUT(req: NextRequest) {
           title:    `${requesterName}'s WFH for ${dateLabel} needs final approval`,
           body:     `Manager approved — awaiting CEO / HR.${approvalNote ? `\nNote: ${String(approvalNote).slice(0, 240)}` : ""}`,
           linkUrl:  "/dashboard/hr/approvals?tab=wfh",
+          emailData: { ...wfhEmailBase, l1ApproverName: approverName, l1ApprovalNote: approvalNote ?? undefined },
         }),
         notifyUsers({
           actorId:  myId,
@@ -314,6 +341,7 @@ export async function PUT(req: NextRequest) {
           title:    `Your WFH for ${dateLabel} is partially approved`,
           body:     `Awaiting final approval from CEO / HR.${approvalNote ? `\nNote: ${String(approvalNote).slice(0, 240)}` : ""}`,
           linkUrl:  "/dashboard/hr/attendance",
+          emailData: { ...wfhEmailBase, l1ApproverName: approverName, l1ApprovalNote: approvalNote ?? undefined },
         }),
       ]);
       return NextResponse.json(await prisma.wFHRequest.findUnique({ where: { id } }));
@@ -348,6 +376,10 @@ export async function PUT(req: NextRequest) {
       },
     });
 
+    // L1 approver lookup so the final email lists manager + finaliser.
+    const l1Approver = record.approvedById
+      ? await prisma.user.findUnique({ where: { id: record.approvedById }, select: { name: true } })
+      : null;
     await notifyUsers({
       actorId:  myId,
       userIds:  [record.userId],
@@ -356,6 +388,14 @@ export async function PUT(req: NextRequest) {
       title:    `Your WFH for ${dateLabel} is approved`,
       body:     `Final approval granted.${approvalNote ? `\nNote: ${String(approvalNote).slice(0, 240)}` : ""}`,
       linkUrl:  "/dashboard/hr/attendance",
+      emailData: {
+        ...wfhEmailBase,
+        l1ApproverName: l1Approver?.name,
+        l1ApprovalNote: record.approvalNote ?? undefined,
+        approverName,
+        stageLabel:     "Approved by",
+        approvalNote:   approvalNote ?? undefined,
+      },
     });
     return NextResponse.json(await prisma.wFHRequest.findUnique({ where: { id } }));
   } catch (e) { return serverError(e, "PUT /api/hr/attendance/wfh"); }

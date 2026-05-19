@@ -22,6 +22,7 @@
 //     unreachable — the defaults still render.
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { ChevronDown, Plus, Trash2, Check, X } from "lucide-react";
@@ -66,6 +67,22 @@ export default function CustomSelect({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const btnRef     = useRef<HTMLButtonElement>(null);
+  const panelRef   = useRef<HTMLDivElement>(null);
+  // Trigger geometry — recomputed on open and on scroll/resize so the
+  // portal-rendered popup follows the button when the page moves.
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const recompute = () => { if (btnRef.current) setRect(btnRef.current.getBoundingClientRect()); };
+    recompute();
+    window.addEventListener("resize", recompute);
+    window.addEventListener("scroll", recompute, true);
+    return () => {
+      window.removeEventListener("resize", recompute);
+      window.removeEventListener("scroll", recompute, true);
+    };
+  }, [open]);
 
   const apiUrl = `/api/hr/options?key=${encodeURIComponent(listKey)}`;
   const { data } = useSWR<{ items: CustomItem[] }>(apiUrl, fetcher, {
@@ -89,15 +106,17 @@ export default function CustomSelect({
     allOptions.push({ value: c.value, isCustom: true, id: c.id });
   }
 
-  // Close on outside-click / Escape.
+  // Close on outside-click / Escape. The popup now lives in a portal,
+  // so a click on it isn't inside `wrapperRef` — we have to check the
+  // panel ref separately.
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (!wrapperRef.current) return;
-      if (!wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-        setAdding(false);
-      }
+      const t = e.target as Node;
+      if (wrapperRef.current?.contains(t)) return;
+      if (panelRef.current?.contains(t))   return;
+      setOpen(false);
+      setAdding(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") { setOpen(false); setAdding(false); }
@@ -160,6 +179,7 @@ export default function CustomSelect({
   return (
     <div ref={wrapperRef} className="relative">
       <button
+        ref={btnRef}
         type="button"
         disabled={disabled}
         aria-haspopup="listbox"
@@ -185,11 +205,41 @@ export default function CustomSelect({
         />
       )}
 
-      {open && (
+      {open && rect && typeof document !== "undefined" && createPortal((() => {
+        // Portal-positioned popup so it escapes ancestor overflow-hidden
+        // (the EditProfilePanel section card clips otherwise). Auto-flip
+        // up when the option list would extend past the viewport.
+        const POPUP_MAX = 320;          // slightly taller than SelectField — needs room for the Add row
+        const GAP       = 4;
+        const vh        = typeof window !== "undefined" ? window.innerHeight : 0;
+        const spaceBelow = vh - rect.bottom;
+        const spaceAbove = rect.top;
+        // Desired height = exactly what the rows need (row ~36px + the
+        // ~60px footer with the "Add custom value" button). Cap by what
+        // the viewport gives. Clamping to `desired` keeps the panel
+        // hugging the trigger when flipping up — without this, the
+        // panel was sized to the entire space-above and the trigger
+        // ended up ~250px below the popup.
+        const desired = Math.min(POPUP_MAX, allOptions.length * 36 + 60);
+        const flipUp  = spaceBelow < desired && spaceAbove > spaceBelow;
+        const avail   = (flipUp ? spaceAbove : spaceBelow) - GAP - 8;
+        const popupMaxH = Math.max(140, Math.min(desired, avail));
+        const top     = flipUp ? Math.max(8, rect.top - popupMaxH - GAP) : rect.bottom + GAP;
+        return (
         <div
+          ref={panelRef}
           role="listbox"
-          className="absolute left-0 right-0 z-30 mt-1 max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg"
+          className="flex flex-col rounded-lg border border-slate-200 bg-white shadow-2xl"
+          style={{
+            position:  "fixed",
+            top,
+            left:      rect.left,
+            width:     rect.width,
+            maxHeight: popupMaxH,
+            zIndex:    10000,
+          }}
         >
+        <div className="overflow-y-auto" style={{ maxHeight: popupMaxH }}>
           {allOptions.length === 0 && !adding && (
             <p className="px-3 py-2 text-[12px] text-slate-400">No options yet</p>
           )}
@@ -275,7 +325,9 @@ export default function CustomSelect({
             </div>
           )}
         </div>
-      )}
+        </div>
+        );
+      })(), document.body)}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import PopupPanel from "@/components/ui/PopupPanel";
 
 const CATEGORIES = [
     {
@@ -150,12 +151,14 @@ export default function FeedbackPage() {
                                 </svg>
                             </button>
 
-                            {dropdownOpen && (
-                                <div
-                                    role="listbox"
-                                    aria-labelledby="fb-category-label"
-                                    className="absolute z-20 mt-2 w-full rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1a1a38] shadow-lg overflow-hidden max-h-[22rem] overflow-y-auto"
-                                >
+                            <PopupPanel
+                                open={dropdownOpen}
+                                triggerRef={dropdownRef}
+                                onClose={() => setDropdownOpen(false)}
+                                maxHeight={352}
+                                className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1a1a38] shadow-2xl overflow-y-auto"
+                            >
+                                <div role="listbox" aria-labelledby="fb-category-label">
                                     {CATEGORIES.map((c) => {
                                         const isSelected = c.value === category;
                                         return (
@@ -189,7 +192,7 @@ export default function FeedbackPage() {
                                         );
                                     })}
                                 </div>
-                            )}
+                            </PopupPanel>
                         </div>
                         {selectedCategory && (
                             <p className="mt-3 text-xs md:text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
