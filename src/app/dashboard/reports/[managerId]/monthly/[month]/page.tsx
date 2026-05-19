@@ -3,7 +3,8 @@
 import React from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ResizableTh } from "@/components/ui/ResizableTh";
-import { useState, useMemo, useCallback, useEffect, createContext, useContext } from "react";
+import PopupPanel from "@/components/ui/PopupPanel";
+import { useState, useMemo, useCallback, useEffect, useRef, createContext, useContext } from "react";
 import { useSession } from "next-auth/react";
 import useSWR from "swr";
 import type { ManagerReportFormat } from "@/lib/reports/manager-report-format";
@@ -250,7 +251,12 @@ function AddExtraCase({
                 placeholder="Search team cases…"
                 className="w-full bg-white dark:bg-[#1a1a32] border border-amber-300 dark:border-amber-500/30 rounded-md px-2 py-1 text-xs text-slate-800 dark:text-slate-200 placeholder:text-slate-400 placeholder:italic focus:outline-none focus:ring-1 focus:ring-amber-400"
             />
-            <div className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-md border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1a1a32] shadow-lg text-xs">
+            <PopupPanel
+                open={true}
+                triggerRef={containerRef}
+                maxHeight={224}
+                className="rounded-md border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1a1a32] shadow-2xl text-xs overflow-y-auto"
+            >
                 {filtered.length === 0 ? (
                     <div className="px-2.5 py-2 text-slate-400 italic">
                         {eligibleCases.length === 0 ? "No team cases found in this period." : "No matches."}
@@ -284,7 +290,7 @@ function AddExtraCase({
                 >
                     + Custom case (offline)…
                 </button>
-            </div>
+            </PopupPanel>
         </div>
     );
 }

@@ -1,19 +1,22 @@
 // Canonical roster of department names HR can pick from anywhere in
 // the app (onboarding wizard, employee profile edits, KPI manager).
-// This list reflects the actual NB Media org chart — every value here
-// matches at least one employee's stored department, and every stored
-// department appears here. Curated from the live DB on 2026-05-16
-// after HR pruned the earlier role-style list ("Writers", "Editors",
-// "Managers", etc.) — those were job TITLES, not departments. Extend
-// by appending; alphabetised inside the dropdown is handled by the
+// Curated 2026-05-19 per the latest NB Media org chart. Extend by
+// appending; alphabetised inside the dropdown is handled by the
 // consumer if needed.
+//
+// NOTE: existing employee rows may still hold the older department
+// names ("AI Team", "Content Strategy & Research", "Production", …).
+// They keep working — the People-page filter is discovered-only, so
+// stored values still appear there. HR can re-categorise each employee
+// via Edit Profile → Department dropdown (which now lists this set).
 export const DEPARTMENTS = [
-  "AI Team",
-  "Content Strategy & Research",
-  "Executive Leadership Team",
-  "HR",
-  "IT",
-  "Operations",
-  "Production",
+  "AI",
+  "Editing",
+  "Human Resource",
+  "Management",
+  "Packaging Team",
+  "Quality Assurance",
+  "Research",
   "Social Media",
+  "Writing",
 ];

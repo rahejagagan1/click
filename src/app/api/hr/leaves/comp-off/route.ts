@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
+import { notifyApprovers, notifyUsers } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,38 @@ export async function POST(req: NextRequest) {
         expiryDate: expiry,
       },
     });
+
+    // Notify L1 (manager) + L2 (HR admins) so the request actually
+    // surfaces — comp-off used to silently submit with no email at all.
+    const requester = await prisma.user.findUnique({ where: { id: myId }, select: { name: true } });
+    const workedLabel = new Date(workedDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    const compEmailBase = {
+      applicantName: requester?.name || "An employee",
+      workedDate:    new Date(workedDate),
+      creditDays:    parseFloat(creditDays || "1"),
+      reason:        String(reason || "").trim() || undefined,
+    };
+    await Promise.all([
+      notifyApprovers({
+        actorId:  myId,
+        type:     "comp_off",
+        entityId: rec.id,
+        title:    `${requester?.name || "An employee"} requested comp-off`,
+        body:     `Worked: ${workedLabel} · Credit: ${creditDays || "1"} day(s) — ${String(reason).slice(0, 120)}`,
+        linkUrl:  "/dashboard/hr/approvals?tab=comp_off",
+        emailData: compEmailBase,
+      }),
+      notifyUsers({
+        actorId:  null,
+        userIds:  [myId],
+        type:     "comp_off",
+        entityId: rec.id,
+        title:    `Comp-off request submitted`,
+        body:     `Your request for ${workedLabel} is awaiting approval.`,
+        linkUrl:  "/dashboard/hr/leaves",
+        emailData: compEmailBase,
+      }),
+    ]);
     return NextResponse.json(rec, { status: 201 });
   } catch (e) { return serverError(e, "POST /api/hr/leaves/comp-off"); }
 }
@@ -69,7 +102,7 @@ export async function PUT(req: NextRequest) {
 
     const record = await prisma.compOffRequest.findUnique({
       where: { id },
-      include: { user: { select: { id: true, managerId: true } } },
+      include: { user: { select: { id: true, name: true, managerId: true } } },
     });
     if (!record) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (record.status !== "pending" && record.status !== "partially_approved") {
@@ -85,10 +118,31 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden — only HR / CEO / Developer can give final approval." }, { status: 403 });
     }
 
+    // Shared payload used by every notification path below.
+    const approver = await prisma.user.findUnique({ where: { id: myId! }, select: { name: true } });
+    const approverName = approver?.name || "An approver";
+    const workedLabel = new Date(record.workedDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    const compEmailBase = {
+      applicantName: record.user?.name || "An employee",
+      workedDate:    record.workedDate,
+      creditDays:    Number(record.creditDays ?? 1),
+      reason:        record.reason || undefined,
+    };
+
     if (action === "reject") {
       const updated = await prisma.compOffRequest.update({
         where: { id },
         data: { status: "rejected", approvedById: record.approvedById ?? myId!, approvalNote: approvalNote ?? record.approvalNote },
+      });
+      await notifyUsers({
+        actorId:  myId!,
+        userIds:  [record.userId],
+        type:     "comp_off",
+        entityId: record.id,
+        title:    `Your comp-off for ${workedLabel} was rejected`,
+        body:     approvalNote ? String(approvalNote).slice(0, 160) : undefined,
+        linkUrl:  "/dashboard/hr/leaves",
+        emailData: { ...compEmailBase, approverName, stageLabel: "Rejected by", approvalNote: approvalNote ?? undefined },
       });
       return NextResponse.json(updated);
     }
@@ -99,6 +153,41 @@ export async function PUT(req: NextRequest) {
         where: { id },
         data: { status: "partially_approved", approvedById: myId!, approvalNote },
       });
+      const devEmails = (process.env.DEVELOPER_EMAILS || "")
+        .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+      const finalApprovers = await prisma.user.findMany({
+        where: {
+          isActive: true,
+          OR: [
+            { orgLevel: { in: ["ceo", "special_access"] } },
+            { role: "hr_manager" },
+            ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+          ],
+        },
+        select: { id: true },
+      });
+      await Promise.all([
+        notifyUsers({
+          actorId:  myId!,
+          userIds:  finalApprovers.map((u) => u.id).filter((uid) => uid !== record.userId),
+          type:     "comp_off",
+          entityId: record.id,
+          title:    `${record.user?.name || "An employee"}'s comp-off for ${workedLabel} needs final approval`,
+          body:     approvalNote ? `Manager approved · ${String(approvalNote).slice(0, 140)}` : "Manager approved — awaiting CEO / HR.",
+          linkUrl:  "/dashboard/hr/approvals?tab=comp_off",
+          emailData: { ...compEmailBase, l1ApproverName: approverName, l1ApprovalNote: approvalNote ?? undefined },
+        }),
+        notifyUsers({
+          actorId:  myId!,
+          userIds:  [record.userId],
+          type:     "comp_off",
+          entityId: record.id,
+          title:    `Your comp-off for ${workedLabel} is partially approved`,
+          body:     "Awaiting final approval from CEO / HR.",
+          linkUrl:  "/dashboard/hr/leaves",
+          emailData: { ...compEmailBase, l1ApproverName: approverName, l1ApprovalNote: approvalNote ?? undefined },
+        }),
+      ]);
       return NextResponse.json(updated);
     }
 
@@ -106,6 +195,26 @@ export async function PUT(req: NextRequest) {
     const updated = await prisma.compOffRequest.update({
       where: { id },
       data: { status: "approved", approvalNote: approvalNote ?? record.approvalNote },
+    });
+    const l1Approver = record.approvedById
+      ? await prisma.user.findUnique({ where: { id: record.approvedById }, select: { name: true } })
+      : null;
+    await notifyUsers({
+      actorId:  myId!,
+      userIds:  [record.userId],
+      type:     "comp_off",
+      entityId: record.id,
+      title:    `Your comp-off for ${workedLabel} was approved`,
+      body:     approvalNote ? String(approvalNote).slice(0, 160) : undefined,
+      linkUrl:  "/dashboard/hr/leaves",
+      emailData: {
+        ...compEmailBase,
+        l1ApproverName: l1Approver?.name,
+        l1ApprovalNote: record.approvalNote ?? undefined,
+        approverName,
+        stageLabel:     "Approved by",
+        approvalNote:   approvalNote ?? undefined,
+      },
     });
     return NextResponse.json(updated);
   } catch (e) { return serverError(e, "PUT /api/hr/leaves/comp-off"); }

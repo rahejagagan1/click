@@ -1,0 +1,417 @@
+// HR Master Sheet generator. Produces a single XLSX with one tab per
+// requested category. HR-admin tier only — uses ExcelJS (already in
+// the project) and pulls live data via Prisma so the file always
+// reflects the current DB state.
+import { NextRequest, NextResponse } from "next/server";
+import ExcelJS from "exceljs";
+import prisma from "@/lib/prisma";
+import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
+
+export const dynamic = "force-dynamic";
+
+// IST month boundaries — we apply attendance windows in IST so dates
+// don't shift around the UTC midnight cutoff.
+function istMonthRange(year: number, month0: number): { start: Date; end: Date; label: string } {
+  // Month start in IST = (month start in UTC) − 5:30. Easier: build
+  // 00:00 UTC of (month-start in IST) by subtracting 5h30 from a UTC date.
+  const utcStart = new Date(Date.UTC(year, month0, 1, 0, 0, 0));
+  const utcEnd   = new Date(Date.UTC(year, month0 + 1, 1, 0, 0, 0));
+  // Shift forward by -5:30 to get the IST-start represented as UTC.
+  const start = new Date(utcStart.getTime() - (5 * 60 + 30) * 60_000);
+  const end   = new Date(utcEnd.getTime()   - (5 * 60 + 30) * 60_000);
+  const label = utcStart.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
+  return { start, end, label };
+}
+
+// IST year boundaries — same trick as the month helper, just spanning
+// Jan 1 → Jan 1 of (year+1). The label is just the bare year so the
+// resulting sheet name reads "Attendance — 2025".
+function istYearRange(year: number): { start: Date; end: Date; label: string } {
+  const utcStart = new Date(Date.UTC(year,     0, 1, 0, 0, 0));
+  const utcEnd   = new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0));
+  const start = new Date(utcStart.getTime() - (5 * 60 + 30) * 60_000);
+  const end   = new Date(utcEnd.getTime()   - (5 * 60 + 30) * 60_000);
+  return { start, end, label: String(year) };
+}
+
+const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1A1A2E" } };
+const HEADER_FONT: Partial<ExcelJS.Font> = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+const ALT_FILL:    ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8F9FA" } };
+
+function styleSheet(ws: ExcelJS.Worksheet) {
+  const header = ws.getRow(1);
+  header.eachCell((c) => {
+    c.fill = HEADER_FILL; c.font = HEADER_FONT;
+    c.alignment = { vertical: "middle", horizontal: "center" };
+    c.border = { bottom: { style: "thin", color: { argb: "FF333333" } } };
+  });
+  header.height = 22;
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+  // Alternate row shading for readability.
+  ws.eachRow((row, i) => {
+    if (i === 1) return;
+    if (i % 2 === 0) row.eachCell((c) => { c.fill = ALT_FILL; });
+  });
+  // Auto-size columns based on header + sample of values (cap at 40).
+  ws.columns.forEach((col) => {
+    if (!col) return;
+    let max = 10;
+    col.eachCell?.({ includeEmpty: false }, (cell) => {
+      const len = String(cell.value ?? "").length;
+      if (len > max) max = len;
+    });
+    col.width = Math.min(max + 2, 40);
+  });
+}
+
+const fmtDate = (d: Date | string | null | undefined): string => {
+  if (!d) return "";
+  const dt = typeof d === "string" ? new Date(d) : d;
+  return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+};
+const fmtIstTime = (d: Date | string | null | undefined): string => {
+  if (!d) return "";
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).format(typeof d === "string" ? new Date(d) : d);
+};
+const fmtMins = (m: number | null | undefined) => {
+  if (m == null) return "";
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+};
+
+// ─────────────────────────────────────────────────────────────────────
+//  Sheet generators
+// ─────────────────────────────────────────────────────────────────────
+
+async function addEmployeesSheet(wb: ExcelJS.Workbook) {
+  const users = await prisma.user.findMany({
+    where: { isActive: true },
+    orderBy: { name: "asc" },
+    include: {
+      employeeProfile: true,
+      manager: { select: { name: true } },
+    },
+  });
+  const ws = wb.addWorksheet("Employees");
+  ws.columns = [
+    { header: "HRM No.",        key: "hrm",        width: 12 },
+    { header: "Name",           key: "name",       width: 24 },
+    { header: "Work Email",     key: "email",      width: 30 },
+    { header: "Personal Email", key: "pmail",      width: 28 },
+    { header: "Mobile",         key: "phone",      width: 16 },
+    { header: "Department",     key: "dept",       width: 22 },
+    { header: "Designation",    key: "desig",      width: 28 },
+    { header: "Employment Type", key: "etype",     width: 14 },
+    { header: "Joining Date",   key: "jd",         width: 14 },
+    { header: "Manager",        key: "mgr",        width: 22 },
+    { header: "Role",           key: "role",       width: 16 },
+    { header: "Org Level",      key: "orglevel",   width: 16 },
+    { header: "Business Unit",  key: "bu",         width: 14 },
+    { header: "Cost Center",    key: "cc",         width: 14 },
+    { header: "Legal Entity",   key: "le",         width: 22 },
+    { header: "Job Location",   key: "jl",         width: 14 },
+    { header: "Work Location",  key: "wl",         width: 12 },
+    { header: "Date of Birth",  key: "dob",        width: 14 },
+    { header: "Gender",         key: "gender",     width: 10 },
+    { header: "Blood Group",    key: "blood",      width: 10 },
+    { header: "Marital Status", key: "ms",         width: 12 },
+  ];
+  for (const u of users) {
+    const p = u.employeeProfile;
+    ws.addRow({
+      hrm: p?.employeeId, name: u.name, email: u.email,
+      pmail: p?.personalEmail ?? "", phone: p?.phone ?? "",
+      dept: p?.department ?? "", desig: p?.designation ?? "",
+      etype: p?.employmentType === "intern" ? "Intern" : "Regular Employee",
+      jd: fmtDate(p?.joiningDate as any), mgr: u.manager?.name ?? "",
+      role: u.role, orglevel: u.orgLevel,
+      bu: p?.businessUnit ?? "", cc: p?.costCenter ?? "",
+      le: p?.legalEntity ?? "", jl: p?.jobLocation ?? "",
+      wl: p?.workLocation ?? "", dob: fmtDate(p?.dateOfBirth as any),
+      gender: p?.gender ?? "", blood: p?.bloodGroup ?? "",
+      ms: p?.maritalStatus ?? "",
+    });
+  }
+  styleSheet(ws);
+}
+
+async function addAttendanceSheet(wb: ExcelJS.Workbook, label: string, start: Date | null, end: Date | null) {
+  // When start/end are null we export every attendance row regardless
+  // of date — the "All time" option in the picker. Sheet names are
+  // capped at 31 chars by Excel, so use a short label.
+  const records = await prisma.attendance.findMany({
+    where: start && end ? { date: { gte: start, lt: end } } : undefined,
+    include: { user: { select: { name: true, email: true, employeeProfile: { select: { employeeId: true, department: true } } } } },
+    orderBy: [{ date: "asc" }, { user: { name: "asc" } }],
+  });
+  const ws = wb.addWorksheet(`Attendance — ${label}`.slice(0, 31));
+  ws.columns = [
+    { header: "Date",          key: "date",  width: 14 },
+    { header: "HRM No.",       key: "hrm",   width: 10 },
+    { header: "Employee",      key: "name",  width: 22 },
+    { header: "Department",    key: "dept",  width: 22 },
+    { header: "Status",        key: "status", width: 14 },
+    { header: "Clock-In (IST)", key: "cin",  width: 14 },
+    { header: "Clock-Out (IST)", key: "cout", width: 14 },
+    { header: "Effective Hrs", key: "eff",   width: 12 },
+    { header: "Regularized?",  key: "reg",   width: 12 },
+  ];
+  for (const r of records) {
+    ws.addRow({
+      date: fmtDate(r.date),
+      hrm:  r.user?.employeeProfile?.employeeId ?? "",
+      name: r.user?.name ?? "",
+      dept: r.user?.employeeProfile?.department ?? "",
+      status: r.status,
+      cin: fmtIstTime(r.clockIn),
+      cout: fmtIstTime(r.clockOut),
+      eff: fmtMins(r.totalMinutes),
+      reg: r.isRegularized ? "Yes" : "",
+    });
+  }
+  styleSheet(ws);
+}
+
+async function addLeaveBalancesSheet(wb: ExcelJS.Workbook) {
+  const balances = await prisma.leaveBalance.findMany({
+    include: {
+      user:      { select: { name: true, email: true, employeeProfile: { select: { employeeId: true, department: true } }, isActive: true } },
+      leaveType: { select: { name: true, code: true } },
+    },
+    orderBy: [{ user: { name: "asc" } }, { leaveType: { name: "asc" } }],
+  });
+  const ws = wb.addWorksheet("Leave Balances");
+  ws.columns = [
+    { header: "HRM No.",     key: "hrm",      width: 10 },
+    { header: "Employee",    key: "name",     width: 22 },
+    { header: "Department",  key: "dept",     width: 22 },
+    { header: "Leave Type",  key: "type",     width: 22 },
+    { header: "Total",       key: "total",    width: 10 },
+    { header: "Used",        key: "used",     width: 10 },
+    { header: "Pending",     key: "pending",  width: 10 },
+    { header: "Available",   key: "avail",    width: 10 },
+  ];
+  for (const b of balances) {
+    if (!b.user?.isActive) continue;
+    const total   = Number(b.totalDays   ?? 0);
+    const used    = Number(b.usedDays    ?? 0);
+    const pending = Number(b.pendingDays ?? 0);
+    ws.addRow({
+      hrm:    b.user?.employeeProfile?.employeeId ?? "",
+      name:   b.user?.name ?? "",
+      dept:   b.user?.employeeProfile?.department ?? "",
+      type:   b.leaveType?.name ?? "",
+      total, used, pending,
+      avail: total - used - pending,
+    });
+  }
+  styleSheet(ws);
+}
+
+async function addRequestsSheets(wb: ExcelJS.Workbook) {
+  // Leave
+  const leaves = await prisma.leaveApplication.findMany({
+    include: { user: { select: { name: true, employeeProfile: { select: { employeeId: true, department: true } } } }, leaveType: { select: { name: true } }, approver: { select: { name: true } } },
+    orderBy: { appliedAt: "desc" },
+  });
+  const lws = wb.addWorksheet("Leaves");
+  lws.columns = [
+    { header: "Applied",   key: "applied",   width: 14 },
+    { header: "HRM No.",   key: "hrm",       width: 10 },
+    { header: "Employee",  key: "name",      width: 22 },
+    { header: "Department", key: "dept",     width: 22 },
+    { header: "Type",      key: "type",      width: 18 },
+    { header: "From",      key: "from",      width: 14 },
+    { header: "To",        key: "to",        width: 14 },
+    { header: "Days",      key: "days",      width: 8 },
+    { header: "Status",    key: "status",    width: 14 },
+    { header: "Approver",  key: "approver",  width: 18 },
+    { header: "Reason",    key: "reason",    width: 40 },
+  ];
+  for (const l of leaves) {
+    lws.addRow({
+      applied: fmtDate(l.appliedAt), hrm: l.user?.employeeProfile?.employeeId ?? "",
+      name: l.user?.name ?? "", dept: l.user?.employeeProfile?.department ?? "",
+      type: l.leaveType?.name ?? "", from: fmtDate(l.fromDate), to: fmtDate(l.toDate),
+      days: Number(l.totalDays ?? 0), status: l.status,
+      approver: l.approver?.name ?? "", reason: l.reason ?? "",
+    });
+  }
+  styleSheet(lws);
+
+  // WFH
+  const wfh = await prisma.wFHRequest.findMany({
+    include: { user: { select: { name: true, employeeProfile: { select: { employeeId: true, department: true } } } }, approver: { select: { name: true } } },
+    orderBy: { createdAt: "desc" },
+  });
+  const wws = wb.addWorksheet("WFH");
+  wws.columns = [
+    { header: "Submitted", key: "sub",     width: 14 },
+    { header: "HRM No.",   key: "hrm",     width: 10 },
+    { header: "Employee",  key: "name",    width: 22 },
+    { header: "Department", key: "dept",   width: 22 },
+    { header: "Date",      key: "date",    width: 14 },
+    { header: "Status",    key: "status",  width: 14 },
+    { header: "Approver",  key: "approver", width: 18 },
+    { header: "Reason",    key: "reason",  width: 40 },
+  ];
+  for (const w of wfh) {
+    wws.addRow({
+      sub: fmtDate(w.createdAt), hrm: w.user?.employeeProfile?.employeeId ?? "",
+      name: w.user?.name ?? "", dept: w.user?.employeeProfile?.department ?? "",
+      date: fmtDate(w.date), status: w.status,
+      approver: w.approver?.name ?? "", reason: w.reason ?? "",
+    });
+  }
+  styleSheet(wws);
+
+  // On-Duty
+  const od = await prisma.onDutyRequest.findMany({
+    include: { user: { select: { name: true, employeeProfile: { select: { employeeId: true, department: true } } } }, approver: { select: { name: true } } },
+    orderBy: { createdAt: "desc" },
+  });
+  const ows = wb.addWorksheet("On-Duty");
+  ows.columns = [
+    { header: "Submitted", key: "sub",     width: 14 },
+    { header: "HRM No.",   key: "hrm",     width: 10 },
+    { header: "Employee",  key: "name",    width: 22 },
+    { header: "Department", key: "dept",   width: 22 },
+    { header: "Date",      key: "date",    width: 14 },
+    { header: "Location",  key: "loc",     width: 22 },
+    { header: "Status",    key: "status",  width: 14 },
+    { header: "Approver",  key: "approver", width: 18 },
+    { header: "Purpose",   key: "purpose", width: 40 },
+  ];
+  for (const r of od) {
+    ows.addRow({
+      sub: fmtDate(r.createdAt), hrm: r.user?.employeeProfile?.employeeId ?? "",
+      name: r.user?.name ?? "", dept: r.user?.employeeProfile?.department ?? "",
+      date: fmtDate(r.date), loc: r.location ?? "", status: r.status,
+      approver: r.approver?.name ?? "", purpose: r.purpose ?? "",
+    });
+  }
+  styleSheet(ows);
+
+  // Regularizations
+  const regs = await prisma.attendanceRegularization.findMany({
+    include: { user: { select: { name: true, employeeProfile: { select: { employeeId: true, department: true } } } }, approver: { select: { name: true } } },
+    orderBy: { createdAt: "desc" },
+  });
+  const rws = wb.addWorksheet("Regularizations");
+  rws.columns = [
+    { header: "Submitted", key: "sub",     width: 14 },
+    { header: "HRM No.",   key: "hrm",     width: 10 },
+    { header: "Employee",  key: "name",    width: 22 },
+    { header: "Department", key: "dept",   width: 22 },
+    { header: "Date",      key: "date",    width: 14 },
+    { header: "Status",    key: "status",  width: 14 },
+    { header: "Approver",  key: "approver", width: 18 },
+    { header: "Reason",    key: "reason",  width: 40 },
+  ];
+  for (const r of regs) {
+    rws.addRow({
+      sub: fmtDate(r.createdAt), hrm: r.user?.employeeProfile?.employeeId ?? "",
+      name: r.user?.name ?? "", dept: r.user?.employeeProfile?.department ?? "",
+      date: fmtDate(r.date), status: r.status,
+      approver: r.approver?.name ?? "", reason: r.reason ?? "",
+    });
+  }
+  styleSheet(rws);
+
+  // Comp-Off
+  const comp = await prisma.compOffRequest.findMany({
+    include: { user: { select: { name: true, employeeProfile: { select: { employeeId: true, department: true } } } }, approver: { select: { name: true } } },
+    orderBy: { createdAt: "desc" },
+  });
+  const cws = wb.addWorksheet("Comp-Off");
+  cws.columns = [
+    { header: "Submitted",   key: "sub",     width: 14 },
+    { header: "HRM No.",     key: "hrm",     width: 10 },
+    { header: "Employee",    key: "name",    width: 22 },
+    { header: "Department",  key: "dept",    width: 22 },
+    { header: "Worked Date", key: "wd",      width: 14 },
+    { header: "Credit",      key: "credit",  width: 10 },
+    { header: "Status",      key: "status",  width: 14 },
+    { header: "Approver",    key: "approver", width: 18 },
+    { header: "Reason",      key: "reason",  width: 40 },
+  ];
+  for (const c of comp) {
+    cws.addRow({
+      sub: fmtDate(c.createdAt), hrm: c.user?.employeeProfile?.employeeId ?? "",
+      name: c.user?.name ?? "", dept: c.user?.employeeProfile?.department ?? "",
+      wd: fmtDate(c.workedDate), credit: Number(c.creditDays ?? 0),
+      status: c.status, approver: c.approver?.name ?? "", reason: c.reason ?? "",
+    });
+  }
+  styleSheet(cws);
+}
+
+export async function GET(req: NextRequest) {
+  const { session, errorResponse } = await requireAuth();
+  if (errorResponse) return errorResponse;
+  if (!isHRAdmin(session!.user as any)) {
+    return NextResponse.json({ error: "HR-admin only" }, { status: 403 });
+  }
+  try {
+    const sheets = (req.nextUrl.searchParams.get("sheets") || "employees,attendance,leaves,requests")
+      .split(",").map((s) => s.trim()).filter(Boolean);
+    const period = req.nextUrl.searchParams.get("period") || "both"; // both | current | last | this-year | last-year | all
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "NB Media HR Dashboard";
+    wb.created = new Date();
+
+    if (sheets.includes("employees"))     await addEmployeesSheet(wb);
+    if (sheets.includes("attendance")) {
+      const now = new Date();
+      const yNow = now.getUTCFullYear();
+      const mNow = now.getUTCMonth();
+      if (period === "both" || period === "last") {
+        const prev = istMonthRange(yNow, mNow - 1);
+        await addAttendanceSheet(wb, prev.label, prev.start, prev.end);
+      }
+      if (period === "both" || period === "current") {
+        const curr = istMonthRange(yNow, mNow);
+        await addAttendanceSheet(wb, curr.label, curr.start, curr.end);
+      }
+      if (period === "this-year") {
+        const r = istYearRange(yNow);
+        await addAttendanceSheet(wb, r.label, r.start, r.end);
+      }
+      if (period === "last-year") {
+        const r = istYearRange(yNow - 1);
+        await addAttendanceSheet(wb, r.label, r.start, r.end);
+      }
+      if (period === "all") {
+        // One sheet per year for readability. Years derived from the
+        // actual data so we don't emit empty sheets for years with
+        // zero rows. Falls back to a single all-time sheet if nothing
+        // exists yet.
+        const yearsRaw = await prisma.$queryRawUnsafe<Array<{ y: number }>>(
+          `SELECT DISTINCT EXTRACT(YEAR FROM ("date" AT TIME ZONE 'Asia/Kolkata'))::int AS y
+             FROM "Attendance" ORDER BY y ASC`
+        );
+        if (yearsRaw.length === 0) {
+          await addAttendanceSheet(wb, "All time", null, null);
+        } else {
+          for (const { y } of yearsRaw) {
+            const r = istYearRange(Number(y));
+            await addAttendanceSheet(wb, r.label, r.start, r.end);
+          }
+        }
+      }
+    }
+    if (sheets.includes("leaves"))   await addLeaveBalancesSheet(wb);
+    if (sheets.includes("requests")) await addRequestsSheets(wb);
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const filename = `nb-media-master-sheet-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    return new NextResponse(new Uint8Array(buffer), {
+      headers: {
+        "Content-Type":        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    });
+  } catch (e) { return serverError(e, "GET /api/hr/admin/master-sheet"); }
+}
