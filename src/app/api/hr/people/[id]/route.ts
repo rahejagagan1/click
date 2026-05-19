@@ -178,6 +178,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       emergencyRelationship,
       attendanceCaptureScheme, costCenter,
       pfNumber, uanNumber, biometricId,
+      // ABOUT-tab bios — used to be self-edit-only via /api/hr/profile.
+      // Now HR-admin can edit them on any user's profile too.
+      about, jobLove, hobbies,
       // User row fields — role / orgLevel / manager / team membership.
       role: newRole, orgLevel, managerId, inlineManagerId, teamCapsule,
     } = body;
@@ -428,6 +431,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (pfNumber                !== undefined) { setParts.push(`"pfNumber" = $${i++}`);                args.push(pfNumber                || null); }
       if (uanNumber               !== undefined) { setParts.push(`"uanNumber" = $${i++}`);               args.push(uanNumber               || null); }
       if (biometricId             !== undefined) { setParts.push(`"biometricId" = $${i++}`);             args.push(biometricId             || null); }
+      // ABOUT-tab bios. Empty string clears (stored NULL) to match the
+      // /api/hr/profile self-edit behaviour.
+      if (about   !== undefined) { setParts.push(`"about" = $${i++}`);   args.push(typeof about   === "string" && about.trim().length   > 0 ? about   : null); }
+      if (jobLove !== undefined) { setParts.push(`"jobLove" = $${i++}`); args.push(typeof jobLove === "string" && jobLove.trim().length > 0 ? jobLove : null); }
+      if (hobbies !== undefined) { setParts.push(`"hobbies" = $${i++}`); args.push(typeof hobbies === "string" && hobbies.trim().length > 0 ? hobbies : null); }
       if (setParts.length > 0) {
         args.push(id);
         try {

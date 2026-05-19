@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3 } from "lucide-react";
+import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, FileSpreadsheet } from "lucide-react";
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
@@ -99,6 +99,7 @@ export default function HRAdminPage() {
     || (HR_MANAGER_ALLOWED_RAIL_LINKS.has("hiring")   && tabAllowed("hr_hiring"));
   const showTabPermsRail  = isFullAdmin; // policy config — admin-only
   const showManageKpisRail = isFullAdmin; // KPI uploads — admin-only
+  const showMasterSheetRail = isFullAdmin; // Excel exports — admin-only
 
   const [tab, setTab] = useState("attendance-dashboard");
 
@@ -349,6 +350,18 @@ export default function HRAdminPage() {
             >
               <BarChart3 className="w-4 h-4" />
               <span className="flex-1">Manage KPIs</span>
+              <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+          )}
+          {showMasterSheetRail && (
+            <Link
+              href="/dashboard/hr/admin/master-sheet"
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span className="flex-1">Master Sheet</span>
               <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
               </svg>
