@@ -61,20 +61,28 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
             return NextResponse.json({ error: "Manager not found" }, { status: 404 });
         }
         const team = await resolveReportTeam(managerId, { kind: "weekly", week, month, year });
-        const writerIds = team.filter((m) => m.role === "writer").map((m) => m.id);
+        const writers = team.filter((m) => m.role === "writer");
+        const writerIds = writers.map((m) => m.id);
         if (writerIds.length === 0) {
             return NextResponse.json({ writerCases: [] });
         }
+        const writerIdSet = new Set(writerIds);
+        const writerNameById = new Map(writers.map((w) => [w.id, w.name]));
 
-        // Fetch cases whose writers match AND have at least one subtask done in the week.
-        // We then filter in code to only keep cases where the SPECIFIC subtasks
-        // (Scripting - First Draft  OR  Script Revision R1/R2/…) have dateDone in the week.
+        // Pull every case that has a milestone subtask completed in the
+        // week and is connected to a team writer through one of three
+        // routes (most-truthful first): the subtask's assignee join
+        // table, the subtask's legacy single assignee, or the case's
+        // primary writerUserId. We then dedupe per (case × writer) in
+        // code so every assigned writer gets their own row.
         const cases = await prisma.case.findMany({
             where: {
-                writerUserId: { in: writerIds },
-                subtasks: {
-                    some: { dateDone: { gte: weekStart, lte: weekEnd } },
-                },
+                subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd } } },
+                OR: [
+                    { subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd }, assignees: { some: { userId: { in: writerIds } } } } } },
+                    { subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd }, assigneeUserId: { in: writerIds } } } },
+                    { writerUserId: { in: writerIds } },
+                ],
             },
             include: {
                 writer: { select: { id: true, name: true } },
@@ -83,74 +91,108 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
                         { orderIndex: "asc" },
                         { dateCreated: "asc" },
                     ],
+                    include: {
+                        assignees: { select: { userId: true, user: { select: { name: true } } } },
+                    },
                 },
             },
             orderBy: { dateCreated: "asc" },
         });
 
-        // Keep only cases where the First Draft OR Revision subtask was completed this week
-        const filteredCases = cases.filter((c) => {
-            const firstDraftSub = c.subtasks.find(s => isWriterFirstDraftMilestone(s.name));
-            const revisionSub   = c.subtasks.find(s => isRevisionSubtask(s.name));
-            const fdInWeek  = firstDraftSub?.dateDone != null &&
-                firstDraftSub.dateDone >= weekStart && firstDraftSub.dateDone <= weekEnd;
-            const revInWeek = revisionSub?.dateDone != null &&
-                revisionSub.dateDone >= weekStart && revisionSub.dateDone <= weekEnd;
-            return fdInWeek || revInWeek;
-        });
+        const writerCases: any[] = [];
 
-        const writerCases = filteredCases.map((c) => {
-            const firstDraftSub = c.subtasks.find(s => isWriterFirstDraftMilestone(s.name)) ?? null;
-            const revisionSub   = c.subtasks.find(s => isRevisionSubtask(s.name))   ?? null;
+        for (const c of cases) {
+            const firstDraftSub = c.subtasks.find((s) => isWriterFirstDraftMilestone(s.name)) ?? null;
+            const revisionSub   = c.subtasks.find((s) => isRevisionSubtask(s.name))   ?? null;
 
-            // Only include TAT for the subtask completed IN THIS WEEK
-            const fdInWeek  = !!firstDraftSub?.dateDone &&
+            const fdInWeek = !!firstDraftSub?.dateDone &&
                 firstDraftSub.dateDone >= weekStart && firstDraftSub.dateDone <= weekEnd;
             const revInWeek = !!revisionSub?.dateDone &&
                 revisionSub.dateDone >= weekStart && revisionSub.dateDone <= weekEnd;
+            if (!fdInWeek && !revInWeek) continue;
 
-            let tatFirstDraft = "N/A";
+            // Per-milestone assignee resolution (in team only).
+            // Priority: SubtaskAssignee → Subtask.assigneeUserId → Case.writerUserId.
+            const fdAssignees = new Set<number>();
+            if (fdInWeek && firstDraftSub) {
+                for (const a of firstDraftSub.assignees) {
+                    if (writerIdSet.has(a.userId)) {
+                        fdAssignees.add(a.userId);
+                        if (a.user?.name) writerNameById.set(a.userId, a.user.name);
+                    }
+                }
+                if (fdAssignees.size === 0 && firstDraftSub.assigneeUserId && writerIdSet.has(firstDraftSub.assigneeUserId)) {
+                    fdAssignees.add(firstDraftSub.assigneeUserId);
+                }
+                if (fdAssignees.size === 0 && c.writerUserId && writerIdSet.has(c.writerUserId)) {
+                    fdAssignees.add(c.writerUserId);
+                }
+            }
+            const revAssignees = new Set<number>();
+            if (revInWeek && revisionSub) {
+                for (const a of revisionSub.assignees) {
+                    if (writerIdSet.has(a.userId)) {
+                        revAssignees.add(a.userId);
+                        if (a.user?.name) writerNameById.set(a.userId, a.user.name);
+                    }
+                }
+                if (revAssignees.size === 0 && revisionSub.assigneeUserId && writerIdSet.has(revisionSub.assigneeUserId)) {
+                    revAssignees.add(revisionSub.assigneeUserId);
+                }
+                if (revAssignees.size === 0 && c.writerUserId && writerIdSet.has(c.writerUserId)) {
+                    revAssignees.add(c.writerUserId);
+                }
+            }
+
+            const credited = new Set<number>([...fdAssignees, ...revAssignees]);
+            if (credited.size === 0) continue;
+
+            let tatFirstDraftCase = "N/A";
             if (fdInWeek && firstDraftSub) {
                 const t = resolveSubtaskTat(firstDraftSub) ||
                     (firstDraftSub.dateDone && c.caseStartDate
                         ? formatTatDays(calcBusinessDaysTat(c.caseStartDate, firstDraftSub.dateDone))
                         : "");
-                tatFirstDraft = t || "N/A";
+                tatFirstDraftCase = t || "N/A";
             }
-
-            let tatRevision = "N/A";
+            let tatRevisionCase = "N/A";
             if (revInWeek && revisionSub) {
                 const t = resolveSubtaskTat(revisionSub) ||
                     (revisionSub.dateDone && firstDraftSub?.dateDone
                         ? formatTatDays(calcBusinessDaysTat(firstDraftSub.dateDone, revisionSub.dateDone))
                         : "");
-                tatRevision = t || "N/A";
+                tatRevisionCase = t || "N/A";
             }
 
             const isHero = !!(
                 c.caseType?.toLowerCase().includes("hero") ||
                 c.name?.toLowerCase().includes("hero")
             );
+            const qualityScore =
+                c.writerQualityScore !== null && c.writerQualityScore !== undefined
+                    ? String(c.writerQualityScore)
+                    : "N/A";
 
-            const subtaskName =
-                (fdInWeek  && firstDraftSub?.name) ||
-                (revInWeek && revisionSub?.name)   || "";
+            for (const wid of credited) {
+                const onFd  = fdAssignees.has(wid);
+                const onRev = revAssignees.has(wid);
+                const subtaskName =
+                    (onFd  && firstDraftSub?.name) ||
+                    (onRev && revisionSub?.name)   || "";
 
-            return {
-                writerId:     c.writer?.id ?? null,
-                writerName:   c.writer?.name ?? "",
-                caseName:     c.name,
-                caseStatus:   c.status ?? "",
-                heroCase:     isHero ? "yes" : "no",
-                subtaskName,
-                tatFirstDraft,
-                tatRevision,
-                qualityScore:
-                    c.writerQualityScore !== null && c.writerQualityScore !== undefined
-                        ? String(c.writerQualityScore)
-                        : "N/A",
-            };
-        });
+                writerCases.push({
+                    writerId:     wid,
+                    writerName:   writerNameById.get(wid) ?? (c.writer?.id === wid ? c.writer?.name : "") ?? "",
+                    caseName:     c.name,
+                    caseStatus:   c.status ?? "",
+                    heroCase:     isHero ? "yes" : "no",
+                    subtaskName,
+                    tatFirstDraft: onFd  ? tatFirstDraftCase : "N/A",
+                    tatRevision:   onRev ? tatRevisionCase   : "N/A",
+                    qualityScore,
+                });
+            }
+        }
 
         return NextResponse.json({ writerCases });
     } catch (error) {

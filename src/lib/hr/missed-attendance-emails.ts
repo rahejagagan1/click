@@ -3,6 +3,7 @@ import { sendEmail } from "@/lib/email/sender";
 import { attendanceReminderEmail, hrLateSummaryEmail } from "@/lib/email/templates";
 import { istTodayDateOnly, istTimeOnDate } from "@/lib/ist-date";
 import { getPoliciesByUser } from "@/lib/hr/notification-policy";
+import { isEmailEnabled } from "@/lib/email/toggles";
 
 /**
  * Comma-separated env var of emails who should never receive attendance
@@ -39,6 +40,13 @@ function reminderExclusionSet(): Set<string> {
  *      • In EMAIL_REMINDER_EXCLUDE_EMAILS env list.
  */
 export async function sendMissedClockInReminders(): Promise<number> {
+  // Admin-controllable kill-switch (Admin → Emails Automation). Same
+  // toggle gates clock-in nudges, the HR late summary, and clock-out
+  // nudges below — they're a single "missed-attendance" surface.
+  if (!(await isEmailEnabled("missed_attendance"))) {
+    console.log("[missed-attendance] clock-in reminders skipped — disabled in admin toggles");
+    return 0;
+  }
   const today = istTodayDateOnly();
 
   // 0. Weekend gate (Mon–Fri only). UTC day-of-week is identical to
@@ -123,6 +131,10 @@ export async function sendMissedClockInReminders(): Promise<number> {
  * rest of the HR module.
  */
 export async function sendHrLateClockInSummary(): Promise<number> {
+  if (!(await isEmailEnabled("missed_attendance"))) {
+    console.log("[missed-attendance] HR late summary skipped — disabled in admin toggles");
+    return 0;
+  }
   const today = istTodayDateOnly();
   const dow = new Date(today).getUTCDay();
   if (dow === 0 || dow === 6) return 0;
@@ -246,6 +258,10 @@ export async function sendHrLateClockInSummary(): Promise<number> {
  * each of them. Skips weekends/holidays implicitly (no clock-in row).
  */
 export async function sendMissedClockOutReminders(): Promise<number> {
+  if (!(await isEmailEnabled("missed_attendance"))) {
+    console.log("[missed-attendance] clock-out reminders skipped — disabled in admin toggles");
+    return 0;
+  }
   const today = istTodayDateOnly();
 
   const rows = await prisma.attendance.findMany({
