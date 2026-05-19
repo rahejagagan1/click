@@ -13,6 +13,7 @@ import prisma from "@/lib/prisma";
 import { sendEmail } from "@/lib/email/sender";
 import { violationInProgressReminderEmail } from "@/lib/email/templates";
 import { isDryRun } from "@/lib/email/transport";
+import { isEmailEnabled } from "@/lib/email/toggles";
 
 const REMINDER_INTERVAL_DAYS = 15;
 
@@ -28,6 +29,15 @@ type DueRow = {
 };
 
 export async function sendViolationInProgressReminders(): Promise<number> {
+    // Admin-controllable kill-switch (Admin → Emails Automation). When
+    // disabled, the cron still runs but sends zero emails — no state
+    // change, no lastReminderAt stamps, so flipping back ON later picks
+    // up exactly where it left off.
+    if (!(await isEmailEnabled("violation_reminders"))) {
+        console.log("[violation-reminders] skipped — disabled in admin toggles");
+        return 0;
+    }
+
     const cutoff = new Date(Date.now() - REMINDER_INTERVAL_DAYS * 24 * 60 * 60 * 1000);
 
     // Pull every in-progress violation whose last reminder is older

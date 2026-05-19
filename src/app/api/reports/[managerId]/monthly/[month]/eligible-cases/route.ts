@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { getMonthlyReportWindow } from "@/lib/reports/monthly-window";
+import { resolveReportTeam } from "@/lib/reports/team-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -39,19 +40,16 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
 
         const { windowStart, windowEnd } = getMonthlyReportWindow(year, monthIndex);
 
-        const manager = await prisma.user.findUnique({
-            where: { id: managerId },
-            include: {
-                teamMembers: {
-                    where: { role: { in: ["editor", "writer"] }, isActive: true },
-                    select: { id: true, name: true, role: true },
-                },
-            },
-        });
+        const manager = await prisma.user.findUnique({ where: { id: managerId }, select: { id: true } });
         if (!manager) return NextResponse.json({ error: "Manager not found" }, { status: 404 });
 
-        const editorIds = manager.teamMembers.filter((m) => m.role === "editor").map((m) => m.id);
-        const writerIds = manager.teamMembers.filter((m) => m.role === "writer").map((m) => m.id);
+        // Prefer the frozen team snapshot on locked reports so a user who
+        // was on the team in month M still appears here even if they
+        // later switched managers. Falls back to live `User.managerId`
+        // for drafts and for legacy locked rows that pre-date snapshots.
+        const team = await resolveReportTeam(managerId, { kind: "monthly", month: monthIndex, year });
+        const editorIds = team.filter((m) => m.role === "editor").map((m) => m.id);
+        const writerIds = team.filter((m) => m.role === "writer").map((m) => m.id);
 
         // Resolve the team's caseIds via the relevant subtask kind done in window.
         const [editingSubtasks, scriptingSubtasks] = await Promise.all([

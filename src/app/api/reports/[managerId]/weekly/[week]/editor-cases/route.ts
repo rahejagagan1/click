@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { calcBusinessDaysTat, formatTatDays } from "@/lib/utils";
 import { getWeeklyReportPeriod } from "@/lib/reports/weekly-period";
+import { resolveReportTeam } from "@/lib/reports/team-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -63,33 +64,34 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         }
         const { weekStart, weekEnd } = period;
 
-        // Editors under this manager
-        const manager = await prisma.user.findUnique({
-            where: { id: managerId },
-            include: {
-                teamMembers: {
-                    where: { role: "editor", isActive: true },
-                    select: { id: true, name: true },
-                },
-            },
-        });
-
+        // Editors under this manager — prefer the locked report's team
+        // snapshot so a user who edited cases in this week still appears
+        // even if they later moved managers. Falls back to live team
+        // for drafts / legacy reports.
+        const manager = await prisma.user.findUnique({ where: { id: managerId }, select: { id: true } });
         if (!manager) {
             return NextResponse.json({ error: "Manager not found" }, { status: 404 });
         }
-
-        const editorIds = manager.teamMembers.map((e) => e.id);
+        const team = await resolveReportTeam(managerId, { kind: "weekly", week, month, year });
+        const editors = team.filter((m) => m.role === "editor");
+        const editorIds = editors.map((m) => m.id);
         if (editorIds.length === 0) {
             return NextResponse.json({ editorCases: [] });
         }
+        const editorIdSet = new Set(editorIds);
+        const editorNameById = new Map(editors.map((e) => [e.id, e.name]));
 
-        // Cases where the editor's subtask (editing or editing revision) was done this week
+        // Same approach as writer-cases: pull cases with a milestone
+        // subtask completed in-week, linked to a team editor via
+        // SubtaskAssignee, Subtask.assigneeUserId, or Case.editorUserId.
         const cases = await prisma.case.findMany({
             where: {
-                editorUserId: { in: editorIds },
-                subtasks: {
-                    some: { dateDone: { gte: weekStart, lte: weekEnd } },
-                },
+                subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd } } },
+                OR: [
+                    { subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd }, assignees: { some: { userId: { in: editorIds } } } } } },
+                    { subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd }, assigneeUserId: { in: editorIds } } } },
+                    { editorUserId: { in: editorIds } },
+                ],
             },
             include: {
                 editor: { select: { id: true, name: true } },
@@ -98,70 +100,104 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
                         { orderIndex: "asc" },
                         { dateCreated: "asc" },
                     ],
+                    include: {
+                        assignees: { select: { userId: true, user: { select: { name: true } } } },
+                    },
                 },
             },
             orderBy: { dateCreated: "asc" },
         });
 
-        // Keep only cases where the Editing OR Editing Revision subtask was completed this week
-        const filteredCases = cases.filter((c) => {
-            const editingSub  = c.subtasks.find(s => isEditingSubtask(s.name));
-            const revisionSub = c.subtasks.find(s => isEditingRevisionSubtask(s.name));
-            const editInWeek  = editingSub?.dateDone != null &&
-                editingSub.dateDone >= weekStart && editingSub.dateDone <= weekEnd;
-            const revInWeek   = revisionSub?.dateDone != null &&
-                revisionSub.dateDone >= weekStart && revisionSub.dateDone <= weekEnd;
-            return editInWeek || revInWeek;
-        });
+        const editorCases: any[] = [];
 
-        const editorCases = filteredCases.map((c) => {
-            const editingSub  = c.subtasks.find(s => isEditingSubtask(s.name))  ?? null;
-            const revisionSub = c.subtasks.find(s => isEditingRevisionSubtask(s.name)) ?? null;
+        for (const c of cases) {
+            const editingSub  = c.subtasks.find((s) => isEditingSubtask(s.name)) ?? null;
+            const revisionSub = c.subtasks.find((s) => isEditingRevisionSubtask(s.name)) ?? null;
 
-            // Only include TAT for the subtask completed IN THIS WEEK
             const editInWeek = !!editingSub?.dateDone &&
                 editingSub.dateDone >= weekStart && editingSub.dateDone <= weekEnd;
-            const revInWeek  = !!revisionSub?.dateDone &&
+            const revInWeek = !!revisionSub?.dateDone &&
                 revisionSub.dateDone >= weekStart && revisionSub.dateDone <= weekEnd;
+            if (!editInWeek && !revInWeek) continue;
 
-            let tatEditing = "N/A";
+            // Per-milestone assignee resolution (in team only).
+            // Priority: SubtaskAssignee → Subtask.assigneeUserId → Case.editorUserId.
+            const editAssignees = new Set<number>();
             if (editInWeek && editingSub) {
-                tatEditing = resolveSubtaskTat(editingSub) || "N/A";
+                for (const a of editingSub.assignees) {
+                    if (editorIdSet.has(a.userId)) {
+                        editAssignees.add(a.userId);
+                        if (a.user?.name) editorNameById.set(a.userId, a.user.name);
+                    }
+                }
+                if (editAssignees.size === 0 && editingSub.assigneeUserId && editorIdSet.has(editingSub.assigneeUserId)) {
+                    editAssignees.add(editingSub.assigneeUserId);
+                }
+                if (editAssignees.size === 0 && c.editorUserId && editorIdSet.has(c.editorUserId)) {
+                    editAssignees.add(c.editorUserId);
+                }
+            }
+            const revAssignees = new Set<number>();
+            if (revInWeek && revisionSub) {
+                for (const a of revisionSub.assignees) {
+                    if (editorIdSet.has(a.userId)) {
+                        revAssignees.add(a.userId);
+                        if (a.user?.name) editorNameById.set(a.userId, a.user.name);
+                    }
+                }
+                if (revAssignees.size === 0 && revisionSub.assigneeUserId && editorIdSet.has(revisionSub.assigneeUserId)) {
+                    revAssignees.add(revisionSub.assigneeUserId);
+                }
+                if (revAssignees.size === 0 && c.editorUserId && editorIdSet.has(c.editorUserId)) {
+                    revAssignees.add(c.editorUserId);
+                }
             }
 
-            let tatRevision = "N/A";
+            const credited = new Set<number>([...editAssignees, ...revAssignees]);
+            if (credited.size === 0) continue;
+
+            let tatEditingCase = "N/A";
+            if (editInWeek && editingSub) {
+                tatEditingCase = resolveSubtaskTat(editingSub) || "N/A";
+            }
+            let tatRevisionCase = "N/A";
             if (revInWeek && revisionSub) {
                 const t = resolveSubtaskTat(revisionSub) ||
                     (revisionSub.dateDone && editingSub?.dateDone
                         ? formatTatDays(calcBusinessDaysTat(editingSub.dateDone, revisionSub.dateDone))
                         : "");
-                tatRevision = t || "N/A";
+                tatRevisionCase = t || "N/A";
             }
 
             const isHero = !!(
                 c.caseType?.toLowerCase().includes("hero") ||
                 c.name?.toLowerCase().includes("hero")
             );
+            const qualityScore =
+                (c as any).editorQualityScore !== null && (c as any).editorQualityScore !== undefined
+                    ? String((c as any).editorQualityScore)
+                    : "N/A";
 
-            const subtaskName =
-                (editInWeek && editingSub?.name)  ||
-                (revInWeek  && revisionSub?.name) || "";
+            for (const eid of credited) {
+                const onEdit = editAssignees.has(eid);
+                const onRev  = revAssignees.has(eid);
+                const subtaskName =
+                    (onEdit && editingSub?.name)  ||
+                    (onRev  && revisionSub?.name) || "";
 
-            return {
-                editorId:   c.editor?.id   ?? null,
-                editorName: c.editor?.name ?? "",
-                caseName:   c.name,
-                caseStatus: c.status ?? "",
-                heroCase:   isHero ? "yes" : "no",
-                subtaskName,
-                tatEditing,
-                tatRevision,
-                qualityScore:
-                    (c as any).editorQualityScore !== null && (c as any).editorQualityScore !== undefined
-                        ? String((c as any).editorQualityScore)
-                        : "N/A",
-            };
-        });
+                editorCases.push({
+                    editorId:   eid,
+                    editorName: editorNameById.get(eid) ?? (c.editor?.id === eid ? c.editor?.name : "") ?? "",
+                    caseName:   c.name,
+                    caseStatus: c.status ?? "",
+                    heroCase:   isHero ? "yes" : "no",
+                    subtaskName,
+                    tatEditing: onEdit ? tatEditingCase : "N/A",
+                    tatRevision: onRev ? tatRevisionCase : "N/A",
+                    qualityScore,
+                });
+            }
+        }
 
         return NextResponse.json({ editorCases });
     } catch (error) {

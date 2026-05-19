@@ -12,7 +12,8 @@
 // so we don't duplicate that form.
 
 import { useEffect, useMemo, useState } from "react";
-import { mutate } from "swr";
+import useSWR, { mutate } from "swr";
+import { fetcher } from "@/lib/swr";
 import {
   AlertCircle, CheckCircle2, Save, User, Phone, MapPin, Briefcase,
   ShieldCheck, Wallet,
@@ -245,8 +246,11 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
   const jobHook = useSaveSection(userId);
 
   // ── Section: Work Settings (step 3 of the onboarding wizard) ──────
+  // `leavePolicyId` replaces the old free-text leavePlan. Saves to
+  // User.leavePolicyId; old leavePlan column stays in DB for back-compat
+  // but isn't surfaced/edited here anymore.
   const [work, setWork] = useState({
-    leavePlan:               p.leavePlan ?? "Regular Leave Plan",
+    leavePolicyId:           user.leavePolicyId ?? "",
     holidayList:             p.holidayList ?? "Default Holiday List",
     weeklyOff:               p.weeklyOff ?? "Standard Weekly Off",
     attendanceNumber:        p.attendanceNumber ?? "",
@@ -256,6 +260,10 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
     costCenter:              p.costCenter || "NB Media",
   });
   const workHook = useSaveSection(userId);
+  const { data: leavePolicies = [] } = useSWR<Array<{ id: number; name: string; isActive: boolean }>>(
+    "/api/hr/admin/leave-policies",
+    fetcher,
+  );
 
   // ── Section: Identity (sensitive — empty by default; HR re-enters) ─
   // PAN / Aadhaar / Aadhaar Enrollment stay empty on load (HR re-enters
@@ -333,7 +341,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
       teamCapsule:        user.teamCapsule ?? "",
     });
     setWork({
-      leavePlan:               p.leavePlan ?? "Regular Leave Plan",
+      leavePolicyId:           user.leavePolicyId ?? "",
       holidayList:             p.holidayList ?? "Default Holiday List",
       weeklyOff:               p.weeklyOff ?? "Standard Weekly Off",
       attendanceNumber:        p.attendanceNumber ?? "",
@@ -918,7 +926,7 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
         error={workHook.error}
         savedAt={workHook.savedAt}
         onSave={() => workHook.save({
-          leavePlan:               work.leavePlan.trim()          || null,
+          leavePolicyId:           work.leavePolicyId === "" ? null : Number(work.leavePolicyId),
           holidayList:             work.holidayList.trim()        || null,
           weeklyOff:               work.weeklyOff.trim()          || null,
           attendanceNumber:        work.attendanceNumber.trim()   || null,
@@ -932,13 +940,19 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className={cls.label}>Leave Plan</label>
-            <CustomSelect
-              listKey="leavePlan"
-              defaults={["Regular Leave Plan", "Regular Leave Plan_2026", "Intern Leave Plan", "None"]}
-              value={work.leavePlan}
-              onChange={(v) => setWork({ ...work, leavePlan: v })}
-            />
+            <label className={cls.label}>Leave Policy</label>
+            <select
+              value={work.leavePolicyId}
+              onChange={(e) => setWork({ ...work, leavePolicyId: e.target.value })}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30"
+            >
+              <option value="">— None (manual balances) —</option>
+              {leavePolicies.filter((pol) => pol.isActive || pol.id === Number(work.leavePolicyId)).map((pol) => (
+                <option key={pol.id} value={pol.id}>
+                  {pol.name}{!pol.isActive ? " (inactive)" : ""}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className={cls.label}>Holiday List</label>
@@ -964,10 +978,6 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
               value={work.attendanceNumber || basic.employeeId}
               onChange={(e) => setWork({ ...work, attendanceNumber: e.target.value })}
               placeholder={basic.employeeId || "e.g. HRM104"} />
-            <p className="mt-1 text-[10.5px] text-slate-400">
-              Convention: Attendance Number = HRM No. — kept in sync with{" "}
-              <span className="font-mono">{basic.employeeId || "HRM104"}</span> on save.
-            </p>
           </div>
           <div>
             <label className={cls.label}>Time Tracking Policy</label>

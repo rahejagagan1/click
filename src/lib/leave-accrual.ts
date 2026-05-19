@@ -1,30 +1,21 @@
 // Monthly leave accrual.
 //
-// Policy (NB Media):
-//   • Sick Leave (LeaveType.code = "SL") accrues +1 day per calendar month.
-//     Accrual is cumulative — unused days roll over.
-//   • Every other leave type stays at whatever HR last set on the matrix.
+// Policy-driven: each user is assigned to a LeavePolicy, which has entries
+// per LeaveType specifying monthlyAccrual (in addition to lump-sum
+// daysPerYear granted by "Apply policy"). On accrual, every active entry
+// with monthlyAccrual > 0 credits the user's matching LeaveBalance row
+// for the current year by `months * monthlyAccrual`.
 //
-// The helper is idempotent: it stamps `lastAccrualMonth` (YYYY-MM) on each
-// LeaveBalance row after crediting it, so multiple calls in the same month
-// are no-ops. New hires get `lastAccrualMonth` set to the month they joined,
-// which means they don't accrue retroactively — their first +1 happens at
-// the start of the next month.
+// Idempotent: stamps `lastAccrualMonth` (YYYY-MM) on each LeaveBalance row
+// after crediting. Re-runs in the same month are no-ops. New rows seeded
+// without a lastAccrualMonth get the current month stamped so they don't
+// accrue retroactively — their first credit happens next month.
 
 import prisma from "@/lib/prisma";
-
-const ACCRUING_CODES = new Set(["SL"]);
-const MONTHLY_INCREMENT_DAYS: Record<string, number> = { SL: 1 };
+import { istTodayDateOnly } from "@/lib/ist-date";
 
 function ymKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-// "2025-12" + 1 month → "2026-01"
-function nextYm(ym: string): string {
-  const [yy, mm] = ym.split("-").map((s) => parseInt(s, 10));
-  const d = new Date(Date.UTC(yy, mm, 1)); // mm is 1-based, Date is 0-based
-  return ymKey(d);
 }
 
 // Inclusive count of YYYY-MM steps from `from` (exclusive) up to `to`
@@ -38,41 +29,72 @@ function monthsBetween(fromYm: string | null, toYm: string): number {
 
 /**
  * Run accrual for one user. Safe to call from API routes — fire-and-forget
- * style. Returns the number of months credited (0 if nothing changed).
+ * style. Returns the number of monthly credits applied (0 if nothing changed).
+ *
+ * Reads the user's LeavePolicy.entries to decide which leave types accrue
+ * and by how much per month. Users without a policy (leavePolicyId IS NULL)
+ * skip accrual entirely — HR manages their balances by hand.
  */
 export async function accrueLeavesForUser(userId: number): Promise<number> {
   const now = new Date();
   const currentYm = ymKey(now);
+  const year = istTodayDateOnly().getUTCFullYear();
 
-  // Pull every Sick-Leave-style balance row for this user. Raw SQL keeps
-  // us off the typed client (which may be stale on the new column).
-  const rows = await prisma.$queryRawUnsafe<
-    Array<{ id: number; lastAccrualMonth: string | null; code: string; totalDays: any }>
+  // Find every (leaveType × monthlyAccrual > 0) entry for this user's policy.
+  // No rows = no policy assigned OR policy has no accruing types → no-op.
+  const entries = await prisma.$queryRawUnsafe<
+    Array<{ leaveTypeId: number; monthlyAccrual: any }>
   >(
-    `SELECT lb.id, lb."lastAccrualMonth", lt.code, lb."totalDays"
-       FROM "LeaveBalance" lb
-       JOIN "LeaveType"   lt ON lt.id = lb."leaveTypeId"
-      WHERE lb."userId" = $1
+    `SELECT lpe."leaveTypeId", lpe."monthlyAccrual"
+       FROM "User" u
+       JOIN "LeavePolicy"      lp  ON lp.id = u."leavePolicyId"
+       JOIN "LeavePolicyEntry" lpe ON lpe."policyId" = lp.id
+       JOIN "LeaveType"        lt  ON lt.id = lpe."leaveTypeId"
+      WHERE u.id = $1
+        AND lp."isActive" = true
         AND lt."isActive" = true
-        AND lt.code = ANY($2)`,
+        AND lpe."monthlyAccrual" > 0`,
     userId,
-    Array.from(ACCRUING_CODES),
   );
+  if (entries.length === 0) return 0;
 
   let credited = 0;
-  for (const r of rows) {
-    const months = monthsBetween(r.lastAccrualMonth, currentYm);
+  for (const e of entries) {
+    const perMonth = Number(e.monthlyAccrual);
+    if (!Number.isFinite(perMonth) || perMonth <= 0) continue;
+
+    // Upsert the LeaveBalance row for this (user, leaveType, year). New
+    // rows start with totalDays=0 and lastAccrualMonth=currentYm so they
+    // don't accrue retroactively for prior months in the same year — the
+    // first credit lands next month.
+    const existing = await prisma.$queryRawUnsafe<
+      Array<{ id: number; lastAccrualMonth: string | null }>
+    >(
+      `SELECT id, "lastAccrualMonth" FROM "LeaveBalance"
+        WHERE "userId" = $1 AND "leaveTypeId" = $2 AND year = $3`,
+      userId, e.leaveTypeId, year,
+    );
+
+    if (existing.length === 0) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "LeaveBalance"
+           ("userId","leaveTypeId","year","totalDays","usedDays","pendingDays","lastAccrualMonth","createdAt","updatedAt")
+         VALUES ($1, $2, $3, 0, 0, 0, $4, NOW(), NOW())`,
+        userId, e.leaveTypeId, year, currentYm,
+      );
+      continue; // first credit happens next month
+    }
+
+    const months = monthsBetween(existing[0].lastAccrualMonth, currentYm);
     if (months <= 0) continue;
-    const perMonth = MONTHLY_INCREMENT_DAYS[r.code] ?? 0;
     const add = months * perMonth;
     await prisma.$executeRawUnsafe(
       `UPDATE "LeaveBalance"
           SET "totalDays" = "totalDays" + $1::numeric,
-              "lastAccrualMonth" = $2
+              "lastAccrualMonth" = $2,
+              "updatedAt" = NOW()
         WHERE id = $3`,
-      add,
-      currentYm,
-      r.id,
+      add, currentYm, existing[0].id,
     );
     credited += months;
   }
