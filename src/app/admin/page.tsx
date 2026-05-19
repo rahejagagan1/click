@@ -9,6 +9,7 @@ import {
 import OrgTree from "@/components/admin/org-tree";
 import RegularizationPolicyCard from "@/components/admin/RegularizationPolicyCard";
 import UnlimitedRegularizationPolicyCard from "@/components/admin/UnlimitedRegularizationPolicyCard";
+import EmailsAutomationPanel from "@/components/admin/EmailsAutomationPanel";
 import UserAvatar from "@/components/ui/user-avatar";
 import {
     type TeamCapsuleCatalog,
@@ -42,7 +43,7 @@ interface Space {
     loading?: boolean;
 }
 
-type AdminTab = "workspaces" | "users" | "ytviews" | "reports" | "crons" | "permissions" | "regularization-policy";
+type AdminTab = "workspaces" | "users" | "ytviews" | "reports" | "crons" | "emails" | "permissions" | "regularization-policy";
 
 // Per-job icon + short label for the cron sub-tab pills. Falls back to
 // generic Clock + the full name when an unknown job id is added.
@@ -87,7 +88,7 @@ export default function AdminPage() {
     const adminTabs: readonly AdminTab[] = useMemo(
         () =>
             canManageUsers
-                ? (["workspaces", "users", "ytviews", "reports", "crons", "permissions", "regularization-policy"] as const)
+                ? (["workspaces", "users", "ytviews", "reports", "crons", "emails", "permissions", "regularization-policy"] as const)
                 : (["workspaces", "users", "ytviews", "reports", "permissions"] as const),
         [canManageUsers],
     );
@@ -579,9 +580,11 @@ export default function AdminPage() {
                                   ? "Reports"
                                   : tab === "crons"
                                     ? "Crons"
-                                    : tab === "permissions"
-                                      ? "Permissions"
-                                      : "Regularization Policy"}
+                                    : tab === "emails"
+                                      ? "Emails Automation"
+                                      : tab === "permissions"
+                                        ? "Permissions"
+                                        : "Regularization Policy"}
                     </button>
                 ))}
             </div>
@@ -1670,6 +1673,11 @@ export default function AdminPage() {
                         </div>
                     )}
                 </div>
+            )}
+
+            {/* ── Emails Automation Tab ── */}
+            {activeTab === "emails" && canManageUsers && (
+                <EmailsAutomationPanel />
             )}
 
             {/* ── Permissions Tab ── */}
