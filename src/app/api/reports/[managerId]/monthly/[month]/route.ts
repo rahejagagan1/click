@@ -9,6 +9,7 @@ import {
     normalizeTeamCapsuleInput,
     findCapsulesMatchingTeamCapsule,
 } from "@/lib/capsule-matching";
+import { writeSnapshot as writeReportTeamSnapshot } from "@/lib/reports/team-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -399,6 +400,19 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
             create: { managerId, month, year, ...payload },
             update: payload,
         });
+
+        // Freeze the team roster onto the report when it transitions to
+        // locked. Without this, the report's sidebar / per-member views
+        // re-query User.managerId at read time and "lose" team members
+        // who later switch to a different manager. See
+        // src/lib/reports/team-snapshot.ts for the full rationale.
+        if (shouldLock) {
+            try {
+                await writeReportTeamSnapshot(managerId, { kind: "monthly", month, year });
+            } catch (e) {
+                console.warn("[monthly POST] snapshot write failed:", e);
+            }
+        }
 
         // Notify CEO / HR / admins / developers / special-access only
         // when the report is LOCKED. Same pattern as the weekly route.

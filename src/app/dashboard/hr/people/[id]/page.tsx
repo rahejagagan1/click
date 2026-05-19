@@ -70,6 +70,59 @@ function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value
   );
 }
 
+// Inline dropdown for HR to assign / change a user's leave policy. Reads
+// the active policy list via SWR, PATCHes the user PUT endpoint on change,
+// and triggers a revalidation of the person page so the leave-balances UI
+// reflects the new assignment immediately.
+function LeavePolicyAssignment({
+  userId,
+  current,
+}: {
+  userId: number;
+  current: { id: number; name: string; isActive: boolean } | null;
+}) {
+  const { data: policies = [] } = useSWR<Array<{ id: number; name: string; isActive: boolean }>>(
+    "/api/hr/admin/leave-policies",
+    fetcher,
+  );
+  const [saving, setSaving] = useState(false);
+  const onChange = async (value: string) => {
+    const next = value === "" ? null : Number(value);
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/hr/people/${userId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leavePolicyId: next }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || "Failed to assign policy.");
+        return;
+      }
+      // Refresh this user's page data and any leave-balance views.
+      mutate(`/api/hr/people/${userId}`);
+    } finally { setSaving(false); }
+  };
+  return (
+    <div className="mt-3 flex items-center gap-2">
+      <label className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500 shrink-0">Leave Policy</label>
+      <select
+        value={current?.id ?? ""}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={saving}
+        className="flex-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30 disabled:opacity-60"
+      >
+        <option value="">— None (manual balances) —</option>
+        {policies.filter((p) => p.isActive || p.id === current?.id).map((p) => (
+          <option key={p.id} value={p.id}>{p.name}{!p.isActive ? " (inactive)" : ""}</option>
+        ))}
+      </select>
+      {saving && <span className="text-[11px] text-slate-500">Saving…</span>}
+    </div>
+  );
+}
+
 function Field({ label, value, capitalize = false }: { label: string; value?: string | null; capitalize?: boolean }) {
   return (
     <div className="bg-slate-50 rounded-lg px-4 py-3 border border-slate-100">
@@ -581,10 +634,13 @@ export default function EmployeeDetailPage() {
                     <KV label="UAN Number"          value={p.uanNumber} />
                     <KV label="Biometric ID"        value={p.biometricId} />
                   </Grid3>
-                  <p className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-slate-400">
-                    <ShieldCheck size={12} />
-                    Sensitive data — visible only to HR / CEO / admins.
-                  </p>
+                  {isHRAdmin ? (
+                    <LeavePolicyAssignment userId={user.id} current={user.leavePolicy ?? null} />
+                  ) : user.leavePolicy ? (
+                    <div className="mt-3 text-[12px] text-slate-500">
+                      Leave Policy: <span className="font-semibold text-slate-700">{user.leavePolicy.name}</span>
+                    </div>
+                  ) : null}
                 </DetailCard>
               </div>
             )}

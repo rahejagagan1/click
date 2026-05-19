@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
+import { resolveReportTeam } from "@/lib/reports/team-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -30,11 +31,11 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         const monthStart = new Date(year, month, 1);
         const monthEnd   = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
-        // Fetch all researchers under this manager
-        const researchers = await prisma.user.findMany({
-            where: { managerId, isActive: true, role: "researcher" },
-            select: { id: true, name: true },
-        });
+        // Fetch all researchers — prefer the locked report's team
+        // snapshot so a researcher who later moved managers still shows
+        // up under the period when they were on this manager's team.
+        const team = await resolveReportTeam(managerId, { kind: "monthly", month, year });
+        const researchers = team.filter((m) => m.role === "researcher");
 
         if (researchers.length === 0) {
             return NextResponse.json({ stats: [] });

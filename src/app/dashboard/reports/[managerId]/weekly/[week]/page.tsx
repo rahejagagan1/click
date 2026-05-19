@@ -7,6 +7,7 @@ import { useSession } from "next-auth/react";
 import useSWR from "swr";
 import { formatWeeklyReportPeriodLabel, countWeeksInReportMonth } from "@/lib/reports/weekly-period";
 import type { ManagerReportFormat } from "@/lib/reports/manager-report-format";
+import RefreshTeamSnapshotButton from "@/components/reports/RefreshTeamSnapshotButton";
 
 function getStatusColor(status: string): string {
     const s = (status || "").toLowerCase();
@@ -79,6 +80,7 @@ interface ResearcherRow {
     dailyTargetsMet: string;
     approvedCasesRTC: string;
     avgRating: string;
+    foiaResearched: string;
     foiaPitched: string;
     foiaReceived: string;
     overallRemarks: string;
@@ -115,7 +117,7 @@ const mkOverview = (id: string): QuickOverviewRow => ({
 });
 const mkResearcher = (id: string, name = ""): ResearcherRow => ({
     id, researcher: name, dailyTargetsMet: "", approvedCasesRTC: "",
-    avgRating: "", foiaPitched: "", foiaReceived: "", overallRemarks: "",
+    avgRating: "", foiaResearched: "", foiaPitched: "", foiaReceived: "", overallRemarks: "",
 });
 
 const mkClickUp = (id: string, name = ""): ClickUpRow => ({
@@ -576,7 +578,13 @@ export default function WeeklyReportPage() {
     const [sectionDColWidths, setSectionDColWidths] = useState<Record<number, number>>({});
 
     const fetcher = (url: string) => fetch(url).then((r) => r.json());
-    const { data, isLoading, error: teamLoadError } = useSWR(`/api/reports/${managerId}`, fetcher);
+    // Pass the report's period so the API can return the FROZEN team
+    // (teamSnapshot) for locked reports — see src/lib/reports/team-snapshot.ts.
+    // Drafts and legacy reports without a snapshot still get the live team.
+    const { data, isLoading, error: teamLoadError } = useSWR(
+        `/api/reports/${managerId}?week=${week}&month=${monthIndex}&year=${year}`,
+        fetcher,
+    );
     const manager     = data?.manager;
     const teamMembers: any[] = data?.teamMembers ?? [];
 
@@ -1501,14 +1509,15 @@ export default function WeeklyReportPage() {
                     </colgroup>
                     <thead>
                         <tr>
-                            <ResizableTh colIndex={0} widths={oColWidths} setWidths={setOColWidths} tableRef={oTableRef} colCount={8}>Month</ResizableTh>
+                            <ResizableTh colIndex={0} widths={oColWidths} setWidths={setOColWidths} tableRef={oTableRef} colCount={9}>Month</ResizableTh>
                             <ResizableTh colIndex={1} widths={oColWidths} setWidths={setOColWidths}>Researcher <span className="text-red-300">*</span></ResizableTh>
                             <ResizableTh colIndex={2} widths={oColWidths} setWidths={setOColWidths}>Is the researcher completing his daily targets? If not so why? <span className="text-red-300">*</span></ResizableTh>
                             <ResizableTh colIndex={3} widths={oColWidths} setWidths={setOColWidths}>No. of Approved Cases (RTC) <span className="text-red-300">*</span></ResizableTh>
                             <ResizableTh colIndex={4} widths={oColWidths} setWidths={setOColWidths}>Average rating of the cases <span className="text-red-300">*</span></ResizableTh>
-                            <ResizableTh colIndex={5} widths={oColWidths} setWidths={setOColWidths}>No. of FOIA pitched? <span className="text-red-300">*</span></ResizableTh>
-                            <ResizableTh colIndex={6} widths={oColWidths} setWidths={setOColWidths}>No. of FOIA received <span className="text-red-300">*</span></ResizableTh>
-                            <ResizableTh colIndex={7} widths={oColWidths} setWidths={setOColWidths}>Overall Remarks</ResizableTh>
+                            <ResizableTh colIndex={5} widths={oColWidths} setWidths={setOColWidths}>No. of FOIA researched <span className="text-red-300">*</span></ResizableTh>
+                            <ResizableTh colIndex={6} widths={oColWidths} setWidths={setOColWidths}>No. of FOIA pitched? <span className="text-red-300">*</span></ResizableTh>
+                            <ResizableTh colIndex={7} widths={oColWidths} setWidths={setOColWidths}>No. of FOIA received <span className="text-red-300">*</span></ResizableTh>
+                            <ResizableTh colIndex={8} widths={oColWidths} setWidths={setOColWidths}>Overall Remarks</ResizableTh>
                             <Th>{" "}</Th>
                         </tr>
                     </thead>
@@ -1524,6 +1533,7 @@ export default function WeeklyReportPage() {
                                 <Td><EditInput value={row.dailyTargetsMet} onChange={(v) => setR(idx, "dailyTargetsMet", v)} placeholder="Yes / No — reason if no" disabled={isLocked || viewOnly} /></Td>
                                 <Td><EditInput value={row.approvedCasesRTC} onChange={(v) => setR(idx, "approvedCasesRTC", v)} placeholder="N/A or number" disabled={isLocked || viewOnly} /></Td>
                                 <Td><EditInput value={row.avgRating} onChange={(v) => setR(idx, "avgRating", v)} placeholder="e.g. 4 / 5" disabled={isLocked || viewOnly} /></Td>
+                                <Td><EditInput value={row.foiaResearched} onChange={(v) => setR(idx, "foiaResearched", v)} placeholder="e.g. 10" disabled={isLocked || viewOnly} /></Td>
                                 <Td><EditInput value={row.foiaPitched} onChange={(v) => setR(idx, "foiaPitched", v)} placeholder="e.g. 10" disabled={isLocked || viewOnly} /></Td>
                                 <Td><EditInput value={row.foiaReceived} onChange={(v) => setR(idx, "foiaReceived", v)} placeholder="e.g. 2 + 1" disabled={isLocked || viewOnly} /></Td>
                                 <Td><EditInput value={row.overallRemarks} onChange={(v) => setR(idx, "overallRemarks", v)} placeholder="Overall remarks…" disabled={isLocked || viewOnly} /></Td>
@@ -2224,6 +2234,25 @@ export default function WeeklyReportPage() {
                                 </svg>
                                 {isLocked ? "Submitted & Locked" : "Unlocked — Edit & Resubmit"}
                             </span>
+                        )}
+                        {/* Top-right team-source pill: "Snapshot" vs "Live". */}
+                        {data?.teamSource && (
+                            data.teamSource === "snapshot" ? (
+                                <span title="Team list is frozen from the snapshot saved when this report was submitted" className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase tracking-wider">
+                                    <span className="h-1 w-1 rounded-full bg-emerald-500" /> Snapshot
+                                </span>
+                            ) : (
+                                <span title="No snapshot saved yet — showing current team. Admin can click Refresh to freeze." className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[9px] font-bold uppercase tracking-wider">
+                                    <span className="h-1 w-1 rounded-full bg-amber-500 animate-pulse" /> Live
+                                </span>
+                            )
+                        )}
+                        {/* Admin-only refresh — match the API gate */}
+                        {isLocked && (isAdmin || isCeo || sessionUser?.role === "admin") && (
+                            <RefreshTeamSnapshotButton
+                                managerId={String(managerId)}
+                                period={{ kind: "weekly", week, month: monthIndex, year }}
+                            />
                         )}
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-6 text-sm text-slate-600">

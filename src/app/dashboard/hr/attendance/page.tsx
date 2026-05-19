@@ -230,20 +230,16 @@ function LocationPin({ raw, kind = "in", tintOverride }: { raw?: string | null; 
 // clock-out locations stacked. Replaces the previous "green pin
 // flanking the bar on the left + red pin on the right" layout —
 // less visual noise, single click to see the whole day's geo.
-function DayLocationPin({ inRaw, outRaw }: { inRaw?: string | null; outRaw?: string | null }) {
+function DayLocationPin({ inRaw }: { inRaw?: string | null }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const inInfo  = parseAttLoc(inRaw);
-  const outInfo = parseAttLoc(outRaw);
   const hasIn   = !!inInfo.address  || (typeof inInfo.lat  === "number" && typeof inInfo.lng  === "number");
-  const hasOut  = !!outInfo.address || (typeof outInfo.lat === "number" && typeof outInfo.lng === "number");
-  // Pin colour signals state at a glance:
-  //   • both in + out   → emerald (full day captured)
-  //   • only in         → blue    (still active / no clock-out yet)
-  //   • neither         → slate   (no geo recorded)
-  const tint = hasIn && hasOut ? "#10b981" : hasIn ? "#008CFF" : "#94a3b8";
+  // Geo is only captured on clock-in, so the pin reflects that
+  // single state — emerald when we have it, slate when we don't.
+  const tint = hasIn ? "#10b981" : "#94a3b8";
 
   useEffect(() => {
     if (!open) return;
@@ -314,11 +310,7 @@ function DayLocationPin({ inRaw, outRaw }: { inRaw?: string | null; outRaw?: str
         ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title={
-          hasIn && hasOut ? "Clock-in + Clock-out locations"
-          : hasIn        ? "Clock-in location"
-          : "No location recorded for this entry"
-        }
+        title={hasIn ? "Clock-in location" : "No location recorded for this entry"}
         className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full cursor-pointer transition-all hover:scale-105 focus:outline-none focus:ring-2"
         style={{ color: tint, borderColor: `${tint}33`, background: `${tint}14`, border: `1px solid ${tint}33` }}
         aria-label="Day location"
@@ -340,11 +332,9 @@ function DayLocationPin({ inRaw, outRaw }: { inRaw?: string | null; outRaw?: str
             left:   popoverLeft,
             zIndex: 10000,
           }}
-          className="w-[280px] bg-white dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg shadow-2xl p-3 space-y-3"
+          className="w-[280px] bg-white dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg shadow-2xl p-3"
         >
           <Section label="Clock-In"  info={inInfo}  color="#10b981" />
-          <div className="border-t border-slate-100 dark:border-white/5" />
-          <Section label="Clock-Out" info={outInfo} color="#ef4444" />
         </div>,
         document.body
       )}
@@ -867,19 +857,10 @@ export default function AttendancePage() {
     }
   };
   const clockOut = async () => {
-    // Best-effort geo on clock-out so each AttendanceSession row gets
-    // a clockOutLocation alongside the existing clockInLocation. If
-    // the browser blocks location we still send the request without
-    // coords — server accepts a missing/empty body and stores NULL,
-    // so the user isn't stranded with an open session.
-    let body: Record<string, unknown> = {};
-    const geo = await captureClockInGeo();
-    if (geo.ok) body = { lat: geo.lat, lng: geo.lng, address: geo.address };
-    const res = await fetch("/api/hr/attendance/clock-out", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    // Geo is captured on clock-IN only — clock-out doesn't ask the
+    // browser for a fresh fix. The server still accepts an optional
+    // body but no client sends one anymore.
+    const res = await fetch("/api/hr/attendance/clock-out", { method: "POST" });
     const d = await res.json();
     if (!res.ok) return alert(d.error);
     mutate(`/api/hr/attendance?${attendanceQs}`);
@@ -1785,17 +1766,6 @@ export default function AttendancePage() {
                                 />
                                 <DayLocationPin
                                   inRaw={sessions[0]?.clockInLocation ?? rec.location}
-                                  outRaw={(() => {
-                                    // Walk backwards from the last session and
-                                    // grab the first one that has a clock-out
-                                    // location. While the day is still active
-                                    // (open session) this is null and the popover
-                                    // shows "No location recorded" for that side.
-                                    for (let i = sessions.length - 1; i >= 0; i--) {
-                                      if (sessions[i]?.clockOutLocation) return sessions[i].clockOutLocation;
-                                    }
-                                    return null;
-                                  })()}
                                 />
                               </div>
                               {/* The multi-session in/out grid lives in the

@@ -1965,10 +1965,22 @@ export default function HRHomePage() {
     return () => clearTimeout(t);
   }, [confirmingClockOut, clockingOut]);
 
+  // Mobile clock-in is policy-blocked by default (attendance is meant
+  // to be captured from the workstation). Two escape hatches:
+  //   1. Developers (`DEVELOPER_EMAILS` in env → `user.isDeveloper`) —
+  //      stable bypass for the platform team; tied to identity, not
+  //      knowledge of a URL trick.
+  //   2. `?desktop=1` query param — short-term emergency override for
+  //      anyone whose laptop is unavailable. NOT a secret; treat it
+  //      as "I know what I'm doing, let me through" and follow up
+  //      with regularization if used.
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   useEffect(() => {
-    setIsMobileDevice(detectMobileDevice());
-  }, []);
+    const isDev = user?.isDeveloper === true;
+    const bypassParam = typeof window !== "undefined"
+      && new URLSearchParams(window.location.search).get("desktop") === "1";
+    setIsMobileDevice(detectMobileDevice() && !isDev && !bypassParam);
+  }, [user]);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.permissions?.query) {
@@ -2585,10 +2597,20 @@ export default function HRHomePage() {
             })()}
 
             <div className={`${C.card} p-3.5`}>
-              <p className={`mb-3 text-[13px] font-semibold ${C.t1}`}>On Leave Today</p>
+              <p className={`mb-3 text-[13px] font-semibold ${C.t1}`}>
+                On Leave Today
+                {onLeave.length > 0 && (
+                  <span className={`ml-1.5 text-[11px] font-normal ${C.t3}`}>({onLeave.length})</span>
+                )}
+              </p>
               {onLeave.length > 0 ? (
+                // Show EVERY user with a leave application covering today —
+                // regardless of whether they've clocked in. Half-day users
+                // who came in for the working half still belong here because
+                // they're partially absent. flex-wrap handles overflow into
+                // multiple rows when the day's list is long.
                 <div className="flex flex-wrap gap-3">
-                  {onLeave.slice(0, 4).map((u: any) => (
+                  {onLeave.map((u: any) => (
                     <div key={u.id} className="flex flex-col items-center gap-1">
                       <span className="relative inline-flex">
                         <Av name={u.name} url={u.profilePictureUrl} size={36} />
