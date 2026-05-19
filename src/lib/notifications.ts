@@ -1,5 +1,6 @@
 import prisma from "@/lib/prisma";
 import { sendEmail, emailsForUserIds } from "@/lib/email/sender";
+import { isEmailEnabled } from "@/lib/email/toggles";
 import {
   leaveRequestEmail, wfhRequestEmail, onDutyRequestEmail,
   regularizationRequestEmail, compOffRequestEmail, decisionEmail,
@@ -190,6 +191,13 @@ async function dispatchEmails(
   emailData?: EmailData,
 ): Promise<void> {
   try {
+    // Admin-controllable gate (Admin → Emails Automation). When a type is
+    // toggled off, in-app notifications still flow but the outbound
+    // email is silently dropped. NotificationType ↔ EmailKey are 1:1.
+    if (!(await isEmailEnabled(type as any))) {
+      console.log(`[email] dispatch skipped — type "${type}" disabled in admin toggles`);
+      return;
+    }
     const content = buildEmailFor(type, title, body, emailData);
     if (!content) return;
     const to = await emailsForUserIds(userIds);
