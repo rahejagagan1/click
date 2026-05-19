@@ -44,51 +44,95 @@ export type GeoResult =
  * Browser-only: request geolocation and best-effort reverse-geocode via Nominatim.
  * Returns a tagged result so callers can show the user WHY it failed instead of
  * a generic "location required" message.
+ *
+ * Accuracy strategy:
+ *   • watchPosition collects readings for up to 7 s (the GPS chip
+ *     tightens its fix from ~100 m Wi-Fi triangulation down to
+ *     ~10–20 m as it locks in). We keep the lowest `accuracy` value.
+ *   • Early-exit as soon as a reading hits ≤ 20 m, so happy-path
+ *     clock-ins don't wait a full 7 s.
+ *   • `maximumAge: 0` — never accept a cached fix.
  */
+const ACCURACY_TARGET_M = 20;   // good enough; exit early
+const ACCURACY_BUDGET_MS = 7000; // hard cap so clock-in never stalls
+
 export async function captureClockInGeo(): Promise<GeoResult> {
   if (typeof navigator === "undefined" || !navigator.geolocation) {
     return { ok: false, reason: "unsupported", message: "Your browser doesn't support geolocation." };
   }
-  // Timeout raised to 20s — first-time location on Windows (which needs to
-  // query Wi-Fi SSIDs / the location service) can legitimately take 10–15s.
-  const pos = await new Promise<GeolocationPosition | GeolocationPositionError>((resolve) => {
-    navigator.geolocation.getCurrentPosition(
-      (p) => resolve(p),
-      (e) => resolve(e),
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 }
+
+  const fix = await new Promise<GeolocationPosition | GeolocationPositionError | null>((resolve) => {
+    let best: GeolocationPosition | null = null;
+    let lastErr: GeolocationPositionError | null = null;
+    let settled = false;
+    const settle = (v: GeolocationPosition | GeolocationPositionError | null) => {
+      if (settled) return;
+      settled = true;
+      try { navigator.geolocation.clearWatch(id); } catch { /* noop */ }
+      resolve(v);
+    };
+    const id = navigator.geolocation.watchPosition(
+      (p) => {
+        if (!best || p.coords.accuracy < best.coords.accuracy) best = p;
+        if (best.coords.accuracy <= ACCURACY_TARGET_M) settle(best);
+      },
+      (e) => {
+        lastErr = e;
+        // If we already have any reading at all, prefer it over the
+        // error. Otherwise surface the error so the caller can show
+        // the right "permission denied" / "timeout" message.
+        if (!best) settle(e);
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
     );
+    setTimeout(() => settle(best ?? lastErr), ACCURACY_BUDGET_MS);
   });
-  if ("code" in pos) {
+
+  if (!fix) {
+    return { ok: false, reason: "position_unavailable", message: "Your device couldn't determine a location. Make sure Location services are ON." };
+  }
+  if ("code" in fix) {
     const reason: GeoFailReason =
-      pos.code === 1 ? "denied" :
-      pos.code === 2 ? "position_unavailable" :
-      pos.code === 3 ? "timeout" : "unknown";
+      fix.code === 1 ? "denied" :
+      fix.code === 2 ? "position_unavailable" :
+      fix.code === 3 ? "timeout" : "unknown";
     const message =
       reason === "denied"               ? "Location permission is blocked for this site. Click the lock icon in the address bar and allow Location." :
       reason === "position_unavailable" ? "Your device couldn't determine a location. On Windows, make sure Location services are ON in system settings." :
       reason === "timeout"              ? "Location request timed out. Check your Wi-Fi / GPS, then try again." :
-                                          pos.message || "Unknown location error.";
+                                          fix.message || "Unknown location error.";
     return { ok: false, reason, message };
   }
-  const { latitude: lat, longitude: lng } = pos.coords;
-  // Reverse-geocode is best-effort and time-boxed to 3s so a slow Nominatim
-  // response can't block the clock-in.
+
+  const { latitude: lat, longitude: lng } = fix.coords;
+
+  // Reverse-geocode at zoom=18 (street / building level — the most
+  // precise Nominatim returns) and compose the address from
+  // structured fields: street → area → city → state → pincode.
+  // Best-effort and time-boxed to 4 s so a slow Nominatim response
+  // can't block the clock-in.
   let address: string | undefined;
   try {
     const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 3000);
+    const t = setTimeout(() => ctl.abort(), 4000);
     const r = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=14&addressdetails=1`,
-      { headers: { "Accept": "application/json" }, signal: ctl.signal }
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+      { headers: { "Accept": "application/json" }, signal: ctl.signal },
     );
     clearTimeout(t);
     if (r.ok) {
       const j = await r.json();
       const a = j?.address || {};
-      address =
-        [a.suburb || a.neighbourhood || a.road, a.city || a.town || a.village, a.state]
-          .filter(Boolean).join(", ") || j?.display_name || undefined;
+      const street = [a.house_number, a.road].filter(Boolean).join(" ");
+      const area   = a.suburb || a.neighbourhood || a.hamlet || a.village;
+      const city   = a.city   || a.town          || a.municipality;
+      const parts  = [street, area, city, a.state, a.postcode].filter(Boolean);
+      // Drop adjacent duplicates (e.g. "Mohali, Mohali" can happen
+      // when the suburb and city share a name).
+      const deduped = parts.filter((p, i) => i === 0 || p.toLowerCase() !== parts[i - 1].toLowerCase());
+      address = deduped.join(", ") || j?.display_name || undefined;
     }
   } catch { /* best-effort only — coords alone are enough */ }
+
   return { ok: true, lat, lng, address };
 }
