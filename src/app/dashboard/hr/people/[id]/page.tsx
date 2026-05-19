@@ -10,7 +10,7 @@ import { parseAttLoc, type AttLoc } from "@/lib/attendance-location";
 import {
   Mail, Phone, MapPin, Briefcase, Calendar, Building2, IdCard, FileText, Laptop,
   Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
-  MoreVertical, UserMinus, TreePine,
+  MoreVertical, UserMinus, TreePine, Coffee,
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
@@ -92,6 +92,9 @@ export default function EmployeeDetailPage() {
   // duplicate the form here.
   const router = useRouter();
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  // Which PROFILE-tab section is currently being edited. null = closed.
+  // Each section opens its own focused modal with just that card's fields.
+  const [editSection, setEditSection] = useState<null | "primary" | "contact" | "family" | "address" | "identity" | "job" | "time" | "other" | "org" | "bios">(null);
   useEffect(() => {
     if (!headerMenuOpen) return;
     const close = (e: MouseEvent) => {
@@ -120,8 +123,23 @@ export default function EmployeeDetailPage() {
   // edit anyone's. Editing is HR-admin-only (canEdit above).
   // Edit Profile is HR-admin-only (matches the PUT endpoint's gate).
   // Profile owners view their own salary on /dashboard/hr/payroll.
-  const showEditTab = isHRAdmin;
-  const visibleTabs = TABS.filter((t) => t !== "Edit Profile" || showEditTab);
+  // Edit Profile tab is now developer-only — HR / CEO / admins see the
+  // PROFILE tab (read-only with every field) instead, since that mirrors
+  // the full Edit Profile surface without the editing capability that
+  // the org has decided to lock down.
+  const showEditTab = me?.isDeveloper === true;
+  // Attendance is sensitive per-employee data — only the owner of the
+  // profile, their direct manager (NOT inline manager, to keep scope
+  // tight) and the HR-admin tier should see it. Peers don't see each
+  // other's daily clock-ins.
+  const isSelfView = me?.dbId != null && Number(me.dbId) === userId;
+  const isMyManager = user?.manager?.id != null && me?.dbId != null && user.manager.id === Number(me.dbId);
+  const showAttendanceTab = isSelfView || isMyManager || isHRAdmin;
+  const visibleTabs = TABS.filter((t) => {
+    if (t === "Edit Profile" && !showEditTab)     return false;
+    if (t === "Attendance"   && !showAttendanceTab) return false;
+    return true;
+  });
 
   if (isLoading) {
     return (
@@ -337,7 +355,7 @@ export default function EmployeeDetailPage() {
 
           {/* Tab bar — sits at the bottom of the identity card */}
           <div className="border-t border-slate-100 px-7">
-            <div className="flex gap-0 overflow-x-auto">
+            <div className="flex gap-0 flex-wrap">
               {visibleTabs.map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)}
                   className={`relative px-4 py-3.5 text-[11.5px] font-bold uppercase tracking-wider whitespace-nowrap transition-colors ${
@@ -369,28 +387,33 @@ export default function EmployeeDetailPage() {
           </div>
         ) : null}
 
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className={`grid grid-cols-1 gap-5 ${directReports.length > 0 ? "lg:grid-cols-[minmax(0,1fr)_300px]" : ""}`}>
           <main className="min-w-0 space-y-5">
             {activeTab === "About" && (
               <>
                 {/* About card */}
                 <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
-                  <h3 className="mb-3 inline-flex items-center gap-2 text-[15px] font-semibold text-slate-800">
-                    About <span className="text-slate-300">✏️</span>
-                  </h3>
-                  <p className="text-[13px] leading-relaxed text-slate-600">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-[15px] font-semibold text-slate-800">About</h3>
+                    {canEdit && (
+                      <button onClick={() => setEditSection("bios")} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#008CFF] hover:underline">
+                        <Pencil size={12} /> Edit
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[13px] leading-relaxed text-slate-600 whitespace-pre-wrap">
                     {p.about || `Hi I am ${user.name}.`}
                   </p>
 
-                  <h4 className="mt-5 inline-flex items-center gap-2 text-[14px] font-semibold text-slate-800">
-                    What I love about my job? <span className="text-slate-300">✏️</span>
+                  <h4 className="mt-5 text-[14px] font-semibold text-slate-800">
+                    What I love about my job?
                   </h4>
-                  <p className="mt-1 text-[12.5px] text-slate-600">{p.jobLove || "—"}</p>
+                  <p className="mt-1 text-[12.5px] text-slate-600 whitespace-pre-wrap">{p.jobLove || "—"}</p>
 
-                  <h4 className="mt-5 inline-flex items-center gap-2 text-[14px] font-semibold text-slate-800">
-                    My interests and hobbies <span className="text-slate-300">✏️</span>
+                  <h4 className="mt-5 text-[14px] font-semibold text-slate-800">
+                    My interests and hobbies
                   </h4>
-                  <p className="mt-1 text-[12.5px] text-slate-600">{p.hobbies || "N/A"}</p>
+                  <p className="mt-1 text-[12.5px] text-slate-600 whitespace-pre-wrap">{p.hobbies || "N/A"}</p>
                 </section>
 
                 {/* Primary Details card */}
@@ -420,14 +443,62 @@ export default function EmployeeDetailPage() {
                     </div>
                   </div>
                 </section>
+
+                {/* Family card — self-edited by the employee from their
+                    own ABOUT tab. Always rendered (with empty-state hint)
+                    so HR sees the section the moment they open the
+                    profile, not only on the PROFILE sub-tab. */}
+                <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="text-[15px] font-semibold text-slate-800">Family</h3>
+                    {canEdit && (
+                      <button onClick={() => setEditSection("family")} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#008CFF] hover:underline">
+                        <Pencil size={12} /> Edit
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-8 gap-y-5">
+                    <Compact label="Father's Name"  value={p.parentName} />
+                    <Compact label="Mother's Name"  value={p.motherName} />
+                    <Compact label="Spouse's Name"  value={p.spouseName} />
+                    <Compact label="Children"       value={p.childrenNames} />
+                  </div>
+                  {!(p.parentName || p.motherName || p.spouseName || p.childrenNames) && (
+                    <p className="mt-3 text-[11.5px] text-slate-400">
+                      Not yet filled in by the employee — they can add these from their own profile (ABOUT tab).
+                    </p>
+                  )}
+                </section>
+
+                {/* Emergency Contact card */}
+                <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="text-[15px] font-semibold text-slate-800">Emergency Contact</h3>
+                    {canEdit && (
+                      <button onClick={() => setEditSection("contact")} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#008CFF] hover:underline">
+                        <Pencil size={12} /> Edit
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-8 gap-y-5">
+                    <Compact label="Relationship"   value={p.emergencyRelationship} capitalize />
+                    <Compact label="Contact Phone"  value={p.emergencyPhone} />
+                  </div>
+                  {!(p.emergencyRelationship || p.emergencyPhone) && (
+                    <p className="mt-3 text-[11.5px] text-slate-400">
+                      Not yet filled in by the employee.
+                    </p>
+                  )}
+                </section>
               </>
             )}
 
             {activeTab === "Profile" && (
               <div className="space-y-5">
                 {/* ── Primary Details ── */}
-                <DetailCard title="Primary Details">
+                <DetailCard title="Primary Details" onEdit={canEdit ? () => setEditSection("primary") : undefined}>
                   <Grid3>
+                    <KV label="HRM No."               value={p.employeeId} />
                     <KV label="First Name"            value={p.firstName ?? user.name?.split(" ")[0]} />
                     <KV label="Middle Name"           value={p.middleName} />
                     <KV label="Last Name"             value={p.lastName ?? user.name?.split(" ").slice(1).join(" ")} />
@@ -442,7 +513,7 @@ export default function EmployeeDetailPage() {
                 </DetailCard>
 
                 {/* ── Contact Details ── */}
-                <DetailCard title="Contact Details">
+                <DetailCard title="Contact Details" onEdit={canEdit ? () => setEditSection("contact") : undefined}>
                   <Grid3>
                     <KV label="Work Email"      value={user.email} />
                     <KV label="Personal Email"  value={p.personalEmail} />
@@ -454,20 +525,26 @@ export default function EmployeeDetailPage() {
                   </Grid3>
                 </DetailCard>
 
-                {/* ── Family ── */}
-                {(p.parentName || p.motherName || p.spouseName || p.childrenNames) && (
-                  <DetailCard title="Family">
-                    <Grid3>
-                      <KV label="Father's Name"   value={p.parentName} />
-                      <KV label="Mother's Name"   value={p.motherName} />
-                      <KV label="Spouse's Name"   value={p.spouseName} />
-                      <KV label="Children"        value={p.childrenNames} />
-                    </Grid3>
-                  </DetailCard>
-                )}
+                {/* ── Family ── always shown so HR can see the section
+                    even when the employee hasn't filled it in yet. The
+                    employee self-edits this from their own profile
+                    (ABOUT tab). KV renders "—" for missing values. */}
+                <DetailCard title="Family" onEdit={canEdit ? () => setEditSection("family") : undefined}>
+                  <Grid3>
+                    <KV label="Father's Name"   value={p.parentName} />
+                    <KV label="Mother's Name"   value={p.motherName} />
+                    <KV label="Spouse's Name"   value={p.spouseName} />
+                    <KV label="Children"        value={p.childrenNames} />
+                  </Grid3>
+                  {!(p.parentName || p.motherName || p.spouseName || p.childrenNames) && (
+                    <p className="mt-3 text-[11.5px] text-slate-400">
+                      Not yet filled in by the employee — they can add these from their own profile (ABOUT tab).
+                    </p>
+                  )}
+                </DetailCard>
 
                 {/* ── Addresses ── */}
-                <DetailCard title="Addresses">
+                <DetailCard title="Addresses" onEdit={canEdit ? () => setEditSection("address") : undefined}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <p className="text-[10px] uppercase tracking-[0.1em] text-slate-400 font-semibold mb-1.5">Current Address</p>
@@ -495,70 +572,150 @@ export default function EmployeeDetailPage() {
                 </DetailCard>
 
                 {/* ── Identity Information (PAN / Aadhaar / statutory IDs) ── */}
-                {(p.panNumber || p.aadhaarNumber || p.pfNumber || p.uanNumber || p.biometricId) && (
-                  <DetailCard title="Identity Information">
-                    <Grid3>
-                      <KV label="PAN Number"     value={maskPan(p.panNumber)} />
-                      <KV label="Aadhaar Number" value={maskAadhaar(p.aadhaarNumber)} />
-                      <KV label="PF Number"      value={p.pfNumber} />
-                      <KV label="UAN Number"     value={p.uanNumber} />
-                      <KV label="Biometric ID"   value={p.biometricId} />
-                    </Grid3>
-                    <p className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-slate-400">
-                      <ShieldCheck size={12} />
-                      Sensitive data — visible only to HR / CEO / admins.
-                    </p>
-                  </DetailCard>
-                )}
-              </div>
-            )}
-
-            {activeTab === "Job" && (
-              <div className="space-y-5">
-                <DetailCard title="Job Details">
+                <DetailCard title="Identity Information" onEdit={canEdit ? () => setEditSection("identity") : undefined}>
                   <Grid3>
-                    <KV label="Designation"          value={p.designation} />
-                    <KV label="Secondary Job Title"  value={p.secondaryJobTitle} />
-                    <KV label="Department"           value={p.department} />
-                    <KV label="Business Unit"        value={p.businessUnit} />
-                    <KV label="Legal Entity"         value={p.legalEntity} />
-                    <KV label="Employment Type"      value={prettyEmp(p.employmentType)} capitalize />
-                    <KV label="Work Location"        value={p.workLocation} capitalize />
-                    <KV label="Job Location"         value={p.jobLocation} />
-                    <KV label="Work Country"         value={p.workCountry} />
-                    <KV label="Nationality"          value={p.nationality} />
-                    <KV label="Joining Date"         value={fmtDate(p.joiningDate)} />
-                    <KV label="Internship End Date"  value={fmtDate(p.internshipEndDate)} />
-                    <KV label="Notice Period (days)" value={p.noticePeriodDays != null ? String(p.noticePeriodDays) : null} />
-                    <KV label="Probation Policy"     value={p.probationPolicy} />
-                    <KV label="Role"                 value={getUserRoleLabel(user.role) || user.role} capitalize />
-                    <KV label="Org Level"            value={prettyEmp(user.orgLevel)} capitalize />
-                    <KV label="Team Capsule"         value={user.teamCapsule} />
+                    <KV label="PAN Number"          value={maskPan(p.panNumber)} />
+                    <KV label="Aadhaar Number"      value={maskAadhaar(p.aadhaarNumber)} />
+                    <KV label="Aadhaar Enrollment"  value={p.aadhaarEnrollment ? "•••• " + String(p.aadhaarEnrollment).slice(-4) : null} />
+                    <KV label="PF Number"           value={p.pfNumber} />
+                    <KV label="UAN Number"          value={p.uanNumber} />
+                    <KV label="Biometric ID"        value={p.biometricId} />
                   </Grid3>
+                  <p className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-slate-400">
+                    <ShieldCheck size={12} />
+                    Sensitive data — visible only to HR / CEO / admins.
+                  </p>
                 </DetailCard>
-
-                {(p.leavePlan || p.holidayList || p.weeklyOff || p.attendanceNumber || p.timeTrackingPolicy || p.penalizationPolicy || p.attendanceCaptureScheme || p.costCenter) && (
-                  <DetailCard title="Work Settings">
-                    <Grid3>
-                      <KV label="Leave Plan"                value={p.leavePlan} />
-                      <KV label="Holiday List"              value={p.holidayList} />
-                      <KV label="Weekly Off"                value={p.weeklyOff} />
-                      <KV label="Attendance Number"         value={p.attendanceNumber} />
-                      <KV label="Time Tracking Policy"      value={p.timeTrackingPolicy} />
-                      <KV label="Penalization Policy"       value={p.penalizationPolicy} />
-                      <KV label="Attendance Capture Scheme" value={p.attendanceCaptureScheme} />
-                      <KV label="Cost Center"               value={p.costCenter} />
-                    </Grid3>
-                  </DetailCard>
-                )}
               </div>
             )}
 
-            {activeTab === "Attendance" && (
+            {activeTab === "Job" && (() => {
+              // Keka-style 2-column layout — main job/time/other cards on
+              // the left, the Organization sidebar (manager + reports
+              // chain) on the right. Theme stays slate-on-white to match
+              // the rest of the app.
+              const inProbationLabel = p.employmentType === "intern"
+                ? `Yes${p.joiningDate ? ` (${fmtDate(p.joiningDate)}` : ""}${p.internshipEndDate ? ` – ${fmtDate(p.internshipEndDate)})` : ""}`
+                : "No";
+              const contractRange = (p.joiningDate || p.internshipEndDate)
+                ? `${p.employmentType === "intern" ? "Internship" : "Employed"}${p.joiningDate ? ` · ${fmtDate(p.joiningDate)}` : ""}${p.internshipEndDate ? ` – ${fmtDate(p.internshipEndDate)}` : ""}`
+                : null;
+              return (
+                <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
+                  <div className="space-y-5">
+                    {/* ── Job Details ── 9 fields = clean 3×3 grid.
+                        Pay Band / Pay Grade / the empty filler row were
+                        dropped because we don't track those today. */}
+                    <DetailCard title="Job Details" onEdit={canEdit ? () => setEditSection("job") : undefined}>
+                      <Grid3>
+                        <KV label="Employee Number"        value={p.employeeId} />
+                        <KV label="Date of Joining"        value={fmtDate(p.joiningDate)} />
+                        <KV label="Job Title — Primary"    value={p.designation} />
+                        <KV label="Job Title — Secondary"  value={p.secondaryJobTitle} />
+                        <KV label="In Probation"           value={inProbationLabel} />
+                        <KV label="Notice Period"          value={p.noticePeriodDays != null ? `${p.noticePeriodDays} Days` : null} />
+                        <KV label="Employment Type"        value={p.employmentType === "intern" ? "Intern" : "Regular Employee"} />
+                        <KV label="Time Type"              value="Full Time" />
+                        <KV label="Contract Status"        value={contractRange} />
+                      </Grid3>
+                    </DetailCard>
+
+                    {/* ── Employee Time ── 8 fields flow naturally in a
+                        3-col grid (last row carries the 2 leftover
+                        cells). Shift Weekly Off Rule was dropped — we
+                        don't track per-employee shift exceptions. */}
+                    <DetailCard title="Employee Time" onEdit={canEdit ? () => setEditSection("time") : undefined}>
+                      <Grid3>
+                        <KV label="Shift"                           value="Regular Shift" />
+                        <KV label="Weekly Off Policy"               value={p.weeklyOff} />
+                        <KV label="Leave Plan"                      value={p.leavePlan} />
+                        <KV label="Holiday Calendar"                value={p.holidayList} />
+                        <KV label="Attendance Number"               value={p.attendanceNumber || p.employeeId} />
+                        <KV label="Attendance Time Tracking Policy" value={p.timeTrackingPolicy} />
+                        <KV label="Attendance Penalisation Policy"  value={p.penalizationPolicy} />
+                        <KV label="Attendance Capture Scheme"       value={p.attendanceCaptureScheme} />
+                      </Grid3>
+                    </DetailCard>
+
+                    {/* ── Other ── */}
+                    <DetailCard title="Other" onEdit={canEdit ? () => setEditSection("other") : undefined}>
+                      <Grid3>
+                        <KV label="Biometric"           value={p.biometricId} />
+                        <KV label="Internship End Date" value={fmtDate(p.internshipEndDate)} />
+                        <KV label="Job Location"        value={p.jobLocation} capitalize />
+                      </Grid3>
+                    </DetailCard>
+                  </div>
+
+                  {/* ── Organization sidebar ── */}
+                  <aside className="lg:sticky lg:top-5 self-start">
+                    <DetailCard title="Organization" onEdit={canEdit ? () => setEditSection("org") : undefined}>
+                      <div className="space-y-4">
+                        <KV label="Business Unit"   value={p.businessUnit} />
+                        <KV label="Department"      value={p.department} />
+                        <KV label="Location"        value={p.jobLocation} capitalize />
+                        <KV label="Cost Center"     value={p.costCenter} />
+                        <KV label="Legal Entity"    value={p.legalEntity} />
+
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Reports To</p>
+                          {user.manager ? (
+                            <Link href={`/dashboard/hr/people/${user.manager.id}`} className="mt-1.5 inline-flex items-center gap-2 hover:underline">
+                              {user.manager.profilePictureUrl ? (
+                                <img src={user.manager.profilePictureUrl} alt="" referrerPolicy="no-referrer" className="h-6 w-6 rounded-full object-cover" />
+                              ) : (
+                                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#008CFF]/15 text-[10px] font-bold text-[#008CFF]">
+                                  {user.manager.name?.split(" ").map((p: string) => p[0]).join("").slice(0,2).toUpperCase()}
+                                </span>
+                              )}
+                              <span className="text-[13px] font-medium text-slate-800">{user.manager.name}</span>
+                            </Link>
+                          ) : (
+                            <p className="mt-1 text-[13px] text-slate-800">—</p>
+                          )}
+                        </div>
+
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">L2 Manager</p>
+                          {user.inlineManager ? (
+                            <Link href={`/dashboard/hr/people/${user.inlineManager.id}`} className="mt-1.5 inline-flex items-center gap-2 hover:underline">
+                              {user.inlineManager.profilePictureUrl ? (
+                                <img src={user.inlineManager.profilePictureUrl} alt="" referrerPolicy="no-referrer" className="h-6 w-6 rounded-full object-cover" />
+                              ) : (
+                                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-violet-500/15 text-[10px] font-bold text-violet-600">
+                                  {user.inlineManager.name?.split(" ").map((p: string) => p[0]).join("").slice(0,2).toUpperCase()}
+                                </span>
+                              )}
+                              <span className="text-[13px] font-medium text-slate-800">{user.inlineManager.name}</span>
+                            </Link>
+                          ) : (
+                            <p className="mt-1 text-[13px] text-slate-800">—</p>
+                          )}
+                        </div>
+
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Direct Reports</p>
+                          <p className="mt-1 text-[13px] font-medium text-slate-800">{directReports.length} {directReports.length === 1 ? "Employee" : "Employees"}</p>
+                        </div>
+                      </div>
+                    </DetailCard>
+                  </aside>
+                </div>
+              );
+            })()}
+
+            {activeTab === "Attendance" && (showAttendanceTab ? (
               <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
                 <EmployeeTimePanel userId={userId} userName={user.name} isHRAdmin={isHRAdmin} meDbId={Number(me?.dbId) || null} />
               </section>
-            )}
+            ) : (
+              <section className="rounded-xl border border-slate-200 bg-white p-12 text-center shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
+                <p className="text-[14px] font-semibold text-slate-700">Attendance is private</p>
+                <p className="mt-1 text-[12.5px] text-slate-500">
+                  Only the employee, their direct manager, and HR-admins can view this tab.
+                </p>
+              </section>
+            ))}
 
             {activeTab === "Documents" && (
               <DocumentsPanel profile={p} documents={user.documents || []} />
@@ -599,20 +756,23 @@ export default function EmployeeDetailPage() {
             )}
           </main>
 
-          {/* ── Right rail: Reporting Team (sticky on lg+) ── */}
-          <aside className="lg:sticky lg:top-6 lg:self-start">
-            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="inline-flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wide text-slate-800">
-                  <UsersIcon size={14} className="text-[#008CFF]" />
-                  Reporting Team
-                </h3>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-slate-500">
-                  {directReports.length}
-                </span>
-              </div>
+          {/* ── Right rail: Reporting Team — only rendered when at least
+              one person actually reports to this user. Hides the "0
+              direct reports" empty card so the rail collapses for
+              non-managers (e.g. ICs / interns). */}
+          {directReports.length > 0 && (
+            <aside className="lg:sticky lg:top-6 lg:self-start">
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="inline-flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wide text-slate-800">
+                    <UsersIcon size={14} className="text-[#008CFF]" />
+                    Reporting Team
+                  </h3>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-slate-500">
+                    {directReports.length}
+                  </span>
+                </div>
 
-              {directReports.length > 0 && (
                 <div className="relative mb-3">
                   <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
@@ -622,28 +782,26 @@ export default function EmployeeDetailPage() {
                     className="h-8 w-full rounded-lg border border-slate-200 bg-white pl-8 pr-3 text-[12px] text-slate-800 placeholder-slate-400 focus:border-[#008CFF] focus:outline-none"
                   />
                 </div>
-              )}
 
-              <div className="space-y-1">
-                {filteredReports.length > 0 ? filteredReports.map((member: any) => (
-                  <Link key={member.id} href={`/dashboard/hr/people/${member.id}`}
-                    className="flex items-center gap-2.5 rounded-lg px-2 py-2 transition-colors hover:bg-slate-50">
-                    <Avatar url={member.profilePictureUrl} name={member.name} size={32} fontSize={11} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[12.5px] font-semibold text-slate-800">{member.name}</p>
-                      <p className="truncate text-[10.5px] text-slate-500">
-                        {getUserRoleLabel(member.role) || "Team Member"}
-                      </p>
-                    </div>
-                  </Link>
-                )) : (
-                  <p className="py-6 text-center text-[12px] text-slate-500">
-                    {directReports.length === 0 ? "No direct reports" : "No matches"}
-                  </p>
-                )}
+                <div className="space-y-1">
+                  {filteredReports.length > 0 ? filteredReports.map((member: any) => (
+                    <Link key={member.id} href={`/dashboard/hr/people/${member.id}`}
+                      className="flex items-center gap-2.5 rounded-lg px-2 py-2 transition-colors hover:bg-slate-50">
+                      <Avatar url={member.profilePictureUrl} name={member.name} size={32} fontSize={11} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[12.5px] font-semibold text-slate-800">{member.name}</p>
+                        <p className="truncate text-[10.5px] text-slate-500">
+                          {getUserRoleLabel(member.role) || "Team Member"}
+                        </p>
+                      </div>
+                    </Link>
+                  )) : (
+                    <p className="py-6 text-center text-[12px] text-slate-500">No matches</p>
+                  )}
+                </div>
               </div>
-            </div>
-          </aside>
+            </aside>
+          )}
         </div>
       </div>
 
@@ -651,6 +809,263 @@ export default function EmployeeDetailPage() {
           canonical edit surface. ProfileEditModal stays defined below
           for now (no longer mounted) and can be removed in a follow-up
           cleanup once the new tab is verified in production. */}
+
+      {/* ── PROFILE-tab section editors (HR-admin only) ──────────────── */}
+      {editSection && canEdit && (() => {
+        const close = (saved: boolean) => {
+          setEditSection(null);
+          if (saved) mutate(`/api/hr/people/${userId}`);
+        };
+        const dateISO = (v: any): string => {
+          if (!v) return "";
+          if (typeof v === "string") return v.slice(0, 10);
+          try { return new Date(v).toISOString().slice(0, 10); } catch { return ""; }
+        };
+        if (editSection === "primary") return (
+          <SectionEditModal
+            userId={userId}
+            title="Primary Details"
+            onClose={close}
+            values={{
+              employeeId: p.employeeId ?? "",
+              firstName:  p.firstName ?? "",
+              middleName: p.middleName ?? "",
+              lastName:   p.lastName ?? "",
+              displayName: user.name ?? "",
+              dateOfBirth: dateISO(p.dateOfBirth),
+              gender:     p.gender ?? "",
+              bloodGroup: p.bloodGroup ?? "",
+              maritalStatus: p.maritalStatus ?? "",
+              nationality: p.nationality ?? "",
+              physicallyHandicapped: p.physicallyHandicapped ?? "No",
+            }}
+            fields={[
+              { key: "employeeId",  label: "HRM No." },
+              { key: "firstName",   label: "First Name" },
+              { key: "middleName",  label: "Middle Name" },
+              { key: "lastName",    label: "Last Name" },
+              { key: "displayName", label: "Display Name", fullWidth: true },
+              { key: "dateOfBirth", label: "Date of Birth", type: "date" },
+              { key: "gender",      label: "Gender", type: "select", options: ["Male", "Female", "Other", "Prefer not to say"] },
+              { key: "bloodGroup",  label: "Blood Group", type: "select", options: ["A+","A-","B+","B-","O+","O-","AB+","AB-"] },
+              { key: "maritalStatus", label: "Marital Status", type: "select", options: ["Single","Married","Divorced","Widowed"] },
+              { key: "nationality", label: "Nationality" },
+              { key: "physicallyHandicapped", label: "Physically Handicapped", type: "select", options: ["No", "Yes"] },
+            ]}
+          />
+        );
+        if (editSection === "contact") return (
+          <SectionEditModal
+            userId={userId}
+            title="Contact Details"
+            onClose={close}
+            values={{
+              personalEmail: p.personalEmail ?? "",
+              phone:         p.phone ?? "",
+              workPhone:     p.workPhone ?? "",
+              homePhone:     p.homePhone ?? "",
+              emergencyPhone: p.emergencyPhone ?? "",
+              emergencyRelationship: p.emergencyRelationship ?? "",
+            }}
+            fields={[
+              { key: "personalEmail", label: "Personal Email", type: "email", fullWidth: true },
+              { key: "phone",         label: "Mobile Number",  type: "tel" },
+              { key: "workPhone",     label: "Work Number",    type: "tel" },
+              { key: "homePhone",     label: "Home Phone",     type: "tel" },
+              { key: "emergencyPhone", label: "Emergency Phone", type: "tel" },
+              { key: "emergencyRelationship", label: "Emergency Relationship", type: "select", options: ["Father","Mother","Spouse","Sibling","Friend","Guardian","Other"] },
+            ]}
+          />
+        );
+        if (editSection === "family") return (
+          <SectionEditModal
+            userId={userId}
+            title="Personal Details & Family"
+            onClose={close}
+            values={{
+              parentName:    p.parentName ?? "",
+              motherName:    p.motherName ?? "",
+              spouseName:    p.spouseName ?? "",
+              childrenNames: p.childrenNames ?? "",
+            }}
+            fields={[
+              { key: "parentName",    label: "Father's Name" },
+              { key: "motherName",    label: "Mother's Name" },
+              { key: "spouseName",    label: "Spouse's Name" },
+              { key: "childrenNames", label: "Children (comma-separated)", fullWidth: true },
+            ]}
+          />
+        );
+        if (editSection === "address") return (
+          <SectionEditModal
+            userId={userId}
+            title="Addresses"
+            hint="Both current and permanent addresses"
+            onClose={close}
+            values={{
+              address:          p.address ?? "",
+              addressLine2:     p.addressLine2 ?? "",
+              city:             p.city ?? "",
+              state:            p.state ?? "",
+              addressPincode:   p.addressPincode ?? "",
+              addressCountry:   p.addressCountry ?? "India",
+              permanentLine1:   p.permanentLine1 ?? "",
+              permanentLine2:   p.permanentLine2 ?? "",
+              permanentCity:    p.permanentCity ?? "",
+              permanentState:   p.permanentState ?? "",
+              permanentPincode: p.permanentPincode ?? "",
+              permanentCountry: p.permanentCountry ?? "India",
+            }}
+            fields={[
+              { key: "address",        label: "Current — Address Line 1", type: "textarea", fullWidth: true },
+              { key: "addressLine2",   label: "Current — Address Line 2", fullWidth: true },
+              { key: "city",           label: "Current — City" },
+              { key: "state",          label: "Current — State" },
+              { key: "addressPincode", label: "Current — Pincode" },
+              { key: "addressCountry", label: "Current — Country" },
+              { key: "permanentLine1", label: "Permanent — Address Line 1", type: "textarea", fullWidth: true },
+              { key: "permanentLine2", label: "Permanent — Address Line 2", fullWidth: true },
+              { key: "permanentCity",  label: "Permanent — City" },
+              { key: "permanentState", label: "Permanent — State" },
+              { key: "permanentPincode", label: "Permanent — Pincode" },
+              { key: "permanentCountry", label: "Permanent — Country" },
+            ]}
+          />
+        );
+        if (editSection === "identity") return (
+          <SectionEditModal
+            userId={userId}
+            title="Identity Information"
+            hint="PAN / Aadhaar are write-only — leave blank to keep the existing value"
+            onClose={close}
+            values={{
+              panNumber: "",
+              aadhaarNumber: "",
+              aadhaarEnrollment: "",
+              pfNumber:   p.pfNumber ?? "",
+              uanNumber:  p.uanNumber ?? "",
+              biometricId: p.biometricId ?? "",
+            }}
+            fields={[
+              { key: "panNumber",        label: "PAN Number (leave blank to keep existing)" },
+              { key: "aadhaarNumber",    label: "Aadhaar Number (leave blank to keep existing)" },
+              { key: "aadhaarEnrollment", label: "Aadhaar Enrollment (leave blank to keep existing)", fullWidth: true },
+              { key: "pfNumber",         label: "PF Number" },
+              { key: "uanNumber",        label: "UAN Number" },
+              { key: "biometricId",      label: "Biometric ID" },
+            ]}
+          />
+        );
+        if (editSection === "job") return (
+          <SectionEditModal
+            userId={userId}
+            title="Job Details"
+            onClose={close}
+            values={{
+              employeeId:        p.employeeId ?? "",
+              joiningDate:       dateISO(p.joiningDate),
+              designation:       p.designation ?? "",
+              secondaryJobTitle: p.secondaryJobTitle ?? "",
+              employmentType:    p.employmentType ?? "fulltime",
+              internshipEndDate: dateISO(p.internshipEndDate),
+              noticePeriodDays:  p.noticePeriodDays != null ? String(p.noticePeriodDays) : "30",
+              probationPolicy:   p.probationPolicy ?? "",
+            }}
+            fields={[
+              { key: "employeeId",        label: "HRM No." },
+              { key: "joiningDate",       label: p.employmentType === "intern" ? "Internship Start Date" : "Date of Joining", type: "date" },
+              { key: "designation",       label: "Job Title — Primary" },
+              { key: "secondaryJobTitle", label: "Job Title — Secondary" },
+              { key: "employmentType",    label: "Employment Type", type: "select", options: [
+                { value: "fulltime", label: "Regular Employee" },
+                { value: "intern",   label: "Intern" },
+              ]},
+              { key: "internshipEndDate", label: "Internship End Date (only when Intern)", type: "date" },
+              { key: "noticePeriodDays",  label: "Notice Period (days)" },
+              { key: "probationPolicy",   label: "Probation Policy" },
+            ]}
+          />
+        );
+        if (editSection === "time") return (
+          <SectionEditModal
+            userId={userId}
+            title="Employee Time"
+            onClose={close}
+            values={{
+              weeklyOff:               p.weeklyOff ?? "",
+              leavePlan:               p.leavePlan ?? "",
+              holidayList:             p.holidayList ?? "",
+              attendanceNumber:        p.attendanceNumber ?? p.employeeId ?? "",
+              timeTrackingPolicy:      p.timeTrackingPolicy ?? "",
+              penalizationPolicy:      p.penalizationPolicy ?? "",
+              attendanceCaptureScheme: p.attendanceCaptureScheme ?? "",
+            }}
+            fields={[
+              { key: "weeklyOff",               label: "Weekly Off Policy", type: "select", options: ["Standard Weekly Off", "Saturday + Sunday", "Sunday Only", "Custom"] },
+              { key: "leavePlan",               label: "Leave Plan",         type: "select", options: ["Regular Leave Plan", "Regular Leave Plan_2026", "Intern Leave Plan", "None"] },
+              { key: "holidayList",             label: "Holiday Calendar",   type: "select", options: ["Default Holiday List", "India Public Holidays"] },
+              { key: "attendanceNumber",        label: "Attendance Number" },
+              { key: "timeTrackingPolicy",      label: "Attendance Time Tracking Policy", type: "select", options: ["On-Site Capture", "Remote Capture", "Hybrid Capture", "None"] },
+              { key: "penalizationPolicy",      label: "Attendance Penalisation Policy",  type: "select", options: ["Default", "Strict", "Lenient", "None"] },
+              { key: "attendanceCaptureScheme", label: "Attendance Capture Scheme",       type: "select", options: ["On-Site", "Remote", "Hybrid"] },
+            ]}
+          />
+        );
+        if (editSection === "other") return (
+          <SectionEditModal
+            userId={userId}
+            title="Other"
+            onClose={close}
+            values={{
+              biometricId:       p.biometricId ?? "",
+              internshipEndDate: dateISO(p.internshipEndDate),
+              jobLocation:       p.jobLocation ?? "",
+            }}
+            fields={[
+              { key: "biometricId",       label: "Biometric ID" },
+              { key: "internshipEndDate", label: "Internship End Date", type: "date" },
+              { key: "jobLocation",       label: "Job Location",        type: "select", options: ["Mohali", "Delhi", "Mumbai", "Remote"] },
+            ]}
+          />
+        );
+        if (editSection === "bios") return (
+          <SectionEditModal
+            userId={userId}
+            title="About / What I love / Hobbies"
+            hint="Free-text bios shown on the ABOUT tab. Leave blank to clear."
+            onClose={close}
+            values={{
+              about:   p.about   ?? "",
+              jobLove: p.jobLove ?? "",
+              hobbies: p.hobbies ?? "",
+            }}
+            fields={[
+              { key: "about",   label: "About",                       type: "textarea", placeholder: "Tell the team a bit about yourself…" },
+              { key: "jobLove", label: "What I love about my job?",   type: "textarea", placeholder: "Share what excites you about your role…" },
+              { key: "hobbies", label: "My interests and hobbies",    type: "textarea", placeholder: "Movies, music, sports, side projects…" },
+            ]}
+          />
+        );
+        if (editSection === "org") return (
+          <SectionEditModal
+            userId={userId}
+            title="Organization"
+            hint="Business Unit and Cost Center are locked to NB Media org-wide. Manager fields stay with the legacy Edit Profile tab (developer-only)."
+            onClose={close}
+            values={{
+              department:    p.department ?? "",
+              jobLocation:   p.jobLocation ?? "",
+              legalEntity:   p.legalEntity ?? "",
+            }}
+            fields={[
+              { key: "department",  label: "Department",   type: "select", options: ["AI", "Editing", "Human Resource", "Management", "Packaging Team", "Quality Assurance", "Research", "Social Media", "Writing"] },
+              { key: "jobLocation", label: "Location",     type: "select", options: ["Mohali", "Delhi", "Mumbai", "Remote"] },
+              { key: "legalEntity", label: "Legal Entity", type: "select", options: ["NB Media Productions"] },
+            ]}
+          />
+        );
+        return null;
+      })()}
     </div>
   );
 }
@@ -707,6 +1122,127 @@ function KV({ label, value, capitalize = false }: { label: string; value?: strin
     <div>
       <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">{label}</p>
       <p className={`mt-1 text-[13px] text-slate-800 ${capitalize ? "capitalize" : ""}`}>{value || "—"}</p>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PROFILE-tab per-section edit modal — HR-admin only. Saves via PUT
+//  /api/hr/people/[id], which auto-upserts the EmployeeProfile row.
+// ─────────────────────────────────────────────────────────────────────────────
+type SectionFieldType = "text" | "date" | "select" | "textarea" | "tel" | "email";
+type SectionOption = string | { value: string; label: string };
+type SectionField = {
+  key: string;
+  label: string;
+  type?: SectionFieldType;
+  options?: SectionOption[];
+  placeholder?: string;
+  fullWidth?: boolean;
+};
+function SectionEditModal({
+  title, hint, fields, values, userId, onClose,
+}: {
+  title: string;
+  hint?: string;
+  fields: SectionField[];
+  values: Record<string, string>;
+  userId: number;
+  onClose: (saved: boolean) => void;
+}) {
+  const [form, setForm] = useState<Record<string, string>>(values);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr]       = useState("");
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    setSaving(true); setErr("");
+    try {
+      // Only send keys that are present in the modal's field list — keeps
+      // the patch tight so we never accidentally overwrite a field the
+      // user didn't see.
+      const payload: Record<string, string | null> = {};
+      for (const f of fields) {
+        const v = (form[f.key] ?? "").toString();
+        // Empty string → null so DB clears the column. Modal forms only
+        // ever explicitly type a value or leave it blank.
+        payload[f.key] = v.length > 0 ? v : null;
+      }
+      const res = await fetch(`/api/hr/people/${userId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setErr(d?.error || `Save failed (HTTP ${res.status})`); return; }
+      onClose(true);
+    } catch (e: any) {
+      setErr(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+          <div>
+            <h3 className="text-[14.5px] font-semibold text-slate-800">{title}</h3>
+            {hint && <p className="mt-0.5 text-[11.5px] text-slate-500">{hint}</p>}
+          </div>
+          <button onClick={() => onClose(false)} className="text-slate-400 hover:text-slate-700">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="px-6 py-5 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {fields.map((f) => (
+            <div key={f.key} className={f.fullWidth || f.type === "textarea" ? "sm:col-span-2" : ""}>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">{f.label}</label>
+              {f.type === "date" ? (
+                <SharedDatePicker value={form[f.key] ?? ""} onChange={(v) => set(f.key, v)} />
+              ) : f.type === "select" && f.options ? (
+                <SelectField
+                  value={form[f.key] ?? ""}
+                  onChange={(v) => set(f.key, v)}
+                  options={f.options}
+                  placeholder={f.placeholder ?? "Select…"}
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-800"
+                />
+              ) : f.type === "textarea" ? (
+                <textarea
+                  value={form[f.key] ?? ""}
+                  onChange={(e) => set(f.key, e.target.value)}
+                  rows={2}
+                  placeholder={f.placeholder}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 placeholder-slate-400 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 resize-none"
+                />
+              ) : (
+                <input
+                  type={f.type ?? "text"}
+                  value={form[f.key] ?? ""}
+                  onChange={(e) => set(f.key, e.target.value)}
+                  placeholder={f.placeholder}
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-800 placeholder-slate-400 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15"
+                />
+              )}
+            </div>
+          ))}
+        </div>
+        {err && (
+          <p className="mx-6 mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">{err}</p>
+        )}
+        <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-6 py-3">
+          <button onClick={() => onClose(false)} className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
+          <button
+            onClick={save}
+            disabled={saving}
+            className="h-8 rounded-lg bg-[#3b82f6] px-4 text-[12px] font-semibold text-white hover:bg-[#2563eb] disabled:opacity-60"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1408,6 +1944,11 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
   // submitting a Leave application and granting WFH for the same user
   // without forcing HR to close one modal and open another.
   const [leaveModalTab, setLeaveModalTab] = useState<"leave" | "wfh">("leave");
+  // On-Duty on-behalf modal — standalone small modal that POSTs to the
+  // existing /api/hr/attendance/on-duty endpoint with targetUserId.
+  const [odOpen, setOdOpen] = useState(false);
+  // `date` = From, `toDate` = To. Single-day defaults to date == toDate.
+  const [odForm, setOdForm] = useState<{ date: string; toDate: string; location: string; purpose: string }>({ date: "", toDate: "", location: "", purpose: "" });
   // WFH on-behalf form: `date` is the FROM date, `toDate` is the TO date.
   // The API treats a missing/equal `toDate` as a single-day grant; when a
   // later toDate is supplied (HR-on-behalf only) it grants WFH for every
@@ -1472,13 +2013,24 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
 
   const openWfhFor = (rec: any) => {
     const dateOnly = String(rec.date).slice(0, 10);
+    // Route through the unified Leave + WFH modal with the WFH tab
+    // pre-selected — keeps a single canonical form instead of a
+    // standalone WFH modal that duplicated the same fields.
     setWfhForm({ date: dateOnly, toDate: dateOnly, reason: "" });
+    setLeaveModalTab("wfh");
     setMenuOpenKey(null);
-    setWfhOpen(true);
+    setLeaveOpen(true);
+  };
+  const openOdFor = (rec: any) => {
+    const dateOnly = String(rec.date).slice(0, 10);
+    setOdForm({ date: dateOnly, toDate: dateOnly, location: "", purpose: "" });
+    setMenuOpenKey(null);
+    setOdOpen(true);
   };
   const openLeaveFor = (rec: any) => {
     const dateOnly = String(rec.date).slice(0, 10);
     setLeaveForm({ leaveTypeId: "", fromDate: dateOnly, toDate: dateOnly, reason: "" });
+    setLeaveModalTab("leave");
     setMenuOpenKey(null);
     setLeaveOpen(true);
   };
@@ -1513,6 +2065,31 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { alert(d.error || "Failed to grant WFH"); return; }
       setWfhOpen(false);
+      refreshAttendanceCaches();
+    } finally { setSubmitting(false); }
+  };
+
+  const submitOnDuty = async () => {
+    if (!odForm.date)            { alert("From date is required."); return; }
+    if (!odForm.purpose.trim())  { alert("Purpose is required."); return; }
+    const effectiveTo = odForm.toDate && odForm.toDate >= odForm.date ? odForm.toDate : odForm.date;
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/hr/attendance/on-duty", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetUserId: userId,
+          date:         odForm.date,
+          toDate:       effectiveTo,
+          location:     odForm.location.trim() || undefined,
+          purpose:      odForm.purpose.trim(),
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { alert(d.error || "Failed to submit on-duty request."); return; }
+      setOdOpen(false);
+      setOdForm({ date: "", toDate: "", location: "", purpose: "" });
       refreshAttendanceCaches();
     } finally { setSubmitting(false); }
   };
@@ -1608,8 +2185,179 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
     }
   };
 
+  // ── ME-tab-style top summary widgets ─────────────────────────────────
+  // Computed from the `records` we already fetched so we don't need any
+  // new API calls. Avg hours and on-time arrival % cover the last 7
+  // calendar days. The Mon→Sun pills show this week with the worked
+  // days coloured by status.
+  const istToday = (() => {
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value || "";
+    return `${get("year")}-${get("month")}-${get("day")}`;
+  })();
+  const last7 = (() => {
+    const out: string[] = [];
+    const base = new Date(istToday + "T00:00:00Z");
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(base); d.setUTCDate(d.getUTCDate() - i);
+      out.push(d.toISOString().slice(0, 10));
+    }
+    return out;
+  })();
+  const last7Records = records.filter((r) => last7.includes(String(r.date).slice(0, 10)));
+  // Roll today's LIVE minutes into the 7-day total — the stored
+  // totalMinutes is stale for an ongoing session.
+  const minsFor = (r: any) => {
+    const base = r.totalMinutes || 0;
+    if (String(r.date).slice(0, 10) !== istToday) return base;
+    const sess = Array.isArray(r.sessions) ? r.sessions : [];
+    const open = sess.find((s: any) => !s.clockOut);
+    return open
+      ? base + Math.max(0, Math.floor((now.getTime() - new Date(open.clockIn).getTime()) / 60000))
+      : base;
+  };
+  const workedMins7  = last7Records.reduce((s, r) => s + minsFor(r), 0);
+  const workedDays7  = last7Records.filter((r) => minsFor(r) > 0).length;
+  const avgMins      = workedDays7 > 0 ? Math.round(workedMins7 / workedDays7) : 0;
+  // On-time = clock-in <= 10:00 IST. Same rule as the daily summary email.
+  const onTime7 = last7Records.filter((r) => {
+    if (!r.clockIn) return false;
+    const ist = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(r.clockIn));
+    const [h, m] = ist.split(":").map(Number);
+    return h * 60 + m <= 10 * 60;
+  }).length;
+  const onTimePct = workedDays7 > 0 ? Math.round((onTime7 / workedDays7) * 100) : 0;
+
+  // Mon → Sun this week
+  const weekPills = (() => {
+    const base = new Date(istToday + "T00:00:00Z");
+    const dow = (base.getUTCDay() + 6) % 7; // Mon=0 ... Sun=6
+    const monday = new Date(base); monday.setUTCDate(monday.getUTCDate() - dow);
+    const labels = ["M", "T", "W", "T", "F", "S", "S"];
+    return labels.map((lbl, i) => {
+      const d = new Date(monday); d.setUTCDate(d.getUTCDate() + i);
+      const iso = d.toISOString().slice(0, 10);
+      const rec = records.find((r) => String(r.date).slice(0, 10) === iso);
+      const isToday = iso === istToday;
+      const status: "today" | "present" | "absent" | "off" | "future" =
+        isToday ? "today" :
+        iso > istToday ? "future" :
+        (i >= 5) ? "off" :  // Sat/Sun
+        rec?.clockIn ? "present" : "absent";
+      return { lbl, status };
+    });
+  })();
+  const pillColor = (s: string) =>
+    s === "today"   ? "bg-[#008CFF] text-white" :
+    s === "present" ? "bg-emerald-100 text-emerald-700" :
+    s === "absent"  ? "bg-rose-100 text-rose-600" :
+    s === "off"     ? "bg-slate-100 text-slate-500" :
+                      "bg-slate-50 text-slate-400";
+
   return (
     <section>
+      {/* ── Top summary row — Stats · Timings · Actions ───────────── */}
+      {(() => {
+        // Today's record + LIVE minute count for ongoing sessions.
+        // Mirrors the per-row table logic so the cards stay in sync
+        // with the "Today" row below.
+        const todayRec = records.find((r) => String(r.date).slice(0, 10) === istToday);
+        const todaySessions = Array.isArray(todayRec?.sessions) ? todayRec!.sessions as any[] : [];
+        const openSess = todaySessions.find((s) => !s.clockOut);
+        const baseTodayMins = todayRec?.totalMinutes ?? 0;
+        const liveTodayMins = openSess
+          ? baseTodayMins + Math.max(0, Math.floor((now.getTime() - new Date(openSess.clockIn).getTime()) / 60000))
+          : baseTodayMins;
+        const fmtIstHM = (instant: any) => instant
+          ? new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(instant))
+          : null;
+        const effMins   = liveTodayMins;
+        const grossMins = liveTodayMins; // gross == effective for now (no break tracking)
+        const todayIn   = fmtIstHM(todayRec?.clockIn);
+        const todayOut  = fmtIstHM(todayRec?.clockOut);
+        // 9 AM → 6 PM standard workday → progress bar fill % based on
+        // worked minutes vs 9h target.
+        const workdayMins = 9 * 60;
+        const progressPct = Math.min(100, Math.round((effMins / workdayMins) * 100));
+        return (
+          <div className="mb-5 grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* ── Attendance Stats ── */}
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <p className="text-[13px] font-semibold text-slate-800">Attendance Stats</p>
+              <p className="mt-0.5 text-[11px] text-slate-500">Last 7 Days</p>
+              <div className="mt-3 grid grid-cols-[1fr_auto_auto] gap-x-3 items-end pb-2 border-b border-slate-100">
+                <span />
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Avg Hrs/Day</span>
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 text-right">On Time</span>
+              </div>
+              <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 items-center py-3 border-b border-slate-100">
+                <span className="inline-flex items-center gap-2">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 text-[10px] font-bold">
+                    {userName?.split(" ").map((p: string) => p[0]).join("").slice(0,2).toUpperCase()}
+                  </span>
+                  <span className="text-[12.5px] font-semibold text-slate-700">{isSelfView ? "Me" : userName}</span>
+                </span>
+                <span className="text-[13px] font-bold tabular-nums text-slate-800">{fmtMins(avgMins)}</span>
+                <span className="text-[13px] font-bold tabular-nums text-slate-800 text-right">{onTimePct}%</span>
+              </div>
+            </div>
+
+            {/* ── Timings ── */}
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <p className="text-[13px] font-semibold text-slate-800">Timings</p>
+              <div className="mt-3 flex items-center justify-between gap-1">
+                {weekPills.map((p, i) => (
+                  <span key={i} className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold ${pillColor(p.status)}`}>
+                    {p.lbl}
+                  </span>
+                ))}
+              </div>
+              <p className="mt-3 text-[11.5px] text-slate-500">Today (9:00 AM – 6:00 PM)</p>
+              <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                <div className="h-full bg-[#008CFF] rounded-full transition-all" style={{ width: `${progressPct}%` }} />
+              </div>
+              <div className="mt-1.5 flex items-center justify-between text-[10.5px] text-slate-500">
+                <span>Duration: <strong className="text-slate-700">{fmtMins(effMins)}</strong></span>
+                <span>{todayRec?.clockIn ? `In: ${todayIn}${todayOut ? ` · Out: ${todayOut}` : ""}` : "not clocked in"}</span>
+              </div>
+            </div>
+
+            {/* ── Actions ── */}
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <p className="text-[13px] font-semibold text-slate-800">Actions</p>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {today.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })}
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-x-3 text-[11px] text-slate-500">
+                <span>Effective: <strong className="text-slate-800">{fmtMins(effMins)}</strong></span>
+                <span>Gross: <strong className="text-slate-800">{fmtMins(grossMins)}</strong></span>
+              </div>
+              {(isHRAdmin || isSelfView) && (
+                <div className="mt-3 grid grid-cols-2 gap-1.5">
+                  <button onClick={() => { setLeaveOpen(true); setLeaveModalTab("wfh"); }} className="inline-flex items-center gap-1.5 rounded-md text-[12px] font-medium text-[#008CFF] hover:underline justify-start">
+                    <Home size={12} /> Work From Home
+                  </button>
+                  <button onClick={() => setOdOpen(true)} className="inline-flex items-center gap-1.5 rounded-md text-[12px] font-medium text-[#008CFF] hover:underline justify-start">
+                    <Briefcase size={12} /> On Duty
+                  </button>
+                  <button onClick={() => setRegOpen(true)} className="inline-flex items-center gap-1.5 rounded-md text-[12px] font-medium text-[#008CFF] hover:underline justify-start">
+                    <ShieldCheck size={12} /> Regularization
+                  </button>
+                  <button onClick={() => { setLeaveOpen(true); setLeaveModalTab("leave"); }} className="inline-flex items-center gap-1.5 rounded-md text-[12px] font-medium text-[#008CFF] hover:underline justify-start">
+                    <Coffee size={12} /> Apply Leave
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Logs & Requests sub-tabs (visual parity with the ME tab) ── */}
+      <div className="mb-3 flex items-center justify-between border-b border-slate-100 px-1">
+        <p className="text-[13px] font-semibold text-slate-800">Logs &amp; Requests</p>
+      </div>
+
       {/* Period bar */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3 px-1">
         <h3 className="text-[14px] font-semibold text-slate-800">{periodLabel}</h3>
@@ -1976,6 +2724,13 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                               </button>
                               <button
                                 type="button"
+                                onClick={() => openOdFor(rec)}
+                                className="block w-full px-3 py-2 text-slate-700 hover:bg-sky-50 hover:text-sky-700 border-t border-slate-100"
+                              >
+                                On Duty
+                              </button>
+                              <button
+                                type="button"
                                 onClick={() => openLeaveFor(rec)}
                                 className="block w-full px-3 py-2 text-slate-700 hover:bg-sky-50 hover:text-sky-700 border-t border-slate-100"
                               >
@@ -2032,7 +2787,7 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
 
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  Reason <span className="text-rose-500">*</span> <span className="font-normal normal-case tracking-normal text-slate-400">(visible in audit log)</span>
+                  Reason <span className="text-rose-500">*</span>
                 </label>
                 <textarea
                   value={regForm.reason}
@@ -2068,30 +2823,113 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
       ) : null}
 
       {/* ── HR on-behalf: WFH modal ───────────────────────────────────── */}
+      {/* ── HR on-behalf: On Duty modal ────────────────────────────── */}
+      {odOpen && isHRAdmin ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <div>
+                <h3 className="text-[14px] font-semibold text-slate-800">Submit On Duty</h3>
+                <p className="text-[11.5px] text-slate-500">For {userName}</p>
+              </div>
+              <button onClick={() => setOdOpen(false)} className="text-slate-400 hover:text-slate-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-3 px-5 py-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">From</label>
+                  <DateField
+                    value={odForm.date}
+                    onChange={(v) => setOdForm((f) => ({ ...f, date: v, toDate: f.toDate && f.toDate >= v ? f.toDate : v }))}
+                    className="mt-1 w-full"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">To</label>
+                  <DateField
+                    value={odForm.toDate}
+                    onChange={(v) => setOdForm((f) => ({ ...f, toDate: v }))}
+                    className="mt-1 w-full"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Location <span className="font-normal normal-case tracking-normal text-slate-400">(optional)</span></label>
+                <input
+                  value={odForm.location}
+                  onChange={(e) => setOdForm((f) => ({ ...f, location: e.target.value }))}
+                  placeholder="e.g. Client office, Mumbai"
+                  className="mt-1 h-9 w-full rounded border border-slate-200 px-2.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Purpose <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  value={odForm.purpose}
+                  onChange={(e) => setOdForm((f) => ({ ...f, purpose: e.target.value }))}
+                  rows={3}
+                  placeholder="Why is on-duty being submitted on behalf?"
+                  className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+              <button
+                onClick={() => setOdOpen(false)}
+                className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitOnDuty}
+                disabled={submitting || !odForm.date || !odForm.purpose.trim()}
+                className="h-8 rounded bg-[#008CFF] px-4 text-[12px] font-semibold text-white hover:bg-[#0070d4] disabled:opacity-60"
+              >
+                {submitting ? "Submitting…" : "Submit On Duty"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {wfhOpen && isHRAdmin ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <div>
                 <h3 className="text-[14px] font-semibold text-slate-800">Grant Work From Home</h3>
-                <p className="text-[11.5px] text-slate-500">For {userName} · routed through L1 → L2</p>
+                <p className="text-[11.5px] text-slate-500">For {userName}</p>
               </div>
               <button onClick={() => setWfhOpen(false)} className="text-slate-400 hover:text-slate-700">
                 <X className="h-4 w-4" />
               </button>
             </div>
             <div className="space-y-3 px-5 py-4">
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Date</label>
-                <DateField
-                  value={wfhForm.date}
-                  onChange={(v) => setWfhForm((f) => ({ ...f, date: v }))}
-                  className="mt-1 w-full"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">From</label>
+                  <DateField
+                    value={wfhForm.date}
+                    onChange={(v) => setWfhForm((f) => ({ ...f, date: v, toDate: f.toDate && f.toDate >= v ? f.toDate : v }))}
+                    className="mt-1 w-full"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">To</label>
+                  <DateField
+                    value={wfhForm.toDate}
+                    onChange={(v) => setWfhForm((f) => ({ ...f, toDate: v }))}
+                    className="mt-1 w-full"
+                  />
+                </div>
               </div>
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  Reason <span className="text-rose-500">*</span> <span className="font-normal normal-case tracking-normal text-slate-400">(visible in audit log)</span>
+                  Reason <span className="text-rose-500">*</span>
                 </label>
                 <textarea
                   value={wfhForm.reason}
@@ -2100,9 +2938,6 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                   placeholder="Why is WFH being granted on behalf?"
                   className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
                 />
-              </div>
-              <div className="rounded bg-[#008CFF]/10 px-3 py-2 text-[11.5px] text-[#0064b6] ring-1 ring-inset ring-[#008CFF]/30">
-                HR on-behalf WFH goes through <strong>normal approval</strong> — lands in {userName}&apos;s manager&apos;s L1 queue, then CEO/HR finalises.
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
@@ -2133,12 +2968,7 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                 <h3 className="text-[14px] font-semibold text-slate-800">
                   {leaveModalTab === "leave" ? "Apply Leave on behalf" : "Grant Work From Home"}
                 </h3>
-                <p className="text-[11.5px] text-slate-500">
-                  For {userName}{" "}
-                  {leaveModalTab === "leave"
-                    ? "· routed through L1 → L2 · LWP fallback enabled"
-                    : "· routed through L1 → L2 · weekends skipped"}
-                </p>
+                <p className="text-[11.5px] text-slate-500">For {userName}</p>
               </div>
               <button onClick={() => setLeaveOpen(false)} className="text-slate-400 hover:text-slate-700">
                 <X className="h-4 w-4" />
@@ -2187,7 +3017,6 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                         {targetBalances[Number(leaveForm.leaveTypeId)].toFixed(1)} day{targetBalances[Number(leaveForm.leaveTypeId)] === 1 ? "" : "s"}
                       </span>{" "}
                       available in this type.
-                      {targetBalances[Number(leaveForm.leaveTypeId)] <= 0 && " LWP fallback will kick in."}
                     </p>
                   )}
                 </div>
@@ -2211,7 +3040,7 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                 </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Reason <span className="text-rose-500">*</span> <span className="font-normal normal-case tracking-normal text-slate-400">(visible in audit log)</span>
+                    Reason <span className="text-rose-500">*</span>
                   </label>
                   <textarea
                     value={leaveForm.reason}
@@ -2220,9 +3049,6 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                     placeholder="Why is leave being granted on behalf?"
                     className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
                   />
-                </div>
-                <div className="rounded bg-[#008CFF]/10 px-3 py-2 text-[11.5px] text-[#0064b6] ring-1 ring-inset ring-[#008CFF]/30">
-                  HR on-behalf leave goes through <strong>normal approval</strong> — lands in {userName}&apos;s manager&apos;s L1 queue, then CEO/HR finalises. If the selected leave type has no balance, the system falls back to Leave Without Pay automatically.
                 </div>
               </div>
             ) : (
@@ -2247,7 +3073,7 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                 </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Reason <span className="text-rose-500">*</span> <span className="font-normal normal-case tracking-normal text-slate-400">(visible in audit log)</span>
+                    Reason <span className="text-rose-500">*</span>
                   </label>
                   <textarea
                     value={wfhForm.reason}
@@ -2256,9 +3082,6 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                     placeholder="Why is WFH being granted on behalf?"
                     className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
                   />
-                </div>
-                <div className="rounded bg-[#008CFF]/10 px-3 py-2 text-[11.5px] text-[#0064b6] ring-1 ring-inset ring-[#008CFF]/30">
-                  HR on-behalf WFH goes through <strong>normal approval</strong> — lands in {userName}&apos;s manager&apos;s L1 queue, then CEO/HR finalises. Multi-day ranges create one request per working day (weekends skipped).
                 </div>
               </div>
             )}

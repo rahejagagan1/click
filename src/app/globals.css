@@ -321,6 +321,15 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.25);
 }
 
+/* Hide the little ▲▼ arrow buttons that Chromium/Brave render at the
+   top/bottom of scrollbar tracks. Pure-thumb scrollbars look cleaner
+   and match the rest of the app's minimal aesthetic. */
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* ═══════════════════════════════════════════════
    DARK MODE — lighten hardcoded near-black colours
    ═══════════════════════════════════════════════ */

@@ -128,7 +128,7 @@ export default function ProfilePage() {
     setProfileSeen(true);
     try { window.localStorage.setItem(PROFILE_SEEN_KEY, "1"); } catch {}
   }, [tab, profileSeen]);
-  const [editModal, setEditModal] = useState<null | "primary" | "contact" | "address" | "emergency" | "photo">(null);
+  const [editModal, setEditModal] = useState<null | "primary" | "contact" | "address" | "emergency" | "family" | "photo">(null);
   const [bioAbout, setBioAbout] = useState("");
   const [bioLove, setBioLove]   = useState("");
   const [bioHobbies, setBioHobbies] = useState("");
@@ -149,6 +149,11 @@ export default function ProfilePage() {
     address: "", city: "", state: "",
     profilePictureUrl: "",
     personalEmail: "", workPhone: "",
+    // Family + emergency-contact — self-edited from the ABOUT tab
+    // (used to be HR-onboarded).
+    physicallyHandicapped: "",
+    parentName: "", motherName: "", spouseName: "", childrenNames: "",
+    emergencyRelationship: "",
     // Onboarding-set fields — read-only on the profile but surfaced
     // here so the UI can show them right away without a separate fetch.
     employeeId: "", firstName: "", middleName: "", lastName: "",
@@ -172,6 +177,14 @@ export default function ProfilePage() {
         emergencyPhone: p.emergencyPhone ?? "",
         address: p.address ?? "", city: p.city ?? "", state: p.state ?? "",
         profilePictureUrl: profile.profilePictureUrl ?? "",
+        // Family + emergency (self-edited from the ABOUT tab). The
+        // legacy column for "Father Name" is `parentName`.
+        physicallyHandicapped: p.physicallyHandicapped ?? "",
+        parentName: p.parentName ?? "",
+        motherName: p.motherName ?? "",
+        spouseName: p.spouseName ?? "",
+        childrenNames: p.childrenNames ?? "",
+        emergencyRelationship: p.emergencyRelationship ?? "",
         // Onboarding-set fields straight from the EmployeeProfile row.
         employeeId: p.employeeId ?? "",
         firstName: p.firstName ?? "", middleName: p.middleName ?? "", lastName: p.lastName ?? "",
@@ -405,6 +418,51 @@ export default function ProfilePage() {
                   ))}
                 </div>
               </div>
+
+              {/* Family — self-edited (moved here from the HR onboarding wizard) */}
+              <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-[14px] font-semibold text-slate-800 dark:text-white">Personal Details &amp; Family</h3>
+                  <button onClick={() => setEditModal("family")} className="text-[12px] font-medium text-[#008CFF] hover:underline flex items-center gap-1">
+                    <Pencil size={12} /> Edit
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                  {[
+                    { label: "PHYSICALLY HANDICAPPED", value: form.physicallyHandicapped },
+                    { label: "FATHER NAME",            value: form.parentName },
+                    { label: "MOTHER NAME",            value: form.motherName },
+                    { label: "SPOUSE NAME",            value: form.spouseName },
+                    { label: "CHILDREN NAMES",         value: form.childrenNames },
+                  ].map(f => (
+                    <div key={f.label}>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wider">{f.label}</p>
+                      <p className="text-[13px] text-slate-700 dark:text-slate-200 font-medium mt-0.5">{f.value || "—"}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Emergency Contact — self-edited */}
+              <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-[14px] font-semibold text-slate-800 dark:text-white">Emergency Contact</h3>
+                  <button onClick={() => setEditModal("emergency")} className="text-[12px] font-medium text-[#008CFF] hover:underline flex items-center gap-1">
+                    <Pencil size={12} /> Edit
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                  {[
+                    { label: "RELATIONSHIP",  value: form.emergencyRelationship },
+                    { label: "CONTACT PHONE", value: form.emergencyPhone },
+                  ].map(f => (
+                    <div key={f.label}>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wider">{f.label}</p>
+                      <p className="text-[13px] text-slate-700 dark:text-slate-200 font-medium mt-0.5">{f.value || "—"}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
 
             {/* Right */}
@@ -450,10 +508,8 @@ export default function ProfilePage() {
                   Primary Details
                   <span className="text-[10px] text-slate-400">(i)</span>
                 </h3>
-                <button onClick={() => setEditModal("primary")}
-                  className="text-[12px] font-medium text-[#008CFF] hover:underline flex items-center gap-1">
-                  <Pencil size={12} /> Edit
-                </button>
+                {/* Read-only for the employee — HR-admin edits these via
+                    /dashboard/hr/people/[id] → PROFILE tab. */}
               </div>
               <div className="px-5 py-4 grid grid-cols-3 gap-x-8 gap-y-4">
                 {[
@@ -476,7 +532,7 @@ export default function ProfilePage() {
             <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
               <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 dark:border-white/[0.05]">
                 <h3 className="text-[13px] font-semibold text-slate-800 dark:text-white flex items-center gap-2">Contact Details <span className="text-[10px] text-slate-400">(i)</span></h3>
-                <button onClick={() => setEditModal("contact")} className="text-[12px] font-medium text-[#008CFF] hover:underline flex items-center gap-1"><Pencil size={12} /> Edit</button>
+                {/* Read-only — HR-admin edits these. */}
               </div>
               <div className="px-5 py-4 grid grid-cols-3 gap-x-8 gap-y-4">
                 {[
@@ -497,7 +553,7 @@ export default function ProfilePage() {
             <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
               <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 dark:border-white/[0.05]">
                 <h3 className="text-[13px] font-semibold text-slate-800 dark:text-white">Addresses</h3>
-                <button onClick={() => setEditModal("address")} className="text-[12px] font-medium text-[#008CFF] hover:underline flex items-center gap-1"><Pencil size={12} /> Edit</button>
+                {/* Read-only — HR-admin edits these. */}
               </div>
               <div className="px-5 py-4 grid grid-cols-3 gap-x-8 gap-y-4">
                 {[
@@ -517,7 +573,7 @@ export default function ProfilePage() {
             <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
               <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 dark:border-white/[0.05]">
                 <h3 className="text-[13px] font-semibold text-slate-800 dark:text-white">Profile Picture</h3>
-                <button onClick={() => setEditModal("photo")} className="text-[12px] font-medium text-[#008CFF] hover:underline flex items-center gap-1"><Pencil size={12} /> Edit</button>
+                {/* Read-only — sourced from Google sign-in or set by HR. */}
               </div>
               <div className="px-5 py-4 flex items-center gap-4">
                 <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#008CFF] to-[#0055bb] flex items-center justify-center text-white text-lg font-bold overflow-hidden">
@@ -692,6 +748,38 @@ export default function ProfilePage() {
         <EditModal title="Profile Picture URL" onClose={() => setEditModal(null)}
           fields={[{ key: "profilePictureUrl", label: "Image URL" }]}
           values={{ profilePictureUrl: form.profilePictureUrl }}
+          onSave={save}
+        />
+      )}
+      {editModal === "family" && (
+        <EditModal title="Personal Details & Family" onClose={() => setEditModal(null)}
+          fields={[
+            { key: "physicallyHandicapped", label: "Physically Handicapped", options: ["No", "Yes"] },
+            { key: "parentName",            label: "Father Name" },
+            { key: "motherName",            label: "Mother Name" },
+            { key: "spouseName",            label: "Spouse Name" },
+            { key: "childrenNames",         label: "Children Names", fullWidth: true },
+          ]}
+          values={{
+            physicallyHandicapped: form.physicallyHandicapped || "No",
+            parentName:            form.parentName,
+            motherName:            form.motherName,
+            spouseName:            form.spouseName,
+            childrenNames:         form.childrenNames,
+          }}
+          onSave={save}
+        />
+      )}
+      {editModal === "emergency" && (
+        <EditModal title="Emergency Contact" onClose={() => setEditModal(null)}
+          fields={[
+            { key: "emergencyRelationship", label: "Relationship", options: ["Father", "Mother", "Spouse", "Sibling", "Friend", "Guardian", "Other"] },
+            { key: "emergencyPhone",        label: "Contact Phone", type: "tel" },
+          ]}
+          values={{
+            emergencyRelationship: form.emergencyRelationship,
+            emergencyPhone:        form.emergencyPhone,
+          }}
           onSave={save}
         />
       )}

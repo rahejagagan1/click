@@ -6,6 +6,7 @@ import { fetcher } from "@/lib/swr";
 import { Search, Sparkles, Plus, Minus, X, CalendarPlus, AlertTriangle, Home, Clock } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 import SelectField from "@/components/ui/SelectField";
+import PopupPanel from "@/components/ui/PopupPanel";
 
 type LeaveTypeRow = { id: number; name: string; code: string; daysPerYear: number; applicable?: boolean };
 type Bal          = { id: number | null; total: number; used: number; pending: number };
@@ -629,11 +630,6 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                 <h3 className="text-[15px] font-bold text-slate-800">
                   Apply {applyMode === "wfh" ? "WFH" : "Leave"} on behalf
                 </h3>
-                <p className="mt-0.5 text-[11.5px] text-slate-500">
-                  {applyMode === "wfh"
-                    ? "Goes through normal approval — lands in the manager's L1 queue, then CEO/HR finalises. Weekends are skipped on multi-day ranges."
-                    : "Goes through normal approval — lands in the manager's L1 queue. If balance is insufficient and LWP fallback is on, switches to Leave Without Pay."}
-                </p>
               </div>
               <button onClick={() => !applyBusy && setApplyOpen(false)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
                 <X size={16} />
@@ -692,8 +688,13 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                     placeholder="Search by name or email…"
                     className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
                   />
-                  {empOpen && (
-                    <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
+                  <PopupPanel
+                    open={empOpen}
+                    triggerRef={empPickerRef}
+                    onClose={() => setEmpOpen(false)}
+                    maxHeight={288}
+                    className="bg-white border border-slate-200 rounded-lg shadow-2xl overflow-y-auto"
+                  >
                       {filteredEmps.length === 0 ? (
                         <p className="px-3 py-2.5 text-[12.5px] text-slate-500">
                           {empQuery ? "No matching employees." : "No active employees."}
@@ -720,8 +721,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                           );
                         })
                       )}
-                    </div>
-                  )}
+                  </PopupPanel>
                 </div>
               </div>
 

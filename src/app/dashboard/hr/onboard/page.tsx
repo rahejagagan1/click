@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import { useRouter } from "next/navigation";
@@ -9,6 +9,7 @@ import { JOB_TITLES } from "@/lib/job-titles";
 import { DEPARTMENTS } from "@/lib/departments";
 import CustomSelect from "@/components/ui/CustomSelect";
 import SelectField from "@/components/ui/SelectField";
+import PopupPanel from "@/components/ui/PopupPanel";
 import KekaImportModal from "@/components/hr/KekaImportModal";
 import type { KekaRow, KekaFormPatch } from "@/lib/keka-import";
 import { Upload as UploadIcon } from "lucide-react";
@@ -318,6 +319,7 @@ export default function OnboardEmployeePage() {
   const [lookup, setLookup] = useState<LookupBanner>({ kind: "idle" });
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const emailFieldRef = useRef<HTMLDivElement>(null);
 
   // Pull the active EmployeeNumberSeries so the form can show the
   // next-allocatable employee number as a hint ("Next: HRM47").
@@ -813,15 +815,20 @@ export default function OnboardEmployeePage() {
             <SectionTitle>Contact Details</SectionTitle>
             <Grid>
               <Field label="Work Email" required>
-                <div className="relative">
+                <div className="relative" ref={emailFieldRef}>
                   <Input
                     type="email"
                     v={form.workEmail}
                     set={(v) => { set("workEmail", v); setShowSuggestions(true); }}
                     placeholder="Type a name or email…"
                   />
-                  {showSuggestions && suggestions.length > 0 && (
-                    <ul className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-white/[0.08] dark:bg-[#0a1526]">
+                  <PopupPanel
+                    open={showSuggestions && suggestions.length > 0}
+                    triggerRef={emailFieldRef}
+                    maxHeight={264}
+                    className="rounded-lg border border-slate-200 bg-white shadow-2xl overflow-y-auto dark:border-white/[0.08] dark:bg-[#0a1526]"
+                  >
+                    <ul>
                       {suggestions.map((u: any) => {
                         const initials = String(u.name ?? "?")
                           .split(" ").map((p: string) => p[0]).join("").slice(0, 2).toUpperCase();
@@ -850,7 +857,7 @@ export default function OnboardEmployeePage() {
                         );
                       })}
                     </ul>
-                  )}
+                  </PopupPanel>
                 </div>
                 {lookup.kind === "loading" && suggestions.length === 0 && (
                   <p className="mt-1.5 text-[11px] text-slate-400">Searching…</p>
@@ -889,46 +896,10 @@ export default function OnboardEmployeePage() {
           </StepCard>
         )}
 
-        {step === 1 && (
-          <StepCard title="Personal Details & Family">
-            <Grid>
-              <Field label="Marital Status">
-                <Select v={form.maritalStatus} set={v => set("maritalStatus", v)} opts={["", "Single", "Married", "Divorced", "Widowed"]} />
-              </Field>
-              <Field label="Blood Group">
-                <Select v={form.bloodGroup} set={v => set("bloodGroup", v)} opts={["", "A+ (A Positive)", "A- (A Negative)", "B+ (B Positive)", "B- (B Negative)", "AB+ (AB Positive)", "AB- (AB Negative)", "O+ (O Positive)", "O- (O Negative)", "Not Available"]} />
-              </Field>
-              <Field label="Physically Handicapped">
-                <Select v={form.physicallyHandicapped} set={v => set("physicallyHandicapped", v)} opts={["No", "Yes"]} />
-              </Field>
-              <Field label="Father Name">
-                <Input v={form.fatherName} set={v => set("fatherName", v)} placeholder="As printed on PAN card" />
-              </Field>
-              <Field label="Mother Name">
-                <Input v={form.motherName} set={v => set("motherName", v)} placeholder="Mother's full name" />
-              </Field>
-              <Field label="Spouse Name">
-                <Input v={form.spouseName} set={v => set("spouseName", v)} placeholder="If applicable" />
-              </Field>
-              <Field label="Children Names" hint="Comma-separated if multiple">
-                <Input v={form.childrenNames} set={v => set("childrenNames", v)} placeholder="e.g. Ria, Rohan" />
-              </Field>
-            </Grid>
-          </StepCard>
-        )}
-
-        {step === 1 && (
-          <StepCard title="Emergency Contact">
-            <Grid cols={2}>
-              <Field label="Relationship">
-                <Select v={form.emergencyRelationship} set={v => set("emergencyRelationship", v)} opts={["", "Father", "Mother", "Spouse", "Sibling", "Friend", "Guardian", "Other"]} />
-              </Field>
-              <Field label="Contact Phone">
-                <Input type="tel" v={form.emergencyPhone} set={v => set("emergencyPhone", v)} placeholder="Phone number" />
-              </Field>
-            </Grid>
-          </StepCard>
-        )}
+        {/* Personal Details & Family + Emergency Contact moved to the
+            employee's own profile page (ABOUT tab) so the employee fills
+            these in themselves rather than HR collecting them at
+            onboarding. */}
 
         {step === 2 && (
           <StepCard title="Employment Details">
@@ -1281,7 +1252,23 @@ export default function OnboardEmployeePage() {
                 <input
                   type="checkbox"
                   checked={sameAsCurrent}
-                  onChange={(e) => setSameAsCurrent(e.target.checked)}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setSameAsCurrent(next);
+                    // Clear permanent fields on uncheck so synced values
+                    // don't linger and look like deliberate input.
+                    if (!next) {
+                      setForm((f) => ({
+                        ...f,
+                        permanentLine1:   "",
+                        permanentLine2:   "",
+                        permanentCity:    "",
+                        permanentState:   "",
+                        permanentPincode: "",
+                        permanentCountry: "India",
+                      }));
+                    }
+                  }}
                   className="h-4 w-4 rounded border-slate-300 text-[#3b82f6] focus:ring-[#3b82f6]/30"
                 />
                 Same as Current Address
