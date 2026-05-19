@@ -101,6 +101,7 @@ export async function POST(request: NextRequest) {
             inlineManagerId,            // optional secondary / dotted-line manager
             inviteToLogin,              // boolean: if true, email a welcome / sign-in link
             enableOnboarding,           // boolean: if true, gate first login behind /onboarding
+            leavePolicyId,              // optional: assign a LeavePolicy at creation
             profile,                    // optional EmployeeProfile payload
             shiftId,                    // optional UserShift assignment
             leaveBalances,              // optional: [{ leaveTypeId, totalDays }] for current year
@@ -163,6 +164,11 @@ export async function POST(request: NextRequest) {
                         ? null
                         : Number(managerId);
                 }
+                if (leavePolicyId !== undefined) {
+                    updateData.leavePolicyId = (leavePolicyId === null || leavePolicyId === "")
+                        ? null
+                        : Number(leavePolicyId);
+                }
                 // Detect role/orgLevel change so we can re-sync tab perms
                 // after the update commits (same logic as Admin → Users
                 // PATCH). Read the pre-update values from the DB so we're
@@ -194,6 +200,7 @@ export async function POST(request: NextRequest) {
                         clickupUserId: resolvedClickupId,
                         teamCapsule: resolvedCapsule,
                         managerId: managerId || null,
+                        leavePolicyId: leavePolicyId == null || leavePolicyId === "" ? null : Number(leavePolicyId),
                     },
                 });
             }
