@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DatePicker } from "@/components/ui/date-picker";
 import SelectField from "@/components/ui/SelectField";
+import PopupPanel from "@/components/ui/PopupPanel";
 
 interface NumberSeries {
     id: number;
@@ -333,6 +334,10 @@ function Page1({
     suggestions: any[];
     onPickSuggestion: (u: any) => void;
 }) {
+    // Local ref so the email autocomplete popup (PopupPanel) can pin to
+    // the input wrapper. Declared inside Page1 because that's where the
+    // JSX lives.
+    const wizardEmailRef = useRef<HTMLDivElement>(null);
     return (
         <div className="space-y-10">
             <section>
@@ -414,7 +419,7 @@ function Page1({
                 <h2 className="text-[17px] font-semibold text-slate-900 dark:text-white mb-6">Contact Details</h2>
                 <div className="grid grid-cols-2 gap-6">
                     <Field label="Work Email" required>
-                        <div className="relative">
+                        <div className="relative" ref={wizardEmailRef}>
                             <input
                                 type="email"
                                 value={form.workEmail}
@@ -426,8 +431,13 @@ function Page1({
                             {/* Autocomplete dropdown — suggests existing
                                 Users matching the search query so HR can
                                 link to them with one click. */}
-                            {suggestions.length > 0 && (
-                                <ul className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-white/[0.08] dark:bg-[#0a1526]">
+                            <PopupPanel
+                                open={suggestions.length > 0}
+                                triggerRef={wizardEmailRef}
+                                maxHeight={264}
+                                className="rounded-lg border border-slate-200 bg-white shadow-2xl overflow-y-auto dark:border-white/[0.08] dark:bg-[#0a1526]"
+                            >
+                                <ul>
                                     {suggestions.map((u: any) => {
                                         const initials = String(u.name ?? "?")
                                             .split(" ").map((p: string) => p[0]).join("").slice(0, 2).toUpperCase();
@@ -458,7 +468,7 @@ function Page1({
                                         );
                                     })}
                                 </ul>
-                            )}
+                            </PopupPanel>
                         </div>
                         {lookup.kind === "loading" && suggestions.length === 0 && (
                             <p className="mt-1.5 text-[11px] text-slate-400">Searching…</p>
