@@ -113,7 +113,14 @@ export default function LeavesPage() {
                       <svg className="w-5 h-5 text-[#008CFF]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
                     </div>
                     {view === "team" && <div className="min-w-[100px]"><span className="text-[10px] text-slate-500 uppercase tracking-wider block">Employee</span><span className="text-[13px] text-slate-800 dark:text-white font-medium">{app.user?.name}</span></div>}
-                    <div className="min-w-[140px]"><span className="text-[10px] text-slate-500 uppercase tracking-wider block">Past Leave</span><span className="text-[13px] text-slate-800 dark:text-white">{new Date(app.fromDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} ({app.totalDays} day{app.totalDays > 1 ? "s" : ""})</span></div>
+                    <div className="min-w-[140px]"><span className="text-[10px] text-slate-500 uppercase tracking-wider block">Leave Dates</span><span className="text-[13px] text-slate-800 dark:text-white">{(() => {
+                      const from = new Date(app.fromDate);
+                      const to   = new Date(app.toDate);
+                      const same = from.toDateString() === to.toDateString();
+                      return same
+                        ? `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} (${app.totalDays} day${app.totalDays > 1 ? "s" : ""})`
+                        : `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} (${app.totalDays} day${app.totalDays > 1 ? "s" : ""})`;
+                    })()}</span></div>
                     <div className="min-w-[120px]"><span className="text-[10px] text-slate-500 uppercase tracking-wider block">Leave Type</span><span className="text-[13px] text-slate-800 dark:text-white">{app.leaveType.name}</span></div>
                     <div className="min-w-[120px]"><span className="text-[10px] text-slate-500 uppercase tracking-wider block">Requested On</span><span className="text-[13px] text-slate-800 dark:text-white">{new Date(app.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span></div>
                     <div className="flex-1"><span className="text-[10px] text-slate-500 uppercase tracking-wider block">Status</span><span className="text-[13px] text-amber-400">Pending</span></div>

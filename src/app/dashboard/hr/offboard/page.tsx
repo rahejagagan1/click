@@ -21,6 +21,7 @@ import {
   UserMinus, Search, AlertCircle, CheckCircle2, X, Save, Paperclip, HelpCircle,
 } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
+import PopupPanel from "@/components/ui/PopupPanel";
 
 type EmpProfile = {
   designation?: string | null;
@@ -205,8 +206,13 @@ function InitiateExitTab() {
                 placeholder="Search by name or email…"
                 className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#0f6ecd]"
               />
-              {open && (
-                <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-80 overflow-y-auto">
+              <PopupPanel
+                open={open}
+                triggerRef={pickerRef}
+                onClose={() => setOpen(false)}
+                maxHeight={320}
+                className="bg-white border border-slate-200 rounded-lg shadow-2xl overflow-y-auto"
+              >
                   {filtered.length === 0 ? (
                     <p className="px-3 py-3 text-[12.5px] text-slate-500">
                       {query ? "No matching employees." : "No active employees."}
@@ -227,8 +233,7 @@ function InitiateExitTab() {
                       </button>
                     ))
                   )}
-                </div>
-              )}
+              </PopupPanel>
             </div>
             <p className="mt-2 text-[11.5px] text-slate-500">
               Select an active employee to open the initiate-exit form.
@@ -709,11 +714,14 @@ function NiceSelect({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
-      {open && (
-        <ul
-          role="listbox"
-          className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-72 overflow-y-auto py-1"
-        >
+      <PopupPanel
+        open={open}
+        triggerRef={ref}
+        onClose={() => setOpen(false)}
+        maxHeight={288}
+        className="bg-white border border-slate-200 rounded-lg shadow-2xl overflow-y-auto py-1"
+      >
+        <ul role="listbox">
           {options.map((opt) => {
             const active = opt === value;
             return (
@@ -735,7 +743,7 @@ function NiceSelect({
             );
           })}
         </ul>
-      )}
+      </PopupPanel>
     </div>
   );
 }
