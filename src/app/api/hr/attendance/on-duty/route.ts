@@ -57,8 +57,11 @@ export async function POST(req: NextRequest) {
     const subjectUserId = onBehalf ? tid! : myId;
 
     // Date range: only HR-on-behalf can grant a multi-day on-duty.
-    // Self-apply ignores `toDate`. Weekends are skipped server-side
-    // so HR can drop a Mon–Fri range without worrying about Sat/Sun.
+    // Self-apply ignores `toDate`. Weekends are INCLUDED — On Duty
+    // explicitly supports Saturday / Sunday work (client visits,
+    // weekend events, etc.). The previous Mon–Fri filter has been
+    // removed so HR can drop a range that spans a weekend and every
+    // day gets a row.
     const fromDate = new Date(date);
     const toDateObj = toDate ? new Date(toDate) : fromDate;
     if (toDateObj.getTime() < fromDate.getTime()) {
@@ -69,12 +72,12 @@ export async function POST(req: NextRequest) {
     }
     const targetDays: Date[] = [];
     for (let cur = new Date(fromDate.getTime()); cur.getTime() <= toDateObj.getTime(); cur.setUTCDate(cur.getUTCDate() + 1)) {
-      const dow = cur.getUTCDay();
-      if (dow === 0 || dow === 6) continue;
       targetDays.push(new Date(cur));
     }
     if (targetDays.length === 0) {
-      return NextResponse.json({ error: "Selected dates are all weekends." }, { status: 400 });
+      // Defensive: only reachable if the date params were malformed
+      // past the validation above. Kept as a safety net.
+      return NextResponse.json({ error: "No valid dates in the selected range." }, { status: 400 });
     }
     const created = await prisma.$transaction(
       targetDays.map((d) => prisma.onDutyRequest.create({
@@ -93,15 +96,24 @@ export async function POST(req: NextRequest) {
     const requester = await prisma.user.findUnique({ where: { id: subjectUserId }, select: { name: true } });
     const fmt = (d: Date) => d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
     const dateLabel = isRange ? `${fmt(fromDate)} – ${fmt(toDateObj)} (${created.length} day${created.length === 1 ? "" : "s"})` : new Date(date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-    // Structured emailData so the on-duty email mirrors WFH / leave —
-    // Reason block shows just the user-typed purpose, Date row shows the
-    // chosen on-duty date (not the submission date), Location surfaces
-    // as its own row when set.
+    // Structured emailData so the on-duty email mirrors leave —
+    // Reason block shows just the user-typed purpose; the structured
+    // rows below the body show Request Type / From / To / Total Days
+    // (range), or a single Date when self-applied. Time + Location
+    // appear when set. Mirrors leaveRequestEmail's row layout.
     const odEmailBase = {
       applicantName: requester?.name || "An employee",
       date,
-      location: location || undefined,
-      reason: String(purpose || "").trim() || undefined,
+      // Forward the chosen range for HR-on-behalf submissions so the
+      // email's FROM / TO / TOTAL DAYS rows render correctly. Single-
+      // day self-apply leaves toDate / totalDays undefined and the
+      // template falls back to a single DATE row.
+      toDate:    isRange ? toDateObj : undefined,
+      totalDays: isRange ? created.length : undefined,
+      fromTime:  fromTime || undefined,
+      toTime:    toTime   || undefined,
+      location:  location || undefined,
+      reason:    String(purpose || "").trim() || undefined,
     };
     await Promise.all([
       notifyApprovers({
@@ -172,12 +184,19 @@ export async function PUT(req: NextRequest) {
     const approver = await prisma.user.findUnique({ where: { id: myId }, select: { name: true } });
     const approverName = approver?.name || "An approver";
 
-    // Reused across every branch so the email matches WFH / leave format —
-    // Reason = original purpose, Date = chosen on-duty date, plus the
-    // existing approver context flows through to the chain rows.
+    // Reused across every branch so the approval email matches the
+    // leave email's row layout — Reason = original purpose, Date /
+    // From-To-Total-Days surface via the same template fields. Each
+    // OD record is per-day, so approval emails always render the
+    // single-DATE variant (ranges only matter on the initial submit).
+    // Time + Location forward when set.
+    const isoTime = (d: Date | null | undefined) =>
+      d ? `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}` : undefined;
     const odEmailBase = {
       applicantName: requesterName,
       date:          record.date,
+      fromTime:      isoTime(record.fromTime),
+      toTime:        isoTime(record.toTime),
       location:      record.location ?? undefined,
       reason:        record.purpose || undefined,
     };
