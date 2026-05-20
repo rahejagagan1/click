@@ -49,6 +49,10 @@ export type EmailData = {
   date?:         string | Date;
   // On-duty
   location?:     string;
+  // OD time window (e.g. "10:00" / "14:00") — surfaced as a "Time" row
+  // in the email when both ends are set.
+  fromTime?:     string;
+  toTime?:       string;
   // Comp-off
   workedDate?:   string | Date;
   creditDays?:   number | string;
@@ -174,6 +178,16 @@ function buildEmailFor(
     case "on_duty":         return onDutyRequestEmail({
       applicantName,
       date:           emailData?.date     ?? new Date(),
+      // Range fields — only forwarded when the OD route flagged this
+      // as a range submission (HR-on-behalf can grant multi-day OD).
+      // Single-day requests pass undefined and the template falls
+      // back to a single DATE row.
+      toDate:         emailData?.toDate,
+      totalDays:      emailData?.totalDays,
+      // Time window — populated from the OD record's fromTime/toTime
+      // when both are set, so HR sees "Time: 10:00 – 14:00".
+      fromTime:       emailData?.fromTime,
+      toTime:         emailData?.toTime,
       location:       emailData?.location,
       reason:         reasonText,
       approverName:   emailData?.approverName,
