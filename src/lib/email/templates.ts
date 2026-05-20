@@ -197,7 +197,18 @@ export function wfhRequestEmail(args: {
 
 export function onDutyRequestEmail(args: {
   applicantName: string;
+  /** Single-day date; for ranges, pass `fromDate` + `toDate` + `totalDays`. */
   date: string | Date;
+  /** Optional range end. When set + different from `date`, the email
+   *  renders FROM / TO / TOTAL DAYS instead of a single DATE row —
+   *  mirrors the leave email's structure so HR sees the same fields
+   *  in the same order across every request type. */
+  toDate?: string | Date;
+  totalDays?: number | string;
+  /** Optional time window — surfaced as a TIME row when both ends are
+   *  present (e.g. "10:00 – 14:00"). Skipped otherwise. */
+  fromTime?: string;
+  toTime?: string;
   location?: string;
   reason?: string;
   /** Optional approver context — same shape as the leave / WFH emails so
@@ -208,7 +219,28 @@ export function onDutyRequestEmail(args: {
   l1ApproverName?: string;
   l1ApprovalNote?: string;
 }): EmailContent {
-  const details: Array<[string, string]> = [["Date", fmtDate(args.date)]];
+  // Lead with the request "type" row so OD emails read the same shape
+  // as a leave email's "Leave Type: Casual Leave" header line.
+  const details: Array<[string, string]> = [["Request Type", "On-Duty"]];
+
+  // Date / range. For a range (toDate set and different from date)
+  // show FROM + TO + TOTAL DAYS, mirroring leaveRequestEmail. Single-
+  // day requests keep a clean single DATE row.
+  const isRange = args.toDate && fmtDate(args.toDate) !== fmtDate(args.date);
+  if (isRange) {
+    details.push(["From", fmtDate(args.date)]);
+    details.push(["To",   fmtDate(args.toDate!)]);
+    const days = args.totalDays;
+    if (days != null) {
+      details.push(["Total Days", `${days} day${Number(days) === 1 ? "" : "s"}`]);
+    }
+  } else {
+    details.push(["Date", fmtDate(args.date)]);
+  }
+
+  if (args.fromTime && args.toTime) {
+    details.push(["Time", `${args.fromTime} – ${args.toTime}`]);
+  }
   if (args.location) details.push(["Location", args.location]);
   if (args.l1ApproverName) details.push(["Manager Approved By", args.l1ApproverName]);
   if (args.l1ApprovalNote) details.push(["Manager Note",        args.l1ApprovalNote]);

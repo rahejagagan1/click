@@ -20,13 +20,6 @@ export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
 
-  if (isMobileRequest(req.headers)) {
-    return NextResponse.json(
-      { error: "Clock-in is only available on Laptop & Desktop.", code: "desktop_only" },
-      { status: 403 },
-    );
-  }
-
   try {
     const user = session!.user as any;
     let userId: number = user.dbId;
@@ -35,6 +28,33 @@ export async function POST(req: NextRequest) {
       userId = dbUser?.id!;
     }
     if (!userId) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+    // Mobile guard. Default policy: clock-in is desktop / laptop only —
+    // we don't want people clocking in from their phone in the car.
+    // Exception: when the user has an On-Duty for today (in ANY status
+    // that isn't rejected or cancelled), the expectation is they're
+    // off-site (client visit, field work, etc.) and a desktop just
+    // isn't available. Pending counts too — once HR is reviewing the
+    // request, the employee is already de-facto on the road and
+    // shouldn't be blocked from punching in while waiting for the
+    // final approval click.
+    if (isMobileRequest(req.headers)) {
+      const today = istTodayDateOnly();
+      const odForToday = await prisma.onDutyRequest.findFirst({
+        where: {
+          userId,
+          date: today,
+          status: { notIn: ["rejected", "cancelled"] },
+        },
+        select: { id: true },
+      });
+      if (!odForToday) {
+        return NextResponse.json(
+          { error: "Clock-in is only available on Laptop & Desktop. Mobile clock-in is unlocked on dates with an On-Duty request (pending or approved).", code: "desktop_only" },
+          { status: 403 },
+        );
+      }
+    }
 
     // Attendance tracking can be turned off per-employee (HR Dashboard →
     // Permissions → Payroll & Attendance). CEO + developers default OFF;
