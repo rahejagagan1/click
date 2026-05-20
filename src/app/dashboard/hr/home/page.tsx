@@ -2054,6 +2054,15 @@ export default function HRHomePage() {
     if (holidayIdx >= upcoming.length && upcoming.length > 0) setHolidayIdx(0);
   }, [upcoming.length, holidayIdx]);
   const todayRec = myData?.todayRecord;
+  // Mobile clock-in/out is blocked by default; ANY On-Duty for today
+  // (pending / partially_approved / approved) unlocks it — same rule
+  // the server enforces. Pre-computed server-side in
+  // /api/hr/attendance so the UI doesn't need a second fetch. The
+  // legacy `hasApprovedOdToday` field is read as a fallback during
+  // the deploy window in case an old client receives a fresh server
+  // response (or vice-versa).
+  const hasOdToday: boolean = !!(myData?.hasOdToday ?? myData?.hasApprovedOdToday);
+  const mobileBlocked = isMobileDevice && !hasOdToday;
   const todayLoc = parseAttLoc(todayRec?.location);
   // Pull the caller's profile so we can read the department — used to label
   // the "team" tab + "Posting to" option with the actual team name (e.g.
@@ -2328,8 +2337,8 @@ export default function HRHomePage() {
                     //    green regardless of office/remote mode.
                     <div className="flex flex-col items-center gap-1">
                       <button
-                        onClick={isMobileDevice ? undefined : clockIn}
-                        disabled={clockingIn || isMobileDevice}
+                        onClick={mobileBlocked ? undefined : clockIn}
+                        disabled={clockingIn || mobileBlocked}
                         className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 bg-green-600 text-white text-[11px] font-semibold transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{
                           background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
@@ -2338,9 +2347,14 @@ export default function HRHomePage() {
                       >
                         {clockingIn ? "Getting location…" : "Web Clock-In"}
                       </button>
-                      {isMobileDevice && (
+                      {mobileBlocked && (
                         <span className="text-center text-[9.5px] leading-tight text-white/70">
                           Only accessible on Laptop &amp; Desktop
+                        </span>
+                      )}
+                      {isMobileDevice && hasOdToday && (
+                        <span className="text-center text-[9.5px] leading-tight text-emerald-300">
+                          Mobile enabled — On-Duty today
                         </span>
                       )}
                     </div>
@@ -2356,7 +2370,7 @@ export default function HRHomePage() {
                             try { await clockOut(); }
                             finally { setClockingOut(false); setConfirmingClockOut(false); }
                           }}
-                          disabled={clockingOut || isMobileDevice}
+                          disabled={clockingOut || mobileBlocked}
                           className="h-[24px] whitespace-nowrap rounded-[3px] px-3 bg-red-600 text-white text-[11px] font-semibold transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
                           style={{
                             background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
@@ -2380,8 +2394,8 @@ export default function HRHomePage() {
                     ) : (
                       <div className="flex flex-col items-center gap-1">
                         <button
-                          onClick={isMobileDevice ? undefined : () => setConfirmingClockOut(true)}
-                          disabled={isMobileDevice}
+                          onClick={mobileBlocked ? undefined : () => setConfirmingClockOut(true)}
+                          disabled={mobileBlocked}
                           className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 bg-red-600 text-white text-[11px] font-semibold transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
                           style={{
                             background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
@@ -2390,9 +2404,14 @@ export default function HRHomePage() {
                         >
                           Web Clock-Out
                         </button>
-                        {isMobileDevice && (
+                        {mobileBlocked && (
                           <span className="text-center text-[9.5px] leading-tight text-white/70">
                             Only accessible on Laptop &amp; Desktop
+                          </span>
+                        )}
+                        {isMobileDevice && hasOdToday && (
+                          <span className="text-center text-[9.5px] leading-tight text-emerald-300">
+                            Mobile enabled — On-Duty today
                           </span>
                         )}
                       </div>
@@ -2403,8 +2422,8 @@ export default function HRHomePage() {
                     //    gradient as the first clock-in.
                     <div className="flex flex-col items-center gap-1">
                       <button
-                        onClick={isMobileDevice ? undefined : clockIn}
-                        disabled={clockingIn || isMobileDevice}
+                        onClick={mobileBlocked ? undefined : clockIn}
+                        disabled={clockingIn || mobileBlocked}
                         className="h-[24px] whitespace-nowrap rounded-[3px] px-3.5 bg-green-600 text-white text-[11px] font-semibold transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{
                           background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
@@ -2413,9 +2432,14 @@ export default function HRHomePage() {
                       >
                         {clockingIn ? "Getting location…" : "Web Clock-In"}
                       </button>
-                      {isMobileDevice && (
+                      {mobileBlocked && (
                         <span className="text-center text-[9.5px] leading-tight text-white/70">
                           Only accessible on Laptop &amp; Desktop
+                        </span>
+                      )}
+                      {isMobileDevice && hasOdToday && (
+                        <span className="text-center text-[9.5px] leading-tight text-emerald-300">
+                          Mobile enabled — On-Duty today
                         </span>
                       )}
                     </div>
