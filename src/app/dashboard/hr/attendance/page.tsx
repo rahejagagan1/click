@@ -874,6 +874,14 @@ export default function AttendancePage() {
   const todayRec  = myData?.todayRecord;
   const summary   = myData?.summary || {};
   const records   = myData?.records  || [];
+  // Mobile clock-in/out is normally blocked, but ANY non-dismissed
+  // On-Duty for today (pending / partially_approved / approved)
+  // unlocks it — same rule the server enforces. The flag is
+  // pre-computed server-side in /api/hr/attendance and ridden through
+  // myData so the UI doesn't need a separate fetch.
+  const hasOdToday: boolean = !!(myData?.hasOdToday ?? myData?.hasApprovedOdToday);
+  // Effective mobile-block: true only when on mobile AND no OD bypass.
+  const mobileBlocked = isMobileDevice && !hasOdToday;
   const days      = ["M","T","W","T","F","S","S"];
   const todayDow  = now.getDay() === 0 ? 6 : now.getDay() - 1;
 
@@ -1301,8 +1309,8 @@ export default function AttendancePage() {
                   "preserve white text" rule. Don't remove. */}
               {!todayRec?.clockIn ? (
                 <div className="flex flex-col gap-1 w-fit">
-                  <button onClick={isMobileDevice ? undefined : clockIn}
-                    disabled={clockingIn || isMobileDevice}
+                  <button onClick={mobileBlocked ? undefined : clockIn}
+                    disabled={clockingIn || mobileBlocked}
                     style={{
                       background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
                       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
@@ -1310,9 +1318,14 @@ export default function AttendancePage() {
                     className="h-8 px-4 bg-green-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
                     {clockingIn ? "Getting location…" : "Web Clock-In"}
                   </button>
-                  {isMobileDevice && (
+                  {mobileBlocked && (
                     <span className="text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
                       Only accessible on Laptop &amp; Desktop
+                    </span>
+                  )}
+                  {isMobileDevice && hasOdToday && (
+                    <span className="text-center text-[10px] leading-tight text-emerald-600 dark:text-emerald-400">
+                      Mobile enabled — On-Duty today
                     </span>
                   )}
                 </div>
@@ -1356,8 +1369,8 @@ export default function AttendancePage() {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-1 w-fit">
-                    <button onClick={isMobileDevice ? undefined : () => setConfirmingClockOut(true)}
-                      disabled={isMobileDevice}
+                    <button onClick={mobileBlocked ? undefined : () => setConfirmingClockOut(true)}
+                      disabled={mobileBlocked}
                       style={{
                         background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
                         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
@@ -1365,16 +1378,21 @@ export default function AttendancePage() {
                       className="h-8 px-4 bg-red-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-not-allowed">
                       Web Clock-Out
                     </button>
-                    {isMobileDevice && (
+                    {mobileBlocked && (
                       <span className="text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
                         Only accessible on Laptop &amp; Desktop
+                      </span>
+                    )}
+                    {isMobileDevice && hasOdToday && (
+                      <span className="text-center text-[10px] leading-tight text-emerald-600 dark:text-emerald-400">
+                        Mobile enabled — On-Duty today
                       </span>
                     )}
                   </div>
                 )
               ) : (
                 <div className="flex flex-col gap-1.5 w-fit">
-                  <button onClick={isMobileDevice ? undefined : clockIn} disabled={clockingIn || isMobileDevice}
+                  <button onClick={mobileBlocked ? undefined : clockIn} disabled={clockingIn || mobileBlocked}
                     style={{
                       background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
                       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
@@ -1382,9 +1400,14 @@ export default function AttendancePage() {
                     className="h-8 px-4 bg-green-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
                     {clockingIn ? "Getting location…" : "Web Clock-In"}
                   </button>
-                  {isMobileDevice && (
+                  {mobileBlocked && (
                     <span className="text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
                       Only accessible on Laptop &amp; Desktop
+                    </span>
+                  )}
+                  {isMobileDevice && hasOdToday && (
+                    <span className="text-center text-[10px] leading-tight text-emerald-600 dark:text-emerald-400">
+                      Mobile enabled — On-Duty today
                     </span>
                   )}
                 </div>
