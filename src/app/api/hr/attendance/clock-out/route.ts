@@ -22,13 +22,6 @@ export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
 
-  if (isMobileRequest(req.headers)) {
-    return NextResponse.json(
-      { error: "Clock-out is only available on Laptop & Desktop.", code: "desktop_only" },
-      { status: 403 },
-    );
-  }
-
   try {
     const user = session!.user as any;
     let userId: number = user.dbId;
@@ -37,6 +30,28 @@ export async function POST(req: NextRequest) {
       userId = dbUser?.id!;
     }
     if (!userId) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+    // Mobile guard, mirrors clock-in: blocked by default, allowed when
+    // ANY non-dismissed On-Duty record covers today. Pending counts —
+    // a user already off-site shouldn't be locked out of clock-out
+    // just because HR hasn't clicked Approve yet.
+    if (isMobileRequest(req.headers)) {
+      const today = istTodayDateOnly();
+      const odForToday = await prisma.onDutyRequest.findFirst({
+        where: {
+          userId,
+          date: today,
+          status: { notIn: ["rejected", "cancelled"] },
+        },
+        select: { id: true },
+      });
+      if (!odForToday) {
+        return NextResponse.json(
+          { error: "Clock-out is only available on Laptop & Desktop. Mobile clock-out is unlocked on dates with an On-Duty request (pending or approved).", code: "desktop_only" },
+          { status: 403 },
+        );
+      }
+    }
     if (!(await isAttendanceEnabled(userId))) {
       return NextResponse.json(
         { error: "Attendance tracking is disabled for your account. Contact HR if this is wrong." },
