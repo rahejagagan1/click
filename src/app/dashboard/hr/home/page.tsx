@@ -10,6 +10,7 @@ import Link from "next/link";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import { isHRAdmin } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
+import { desktopBypassHeader } from "@/lib/desktop-bypass";
 import { PageShell } from "@/components/layout";
 import { DateField } from "@/components/ui/date-field";
 import {
@@ -2082,7 +2083,7 @@ export default function HRHomePage() {
       }
       const res = await fetch("/api/hr/attendance/clock-in", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...desktopBypassHeader() },
         body: JSON.stringify({ lat: geo.lat, lng: geo.lng, address: geo.address }),
       });
       const d = await res.json();
@@ -2093,7 +2094,7 @@ export default function HRHomePage() {
     }
   };
   const clockOut = async () => {
-    const res = await fetch("/api/hr/attendance/clock-out", { method: "POST" });
+    const res = await fetch("/api/hr/attendance/clock-out", { method: "POST", headers: desktopBypassHeader() });
     const d = await res.json();
     if (!res.ok) return alert(d.error);
     mutate(`/api/hr/attendance?month=${monthKey}`);

@@ -6,6 +6,7 @@ import { parseBody } from "@/lib/validate";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { istTodayDateOnly, istHour } from "@/lib/ist-date";
 import { isMobileRequest } from "@/lib/is-mobile-device";
+import { hasDesktopBypassHeader } from "@/lib/desktop-bypass";
 import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
 
 // Real GPS coordinates required so the attendance log always has a verifiable
@@ -20,7 +21,16 @@ export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
 
-  if (isMobileRequest(req.headers)) {
+  // Mobile devices are blocked from clock-in UNLESS the request carries
+  // the desktop-bypass header. The client sends that header when the
+  // page URL contains `?desktop=1` (see src/lib/desktop-bypass.ts).
+  // Use cases:
+  //   • Laptop genuinely unavailable (sick day, travel) — employee opens
+  //     the URL with the bypass on their phone, clocks in, then files a
+  //     regularization for HR's audit trail.
+  //   • Developers also bypass via session.user.isDeveloper — they don't
+  //     need the URL trick.
+  if (isMobileRequest(req.headers) && !hasDesktopBypassHeader(req.headers)) {
     return NextResponse.json(
       { error: "Clock-in is only available on Laptop & Desktop.", code: "desktop_only" },
       { status: 403 },

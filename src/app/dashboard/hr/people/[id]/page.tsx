@@ -16,6 +16,7 @@ import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
 import { isHRAdmin as canViewAsHRAdmin } from "@/lib/access";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
+import EmployeeFinancesPanel from "@/components/hr/EmployeeFinancesPanel";
 import SelectField from "@/components/ui/SelectField";
 
 // "Edit Profile" is HR-admin-only — the canonical place to update any
@@ -23,7 +24,7 @@ import SelectField from "@/components/ui/SelectField";
 // previous standalone "Salary" tab and the inline edit pencils on the
 // Profile tab have been retired so there's exactly one canonical edit
 // surface.
-const TABS = ["About", "Profile", "Job", "Attendance", "Documents", "Assets", "Edit Profile"] as const;
+const TABS = ["About", "Profile", "Job", "Attendance", "Documents", "Assets", "Finances", "Edit Profile"] as const;
 type Tab = typeof TABS[number];
 
 const fmtDate = (d: string | Date | null | undefined) =>
@@ -174,7 +175,13 @@ export default function EmployeeDetailPage() {
   // Edit Profile is HR-admin-only (matches the PUT endpoint's gate).
   // Profile owners view their own salary on /dashboard/hr/payroll.
   const showEditTab = isHRAdmin;
-  const visibleTabs = TABS.filter((t) => t !== "Edit Profile" || showEditTab);
+  // Finances tab: HR-admin only. Salary + bonuses are HR-managed; the
+  // profile owner already sees their own pay slips on /dashboard/hr/payroll.
+  const showFinancesTab = isHRAdmin;
+  const visibleTabs = TABS.filter((t) =>
+    (t !== "Edit Profile" || showEditTab) &&
+    (t !== "Finances"     || showFinancesTab)
+  );
 
   if (isLoading) {
     return (
@@ -654,12 +661,20 @@ export default function EmployeeDetailPage() {
               </section>
             )}
 
+            {activeTab === "Finances" && showFinancesTab && (
+              <EmployeeFinancesPanel userId={userId} userName={user.name} />
+            )}
+
             {activeTab === "Edit Profile" && showEditTab && (
               <EditProfilePanel userId={userId} user={user} managers={managers} />
             )}
           </main>
 
-          {/* ── Right rail: Reporting Team (sticky on lg+) ── */}
+          {/* ── Right rail: Reporting Team — visible on the About tab only.
+                  Profile / Job / Attendance / Documents / Assets / Finances /
+                  Edit Profile are all denser content; the team list distracts
+                  from those, so it's hidden there. */}
+          {activeTab === "About" && (
           <aside className="lg:sticky lg:top-6 lg:self-start">
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
               <div className="mb-4 flex items-center justify-between">
@@ -704,6 +719,7 @@ export default function EmployeeDetailPage() {
               </div>
             </div>
           </aside>
+          )}
         </div>
       </div>
 
