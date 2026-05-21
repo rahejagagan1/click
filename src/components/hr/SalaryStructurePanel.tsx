@@ -80,7 +80,12 @@ function apiToForm(s: ApiStructure | null): FormState {
     salaryType: isIntern ? "Intern" : "Regular Employee",
     payGroup: s.payGroup || "NB Media",
     annualSalary: isIntern ? "" : String(parseFloat(s.ctc || "0") || ""),
-    monthlyStipend: isIntern ? String(parseFloat(s.basic || "0") || "") : "",
+    // For interns, the source-of-truth annual figure is `ctc`. Deriving
+    // the form's monthly stipend off `ctc / 12` rather than off `basic`
+    // means we don't care whether the underlying row is a legacy save
+    // (basic stored as monthly) or a post-fix save (basic stored as
+    // annual) — both have a correct `ctc` value, so both load right.
+    monthlyStipend: isIntern ? String(Math.round((parseFloat(s.ctc || "0") || 0) / 12) || "") : "",
     bonusIncluded: !!s.bonusIncluded,
     pfEligible: !!s.pfEligible,
     structureType: s.structureType || "Range Based",
@@ -102,8 +107,14 @@ function formToApi(f: FormState, userId: number) {
       taxRegime:     null,
       structureType: null,
       pfEligible:    false,
+      // Both `ctc` and `basic` are stored as ANNUAL figures here —
+      // matching how regular employees' rows are saved (basic = annual
+      // amount, divided by 12 only at display time). Older intern rows
+      // stored `basic` as the monthly amount and the breakup display
+      // misrendered them as ₹2,916/month; storing × 12 is the canonical
+      // fix and keeps the data model uniform across salary types.
       ctc:           stipend * 12,
-      basic:         stipend,
+      basic:         stipend * 12,
       hra:           0,
       specialAllowance: 0,
       pfEmployee: 0, pfEmployer: 0,

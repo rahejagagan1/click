@@ -46,7 +46,8 @@ export type TabKey =
   | "hr_admin_assets"
   | "hr_admin_leave_types"
   | "hr_admin_shifts"
-  | "hr_admin_departments";
+  | "hr_admin_departments"
+  | "hr_admin_payroll";
 
 export type TabDef = {
   key: TabKey;
@@ -108,6 +109,7 @@ export const TAB_CATALOG: TabDef[] = [
   { key: "hr_admin_leave_types",   label: "Leave Types",          description: "Configure leave categories",                   pathPrefixes: ["/dashboard/hr/admin?tab=leave-types"],          defaultForNewUser: false, group: "HR Dashboard sections" },
   { key: "hr_admin_shifts",        label: "Shift Templates",      description: "Define attendance shifts",                     pathPrefixes: ["/dashboard/hr/admin?tab=shifts"],               defaultForNewUser: false, group: "HR Dashboard sections" },
   { key: "hr_admin_departments",   label: "Departments (HR)",     description: "HR Dashboard department breakdown",            pathPrefixes: ["/dashboard/hr/admin?tab=departments"],          defaultForNewUser: false, group: "HR Dashboard sections" },
+  { key: "hr_admin_payroll",       label: "Payroll",              description: "Run payroll, lock, mark paid, manage structures", pathPrefixes: ["/dashboard/hr/admin?tab=payroll"],         defaultForNewUser: false, group: "HR Dashboard sections" },
 ];
 
 export const TAB_CATALOG_BY_KEY: Record<TabKey, TabDef> = Object.fromEntries(
@@ -146,7 +148,7 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     // All HR Dashboard sub-tabs on by default for full admins.
     hr_admin_attendance:true, hr_admin_approvals:true, hr_admin_leaves:true,
     hr_admin_holidays:true, hr_admin_assets:true, hr_admin_leave_types:true,
-    hr_admin_shifts:true, hr_admin_departments:true,
+    hr_admin_shifts:true, hr_admin_departments:true, hr_admin_payroll:true,
     // Audit-added pages — admins see everything by default.
     hr_engage:true, hr_announcements:true, hr_org:true, hr_expenses:true,
     hr_approvals:true, hr_analytics:true,
@@ -161,7 +163,7 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     reports:true, departments:true, violations:true,
     hr_admin_attendance:true, hr_admin_approvals:true, hr_admin_leaves:true,
     hr_admin_holidays:true, hr_admin_assets:true, hr_admin_leave_types:true,
-    hr_admin_shifts:true, hr_admin_departments:true,
+    hr_admin_shifts:true, hr_admin_departments:true, hr_admin_payroll:true,
     hr_engage:true, hr_announcements:true, hr_org:true, hr_expenses:true,
     hr_approvals:true, hr_analytics:true,
   },

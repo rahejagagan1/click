@@ -5,12 +5,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3 } from "lucide-react";
+import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote } from "lucide-react";
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
 import LeavesAdminPanel from "@/components/hr/LeavesAdminPanel";
 import LeavePoliciesPanel from "@/components/hr/LeavePoliciesPanel";
+import PayrollAdminPanel from "@/components/hr/PayrollAdminPanel";
 import { DateField } from "@/components/ui/date-field";
 import {
   isHRAdmin,
@@ -38,6 +39,7 @@ const ADMIN_TABS: Array<AdminTabDef & { permKey: string }> = [
   { key: "leave-policies",       label: "Leave Policies",       icon: Calendar,        permKey: "hr_admin_leave_types"    },
   { key: "shifts",               label: "Shift Templates",      icon: Clock,           permKey: "hr_admin_shifts"         },
   { key: "departments",          label: "Departments",          icon: Users,           permKey: "hr_admin_departments"    },
+  { key: "payroll",              label: "Payroll",              icon: Banknote,        permKey: "hr_admin_payroll"        },
 ];
 
 const DAYS_LABEL = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -396,6 +398,9 @@ export default function HRAdminPage() {
 
           {/* ── Assets ── */}
           {tab === "assets" && <AssetsPanel />}
+
+          {/* ── Payroll — runs, generate, lock, mark paid, structures ── */}
+          {tab === "payroll" && <PayrollAdminPanel />}
 
           {/* ── Leave Types ── */}
           {tab === "leave-types" && (
