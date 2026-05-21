@@ -6,6 +6,7 @@ import { parseBody } from "@/lib/validate";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { istTodayDateOnly } from "@/lib/ist-date";
 import { isMobileRequest } from "@/lib/is-mobile-device";
+import { hasDesktopBypassHeader } from "@/lib/desktop-bypass";
 import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
 
 // Same shape as the clock-in body. Optional here because legacy
@@ -22,7 +23,9 @@ export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
 
-  if (isMobileRequest(req.headers)) {
+  // Same desktop-only gate as clock-in. Honors the x-desktop-bypass
+  // header so the `?desktop=1` URL escape hatch works end-to-end.
+  if (isMobileRequest(req.headers) && !hasDesktopBypassHeader(req.headers)) {
     return NextResponse.json(
       { error: "Clock-out is only available on Laptop & Desktop.", code: "desktop_only" },
       { status: 403 },
