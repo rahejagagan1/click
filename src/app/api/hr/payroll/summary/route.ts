@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { requireAuth, isHRAdmin, resolveUserId, serverError } from "@/lib/api-auth";
 import { decryptPII } from "@/lib/pii-crypto";
 
 // Columns that are encrypted at rest. Decrypt on the way out so the
@@ -17,11 +17,21 @@ export const dynamic = "force-dynamic";
  * sync with the latest schema (e.g. after a schema field addition but before
  * `prisma generate` runs on a dev machine).
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
-  const myId = await resolveUserId(session);
-  if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
+  const self = session!.user as any;
+  const meId = await resolveUserId(session);
+  if (!meId) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+  // Admins can pass ?userId=X to view another employee's summary (used by
+  // the HR-side Finances tab on the people-detail page). Non-admins are
+  // always pinned to themselves regardless of query.
+  const { searchParams } = new URL(req.url);
+  const requested = searchParams.get("userId");
+  const myId = (isHRAdmin(self) && requested && /^\d+$/.test(requested))
+    ? parseInt(requested, 10)
+    : meId;
 
   try {
     const [profile] = await prisma.$queryRawUnsafe<any[]>(
@@ -40,11 +50,11 @@ export async function GET() {
       myId
     );
 
-    // File-count breakdown by UserDocument.category — used for the "N file(s)"
-    // badge next to each verified ID row.
+    // File-count breakdown by EmployeeDocument.category — used for the
+    // "N file(s)" badge next to each verified ID row.
     const docs = await prisma.$queryRawUnsafe<any[]>(
       `SELECT "category", COUNT(*)::int AS "count"
-       FROM "UserDocument"
+       FROM "EmployeeDocument"
        WHERE "userId" = $1
        GROUP BY "category"`,
       myId

@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import { isHRAdmin } from "@/lib/access";
+import { desktopBypassHeader } from "@/lib/desktop-bypass";
 import {
   ChevronLeft, ChevronRight, ChevronDown,
   Send, BarChart2, Award, Mail, Users, Calendar,
@@ -249,12 +250,12 @@ export default function HRHomePage() {
     const geo = await captureClockInGeo();
     await fetch("/api/hr/attendance/clock-in", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...desktopBypassHeader() },
       body: JSON.stringify(geo),
     });
     mutate(`/api/hr/attendance?month=${monthKey}`);
   };
-  const clockOut = async () => { await fetch("/api/hr/attendance/clock-out", { method: "POST" }); mutate(`/api/hr/attendance?month=${monthKey}`); };
+  const clockOut = async () => { await fetch("/api/hr/attendance/clock-out", { method: "POST", headers: desktopBypassHeader() }); mutate(`/api/hr/attendance?month=${monthKey}`); };
   const onLeave  = (boardData?.board || []).filter((u: any) => u.status === "on_leave");
   // Split clocked-in employees by their actual location mode (from Attendance.location JSON).
   // "Working Remotely" lists ONLY users who applied for WFH today —
