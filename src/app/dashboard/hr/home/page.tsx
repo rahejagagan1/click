@@ -8,7 +8,7 @@ import SelectField from "@/components/ui/SelectField";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
-import { isHRAdmin } from "@/lib/access";
+import { isHRAdmin, canApplyRestrictedLeave } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { PageShell } from "@/components/layout";
 import { DateField } from "@/components/ui/date-field";
@@ -120,11 +120,27 @@ function BalanceRing({ avail, total, color, size = 70 }: { avail: number; total:
 }
 
 // ── Avatar ─────────────────────────────────────────────────────────────────────
+// Google's CDN (`lh3.googleusercontent.com`) blocks <img> loads that send a
+// Referer header — without `referrerPolicy="no-referrer"` the browser shows the
+// broken-image icon instead of the photo. The onError fallback covers expired
+// or deleted URLs by flipping the img out for the initials chip at runtime.
 function Av({ name, url, size = 40 }: { name: string; url?: string | null; size?: number }) {
   const palette = ["#6366f1","#0891b2","#059669","#d97706","#db2777","#7c3aed","#dc2626"];
   const bg = palette[name.charCodeAt(0) % palette.length];
   const initials = name.split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase();
-  if (url) return <img src={url} alt={name} style={{ width: size, height: size }} className={`rounded-full object-cover ring-2 ${C.ring} shrink-0`} />;
+  const [broken, setBroken] = useState(false);
+  if (url && !broken) {
+    return (
+      <img
+        src={url}
+        alt={name}
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        style={{ width: size, height: size }}
+        className={`rounded-full object-cover ring-2 ${C.ring} shrink-0`}
+      />
+    );
+  }
   return (
     <div style={{ width: size, height: size, background: bg, fontSize: Math.round(size * 0.33) }}
       className={`rounded-full flex items-center justify-center text-white font-semibold ring-2 ${C.ring} shrink-0`}>
@@ -212,6 +228,7 @@ function EventsWidget({
         <img
           src={p.profilePictureUrl}
           alt={p.name}
+          referrerPolicy="no-referrer"
           className="h-12 w-12 rounded-full object-cover ring-2 ring-white shadow-[0_2px_8px_rgba(15,23,42,0.08)]"
           onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }}
         />
@@ -1460,7 +1477,7 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
 // The menu portals to document.body and uses fixed positioning so the
 // parent card's `overflow-hidden` doesn't clip it (the Quick Access tile
 // has rounded corners + clipping that would otherwise crop the popover).
-function OtherActionsMenu({ onSelect }: { onSelect: (kind: LeaveRequestKind) => void }) {
+function OtherActionsMenu({ onSelect, showWfh = true }: { onSelect: (kind: LeaveRequestKind) => void; showWfh?: boolean }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos]   = useState<{ top: number; right: number } | null>(null);
   const btnRef   = useRef<HTMLButtonElement>(null);
@@ -1494,8 +1511,11 @@ function OtherActionsMenu({ onSelect }: { onSelect: (kind: LeaveRequestKind) => 
     setOpen((v) => !v);
   };
 
+  // Remote / hybrid employees already work from home as their baseline —
+  // surfacing a "Work From Home" leave action for them would be
+  // redundant. Caller flips `showWfh=false` for those workers.
   const items: { label: string; Icon: typeof HomeIcon; kind: LeaveRequestKind }[] = [
-    { label: "Work From Home", Icon: HomeIcon,  kind: "wfh"     },
+    ...(showWfh ? [{ label: "Work From Home", Icon: HomeIcon,  kind: "wfh" as LeaveRequestKind }] : []),
     { label: "On Duty",        Icon: Briefcase, kind: "on_duty" },
     { label: "Apply Leave",    Icon: Coffee,    kind: "leave"   },
   ];
@@ -1922,11 +1942,15 @@ export default function HRHomePage() {
   // attendance page.
   const [otherForm, setOtherForm] = useState<LeaveRequestKind | null>(null);
   const { data: leaveTypesData = [] } = useSWR(`/api/hr/admin/leave-types`, fetcher);
-  // Drop balance-only types (e.g. Carry Over Leave) — they're shown
-  // on the leave-balances grid but mustn't appear in the apply form.
+  // Drop balance-only types (e.g. legacy non-applicable buckets) and
+  // restricted-admin types (e.g. Carry Over Leave) when the viewer
+  // isn't CEO / HR Manager / developer — server enforces the same
+  // gate so a hand-crafted POST still 403s.
+  const canApplyRestricted = canApplyRestrictedLeave(user);
   const otherLeaveTypes: { id: number; name: string }[] = Array.isArray(leaveTypesData)
     ? leaveTypesData
         .filter((t: any) => t.applicable !== false)
+        .filter((t: any) => t.adminOnly !== true || canApplyRestricted)
         .map((t: any) => ({ id: t.id, name: t.name }))
     : [];
   const otherTitle: Record<LeaveRequestKind, string> = {
@@ -2069,6 +2093,10 @@ export default function HRHomePage() {
   // "NB_Artificial Intelligence") instead of a hardcoded fallback.
   const { data: meProfile } = useSWR<any>("/api/hr/profile", fetcher);
   const myDepartment: string = (meProfile?.employeeProfile?.department || "").trim();
+  // Hide "Work From Home" from remote/hybrid workers — it's already
+  // their default mode, applying for it would be a no-op.
+  const myWorkLocation = String(meProfile?.employeeProfile?.workLocation ?? "office").toLowerCase();
+  const canApplyWfh = myWorkLocation !== "remote" && myWorkLocation !== "hybrid";
   const teamScope: string = user?.teamCapsule || myDepartment || "team";
   const teamLabel: string = myDepartment || user?.teamCapsule || "My team";
   const postsUrl = orgTab === "org"
@@ -2444,7 +2472,7 @@ export default function HRHomePage() {
                       )}
                     </div>
                   )}
-                  <OtherActionsMenu onSelect={(kind) => setOtherForm(kind)} />
+                  <OtherActionsMenu onSelect={(kind) => setOtherForm(kind)} showWfh={canApplyWfh} />
                 </div>
               </div>
             </div>
@@ -2828,7 +2856,7 @@ export default function HRHomePage() {
                                         className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-slate-700 hover:bg-[#f5f9ff]"
                                       >
                                         {u.profilePictureUrl ? (
-                                          <img src={u.profilePictureUrl} alt="" className="h-6 w-6 rounded-full object-cover" />
+                                          <img src={u.profilePictureUrl} alt="" referrerPolicy="no-referrer" className="h-6 w-6 rounded-full object-cover" />
                                         ) : (
                                           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#e8f1fc] text-[10px] font-semibold text-[#0f4e93]">
                                             {(u.name || "?").trim().slice(0, 1).toUpperCase()}
@@ -3068,7 +3096,7 @@ export default function HRHomePage() {
                                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-slate-700 hover:bg-[#f5f9ff]"
                                   >
                                     {u.profilePictureUrl ? (
-                                      <img src={u.profilePictureUrl} alt="" className="h-6 w-6 rounded-full object-cover" />
+                                      <img src={u.profilePictureUrl} alt="" referrerPolicy="no-referrer" className="h-6 w-6 rounded-full object-cover" />
                                     ) : (
                                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#e8f1fc] text-[10px] font-semibold text-[#0f4e93]">
                                         {(u.name || "?").trim().slice(0, 1).toUpperCase()}

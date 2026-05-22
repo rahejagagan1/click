@@ -34,6 +34,25 @@ export function isHRAdmin(user: ClientUser): boolean {
 }
 
 /**
+ * Tighter gate than `isHRAdmin` — only CEO, role=hr_manager, and
+ * isDeveloper. Deliberately excludes special_access and role=admin.
+ *
+ * Used for restricted-admin leave types (LeaveType.adminOnly), where
+ * even broader admin tiers shouldn't be able to apply on someone's
+ * behalf. The classic case is Carry Over Leave — sensitive enough that
+ * only the actual HR Manager / CEO / a developer should be able to
+ * draw it down.
+ */
+export function canApplyRestrictedLeave(user: ClientUser): boolean {
+  if (!user) return false;
+  return (
+    user.orgLevel === "ceo" ||
+    user.isDeveloper === true ||
+    user.role === "hr_manager"
+  );
+}
+
+/**
  * "Can see reports / scores" tier — admin tier + managers + HoDs + HR
  * managers. Mirrors `canSeeReports` in the sidebar.
  */
