@@ -489,12 +489,21 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
         )}
 
         {/* ── Date range ──────────────────────────────────────────
-            Symmetric flex layout: From / centered days-pill / To.
-            Equal column widths so the dates line up under their
-            labels and the pill sits exactly between them. */}
-        <Section title="Date range">
-          <div className="flex items-end gap-3">
-            <div className="flex-1 min-w-0">
+            FROM and TO each get a full-width column so "dd/mm/yyyy"
+            doesn't get clipped by the trailing calendar icon. The
+            day-count pill moves into the section header (top-right)
+            so it still surfaces but stops fighting the date inputs
+            for horizontal space. */}
+        <Section
+          title="Date range"
+          right={
+            <span className="inline-flex items-center justify-center h-6 px-2.5 rounded-full bg-slate-100 dark:bg-white/5 text-[11px] font-semibold text-slate-700 dark:text-white tabular-nums whitespace-nowrap">
+              {dayCount} day{dayCount === 1 ? "" : "s"}
+            </span>
+          }
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <div>
               <FieldLabel>From</FieldLabel>
               <DateField
                 value={form.fromDate}
@@ -506,12 +515,7 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
                 className="w-full"
               />
             </div>
-            <div className="self-center pb-[2px]">
-              <span className="inline-flex items-center justify-center h-7 px-3 rounded-full bg-slate-100 dark:bg-white/5 text-[11.5px] font-semibold text-slate-700 dark:text-white tabular-nums whitespace-nowrap">
-                {dayCount} day{dayCount === 1 ? "" : "s"}
-              </span>
-            </div>
-            <div className="flex-1 min-w-0">
+            <div>
               <FieldLabel>To</FieldLabel>
               <DateField
                 value={isHalfLeave ? form.fromDate : form.toDate}
@@ -667,13 +671,22 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
    visual rhythm obvious at a glance.
 */
 
-function Section({ title, required, children }: { title: string; required?: boolean; children: React.ReactNode }) {
+function Section({ title, required, right, children }: {
+  title: string;
+  required?: boolean;
+  /** Right-aligned slot in the section header (e.g. the day-count pill on the date row). */
+  right?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <section>
-      <h3 className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400 mb-2">
-        {title}
-        {required ? <span className="text-rose-500 ml-1">*</span> : null}
-      </h3>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
+          {title}
+          {required ? <span className="text-rose-500 ml-1">*</span> : null}
+        </h3>
+        {right}
+      </div>
       {children}
     </section>
   );
