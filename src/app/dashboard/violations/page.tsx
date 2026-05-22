@@ -314,6 +314,10 @@ export default function ViolationsPage() {
     };
 
     const formatDate = (d: string) => new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+    // Attendance violations are calculated MONTHLY (e.g. "3 lates in May")
+    // so we don't want to show a specific day. Display the picker's
+    // month-year only.
+    const formatMonthYear = (d: string) => new Date(d).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 
     const [statusDropdownId, setStatusDropdownId] = useState<number | null>(null);
     const changeStatus = async (e: React.MouseEvent, id: number, newStatus: string) => {
@@ -763,8 +767,14 @@ export default function ViolationsPage() {
                                     <div>
                                         {v.violationDate && (
                                             <div className="mb-3">
-                                                <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Violation Date</p>
-                                                <p className="text-sm text-slate-700 dark:text-slate-300">{formatDate(v.violationDate)}</p>
+                                                <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">
+                                                    {v.category === "attendance" ? "Violation Month" : "Violation Date"}
+                                                </p>
+                                                <p className="text-sm text-slate-700 dark:text-slate-300">
+                                                    {v.category === "attendance"
+                                                        ? formatMonthYear(v.violationDate)
+                                                        : formatDate(v.violationDate)}
+                                                </p>
                                             </div>
                                         )}
                                         {v.description && (
@@ -875,9 +885,33 @@ export default function ViolationsPage() {
                             />
                         </div>
                         <div>
-                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Date of Violation</label>
-                            <DateField value={newViolation.violationDate} onChange={(v) => setNewViolation(p => ({ ...p, violationDate: v }))}
-                                className="w-full" />
+                            {/* Attendance violations are tracked per-MONTH (e.g. "3
+                                lates in May") — render a month picker for that
+                                category and store the value as the 1st of the
+                                picked month. Every other category keeps the
+                                day-level DateField. */}
+                            {newViolation.category === "attendance" ? (
+                                <>
+                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Month of Violation</label>
+                                    <input
+                                        type="month"
+                                        value={newViolation.violationDate ? newViolation.violationDate.slice(0, 7) : ""}
+                                        onChange={(e) => setNewViolation(p => ({
+                                            ...p,
+                                            // Snap to the 1st so the DB column (DateTime) stays
+                                            // happy and every downstream comparison still works.
+                                            violationDate: e.target.value ? `${e.target.value}-01` : "",
+                                        }))}
+                                        className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                                    />
+                                </>
+                            ) : (
+                                <>
+                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Date of Violation</label>
+                                    <DateField value={newViolation.violationDate} onChange={(v) => setNewViolation(p => ({ ...p, violationDate: v }))}
+                                        className="w-full" />
+                                </>
+                            )}
                         </div>
                     </div>
 
@@ -885,7 +919,20 @@ export default function ViolationsPage() {
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Violation Type</label>
-                            <select value={newViolation.category} onChange={e => setNewViolation(p => ({ ...p, category: e.target.value, customCategory: "" }))}
+                            <select value={newViolation.category} onChange={e => {
+                                const nextCategory = e.target.value;
+                                setNewViolation(p => {
+                                    // When switching INTO attendance, snap the
+                                    // currently-picked date to the 1st of its
+                                    // month so the <input type="month"> shows
+                                    // the right month rather than going blank.
+                                    let nextDate = p.violationDate;
+                                    if (nextCategory === "attendance" && nextDate) {
+                                        nextDate = nextDate.slice(0, 7) + "-01";
+                                    }
+                                    return { ...p, category: nextCategory, customCategory: "", violationDate: nextDate };
+                                });
+                            }}
                                 className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
                                 <option value="">Select type...</option>
                                 {VIOLATION_TYPE_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}

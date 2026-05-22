@@ -45,6 +45,7 @@ export type TabKey =
   | "hr_admin_holidays"
   | "hr_admin_assets"
   | "hr_admin_leave_types"
+  | "hr_admin_leave_policies"
   | "hr_admin_shifts"
   | "hr_admin_departments";
 
@@ -106,6 +107,7 @@ export const TAB_CATALOG: TabDef[] = [
   { key: "hr_admin_holidays",      label: "Holidays & Calendar",  description: "Company holiday list",                         pathPrefixes: ["/dashboard/hr/admin?tab=holidays"],             defaultForNewUser: false, group: "HR Dashboard sections" },
   { key: "hr_admin_assets",        label: "Assets",               description: "Company asset register",                       pathPrefixes: ["/dashboard/hr/admin?tab=assets"],               defaultForNewUser: false, group: "HR Dashboard sections" },
   { key: "hr_admin_leave_types",   label: "Leave Types",          description: "Configure leave categories",                   pathPrefixes: ["/dashboard/hr/admin?tab=leave-types"],          defaultForNewUser: false, group: "HR Dashboard sections" },
+  { key: "hr_admin_leave_policies",label: "Leave Policies",       description: "Per-policy day allotments + assignments",      pathPrefixes: ["/dashboard/hr/admin?tab=leave-policies"],       defaultForNewUser: false, group: "HR Dashboard sections" },
   { key: "hr_admin_shifts",        label: "Shift Templates",      description: "Define attendance shifts",                     pathPrefixes: ["/dashboard/hr/admin?tab=shifts"],               defaultForNewUser: false, group: "HR Dashboard sections" },
   { key: "hr_admin_departments",   label: "Departments (HR)",     description: "HR Dashboard department breakdown",            pathPrefixes: ["/dashboard/hr/admin?tab=departments"],          defaultForNewUser: false, group: "HR Dashboard sections" },
 ];
@@ -146,6 +148,7 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     // All HR Dashboard sub-tabs on by default for full admins.
     hr_admin_attendance:true, hr_admin_approvals:true, hr_admin_leaves:true,
     hr_admin_holidays:true, hr_admin_assets:true, hr_admin_leave_types:true,
+    hr_admin_leave_policies:true,
     hr_admin_shifts:true, hr_admin_departments:true,
     // Audit-added pages — admins see everything by default.
     hr_engage:true, hr_announcements:true, hr_org:true, hr_expenses:true,
@@ -161,6 +164,7 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     reports:true, departments:true, violations:true,
     hr_admin_attendance:true, hr_admin_approvals:true, hr_admin_leaves:true,
     hr_admin_holidays:true, hr_admin_assets:true, hr_admin_leave_types:true,
+    hr_admin_leave_policies:true,
     hr_admin_shifts:true, hr_admin_departments:true,
     hr_engage:true, hr_announcements:true, hr_org:true, hr_expenses:true,
     hr_approvals:true, hr_analytics:true,
@@ -178,11 +182,12 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     // HR Manager extras — visibility into team performance + org metrics.
     cases: true, scores: true, reports: true, company: true, departments: true,
     // HR Dashboard sub-tabs the curated whitelist (HR_MANAGER_ALLOWED_TABS
-    // in src/lib/access.ts) currently allows for HR Manager: attendance,
-    // leaves, holidays, assets, departments. Approvals / leave-types /
-    // shifts default OFF — admins can flip them on per-user.
-    hr_admin_attendance:true, hr_admin_leaves:true, hr_admin_holidays:true,
-    hr_admin_assets:true, hr_admin_departments:true,
+    // in src/lib/access.ts) currently allows for HR Manager + HR Member:
+    // attendance, approvals (recently granted), leaves, holidays, assets,
+    // departments. Leave Types / Leave Policies / Shift Templates default
+    // OFF — admins can flip them on per-user.
+    hr_admin_attendance:true, hr_admin_approvals:true, hr_admin_leaves:true,
+    hr_admin_holidays:true, hr_admin_assets:true, hr_admin_departments:true,
     // HR-Manager also gets the new HR feature pages.
     hr_engage:true, hr_announcements:true, hr_org:true, hr_expenses:true,
     hr_approvals:true, hr_analytics:true,
