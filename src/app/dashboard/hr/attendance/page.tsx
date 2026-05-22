@@ -10,7 +10,7 @@ import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPi
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
 import SelectField from "@/components/ui/SelectField";
-import { isHRAdmin } from "@/lib/access";
+import { isHRAdmin, canApplyRestrictedLeave } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { DateField } from "@/components/ui/date-field";
 
@@ -824,11 +824,22 @@ export default function AttendancePage() {
     if (!c) return null;
     return String(c).slice(0, 10); // YYYY-MM-DD (UTC component is fine — User.createdAt is a timestamp)
   })();
-  // Drop balance-only types (e.g. Carry Over Leave) — they're shown
-  // on the leave-balances grid but mustn't appear in the apply form.
+  // Remote / hybrid employees already work from home as their default
+  // mode — surfacing a "Work From Home" leave option would be confusing
+  // (they don't need to apply for what's already their baseline). Hide
+  // it for them; office-based folks still see it.
+  const myWorkLocation = String((profileData as any)?.employeeProfile?.workLocation ?? "office").toLowerCase();
+  const canApplyWfh = myWorkLocation !== "remote" && myWorkLocation !== "hybrid";
+  // Drop balance-only types (legacy `applicable=false` buckets) and
+  // restricted-admin types (`adminOnly`) when the viewer isn't CEO /
+  // HR Manager / developer. Server enforces the same gate so a
+  // hand-crafted POST still 403s.
+  const me = session?.user as any;
+  const canApplyRestricted = canApplyRestrictedLeave(me);
   const leaveTypes: { id: number; name: string }[] = Array.isArray(leaveTypesData)
     ? leaveTypesData
         .filter((t: any) => t.applicable !== false)
+        .filter((t: any) => t.adminOnly !== true || canApplyRestricted)
         .map((t: any) => ({ id: t.id, name: t.name }))
     : [];
 
@@ -1428,7 +1439,7 @@ export default function AttendancePage() {
               {/* Quick links */}
               <div className="flex flex-col gap-1.5">
                 {[
-                  { label: "Work From Home",    Icon: Home,       onClick: () => openForm("wfh")       },
+                  ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
                   { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
                   { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
                   { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },

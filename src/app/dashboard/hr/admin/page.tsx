@@ -35,7 +35,7 @@ const ADMIN_TABS: Array<AdminTabDef & { permKey: string }> = [
   { key: "holidays",             label: "Holidays & Calendar",  icon: CalendarDays,    permKey: "hr_admin_holidays"       },
   { key: "assets",               label: "Assets",               icon: Package,         permKey: "hr_admin_assets"         },
   { key: "leave-types",          label: "Leave Types",          icon: Calendar,        permKey: "hr_admin_leave_types"    },
-  { key: "leave-policies",       label: "Leave Policies",       icon: Calendar,        permKey: "hr_admin_leave_types"    },
+  { key: "leave-policies",       label: "Leave Policies",       icon: Calendar,        permKey: "hr_admin_leave_policies" },
   { key: "shifts",               label: "Shift Templates",      icon: Clock,           permKey: "hr_admin_shifts"         },
   { key: "departments",          label: "Departments",          icon: Users,           permKey: "hr_admin_departments"    },
 ];
@@ -151,7 +151,7 @@ export default function HRAdminPage() {
   // Leave type form
   const [showLeaveForm, setShowLeaveForm] = useState(false);
   const [editLeave, setEditLeave] = useState<any>(null);
-  const [leaveForm, setLeaveForm] = useState({ name: "", description: "", daysPerYear: "12", isPaid: true, carryForward: false, maxCarryForward: "" });
+  const [leaveForm, setLeaveForm] = useState({ name: "", description: "", daysPerYear: "12", isPaid: true, carryForward: false, maxCarryForward: "", applicable: true, adminOnly: false });
 
   // Shift form
   const [showShiftForm, setShowShiftForm] = useState(false);
@@ -160,7 +160,16 @@ export default function HRAdminPage() {
 
   const openLeaveEdit = (lt: any) => {
     setEditLeave(lt);
-    setLeaveForm({ name: lt.name, description: lt.description || "", daysPerYear: String(lt.daysPerYear), isPaid: lt.isPaid, carryForward: lt.carryForward, maxCarryForward: lt.maxCarryForward ? String(lt.maxCarryForward) : "" });
+    setLeaveForm({
+      name: lt.name,
+      description: lt.description || "",
+      daysPerYear: String(lt.daysPerYear),
+      isPaid: lt.isPaid,
+      carryForward: lt.carryForward,
+      maxCarryForward: lt.maxCarryForward ? String(lt.maxCarryForward) : "",
+      applicable: lt.applicable !== false,
+      adminOnly:  lt.adminOnly === true,
+    });
     setShowLeaveForm(true);
   };
 
@@ -415,7 +424,7 @@ export default function HRAdminPage() {
             <>
               <div className="flex items-center justify-between">
                 <h2 className="text-[14px] font-bold text-slate-800 dark:text-white">Leave Types</h2>
-                <button onClick={() => { setEditLeave(null); setLeaveForm({ name:"",description:"",daysPerYear:"12",isPaid:true,carryForward:false,maxCarryForward:"" }); setShowLeaveForm(true); }}
+                <button onClick={() => { setEditLeave(null); setLeaveForm({ name:"",description:"",daysPerYear:"12",isPaid:true,carryForward:false,maxCarryForward:"",applicable:true,adminOnly:false }); setShowLeaveForm(true); }}
                   className="flex items-center gap-1.5 h-8 px-4 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded-lg text-[12px] font-semibold">
                   <Plus className="w-3.5 h-3.5" />Add Leave Type
                 </button>
@@ -808,6 +817,42 @@ export default function HRAdminPage() {
                     className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-[13px] text-slate-800 dark:text-white" />
                 </div>
               )}
+              {/* Visibility & restricted-admin toggles. "Applicable" controls
+                  whether the type shows up in apply-leave dropdowns at all;
+                  "Admin only" gates it to CEO / HR Manager / developer for
+                  sensitive buckets like Carry Over Leave that HR needs to
+                  draw down on behalf without exposing them to staff. */}
+              <div className="rounded-lg bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 p-3 space-y-2">
+                <label className="flex items-start gap-2 text-[13px] text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={leaveForm.applicable}
+                    onChange={e => setLeaveForm(f => ({ ...f, applicable: e.target.checked }))}
+                    className="w-4 h-4 mt-0.5"
+                  />
+                  <span>
+                    <span className="font-semibold">Applicable</span>
+                    <span className="block text-[11px] text-slate-500 mt-0.5">
+                      Off = balance-only / encashed-at-exit (hidden from apply form).
+                    </span>
+                  </span>
+                </label>
+                <label className={`flex items-start gap-2 text-[13px] cursor-pointer ${leaveForm.applicable ? "text-slate-700 dark:text-slate-300" : "text-slate-400 dark:text-slate-500"}`}>
+                  <input
+                    type="checkbox"
+                    checked={leaveForm.adminOnly}
+                    disabled={!leaveForm.applicable}
+                    onChange={e => setLeaveForm(f => ({ ...f, adminOnly: e.target.checked }))}
+                    className="w-4 h-4 mt-0.5"
+                  />
+                  <span>
+                    <span className="font-semibold">Admin-only</span>
+                    <span className="block text-[11px] text-slate-500 mt-0.5">
+                      Only CEO, HR Manager, and developers can apply. Hidden from everyone else.
+                    </span>
+                  </span>
+                </label>
+              </div>
             </div>
             <div className="flex gap-3 mt-5">
               <button onClick={() => setShowLeaveForm(false)}
