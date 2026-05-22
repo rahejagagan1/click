@@ -37,10 +37,36 @@ export async function PUT(req: NextRequest) {
   try {
     const body = await req.json();
     const { id, name, code, daysPerYear, isPaid, carryForward, isActive } = body;
-    const type = await prisma.leaveType.update({
-      where: { id: parseInt(id) },
+    const typeId = parseInt(id);
+    if (!Number.isFinite(typeId)) {
+      return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+    // The typed Prisma client may not yet know about applicable /
+    // adminOnly (DB columns added later, client regen blocked by a
+    // locked DLL on the Windows dev box). Drop to raw SQL only for
+    // those two so HR can flip the toggles without waiting for a
+    // generator rerun on prod.
+    await prisma.leaveType.update({
+      where: { id: typeId },
       data: { name, code, daysPerYear: parseInt(daysPerYear), isPaid, carryForward, isActive },
     });
-    return NextResponse.json(type);
+    if (body.applicable !== undefined) {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "LeaveType" SET "applicable" = $1 WHERE id = $2`,
+        !!body.applicable, typeId,
+      );
+    }
+    if (body.adminOnly !== undefined) {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "LeaveType" SET "adminOnly" = $1 WHERE id = $2`,
+        !!body.adminOnly, typeId,
+      );
+    }
+    // Re-read with raw SQL so the response includes the new columns
+    // (typed client hasn't been regenerated yet).
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT * FROM "LeaveType" WHERE id = $1`, typeId,
+    );
+    return NextResponse.json(rows[0]);
   } catch (e) { return serverError(e, "PUT /api/hr/admin/leave-types"); }
 }

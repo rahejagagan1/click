@@ -205,7 +205,7 @@ function EmployeePicker({ selected, onChange }: {
         {selected.map((s) => (
           <span key={s.id} className="inline-flex items-center gap-1.5 h-6 pl-1 pr-1.5 rounded-full bg-[#008CFF]/10 text-[#008CFF] dark:bg-[#4a9cff]/15 dark:text-[#4a9cff] text-[11px] font-medium">
             {s.profilePictureUrl ? (
-              <img src={s.profilePictureUrl} alt="" className="w-4 h-4 rounded-full object-cover" />
+              <img src={s.profilePictureUrl} alt="" referrerPolicy="no-referrer" className="w-4 h-4 rounded-full object-cover" />
             ) : (
               <span className="w-4 h-4 rounded-full bg-[#008CFF]/25 text-[9px] flex items-center justify-center">
                 {s.name.slice(0, 1).toUpperCase()}
@@ -256,7 +256,7 @@ function EmployeePicker({ selected, onChange }: {
               className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-[#008CFF]/[0.06] dark:hover:bg-[#4a9cff]/[0.08]"
             >
               {u.profilePictureUrl ? (
-                <img src={u.profilePictureUrl} alt="" className="w-7 h-7 rounded-full object-cover" />
+                <img src={u.profilePictureUrl} alt="" referrerPolicy="no-referrer" className="w-7 h-7 rounded-full object-cover" />
               ) : (
                 <span className="w-7 h-7 rounded-full bg-[#008CFF]/20 text-[#008CFF] text-[11px] font-semibold flex items-center justify-center">
                   {u.name?.slice(0, 1).toUpperCase() || "?"}

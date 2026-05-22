@@ -49,7 +49,7 @@ export default function AnnouncementsPage() {
               {/* Author header */}
               <div className="flex items-center gap-3 px-5 py-3 border-b border-white/[0.04]">
                 <div className="w-9 h-9 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-slate-800 dark:text-white text-sm font-medium overflow-hidden">
-                  {a.author?.profilePictureUrl ? <img src={a.author.profilePictureUrl} className="w-full h-full object-cover" /> : a.author?.name?.charAt(0)}
+                  {a.author?.profilePictureUrl ? <img src={a.author.profilePictureUrl} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" /> : a.author?.name?.charAt(0)}
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center gap-2">

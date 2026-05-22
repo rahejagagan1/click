@@ -190,7 +190,7 @@ export default function HeaderSearch() {
                         className="flex items-center gap-2.5 px-3 py-2 border-b border-slate-100 dark:border-white/[0.04] last:border-b-0 hover:bg-[#008CFF]/[0.06] dark:hover:bg-[#008CFF]/[0.1] transition-colors"
                       >
                         {u.profilePictureUrl ? (
-                          <img src={u.profilePictureUrl} alt="" className="h-7 w-7 rounded-full object-cover shrink-0" />
+                          <img src={u.profilePictureUrl} alt="" referrerPolicy="no-referrer" className="h-7 w-7 rounded-full object-cover shrink-0" />
                         ) : (
                           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#008CFF] text-[10px] font-bold text-white">{initials}</span>
                         )}
