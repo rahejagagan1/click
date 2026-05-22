@@ -7,6 +7,7 @@ import Link from "next/link";
 import SelectField from "@/components/ui/SelectField";
 import { isHRAdmin, canApplyRestrictedLeave } from "@/lib/access";
 import { DateField } from "@/components/ui/date-field";
+import EmployeePicker, { type PickerUser } from "@/components/hr/EmployeePicker";
 
 const TOP_TABS = [
   { key: "home",        label: "HOME",              href: "/dashboard/hr/home"  },
@@ -406,6 +407,10 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
   const isHalfLeave = dayKind !== "full";
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // "Notify" picker — extra people the applicant wants CC'd on the
+  // approval emails. Sent through as `notifyUserIds` so the leave
+  // route layers them onto the L1/L2 approver notification list.
+  const [notify, setNotify] = useState<PickerUser[]>([]);
 
   // Live leave balances so each leave-type option can advertise "X days
   // available". Self-heal endpoint guarantees one row per active type.
@@ -451,7 +456,11 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
     const res = await fetch("/api/hr/leaves", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...form, toDate, reason, leaveTypeId: parseInt(form.leaveTypeId) }),
+      body: JSON.stringify({
+        ...form, toDate, reason,
+        leaveTypeId: parseInt(form.leaveTypeId),
+        notifyUserIds: notify.map((u) => u.id),
+      }),
     });
     const data = await res.json();
     if (!res.ok) { setError(data.error); setSaving(false); return; }
@@ -618,10 +627,12 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
           />
         </div>
 
-        {/* Notify */}
+        {/* Notify — chip-style employee autocomplete. Selected users
+            are passed through to the leave API as notifyUserIds so
+            they get CC'd on the approval emails. */}
         <div>
           <label className="text-[12px] text-slate-500 dark:text-slate-400 font-medium mb-2 block">Notify</label>
-          <input placeholder="Search employee" className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white placeholder-slate-600 focus:outline-none focus:border-[#008CFF]/40" />
+          <EmployeePicker selected={notify} onChange={setNotify} />
         </div>
       </div>
 
