@@ -178,7 +178,7 @@ export default function PeoplePage() {
                   <div className="flex items-start gap-4 mb-4">
                     {/* Avatar */}
                     <div className="w-14 h-14 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-slate-800 dark:text-white text-lg font-bold overflow-hidden ring-2 ring-white/[0.06] shrink-0">
-                      {emp.profilePictureUrl ? <img src={emp.profilePictureUrl} className="w-full h-full object-cover" alt="" /> : emp.name?.charAt(0)}
+                      {emp.profilePictureUrl ? <img src={emp.profilePictureUrl} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" /> : emp.name?.charAt(0)}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">

@@ -762,7 +762,14 @@ export default function EmployeeDetailPage() {
 
             {activeTab === "Attendance" && (showAttendanceTab ? (
               <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
-                <EmployeeTimePanel userId={userId} userName={user.name} isHRAdmin={isHRAdmin} meDbId={Number(me?.dbId) || null} />
+                <EmployeeTimePanel
+                  userId={userId}
+                  userName={user.name}
+                  isHRAdmin={isHRAdmin}
+                  meDbId={Number(me?.dbId) || null}
+                  joiningDate={p?.joiningDate ?? null}
+                  workLocation={p?.workLocation ?? null}
+                />
               </section>
             ) : (
               <section className="rounded-xl border border-slate-200 bg-white p-12 text-center shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
@@ -1753,6 +1760,11 @@ function TimelineBar({
   const endPct   = outMin != null ? Math.min(100, ((outMin - SHIFT_START_MIN) / SHIFT_LEN) * 100) : 0;
   const widthPct = Math.max(0, endPct - startPct);
   const hasBar   = !!(clockIn && clockOut);
+  // When there's a clock-in but no clock-out yet (today: open session;
+  // past dates: forgot-to-clock-out / regularization needed) we still
+  // want a visible marker at the clock-in position so HR can see WHEN
+  // the day started without having to hover the empty track.
+  const hasStartOnly = !!clockIn && !clockOut;
 
   // Lowercase, no leading-zero formatting — matches the attendance
   // page's "Logged In 8:00 am" tooltip wording.
@@ -1809,6 +1821,21 @@ function TimelineBar({
             style={{ left: `${endPct}%`, boxShadow: `0 0 0 2px ${toneCls.ring}` }}
           />
         </>
+      ) : hasStartOnly ? (
+        <>
+          {/* Start-only bar: a short amber stub anchored at the clock-in
+              position, with a single endpoint dot. Communicates "we know
+              when they came in; clock-out is missing." Hover the row for
+              the exact time. */}
+          <div
+            className="absolute top-1/2 h-[8px] -translate-y-1/2 rounded-full bg-gradient-to-r from-amber-300 to-amber-400"
+            style={{ left: `${startPct}%`, width: `6px`, boxShadow: "0 2px 5px rgba(245,158,11,0.35)" }}
+          />
+          <span
+            className="absolute top-1/2 h-[12px] w-[12px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_1px_3px_rgba(15,23,42,0.20)]"
+            style={{ left: `${startPct}%`, boxShadow: `0 0 0 2px #f59e0b` }}
+          />
+        </>
       ) : null}
 
       {/* Themed hover tooltip — same look as the attendance-page bar.
@@ -1836,7 +1863,23 @@ function TimelineBar({
   );
 }
 
-function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: number; userName: string; isHRAdmin: boolean; meDbId: number | null }) {
+function EmployeeTimePanel({
+  userId, userName, isHRAdmin, meDbId, joiningDate, workLocation,
+}: {
+  userId: number; userName: string; isHRAdmin: boolean; meDbId: number | null;
+  joiningDate?: string | null;
+  workLocation?: string | null;
+}) {
+  // Normalise the joining date to a UTC midnight Date so we can clamp
+  // every date window without re-parsing per call. Anything before this
+  // day was pre-employment and shouldn't show as "Absent" — the row
+  // never existed.
+  const joinedAt = joiningDate ? new Date(`${String(joiningDate).slice(0, 10)}T00:00:00Z`) : null;
+  // Remote / hybrid employees already work from home as their baseline,
+  // so applying for WFH is meaningless. Hide the quick action — both
+  // for self-view and for HR viewing such an employee's profile.
+  const targetWorkLocation = String(workLocation ?? "office").toLowerCase();
+  const canApplyWfh = targetWorkLocation !== "remote" && targetWorkLocation !== "hybrid";
   // True when the signed-in viewer is looking at their own profile — used
   // to render a "Regularize this day" link in place of the passive Absent
   // cross icon, deep-linking into /dashboard/hr/attendance with the date
@@ -1859,11 +1902,14 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
   type Period = "30d" | string;
   const [period, setPeriod] = useState<Period>("30d");
 
-  // API URL based on period.
+  // API URL based on period. The 30-day window is clamped to the
+  // employee's joining date so we never fetch (or synthesize) "absent"
+  // rows for days before they were employed.
   const url = (() => {
     if (period === "30d") {
       const end = new Date();
-      const start = new Date(end); start.setDate(start.getDate() - 29);
+      let start = new Date(end); start.setDate(start.getDate() - 29);
+      if (joinedAt && start.getTime() < joinedAt.getTime()) start = new Date(joinedAt.getTime());
       const iso = (d: Date) => d.toISOString().slice(0, 10);
       return `/api/hr/attendance?userId=${userId}&from=${iso(start)}&to=${iso(end)}`;
     }
@@ -1932,6 +1978,8 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
   };
 
   // Build a complete day-by-day series (incl. weekends + absent gaps), newest first.
+  // Start is clamped to the employee's joining date — pre-employment days
+  // would otherwise synthesize as "Absent" rows and pollute the log.
   const fullSeries = (() => {
     let start: Date, end: Date;
     if (period === "30d") {
@@ -1944,6 +1992,9 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
       const todayUtc = new Date(`${today.toISOString().slice(0, 10)}T00:00:00Z`);
       if (end.getTime() > todayUtc.getTime()) end = todayUtc;
     }
+    if (joinedAt && start.getTime() < joinedAt.getTime()) start = new Date(joinedAt.getTime());
+    // If the entire window is pre-joining, bail out with an empty series.
+    if (start.getTime() > end.getTime()) return [] as any[];
     const byDate = new Map<string, any>();
     for (const r of records) byDate.set(String(r.date).slice(0, 10), r);
     const out: any[] = [];
@@ -2251,12 +2302,17 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
     const get = (t: string) => parts.find((p) => p.type === t)?.value || "";
     return `${get("year")}-${get("month")}-${get("day")}`;
   })();
+  // Clamp the 7-day window to the employee's joining date so a brand-new
+  // joiner doesn't get diluted to 0% on-time by 6 pre-employment days.
+  const joinedIso = joinedAt ? joinedAt.toISOString().slice(0, 10) : null;
   const last7 = (() => {
     const out: string[] = [];
     const base = new Date(istToday + "T00:00:00Z");
     for (let i = 0; i < 7; i++) {
       const d = new Date(base); d.setUTCDate(d.getUTCDate() - i);
-      out.push(d.toISOString().slice(0, 10));
+      const iso = d.toISOString().slice(0, 10);
+      if (joinedIso && iso < joinedIso) continue;
+      out.push(iso);
     }
     return out;
   })();
@@ -2390,9 +2446,11 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
               </div>
               {(isHRAdmin || isSelfView) && (
                 <div className="mt-3 grid grid-cols-2 gap-1.5">
-                  <button onClick={() => { setLeaveOpen(true); setLeaveModalTab("wfh"); }} className="inline-flex items-center gap-1.5 rounded-md text-[12px] font-medium text-[#008CFF] hover:underline justify-start">
-                    <Home size={12} /> Work From Home
-                  </button>
+                  {canApplyWfh && (
+                    <button onClick={() => { setLeaveOpen(true); setLeaveModalTab("wfh"); }} className="inline-flex items-center gap-1.5 rounded-md text-[12px] font-medium text-[#008CFF] hover:underline justify-start">
+                      <Home size={12} /> Work From Home
+                    </button>
+                  )}
                   <button onClick={() => setOdOpen(true)} className="inline-flex items-center gap-1.5 rounded-md text-[12px] font-medium text-[#008CFF] hover:underline justify-start">
                     <Briefcase size={12} /> On Duty
                   </button>
@@ -2505,17 +2563,45 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
               const totalMin = liveMin;
               const effectiveDot = totalMin >= 480 ? "bg-emerald-500" : totalMin >= 240 ? "bg-amber-500" : totalMin > 0 ? "bg-red-500" : "bg-slate-300";
 
+              // ── Status-tag flags (Late / Missed / On break) ──
+              // Mirrors the Me-section row badges (in /dashboard/hr/attendance)
+              // so HR sees the same context here when they open someone's
+              // profile. Suppressed when a pending request covers the day —
+              // matches the Me-section's `!hasPendingAny` guard so a pending
+              // regularization / WFH / leave hides the harsher "Late" or
+              // "Missed" label until the request is decided.
+              const hasPendingAny = !!(isRegPending || isWfhPending || isLeavePending);
+              const firstIn = sess[0]?.clockIn
+                ? new Date(sess[0].clockIn)
+                : (rec.clockIn ? new Date(rec.clockIn) : null);
+              const isLateFirstIn = !!firstIn && (() => {
+                // First clock-in at or past 10:00 IST → Late.
+                // UTC + 5:30 → IST hour. Don't use getHours() — that uses
+                // the SERVER's local timezone and would skew the cutoff.
+                const istHr = (firstIn.getUTCHours() + 5 + Math.floor((firstIn.getUTCMinutes() + 30) / 60)) % 24;
+                return istHr >= 10;
+              })();
+              const missedClockOut = !!rec.clockIn && !rec.clockOut && !isToday && !rec.isRegularized && !isLeaveRow;
+              // "On break" — today, all closed sessions, day-total still < 9h.
+              // Means the user clocked out for a break but hasn't hit the
+              // 9h threshold; not yet "done for the day".
+              const isOnBreak = isToday && !openSess && sess.some((s) => s.clockOut) && !rec.isRegularized && (rec.totalMinutes || 0) < 540;
+
               return (
                 <tr key={rec.id} className={`border-b border-slate-100 transition-colors ${rowBg}`}>
                   {/* Date + badges */}
                   <td className="px-5 py-3 align-middle">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <p className="text-[12.5px] font-medium text-slate-800">{dateLabel}</p>
                       {isToday        ? <span className="inline-flex items-center rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-sky-700">Today</span> : null}
                       {isLeaveRow     ? <span className="inline-flex items-center rounded bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet-700">Leave</span> : null}
                       {isWeekend      ? <span className="inline-flex items-center rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-600">W-Off</span> : null}
                       {isHoliday      ? <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">Holiday</span> : null}
                       {isWfhApproved && !isLeaveRow ? <span className="inline-flex items-center rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-700">WFH</span> : null}
+                      {/* New tags (matches Me-section) */}
+                      {missedClockOut && !hasPendingAny ? <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">Missed</span> : null}
+                      {isLateFirstIn && !!rec.clockIn && !hasPendingAny && !isLeaveRow ? <span className="inline-flex items-center rounded bg-orange-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-orange-700">Late</span> : null}
+                      {isOnBreak ? <span className="inline-flex items-center rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-700">On break</span> : null}
                     </div>
                   </td>
 
@@ -2616,6 +2702,19 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                               </div>
                             );
                           }
+                          // Clocked in but never clocked out (status didn't flip to
+                          // present/late/half_day). Surface "Incomplete" instead of
+                          // a silent dash so HR can see the row needs attention.
+                          if (hasActual && !rec.clockOut) {
+                            return (
+                              <span
+                                className="text-[12.5px] italic text-amber-700"
+                                title="Clocked in but no clock-out recorded — regularization needed"
+                              >
+                                Incomplete
+                              </span>
+                            );
+                          }
                           return <span className="text-[12.5px] text-slate-400">—</span>;
                         })()}
                       </td>
@@ -2630,6 +2729,16 @@ function EmployeeTimePanel({ userId, userName, isHRAdmin, meDbId }: { userId: nu
                             return (
                               <span className={`text-[12.5px] ${isRegPending ? "italic text-amber-700" : "text-slate-700"}`}>
                                 {fmtMins(mins) || "0h 0m"}
+                              </span>
+                            );
+                          }
+                          if (hasActual && !rec.clockOut) {
+                            return (
+                              <span
+                                className="text-[12.5px] italic text-amber-700"
+                                title="Clocked in but no clock-out recorded"
+                              >
+                                Incomplete
                               </span>
                             );
                           }
