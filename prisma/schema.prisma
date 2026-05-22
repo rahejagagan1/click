@@ -1119,6 +1119,12 @@ model LeaveType {
   // that the company doesn't auto-credit anymore but still pays out
   // at exit for old employees who already have a stored balance.
   applicable          Boolean   @default(true)
+  // When true the type IS applyable but only by restricted-admin
+  // tier (CEO / HR Manager / isDeveloper) — server returns 403 for
+  // anyone else and the apply-form dropdown hides it. Lets HR drive
+  // sensitive types like Carry Over Leave from the on-behalf form
+  // without exposing them to regular employees.
+  adminOnly           Boolean   @default(false)
   createdAt           DateTime  @default(now())
 
   balances            LeaveBalance[]

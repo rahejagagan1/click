@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
+import { canApplyRestrictedLeave } from "@/lib/access";
 import { notifyUsers } from "@/lib/notifications";
 import { countWorkingDays } from "@/lib/hr/working-days";
 
@@ -102,6 +103,16 @@ export async function POST(req: NextRequest) {
     }
     if (leaveType.applicable === false) {
       return NextResponse.json({ error: "This leave type is not applicable — balance is encashed at exit." }, { status: 400 });
+    }
+    // Restricted-admin leave types (e.g. Carry Over Leave) — applyable
+    // only by the tightest admin tier: CEO / role=hr_manager /
+    // isDeveloper. Explicitly excludes special_access + role=admin so
+    // the gate matches the leadership intent for sensitive balances.
+    if ((leaveType as any).adminOnly === true && !canApplyRestrictedLeave(self)) {
+      return NextResponse.json(
+        { error: "This leave type can only be applied by HR Manager, CEO, or a developer." },
+        { status: 403 },
+      );
     }
     // Note: we intentionally do NOT gate applications by user.leavePolicyId.
     // HR manages balances manually in the Leave Balances matrix and can

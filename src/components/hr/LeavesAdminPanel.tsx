@@ -465,7 +465,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                 <td className="sticky left-0 z-[1] bg-inherit px-5 py-3 min-w-[260px]">
                   <div className="flex items-center gap-2.5">
                     {emp.profilePictureUrl ? (
-                      <img src={emp.profilePictureUrl} alt="" className="h-8 w-8 rounded-full object-cover ring-1 ring-slate-200" />
+                      <img src={emp.profilePictureUrl} alt="" referrerPolicy="no-referrer" className="h-8 w-8 rounded-full object-cover ring-1 ring-slate-200" />
                     ) : (
                       <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e8f1fc] text-[11px] font-semibold text-[#0f4e93] ring-1 ring-[#cfdef5]">
                         {(emp.name || "?").trim().slice(0, 1).toUpperCase()}
