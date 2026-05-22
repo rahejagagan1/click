@@ -769,6 +769,8 @@ export default function EmployeeDetailPage() {
                   meDbId={Number(me?.dbId) || null}
                   joiningDate={p?.joiningDate ?? null}
                   workLocation={p?.workLocation ?? null}
+                  targetOrgLevel={user.orgLevel ?? null}
+                  targetIsDeveloper={user.isDeveloper === true}
                 />
               </section>
             ) : (
@@ -1865,11 +1867,20 @@ function TimelineBar({
 
 function EmployeeTimePanel({
   userId, userName, isHRAdmin, meDbId, joiningDate, workLocation,
+  targetOrgLevel, targetIsDeveloper,
 }: {
   userId: number; userName: string; isHRAdmin: boolean; meDbId: number | null;
   joiningDate?: string | null;
   workLocation?: string | null;
+  targetOrgLevel?: string | null;
+  targetIsDeveloper?: boolean;
 }) {
+  // CEO + developers don't punch a clock — flexible schedules mean the
+  // daily "Absent" cross-marks for every non-clocked-in day are noise.
+  // When viewing their profile (or their own page) we skip absent-row
+  // synthesis below. Real clock-ins, weekends, and holidays still
+  // appear; just the empty-day "Absent" placeholders are dropped.
+  const skipAbsentSynthesis = !!(targetOrgLevel === "ceo" || targetIsDeveloper);
   // Normalise the joining date to a UTC midnight Date so we can clamp
   // every date window without re-parsing per call. Anything before this
   // day was pre-employment and shouldn't show as "Absent" — the row
@@ -2005,6 +2016,10 @@ function EmployeeTimePanel({
       else {
         const dow = d.getUTCDay();
         const isWeekend = dow === 0 || dow === 6;
+        // CEO + developers — only synthesize weekends (calendar context).
+        // Drop the "Absent" placeholders so the log isn't a wall of
+        // cross-marks for someone who doesn't punch a clock.
+        if (skipAbsentSynthesis && !isWeekend) continue;
         out.push({
           id: `synth-${iso}`,
           date: `${iso}T00:00:00.000Z`,

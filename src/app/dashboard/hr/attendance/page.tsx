@@ -970,6 +970,14 @@ export default function AttendancePage() {
     const dd = parts.find(p => p.type === "day")!.value;
     return `${y}-${m}-${dd}`;
   })();
+  // CEO and developers don't punch a clock — their schedules are flexible
+  // and the daily "Absent" markers don't represent anything meaningful for
+  // them. Skip synthesizing absent rows in their log. Real clock-ins (if
+  // any), weekends, and today's "pending" row are still kept so they can
+  // see the few times they did clock in + know what day it is + still
+  // click Clock-In if they want.
+  const skipAbsentSynthesis = user?.orgLevel === "ceo" || user?.isDeveloper === true;
+
   const recsWithToday = (() => {
     // Build the list of every IST calendar day in the current view, then fill
     // each day with the matching server record (if any) or a synthetic empty
@@ -1015,6 +1023,11 @@ export default function AttendancePage() {
         const dow = d.getUTCDay(); // 0 = Sun, 6 = Sat
         const isWeekend = dow === 0 || dow === 6;
         const isToday = iso === istTodayIso;
+        // For CEO / developers, skip synthesizing the "absent" rows —
+        // they don't punch a clock, so the cross-mark noise is wrong.
+        // Today's pending row + weekends still get synthesized (today
+        // so they can still clock in; weekends for calendar context).
+        if (skipAbsentSynthesis && !isToday && !isWeekend) continue;
         out.push({
           id: `synthetic-${iso}`,
           date: `${iso}T00:00:00.000Z`,
