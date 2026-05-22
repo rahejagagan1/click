@@ -19,6 +19,9 @@ import {
   isAdmin, isHRAdmin, isFullHRAdmin,
   HR_MANAGER_ALLOWED_TABS,
 } from "../src/lib/access";
+import {
+  TAB_CATALOG, TAB_CATALOG_BY_KEY, defaultTabPermissions,
+} from "../src/lib/permissions/tabs";
 
 type Status = "PASS" | "FAIL";
 const results: { name: string; status: Status; evidence: string }[] = [];
@@ -145,6 +148,66 @@ record(
   "Server gate — plain employee REJECTED",
   expect(!serverApprovalsGate(plainEmployee)),
   `Non-HR + non-admin users without direct reports get 403, as before.`,
+);
+
+// ── HR Dashboard sub-tab catalog (the toggles in the Permissions UI's
+//    "HR Dashboard sections" group) ───────────────────────────────────
+const SUB_TABS = TAB_CATALOG.filter((t) => t.group === "HR Dashboard sections").map((t) => t.key);
+record(
+  "Sub-tab catalog — every HR Dashboard section has its own perm key",
+  expect(
+    SUB_TABS.includes("hr_admin_attendance" as any) &&
+    SUB_TABS.includes("hr_admin_approvals" as any) &&
+    SUB_TABS.includes("hr_admin_leaves" as any) &&
+    SUB_TABS.includes("hr_admin_holidays" as any) &&
+    SUB_TABS.includes("hr_admin_assets" as any) &&
+    SUB_TABS.includes("hr_admin_leave_types" as any) &&
+    SUB_TABS.includes("hr_admin_leave_policies" as any) &&
+    SUB_TABS.includes("hr_admin_shifts" as any) &&
+    SUB_TABS.includes("hr_admin_departments" as any),
+  ),
+  `9 keys present in TAB_CATALOG: ${SUB_TABS.join(", ")}`,
+);
+record(
+  "Sub-tab catalog — Leave Policies has its OWN key (no longer shares with Leave Types)",
+  expect(
+    TAB_CATALOG_BY_KEY.hr_admin_leave_types?.label === "Leave Types" &&
+    TAB_CATALOG_BY_KEY.hr_admin_leave_policies?.label === "Leave Policies",
+  ),
+  `hr_admin_leave_types → "Leave Types"; hr_admin_leave_policies → "Leave Policies". Toggling one no longer hides the other.`,
+);
+
+// ── Role defaults — make sure ROLE_TAB_OVERRIDES wires the toggles
+//    so each tier sees the right sub-tabs out of the box ──────────────
+const ceoDefaults         = defaultTabPermissions("ceo");
+const specialAccessDefaults = defaultTabPermissions("special_access");
+const hrManagerDefaults   = defaultTabPermissions("hr_manager");
+const plainDefaults       = defaultTabPermissions("member");
+
+record(
+  "Defaults — CEO sees every HR Dashboard sub-tab",
+  expect(SUB_TABS.every((k) => ceoDefaults[k] === true)),
+  `Full admin sees all 9 sub-tabs on day 1.`,
+);
+record(
+  "Defaults — special_access sees every HR Dashboard sub-tab",
+  expect(SUB_TABS.every((k) => specialAccessDefaults[k] === true)),
+  `Senior-admin tier mirrors CEO.`,
+);
+record(
+  "Defaults — HR Manager / HR Member: Approvals is ON by default",
+  expect(hrManagerDefaults.hr_admin_approvals === true),
+  `Approvals was just added to the curated whitelist; default toggle now matches.`,
+);
+record(
+  "Defaults — HR Manager / HR Member: Leave Policies is OFF by default (admin-only)",
+  expect(hrManagerDefaults.hr_admin_leave_policies === false),
+  `Policy / org-wide config tab stays admin-only — admins can flip per-user if needed.`,
+);
+record(
+  "Defaults — plain employee: every HR Dashboard sub-tab is OFF",
+  expect(SUB_TABS.every((k) => plainDefaults[k] === false)),
+  `Sub-tabs are gated by the parent hr_admin tab; plain employees see neither.`,
 );
 
 // ── Output ──────────────────────────────────────────────────────────

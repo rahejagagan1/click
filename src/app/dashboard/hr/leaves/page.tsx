@@ -5,7 +5,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import SelectField from "@/components/ui/SelectField";
-import { isHRAdmin } from "@/lib/access";
+import { isHRAdmin, canApplyRestrictedLeave } from "@/lib/access";
 import { DateField } from "@/components/ui/date-field";
 
 const TOP_TABS = [
@@ -308,13 +308,24 @@ export default function LeavesPage() {
       {showApply && (
         <>
           <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowApply(false)} />
-          {/* Filter to applicable types only — balance-only buckets like
-              Carry Over Leave still surface on the leave-balances grid
-              but mustn't be selectable in the apply form. */}
-          <RequestLeavePanel
-            leaveTypes={leaveTypes.filter((lt: any) => lt.applicable !== false)}
-            onClose={() => setShowApply(false)}
-          />
+          {/* Filter to applicable types only — balance-only buckets still
+              surface on the leave-balances grid but mustn't be selectable
+              in the apply form. Restricted-admin types (adminOnly=true)
+              are additionally hidden from anyone who isn't CEO / HR
+              Manager / developer; the server enforces the same gate. */}
+          {(() => {
+            const me = session?.user as any;
+            const canApplyRestricted = canApplyRestrictedLeave(me);
+            const applyable = leaveTypes
+              .filter((lt: any) => lt.applicable !== false)
+              .filter((lt: any) => lt.adminOnly !== true || canApplyRestricted);
+            return (
+              <RequestLeavePanel
+                leaveTypes={applyable}
+                onClose={() => setShowApply(false)}
+              />
+            );
+          })()}
         </>
       )}
 
