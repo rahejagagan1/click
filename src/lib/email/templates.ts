@@ -56,6 +56,14 @@ const fmtDate = (d: string | Date) =>
   new Date(d).toLocaleDateString("en-IN", {
     day: "2-digit", month: "short", year: "numeric", weekday: "short",
   });
+// Month-only formatter — used for category=attendance violations, where
+// the value tracked is the calendar month ("May 2026") rather than a
+// specific day. Stays consistent with the in-app violation detail
+// row's display in /dashboard/violations.
+const fmtMonthYear = (d: string | Date) =>
+  new Date(d).toLocaleDateString("en-IN", {
+    month: "long", year: "numeric",
+  });
 
 // ── Helper: build subject + html + text from a request payload ─────────
 type RequestArgs = {
@@ -805,7 +813,16 @@ export function violationCreatedEmail(args: {
   const stat  = STATUS_LABEL[args.status] ?? args.status;
   const statColor = STATUS_COLOR[args.status] ?? "#64748b";
   const sevTint = SEVERITY_TINT[args.severity] ?? SEVERITY_TINT.medium;
-  const dateLabel = args.violationDate ? fmtDate(args.violationDate) : null;
+  // Attendance violations are tracked per-MONTH (e.g. "3 lates in May")
+  // so the email surfaces "Month" + "May 2026" instead of the day-level
+  // "Date" / "01 May, 2026". Every other category keeps the day-level
+  // wording — matches the in-app violation detail row in
+  // /dashboard/violations and the month-picker form input.
+  const isAttendance = (args.category ?? "").toLowerCase() === "attendance";
+  const dateLabel = args.violationDate
+    ? (isAttendance ? fmtMonthYear(args.violationDate) : fmtDate(args.violationDate))
+    : null;
+  const dateRowLabel = isAttendance ? "Month" : "Date";
 
   // Severity-tinted alert banner — replaces the generic "policy
   // violation has been recorded" line with a colour-coded callout that
@@ -819,7 +836,7 @@ export function violationCreatedEmail(args: {
   const rows: string[] = [];
   if (args.category)     rows.push(vRow("Category",  escape(args.category)));
   rows.push(vRow("Status", `<span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700;background:${statColor}1a;color:${statColor}">${escape(stat)}</span>`));
-  if (dateLabel)         rows.push(vRow("Date",      escape(dateLabel)));
+  if (dateLabel)         rows.push(vRow(dateRowLabel, escape(dateLabel)));
   if (args.reporterName) rows.push(vRow("Reported by", escape(args.reporterName)));
 
   const body = `
@@ -849,7 +866,7 @@ export function violationCreatedEmail(args: {
     args.category ? `Category: ${args.category}` : null,
     `Severity: ${sev}`,
     `Status: ${stat}`,
-    dateLabel ? `Date: ${dateLabel}` : null,
+    dateLabel ? `${dateRowLabel}: ${dateLabel}` : null,
     args.reporterName ? `Reported by: ${args.reporterName}` : null,
     args.description ? `\nDescription:\n${args.description}` : null,
     args.actionTaken ? `\nAction taken:\n${args.actionTaken}` : null,
