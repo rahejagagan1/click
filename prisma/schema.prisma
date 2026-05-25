@@ -109,6 +109,7 @@ model User {
   leaveApplications      LeaveApplication[]   @relation("LeaveApplicant")
   leaveApprovals         LeaveApplication[]   @relation("LeaveApprover")
   leaveFinalApprovals    LeaveApplication[]   @relation("LeaveFinalApprover")
+  leaveCoverages         LeaveApplication[]   @relation("LeavePOC")
   heldAssets             AssetAssignment[]
   ownedDocuments         EmployeeDocument[]   @relation("DocOwner")
   uploadedDocuments      EmployeeDocument[]   @relation("DocUploader")
@@ -130,10 +131,13 @@ model User {
   regularizationsGranted AttendanceRegularization[] @relation("RegularizationGrantedBy")
   wfhRequests            WFHRequest[]     @relation("WFHUser")
   wfhApprovals           WFHRequest[]     @relation("WFHApprover")
+  wfhCoverages           WFHRequest[]     @relation("WFHPOC")
   onDutyRequests         OnDutyRequest[]  @relation("OnDutyUser")
   onDutyApprovals        OnDutyRequest[]  @relation("OnDutyApprover")
+  onDutyCoverages        OnDutyRequest[]  @relation("OnDutyPOC")
   compOffRequests        CompOffRequest[] @relation("CompOffUser")
   compOffApprovals       CompOffRequest[] @relation("CompOffApprover")
+  compOffCoverages       CompOffRequest[] @relation("CompOffPOC")
   engagePosts            EngagePost[]     @relation("EngageAuthor")
   engagePraises          EngagePost[]     @relation("EngagePraiseTo")
   engageReactions        EngageReaction[]
@@ -1227,6 +1231,11 @@ model LeaveApplication {
   finalApprovalNote String?
   // Optional list of users the applicant asked to notify (Notify picker on form)
   notifyUserIds     Int[]     @default([])
+  // Handoff fields — required by the company's standard leave-application
+  // format. POC is the person covering the requester while they're out;
+  // workStatus is a free-text summary of pending tasks.
+  pocUserId         Int?
+  workStatus        String?   @db.Text
   appliedAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -1234,10 +1243,12 @@ model LeaveApplication {
   leaveType         LeaveType @relation(fields: [leaveTypeId], references: [id])
   approver          User?     @relation("LeaveApprover",       fields: [approvedById],      references: [id])
   finalApprover     User?     @relation("LeaveFinalApprover",  fields: [finalApprovedById], references: [id])
+  poc               User?     @relation("LeavePOC",            fields: [pocUserId],         references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([status])
   @@index([fromDate, toDate])
+  @@index([pocUserId])
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1659,13 +1670,19 @@ model WFHRequest {
   status       String    @default("pending")
   approvedById Int?
   approvalNote String?
+  // Handoff fields — company-standard WFH format.
+  pocUserId       Int?
+  workStatus      String?  @db.Text
+  unavailability  String?  @db.Text
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   user         User      @relation("WFHUser",     fields: [userId],       references: [id], onDelete: Cascade)
   approver     User?     @relation("WFHApprover", fields: [approvedById], references: [id])
+  poc          User?     @relation("WFHPOC",      fields: [pocUserId],    references: [id], onDelete: SetNull)
   @@index([userId])
   @@index([date])
   @@index([status])
+  @@index([pocUserId])
 }
 
 model OnDutyRequest {
@@ -1679,13 +1696,18 @@ model OnDutyRequest {
   status       String    @default("pending")
   approvedById Int?
   approvalNote String?
+  // Handoff fields — company-standard request format.
+  pocUserId    Int?
+  workStatus   String?   @db.Text
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   user         User      @relation("OnDutyUser",     fields: [userId],       references: [id], onDelete: Cascade)
   approver     User?     @relation("OnDutyApprover", fields: [approvedById], references: [id])
+  poc          User?     @relation("OnDutyPOC",      fields: [pocUserId],    references: [id], onDelete: SetNull)
   @@index([userId])
   @@index([date])
   @@index([status])
+  @@index([pocUserId])
 }
 
 model CompOffRequest {
@@ -1699,12 +1721,17 @@ model CompOffRequest {
   approvalNote String?
   isUtilized   Boolean   @default(false)
   expiryDate   DateTime? @db.Date
+  // Handoff fields — company-standard request format.
+  pocUserId    Int?
+  workStatus   String?   @db.Text
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   user         User      @relation("CompOffUser",     fields: [userId],       references: [id], onDelete: Cascade)
   approver     User?     @relation("CompOffApprover", fields: [approvedById], references: [id])
+  poc          User?     @relation("CompOffPOC",      fields: [pocUserId],    references: [id], onDelete: SetNull)
   @@index([userId])
   @@index([status])
+  @@index([pocUserId])
 }
 
 model EngagePost {

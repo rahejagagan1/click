@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
 import { notifyApprovers, notifyUsers } from "@/lib/notifications";
+import { sendEmail } from "@/lib/email/sender";
+import { pocAssignmentEmail } from "@/lib/email/templates";
 
 export const dynamic = "force-dynamic";
 
@@ -36,20 +38,39 @@ export async function POST(req: NextRequest) {
   if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   try {
-    const { workedDate, creditDays, reason } = await req.json();
+    const body = await req.json();
+    const { workedDate, creditDays, reason } = body;
     if (!workedDate || !reason) return NextResponse.json({ error: "workedDate and reason required" }, { status: 400 });
+
+    // Handoff fields — POC + Work Status required. No past-date gate
+    // here: workedDate is INHERENTLY in the past (you're claiming
+    // credit for past extra work) so the today-floor doesn't apply.
+    const pocUserId  = Number.isFinite(Number(body.pocUserId))  ? Number(body.pocUserId)  : null;
+    const workStatus = typeof body.workStatus === "string" ? body.workStatus.trim() : "";
+    if (!pocUserId)  return NextResponse.json({ error: "POC in Absence is required." }, { status: 400 });
+    if (!workStatus) return NextResponse.json({ error: "Work Status is required." }, { status: 400 });
+    const pocUser = await prisma.user.findUnique({
+      where: { id: pocUserId },
+      select: { id: true, name: true, email: true, isActive: true },
+    });
+    if (!pocUser || !pocUser.isActive) {
+      return NextResponse.json({ error: "Selected POC is not an active employee." }, { status: 400 });
+    }
 
     const expiry = new Date(workedDate);
     expiry.setMonth(expiry.getMonth() + 3);
 
     const rec = await prisma.compOffRequest.create({
-      data: {
+      // pocUserId / workStatus may be unknown to the typed client until
+      // `prisma generate` reruns. Runtime is fine — migration added both.
+      data: ({
         userId: myId,
         workedDate: new Date(workedDate),
         creditDays: parseFloat(creditDays || "1"),
         reason,
         expiryDate: expiry,
-      },
+        pocUserId, workStatus,
+      } as any),
     });
 
     // Notify L1 (manager) + L2 (HR admins) so the request actually
@@ -83,6 +104,23 @@ export async function POST(req: NextRequest) {
         emailData: compEmailBase,
       }),
     ]);
+
+    // POC heads-up — fire-and-forget so SMTP hiccups don't 500 the save.
+    if (pocUser.email && pocUserId !== myId) {
+      void sendEmail({
+        to: pocUser.email,
+        content: pocAssignmentEmail({
+          pocName:       pocUser.name || "there",
+          applicantName: requester?.name || "An employee",
+          requestType:   "Comp-Off",
+          dateLabel:     workedLabel,
+          daysLabel:     `${parseFloat(creditDays || "1")} day(s) credit`,
+          workStatus,
+          reason:        String(reason || "").trim() || undefined,
+        }),
+      });
+    }
+
     return NextResponse.json(rec, { status: 201 });
   } catch (e) { return serverError(e, "POST /api/hr/leaves/comp-off"); }
 }
