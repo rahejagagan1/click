@@ -7,6 +7,7 @@ import { stringifyAttLoc } from "@/lib/attendance-location";
 import { istTodayDateOnly, istHour } from "@/lib/ist-date";
 import { isMobileRequest } from "@/lib/is-mobile-device";
 import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
+import { evaluateOfficeGeofence } from "@/lib/office-geofence";
 
 // Real GPS coordinates required so the attendance log always has a verifiable
 // physical location. Address is optional and capped to keep payloads small.
@@ -107,9 +108,17 @@ export async function POST(req: NextRequest) {
 
     const wl = (profile?.workLocation || "office").toLowerCase();
     const isRemote = !!approvedWfh || wl === "remote" || wl === "hybrid";
+    // Office geofence — compute distance + atOffice flag now so the
+    // attendance dashboard can render a reliable "At Office" badge
+    // independent of Nominatim's address text. Returns undefined
+    // fields when the office isn't configured (OFFICE_LAT / OFFICE_LNG
+    // missing), in which case we silently store nothing.
+    const geofence = evaluateOfficeGeofence(bodyLat, bodyLng);
     const location = stringifyAttLoc({
       mode: isRemote ? "remote" : "office",
       lat: bodyLat, lng: bodyLng, address: bodyAddr,
+      atOffice:             geofence.atOffice,
+      distanceFromOfficeM:  geofence.distanceM,
     });
 
     // ── Multi-session clock-in ──────────────────────────────────────────
