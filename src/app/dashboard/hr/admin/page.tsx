@@ -136,8 +136,17 @@ export default function HRAdminPage() {
   const [holidayForm, setHolidayForm] = useState({ name: "", date: "", isOptional: false });
 
   const saveHoliday = async () => {
+    // The DB stores the "Optional holiday" toggle as the `type` column
+    // ("public" = mandatory, "optional" = employee can choose). Project
+    // the front-end's `isOptional` boolean back into that string before
+    // sending so the row actually persists with the right flavour.
     const res = await fetch("/api/hr/admin/holidays", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(holidayForm),
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: holidayForm.name,
+        date: holidayForm.date,
+        type: holidayForm.isOptional ? "optional" : "public",
+      }),
     });
     if (res.ok) { setShowHolidayForm(false); setHolidayForm({ name: "", date: "", isOptional: false }); mutate("/api/hr/admin/holidays"); }
     else alert((await res.json()).error);
@@ -744,15 +753,19 @@ export default function HRAdminPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(holidays as any[]).sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((h: any) => (
+                    {(holidays as any[]).sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((h: any) => {
+                      // The DB row carries `type` (public | company | optional);
+                      // only "optional" maps to the amber "Optional" badge.
+                      const isOptional = h.type === "optional";
+                      return (
                       <tr key={h.id} className="border-b border-slate-50 dark:border-white/[0.03] hover:bg-slate-50/50 dark:hover:bg-white/[0.015]">
                         <td className="px-5 py-3 text-[12px] text-slate-600 dark:text-slate-400 font-medium">
                           {new Date(h.date).toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })}
                         </td>
                         <td className="px-5 py-3 text-[13px] font-semibold text-slate-800 dark:text-white">{h.name}</td>
                         <td className="px-5 py-3">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${h.isOptional ? "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400" : "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}`}>
-                            {h.isOptional ? "Optional" : "Mandatory"}
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isOptional ? "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400" : "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}`}>
+                            {isOptional ? "Optional" : "Mandatory"}
                           </span>
                         </td>
                         <td className="px-5 py-3 text-right">
@@ -762,7 +775,8 @@ export default function HRAdminPage() {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
                 {holidays.length === 0 && (
