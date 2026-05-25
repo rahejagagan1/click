@@ -1469,8 +1469,21 @@ export default function AttendancePage() {
         </div>{/* end Panel 3 */}
       </div>{/* end 3-panel header */}
 
-      {/* ── Logs & Requests ── */}
+      {/* ── Logs & Requests ──────────────────────────────────────
+          Hidden entirely for CEO + Developer users — their schedules
+          are flexible and the per-day log is just noise. The Stats
+          card + clock-in button at the top still apply if they ever
+          want to record a punch; only this big table is gone.
+          `skipAbsentSynthesis` is the same predicate we use above to
+          drop the synthesised "Absent" rows.
+
+          NOTE: the modals (RegularizeModal / LeaveRequestForm) sit
+          inside the same wrapper but render `fixed inset-0`, so they
+          must STAY in the tree even for CEO/dev — only the table
+          chrome is wrapped in the conditional. */}
       <div className="px-6 pt-5 pb-8">
+       {!skipAbsentSynthesis && (
+       <>
 
         {/* Section header */}
         <div className="flex items-center justify-between mb-1">
@@ -2234,6 +2247,8 @@ export default function AttendancePage() {
           </>
         )}
 
+       </>
+       )}
       {showRegModal && (
         <RegularizeModal
           prefillDate={regPrefillDate}
