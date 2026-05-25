@@ -8,8 +8,8 @@
 //
 // Visibility / authorization is gated by the parent page: this panel
 // only renders for the HR-admin tier (CEO / dev / admin / special_access
-// / hr_manager). Salary section embeds the existing SalaryStructurePanel
-// so we don't duplicate that form.
+// / hr_manager). The Compensation section is gated by a narrower
+// `canSeeSalary` prop — only HR Manager / CEO / developer see it.
 
 import { useEffect, useMemo, useState } from "react";
 import useSWR, { mutate } from "swr";
@@ -30,6 +30,7 @@ type Props = {
   userId: number;
   user: any;        // Result of GET /api/hr/people/[id]
   managers: Manager[];
+  canSeeSalary?: boolean;
 };
 
 const cls = {
@@ -131,7 +132,7 @@ function useSaveSection(userId: number) {
   return { saving, error, savedAt, save };
 }
 
-export default function EditProfilePanel({ userId, user, managers }: Props) {
+export default function EditProfilePanel({ userId, user, managers, canSeeSalary = false }: Props) {
   const p = user.profile || {};
 
   // ── Section: Basic Details ─────────────────────────────────────────
@@ -1082,10 +1083,13 @@ export default function EditProfilePanel({ userId, user, managers }: Props) {
         </div>
       </Section>
 
-      {/* ── Compensation (reuses the dedicated panel) ── */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-transparent">
-        <SalaryStructurePanel userId={userId} canEdit />
-      </div>
+      {/* ── Compensation (reuses the dedicated panel) ──
+          Gated by canSeeSalary — HR Manager / CEO / developer only. */}
+      {canSeeSalary && (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-transparent">
+          <SalaryStructurePanel userId={userId} canEdit />
+        </div>
+      )}
     </div>
   );
 }

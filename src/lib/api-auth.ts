@@ -80,6 +80,49 @@ export function isHRAdmin(user: any): boolean {
 }
 
 /**
+ * The one developer who is trusted with salary data. Other developers
+ * (e.g. anyone else listed in DEVELOPER_EMAILS) pass `isDeveloper` for
+ * every other dev-only surface but NOT for compensation. Update here if
+ * the org's primary developer changes.
+ */
+export const SALARY_DEV_EMAIL = "rahejagagan1@gmail.com";
+
+/** True when this user is the salary-trusted developer. */
+export function isSalaryDeveloper(user: any): boolean {
+    return (
+        user?.isDeveloper === true &&
+        typeof user?.email === "string" &&
+        user.email.toLowerCase() === SALARY_DEV_EMAIL
+    );
+}
+
+/**
+ * Narrower gate dedicated to salary / payroll data. Per explicit policy
+ * (2026-05-25), only HR Manager, CEO, and the salary-trusted developer
+ * (gagan — see SALARY_DEV_EMAIL above) may see or edit salary, payslips,
+ * and payroll runs. `special_access`, `role=admin`, and OTHER developers
+ * are deliberately excluded — they still pass `isHRAdmin` / `isDeveloper`
+ * for unrelated surfaces but are NOT trusted with compensation data.
+ *
+ * Use this in every salary / payroll route and component instead of
+ * isHRAdmin or isDeveloper. The split keeps the broader HR-admin /
+ * developer tiers intact for unrelated features while locking pay
+ * data down to the three people who actually own it.
+ *
+ * Allowed:
+ *   • orgLevel === "ceo"
+ *   • orgLevel === "hr_manager"
+ *   • email     === SALARY_DEV_EMAIL  (AND isDeveloper === true)
+ */
+export function canViewSalary(user: any): boolean {
+    return (
+        user?.orgLevel === "ceo" ||
+        user?.orgLevel === "hr_manager" ||
+        isSalaryDeveloper(user)
+    );
+}
+
+/**
  * Checks auth and requires HR admin access. Mirrors the client-side
  * `isHRAdmin` helper in src/lib/access.ts so the server and the UI agree
  * on who can hit HR admin endpoints (onboarding, employee CRUD, etc.).
