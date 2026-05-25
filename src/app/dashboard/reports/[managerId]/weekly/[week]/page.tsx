@@ -218,7 +218,23 @@ const mkSectionD = (id: string, channel = "M7"): SectionDRow => ({
     id, channel, totalViews: "", viewsNoShorts: "", subscriberCount: "", videosUploaded: "", titlesChanged: "", remark: "",
 });
 
-type SectionKey = "a1" | "a2" | "a3" | "b" | "c" | "d";
+// Section E mirrors Section D's channel table but for YouTube Shorts —
+// the metrics describe shorts performance only, so the "views excluding
+// shorts" column has no analogue and is dropped.
+interface SectionERow {
+    id: string;
+    channel: string;
+    totalViews: string;
+    subscriberCount: string;
+    shortsUploaded: string;
+    titlesChanged: string;
+    remark: string;
+}
+const mkSectionE = (id: string, channel = "M7"): SectionERow => ({
+    id, channel, totalViews: "", subscriberCount: "", shortsUploaded: "", titlesChanged: "", remark: "",
+});
+
+type SectionKey = "a1" | "a2" | "a3" | "b" | "c" | "d" | "e";
 
 /* ─────────────────────────────── Primitives ────────────────────────────── */
 function ResizableTh({
@@ -576,6 +592,8 @@ export default function WeeklyReportPage() {
     const [sectionCColWidths, setSectionCColWidths] = useState<Record<number, number>>({});
     const sectionDTableRef  = React.useRef<HTMLTableElement>(null) as React.RefObject<HTMLTableElement>;
     const [sectionDColWidths, setSectionDColWidths] = useState<Record<number, number>>({});
+    const sectionETableRef  = React.useRef<HTMLTableElement>(null) as React.RefObject<HTMLTableElement>;
+    const [sectionEColWidths, setSectionEColWidths] = useState<Record<number, number>>({});
 
     const fetcher = (url: string) => fetch(url).then((r) => r.json());
     // Pass the report's period so the API can return the FROZEN team
@@ -616,7 +634,8 @@ export default function WeeklyReportPage() {
             { key: "a2", label: "Section A2", sub: "Clickup Abhishek" },
             { key: "b",  label: "Section B",  sub: ""                 },
             { key: "c",  label: "Section C",  sub: ""                 },
-            { key: "d",  label: "Section D",  sub: ""                 },
+            { key: "d",  label: "Section D",  sub: "Long-form"        },
+            { key: "e",  label: "Section E",  sub: "YT Shorts"        },
           ]
         : [
             { key: "a1", label: "Section A1", sub: "Writers"  },
@@ -744,6 +763,17 @@ export default function WeeklyReportPage() {
     const addSD    = () => setSectionDRows((p) => [...p, mkSectionD(`d-${Date.now()}`)]);
     const removeSD = (idx: number) => setSectionDRows((p) => p.filter((_, i) => i !== idx));
 
+    /* Section E — Views and Changes (YT Shorts) */
+    const [sectionERows, setSectionERows] = useState<SectionERow[]>([
+        mkSectionE("e-1", "M7"),
+        mkSectionE("e-2", "M7CS"),
+        mkSectionE("e-3", "Bodycam"),
+    ]);
+    const setSE = (idx: number, f: keyof SectionERow, v: string) =>
+        setSectionERows((p) => p.map((r, i) => i === idx ? { ...r, [f]: v } : r));
+    const addSE    = () => setSectionERows((p) => [...p, mkSectionE(`e-${Date.now()}`)]);
+    const removeSE = (idx: number) => setSectionERows((p) => p.filter((_, i) => i !== idx));
+
     /* ── Lock / submit state ── */
     const [isLocked,     setIsLocked]     = useState(false);
     const [isSubmitted,  setIsSubmitted]  = useState(false);
@@ -783,6 +813,7 @@ export default function WeeklyReportPage() {
                     if (saved?.overviewRows)    setSectionBRows(saved.overviewRows);   // Andrew Section B
                     if (saved?.researcherRows)  setSectionCRows(saved.researcherRows); // Andrew Section C
                     if (saved?.viewsRows)       setSectionDRows(saved.viewsRows);       // Andrew Section D
+                    if (saved?.shortsRows)      setSectionERows(saved.shortsRows);      // Andrew Section E
                     if (saved?.editorRows)      setClickUpRows(saved.editorRows.map((r: any) => ({ subtaskName: "", ...r })));  // API returns editorRows
                     else if (saved?.clickUpRows) setClickUpRows(saved.clickUpRows.map((r: any) => ({ subtaskName: "", ...r }))); // legacy key
                     if (saved?.overviewRows)    setOverviewRows(saved.overviewRows);
@@ -1162,6 +1193,7 @@ export default function WeeklyReportPage() {
                     overviewRows:    isQaReport ? sectionBRows  : overviewRows,
                     researcherRows:  isResearcherReport ? rRows : isQaReport ? sectionCRows : null,
                     viewsRows:       isQaReport ? sectionDRows : null,
+                    shortsRows:      isQaReport ? sectionERows : null,
                 }),
             });
             const json = await res.json();
@@ -1213,6 +1245,7 @@ export default function WeeklyReportPage() {
             setSectionBRows([mkSectionB("b-1", "Andrew"), mkSectionB("b-2", "Abhishek")]);
             setSectionCRows([mkSectionC("c-1", "Rohini"), mkSectionC("c-2", "Shikha")]);
             setSectionDRows([mkSectionD("d-1", "M7"), mkSectionD("d-2", "M7CS"), mkSectionD("d-3", "Bodycam")]);
+            setSectionERows([mkSectionE("e-1", "M7"), mkSectionE("e-2", "M7CS"), mkSectionE("e-3", "Bodycam")]);
         } catch (e: any) {
             setSubmitError(e.message);
         }
@@ -2015,6 +2048,92 @@ export default function WeeklyReportPage() {
         </div>
     );
 
+    /* ── Section E: Views and Changes (YT Shorts) ── */
+    const renderAndrewSectionE = () => (
+        <div>
+            <div className="mb-3 rounded-t-lg px-4 py-2" style={{ background: "linear-gradient(90deg, #7c3aed 0%, #a78bfa 100%)" }}>
+                <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section E - Views and Changes (YT Shorts) <span className="text-[11px] font-normal opacity-90">(To be filled by Andrew)</span></h2>
+            </div>
+            <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 dark:border-white/10 shadow-sm">
+                <table ref={sectionETableRef} className="border-collapse" style={{ width: "100%", tableLayout: "auto", minWidth: 900 }}>
+                    <colgroup>
+                        <col style={{ minWidth: 110 }} />
+                        <col style={{ minWidth: 90  }} />
+                        <col style={{ minWidth: 120 }} />
+                        <col style={{ minWidth: 110 }} />
+                        <col style={{ minWidth: 140 }} />
+                        <col style={{ minWidth: 300 }} />
+                        <col style={{ minWidth: 140 }} />
+                        <col style={{ minWidth: 40  }} />
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <ResizableTh colIndex={0} widths={sectionEColWidths} setWidths={setSectionEColWidths} tableRef={sectionETableRef} colCount={8}>Month</ResizableTh>
+                            <ResizableTh colIndex={1} widths={sectionEColWidths} setWidths={setSectionEColWidths}>Channel</ResizableTh>
+                            <ResizableTh colIndex={2} widths={sectionEColWidths} setWidths={setSectionEColWidths}>Total Shorts Views</ResizableTh>
+                            <ResizableTh colIndex={3} widths={sectionEColWidths} setWidths={setSectionEColWidths}>Subscriber Count</ResizableTh>
+                            <ResizableTh colIndex={4} widths={sectionEColWidths} setWidths={setSectionEColWidths}>Number of Shorts Uploaded</ResizableTh>
+                            <ResizableTh colIndex={5} widths={sectionEColWidths} setWidths={setSectionEColWidths}>Titles and Thumbnails which required changing</ResizableTh>
+                            <ResizableTh colIndex={6} widths={sectionEColWidths} setWidths={setSectionEColWidths}><span className="text-amber-200 italic text-[10px] font-medium">Remark (optional)</span></ResizableTh>
+                            <Th>{" "}</Th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {sectionERows.map((row, idx) => (
+                            <tr key={row.id} className="group hover:bg-violet-50/60 transition-colors">
+                                <Td muted>
+                                    <span className="font-medium text-slate-700 text-[13px] leading-tight block">
+                                        {idx === 0 ? monthName : ""}
+                                    </span>
+                                </Td>
+                                <Td>
+                                    <select
+                                        value={row.channel}
+                                        onChange={(e) => setSE(idx, "channel", e.target.value)}
+                                        disabled={isLocked || viewOnly}
+                                        className={["w-full bg-transparent text-sm text-slate-800 dark:text-slate-200 focus:outline-none", (isLocked || viewOnly) ? "cursor-not-allowed opacity-60" : "cursor-pointer"].join(" ")}
+                                    >
+                                        <option value="M7">M7</option>
+                                        <option value="M7CS">M7CS</option>
+                                        <option value="Bodycam">Bodycam</option>
+                                    </select>
+                                </Td>
+                                <Td><EditInput value={row.totalViews}      onChange={(v) => setSE(idx, "totalViews",      v)} placeholder="e.g. 1.2M"  disabled={isLocked || viewOnly} /></Td>
+                                <Td><EditInput value={row.subscriberCount} onChange={(v) => setSE(idx, "subscriberCount", v)} placeholder="e.g. 1.3k+" disabled={isLocked || viewOnly} /></Td>
+                                <Td><EditInput value={row.shortsUploaded}  onChange={(v) => setSE(idx, "shortsUploaded",  v)} placeholder="e.g. 12"    disabled={isLocked || viewOnly} /></Td>
+                                <Td>
+                                    <textarea
+                                        value={row.titlesChanged}
+                                        onChange={(e) => setSE(idx, "titlesChanged", e.target.value)}
+                                        placeholder="List shorts titles/thumbnails that required changing..."
+                                        disabled={isLocked || viewOnly}
+                                        rows={3}
+                                        className={[
+                                            "w-full bg-transparent text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-300 dark:placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-violet-300 rounded resize-y",
+                                            (isLocked || viewOnly) ? "cursor-not-allowed opacity-60" : "",
+                                        ].join(" ")}
+                                    />
+                                </Td>
+                                <Td><EditInput value={row.remark} onChange={(v) => setSE(idx, "remark", v)} placeholder="Remark…" disabled={isLocked || viewOnly} /></Td>
+                                <td className="px-2 py-2 border border-slate-200 dark:border-white/10 bg-white dark:bg-[#32324a] text-center align-middle">
+                                    {sectionERows.length > 1 && !isLocked && !viewOnly && <RemoveBtn onClick={() => removeSE(idx)} />}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </DragScrollDiv>
+            {!isLocked && !viewOnly && (
+                <button onClick={addSE} className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-violet-600 hover:text-violet-700 transition-colors">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add row
+                </button>
+            )}
+        </div>
+    );
+
 
     /* ── Section A2: Abhishek — QA Video Review ── */
     const renderAbhishekA2 = () => {
@@ -2152,6 +2271,7 @@ export default function WeeklyReportPage() {
         b:  isQaReport  ? renderAndrewSectionB               : isResearcherReport ? renderB : renderBSimple,
         c:  isQaReport  ? renderAndrewSectionC : () => null,
         d:  isQaReport  ? renderAndrewSectionD : () => null,
+        e:  isQaReport  ? renderAndrewSectionE : () => null,
     };
 
     /* ── Render ── */
