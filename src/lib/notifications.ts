@@ -49,6 +49,10 @@ export type EmailData = {
   date?:         string | Date;
   // On-duty
   location?:     string;
+  // OD time window (e.g. "10:00" / "14:00") — surfaced as a "Time" row
+  // in the email when both ends are set.
+  fromTime?:     string;
+  toTime?:       string;
   // Comp-off
   workedDate?:   string | Date;
   creditDays?:   number | string;
@@ -171,9 +175,48 @@ function buildEmailFor(
       l1ApproverName: emailData?.l1ApproverName,
       l1ApprovalNote: emailData?.l1ApprovalNote,
     });
-    case "on_duty":         return onDutyRequestEmail({ applicantName, date: emailData?.date ?? new Date(), location: emailData?.location, reason: reasonText });
-    case "regularization":  return regularizationRequestEmail({ applicantName, date: emailData?.date ?? new Date(), reason: reasonText });
-    case "comp_off":        return compOffRequestEmail({ applicantName, workedDate: emailData?.workedDate ?? new Date(), creditDays: emailData?.creditDays ?? "—", reason: reasonText });
+    case "on_duty":         return onDutyRequestEmail({
+      applicantName,
+      date:           emailData?.date     ?? new Date(),
+      // Range fields — only forwarded when the OD route flagged this
+      // as a range submission (HR-on-behalf can grant multi-day OD).
+      // Single-day requests pass undefined and the template falls
+      // back to a single DATE row.
+      toDate:         emailData?.toDate,
+      totalDays:      emailData?.totalDays,
+      // Time window — populated from the OD record's fromTime/toTime
+      // when both are set, so HR sees "Time: 10:00 – 14:00".
+      fromTime:       emailData?.fromTime,
+      toTime:         emailData?.toTime,
+      location:       emailData?.location,
+      reason:         reasonText,
+      approverName:   emailData?.approverName,
+      stageLabel:     emailData?.stageLabel,
+      approvalNote:   emailData?.approvalNote,
+      l1ApproverName: emailData?.l1ApproverName,
+      l1ApprovalNote: emailData?.l1ApprovalNote,
+    });
+    case "regularization":  return regularizationRequestEmail({
+      applicantName,
+      date:           emailData?.date     ?? new Date(),
+      reason:         reasonText,
+      approverName:   emailData?.approverName,
+      stageLabel:     emailData?.stageLabel,
+      approvalNote:   emailData?.approvalNote,
+      l1ApproverName: emailData?.l1ApproverName,
+      l1ApprovalNote: emailData?.l1ApprovalNote,
+    });
+    case "comp_off":        return compOffRequestEmail({
+      applicantName,
+      workedDate:     emailData?.workedDate ?? new Date(),
+      creditDays:     emailData?.creditDays ?? "—",
+      reason:         reasonText,
+      approverName:   emailData?.approverName,
+      stageLabel:     emailData?.stageLabel,
+      approvalNote:   emailData?.approvalNote,
+      l1ApproverName: emailData?.l1ApproverName,
+      l1ApprovalNote: emailData?.l1ApprovalNote,
+    });
     default:                return null;
   }
 }
@@ -303,6 +346,10 @@ export async function notifyApprovers(params: {
   linkUrl?: string;
   /** Additional users to notify (e.g. names the requester picked in "Notify"). */
   extraUserIds?: number[];
+  /** Structured payload — fills in the email's leave type, dates, total
+   *  days, approver name, etc. so the template doesn't fall back to
+   *  parsing the title/body. Mirrors notifyUsers. */
+  emailData?: EmailData;
 }): Promise<void> {
   try {
     const approvers = await approverIdsForUser(params.actorId);
@@ -320,7 +367,7 @@ export async function notifyApprovers(params: {
         linkUrl:  params.linkUrl,
       })),
     });
-    void dispatchEmails(recipientIds, params.type, params.title, params.body);
+    void dispatchEmails(recipientIds, params.type, params.title, params.body, params.emailData);
   } catch (e) {
     console.error("notifyApprovers failed:", e);
   }

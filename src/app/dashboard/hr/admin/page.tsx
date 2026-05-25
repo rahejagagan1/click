@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote, ClipboardCheck } from "lucide-react";
+import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote, ClipboardCheck, FileSpreadsheet } from "lucide-react";
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
@@ -42,7 +42,7 @@ const ADMIN_TABS: Array<AdminTabDef & { permKey: string }> = [
   { key: "holidays",             label: "Holidays & Calendar",  icon: CalendarDays,    permKey: "hr_admin_holidays"       },
   { key: "assets",               label: "Assets",               icon: Package,         permKey: "hr_admin_assets"         },
   { key: "leave-types",          label: "Leave Types",          icon: Calendar,        permKey: "hr_admin_leave_types"    },
-  { key: "leave-policies",       label: "Leave Policies",       icon: Calendar,        permKey: "hr_admin_leave_types"    },
+  { key: "leave-policies",       label: "Leave Policies",       icon: Calendar,        permKey: "hr_admin_leave_policies" },
   { key: "shifts",               label: "Shift Templates",      icon: Clock,           permKey: "hr_admin_shifts"         },
   { key: "departments",          label: "Departments",          icon: Users,           permKey: "hr_admin_departments"    },
   { key: "payroll",              label: "Payroll",              icon: Banknote,        permKey: "hr_admin_payroll"        },
@@ -130,6 +130,7 @@ export default function HRAdminPage() {
     || (HR_MANAGER_ALLOWED_RAIL_LINKS.has("hiring")   && tabAllowed("hr_hiring"));
   const showTabPermsRail  = isFullAdmin; // policy config — admin-only
   const showManageKpisRail = isFullAdmin; // KPI uploads — admin-only
+  const showMasterSheetRail = isFullAdmin; // Excel exports — admin-only
 
   const [tab, setTab] = useState("attendance-dashboard");
 
@@ -161,13 +162,46 @@ export default function HRAdminPage() {
   const approvalsTotal = approvalsSummary?.total ?? 0;
 
   const [showHolidayForm, setShowHolidayForm] = useState(false);
+  // editingHolidayId !== null means the modal is in edit mode (PUT to
+  // /api/hr/admin/holidays with id in the body); null means it's a new
+  // holiday (POST). The form fields are shared either way.
+  const [editingHolidayId, setEditingHolidayId] = useState<number | null>(null);
   const [holidayForm, setHolidayForm] = useState({ name: "", date: "", isOptional: false });
 
-  const saveHoliday = async () => {
-    const res = await fetch("/api/hr/admin/holidays", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(holidayForm),
+  const openHolidayEdit = (h: any) => {
+    setEditingHolidayId(h.id);
+    setHolidayForm({
+      name: h.name ?? "",
+      // `date` from API is an ISO string; the DateField needs YYYY-MM-DD.
+      date: typeof h.date === "string" ? h.date.slice(0, 10) : new Date(h.date).toISOString().slice(0, 10),
+      isOptional: h.type === "optional",
     });
-    if (res.ok) { setShowHolidayForm(false); setHolidayForm({ name: "", date: "", isOptional: false }); mutate("/api/hr/admin/holidays"); }
+    setShowHolidayForm(true);
+  };
+
+  const closeHolidayForm = () => {
+    setShowHolidayForm(false);
+    setEditingHolidayId(null);
+    setHolidayForm({ name: "", date: "", isOptional: false });
+  };
+
+  const saveHoliday = async () => {
+    // The DB stores the "Optional holiday" toggle as the `type` column
+    // ("public" = mandatory, "optional" = employee can choose). Project
+    // the front-end's `isOptional` boolean back into that string before
+    // sending so the row actually persists with the right flavour.
+    const payload: any = {
+      name: holidayForm.name,
+      date: holidayForm.date,
+      type: holidayForm.isOptional ? "optional" : "public",
+    };
+    if (editingHolidayId != null) payload.id = editingHolidayId;
+    const res = await fetch("/api/hr/admin/holidays", {
+      method: editingHolidayId != null ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) { closeHolidayForm(); mutate("/api/hr/admin/holidays"); }
     else alert((await res.json()).error);
   };
 
@@ -179,7 +213,7 @@ export default function HRAdminPage() {
   // Leave type form
   const [showLeaveForm, setShowLeaveForm] = useState(false);
   const [editLeave, setEditLeave] = useState<any>(null);
-  const [leaveForm, setLeaveForm] = useState({ name: "", description: "", daysPerYear: "12", isPaid: true, carryForward: false, maxCarryForward: "" });
+  const [leaveForm, setLeaveForm] = useState({ name: "", description: "", daysPerYear: "12", isPaid: true, carryForward: false, maxCarryForward: "", applicable: true, adminOnly: false });
 
   // Shift form
   const [showShiftForm, setShowShiftForm] = useState(false);
@@ -188,7 +222,16 @@ export default function HRAdminPage() {
 
   const openLeaveEdit = (lt: any) => {
     setEditLeave(lt);
-    setLeaveForm({ name: lt.name, description: lt.description || "", daysPerYear: String(lt.daysPerYear), isPaid: lt.isPaid, carryForward: lt.carryForward, maxCarryForward: lt.maxCarryForward ? String(lt.maxCarryForward) : "" });
+    setLeaveForm({
+      name: lt.name,
+      description: lt.description || "",
+      daysPerYear: String(lt.daysPerYear),
+      isPaid: lt.isPaid,
+      carryForward: lt.carryForward,
+      maxCarryForward: lt.maxCarryForward ? String(lt.maxCarryForward) : "",
+      applicable: lt.applicable !== false,
+      adminOnly:  lt.adminOnly === true,
+    });
     setShowLeaveForm(true);
   };
 
@@ -385,6 +428,18 @@ export default function HRAdminPage() {
               </svg>
             </Link>
           )}
+          {showMasterSheetRail && (
+            <Link
+              href="/dashboard/hr/admin/master-sheet"
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span className="flex-1">Master Sheet</span>
+              <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+          )}
           {showHiringRail && (
             <Link
               href="/dashboard/hr/hiring"
@@ -440,7 +495,7 @@ export default function HRAdminPage() {
             <>
               <div className="flex items-center justify-between">
                 <h2 className="text-[14px] font-bold text-slate-800 dark:text-white">Leave Types</h2>
-                <button onClick={() => { setEditLeave(null); setLeaveForm({ name:"",description:"",daysPerYear:"12",isPaid:true,carryForward:false,maxCarryForward:"" }); setShowLeaveForm(true); }}
+                <button onClick={() => { setEditLeave(null); setLeaveForm({ name:"",description:"",daysPerYear:"12",isPaid:true,carryForward:false,maxCarryForward:"",applicable:true,adminOnly:false }); setShowLeaveForm(true); }}
                   className="flex items-center gap-1.5 h-8 px-4 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded-lg text-[12px] font-semibold">
                   <Plus className="w-3.5 h-3.5" />Add Leave Type
                 </button>
@@ -745,7 +800,7 @@ export default function HRAdminPage() {
             <>
               <div className="flex items-center justify-between">
                 <h2 className="text-[14px] font-bold text-slate-800 dark:text-white">Company Holidays</h2>
-                <button onClick={() => { setHolidayForm({ name:"", date: new Date().toISOString().slice(0,10), isOptional: false }); setShowHolidayForm(true); }}
+                <button onClick={() => { setEditingHolidayId(null); setHolidayForm({ name:"", date: new Date().toISOString().slice(0,10), isOptional: false }); setShowHolidayForm(true); }}
                   className="flex items-center gap-1.5 h-8 px-4 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded-lg text-[12px] font-semibold">
                   <Plus className="w-3.5 h-3.5" />Add Holiday
                 </button>
@@ -760,25 +815,38 @@ export default function HRAdminPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(holidays as any[]).sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((h: any) => (
+                    {(holidays as any[]).sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((h: any) => {
+                      // The DB row carries `type` (public | company | optional);
+                      // only "optional" maps to the amber "Optional" badge.
+                      const isOptional = h.type === "optional";
+                      return (
                       <tr key={h.id} className="border-b border-slate-50 dark:border-white/[0.03] hover:bg-slate-50/50 dark:hover:bg-white/[0.015]">
                         <td className="px-5 py-3 text-[12px] text-slate-600 dark:text-slate-400 font-medium">
                           {new Date(h.date).toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })}
                         </td>
                         <td className="px-5 py-3 text-[13px] font-semibold text-slate-800 dark:text-white">{h.name}</td>
                         <td className="px-5 py-3">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${h.isOptional ? "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400" : "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}`}>
-                            {h.isOptional ? "Optional" : "Mandatory"}
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isOptional ? "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400" : "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"}`}>
+                            {isOptional ? "Optional" : "Mandatory"}
                           </span>
                         </td>
                         <td className="px-5 py-3 text-right">
-                          <button onClick={() => deleteHoliday(h.id)}
-                            className="h-7 w-7 flex items-center justify-center rounded-lg bg-red-50 dark:bg-red-500/10 text-red-400 hover:bg-red-100 dark:hover:bg-red-500/20 mx-auto">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button onClick={() => openHolidayEdit(h)}
+                              className="h-7 w-7 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-white/5 text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10 hover:text-slate-700"
+                              title="Edit holiday">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => deleteHoliday(h.id)}
+                              className="h-7 w-7 flex items-center justify-center rounded-lg bg-red-50 dark:bg-red-500/10 text-red-400 hover:bg-red-100 dark:hover:bg-red-500/20"
+                              title="Delete holiday">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
                 {holidays.length === 0 && (
@@ -833,6 +901,42 @@ export default function HRAdminPage() {
                     className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-[13px] text-slate-800 dark:text-white" />
                 </div>
               )}
+              {/* Visibility & restricted-admin toggles. "Applicable" controls
+                  whether the type shows up in apply-leave dropdowns at all;
+                  "Admin only" gates it to CEO / HR Manager / developer for
+                  sensitive buckets like Carry Over Leave that HR needs to
+                  draw down on behalf without exposing them to staff. */}
+              <div className="rounded-lg bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 p-3 space-y-2">
+                <label className="flex items-start gap-2 text-[13px] text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={leaveForm.applicable}
+                    onChange={e => setLeaveForm(f => ({ ...f, applicable: e.target.checked }))}
+                    className="w-4 h-4 mt-0.5"
+                  />
+                  <span>
+                    <span className="font-semibold">Applicable</span>
+                    <span className="block text-[11px] text-slate-500 mt-0.5">
+                      Off = balance-only / encashed-at-exit (hidden from apply form).
+                    </span>
+                  </span>
+                </label>
+                <label className={`flex items-start gap-2 text-[13px] cursor-pointer ${leaveForm.applicable ? "text-slate-700 dark:text-slate-300" : "text-slate-400 dark:text-slate-500"}`}>
+                  <input
+                    type="checkbox"
+                    checked={leaveForm.adminOnly}
+                    disabled={!leaveForm.applicable}
+                    onChange={e => setLeaveForm(f => ({ ...f, adminOnly: e.target.checked }))}
+                    className="w-4 h-4 mt-0.5"
+                  />
+                  <span>
+                    <span className="font-semibold">Admin-only</span>
+                    <span className="block text-[11px] text-slate-500 mt-0.5">
+                      Only CEO, HR Manager, and developers can apply. Hidden from everyone else.
+                    </span>
+                  </span>
+                </label>
+              </div>
             </div>
             <div className="flex gap-3 mt-5">
               <button onClick={() => setShowLeaveForm(false)}
@@ -849,8 +953,8 @@ export default function HRAdminPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-[#001529] rounded-xl shadow-2xl p-6 w-[400px]">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-[14px] font-bold text-slate-800 dark:text-white">Add Holiday</h3>
-              <button onClick={() => setShowHolidayForm(false)}><X className="w-4 h-4 text-slate-400" /></button>
+              <h3 className="text-[14px] font-bold text-slate-800 dark:text-white">{editingHolidayId != null ? "Edit Holiday" : "Add Holiday"}</h3>
+              <button onClick={closeHolidayForm}><X className="w-4 h-4 text-slate-400" /></button>
             </div>
             <div className="space-y-3">
               <div>
@@ -870,7 +974,7 @@ export default function HRAdminPage() {
               </label>
             </div>
             <div className="flex gap-3 mt-5">
-              <button onClick={() => setShowHolidayForm(false)}
+              <button onClick={closeHolidayForm}
                 className="flex-1 h-9 border border-slate-200 dark:border-white/10 rounded-lg text-[13px] text-slate-600 dark:text-slate-300">Cancel</button>
               <button onClick={saveHoliday} disabled={!holidayForm.name || !holidayForm.date}
                 className="flex-1 h-9 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50">Save</button>

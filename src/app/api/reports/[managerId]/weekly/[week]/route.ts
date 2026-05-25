@@ -31,13 +31,14 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         if (!report) return NextResponse.json({ submitted: false, locked: false, data: null });
 
         // Return named columns; fall back to legacy dataJson for old records
-        const data = (report.writerRows || report.editorRows || report.overviewRows || report.researcherRows || (report as any).viewsRows)
+        const data = (report.writerRows || report.editorRows || report.overviewRows || report.researcherRows || (report as any).viewsRows || (report as any).shortsRows)
             ? {
                 writerRows:     report.writerRows,
                 editorRows:     report.editorRows,
                 researcherRows: report.researcherRows,
                 overviewRows:   report.overviewRows,
                 viewsRows:      (report as any).viewsRows,
+                shortsRows:     (report as any).shortsRows,
               }
             : report.dataJson; // legacy fallback
 
@@ -101,7 +102,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
         const managerId = parseInt(managerIdRaw);
         const week      = parseInt(weekRaw);
         const body      = await req.json();
-        const { month, year, isDraft, writerRows, editorRows, researcherRows, overviewRows, viewsRows } = body;
+        const { month, year, isDraft, writerRows, editorRows, researcherRows, overviewRows, viewsRows, shortsRows } = body;
 
         if (isNaN(managerId) || isNaN(week) || isNaN(month) || isNaN(year)) {
             return NextResponse.json({ error: "Invalid parameters" }, { status: 400 });
@@ -122,14 +123,15 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
             researcherRows: researcherRows ?? null,  // Section A3 / Andrew Section C
             overviewRows:   overviewRows   ?? null,  // Section B
             viewsRows:      viewsRows      ?? null,  // Andrew Section D
+            shortsRows:     shortsRows     ?? null,  // Andrew Section E (YT Shorts)
             isLocked:     shouldLock,
             submittedAt:  shouldLock ? new Date() : undefined,
         };
 
         const report = await prisma.weeklyReport.upsert({
             where:  { managerId_week_month_year: { managerId, week, month, year } },
-            create: { managerId, week, month, year, ...payload },
-            update: payload,
+            create: { managerId, week, month, year, ...payload } as any,
+            update: payload as any,
         });
 
         // Freeze the team roster onto the report when it transitions to

@@ -4,6 +4,9 @@ import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { notifyApprovers, notifyUsers } from "@/lib/notifications";
 import { istTimeOnDate, istDateOnlyFrom, istMonthRange } from "@/lib/ist-date";
 import { stringifyAttLoc } from "@/lib/attendance-location";
+import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
+import { sendEmail } from "@/lib/email/sender";
+import { pocAssignmentEmail } from "@/lib/email/templates";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +62,12 @@ export async function POST(req: NextRequest) {
     if (!date || !reason) return NextResponse.json({ error: "date and reason required" }, { status: 400 });
     const extras = Array.isArray(notifyUserIds) ? notifyUserIds.filter((x: any) => Number.isInteger(x)) : [];
 
+    // Past-date gate: regular users can't pre-emptively backdate a WFH
+    // request — that goes through Regularization. CEO / role=hr_manager
+    // / isDeveloper bypass via canApplyRestrictedLeave.
+    const pastErr = checkPastDateAllowed(date, self);
+    if (pastErr) return NextResponse.json({ error: pastErr }, { status: 400 });
+
     // HR on-behalf: when targetUserId is set and the caller is HR-admin,
     // the WFH is created for that user instead of the caller. forceGrant
     // skips the monthly 2-of-2 cap (HR is overriding policy intentionally)
@@ -76,6 +85,26 @@ export async function POST(req: NextRequest) {
     const subjectUserId = onBehalf ? targetUserId! : myId;
     const isHRGrant     = onBehalf && callerIsHRAdmin && forceGrant;
 
+    // Handoff fields — company-standard WFH format. Work Status + Time
+    // of Unavailability are always required. POC is N/A-able: the form
+    // has a "Mark as N/A" toggle for cases where no specific cover is
+    // assigned, which sends pocUserId=null. When a POC is named, it
+    // must be a real active user.
+    const pocUserId      = Number.isFinite(Number(body.pocUserId)) ? Number(body.pocUserId) : null;
+    const workStatus     = typeof body.workStatus     === "string" ? body.workStatus.trim()     : "";
+    const unavailability = typeof body.unavailability === "string" ? body.unavailability.trim() : "";
+    if (!workStatus)             return NextResponse.json({ error: "Work Status is required." }, { status: 400 });
+    if (!unavailability)         return NextResponse.json({ error: "Time of Unavailability is required." }, { status: 400 });
+    const pocUser = pocUserId
+      ? await prisma.user.findUnique({
+          where: { id: pocUserId },
+          select: { id: true, name: true, email: true, isActive: true },
+        })
+      : null;
+    if (pocUserId && (!pocUser || !pocUser.isActive)) {
+      return NextResponse.json({ error: "Selected POC is not an active employee." }, { status: 400 });
+    }
+
     // Normalise to IST calendar days so any UTC-vs-IST drift around 18:30 UTC
     // doesn't shift which day a request belongs to.
     const fromIst = istDateOnlyFrom(new Date(date));
@@ -83,9 +112,11 @@ export async function POST(req: NextRequest) {
     if (toIst.getTime() < fromIst.getTime()) {
       return NextResponse.json({ error: "toDate must be on or after fromDate" }, { status: 400 });
     }
-    // Range support is HR-grant-only. Self-apply ignores toDate.
-    const isRange = isHRGrant && toIst.getTime() > fromIst.getTime();
-    if (!isHRGrant && toDateRaw && toIst.getTime() !== fromIst.getTime()) {
+    // Range support is HR-on-behalf only (forceGrant not required —
+    // ranges go through normal L1→L2 approval like single days).
+    // Self-apply ignores toDate.
+    const isRange = onBehalf && callerIsHRAdmin && toIst.getTime() > fromIst.getTime();
+    if (!onBehalf && toDateRaw && toIst.getTime() !== fromIst.getTime()) {
       return NextResponse.json(
         { error: "Date ranges are only available when HR applies on behalf." },
         { status: 400 },
@@ -150,13 +181,17 @@ export async function POST(req: NextRequest) {
     const created = await prisma.$transaction(
       daysToCreate.map((d) =>
         prisma.wFHRequest.create({
-          data: {
+          // pocUserId / workStatus / unavailability may be unknown to the
+          // typed client until `prisma generate` reruns (Windows DLL lock).
+          // Runtime is fine — the migration already added all three.
+          data: ({
             userId: subjectUserId,
             date: d,
             reason,
             status: finalStatus,
             approvedById: finalStatus === "approved" ? myId : null,
-          },
+            pocUserId, workStatus, unavailability,
+          } as any),
         }),
       ),
     );
@@ -170,6 +205,15 @@ export async function POST(req: NextRequest) {
       ? ` (skipped ${existingKeys.size} day(s) that already had WFH)`
       : "";
 
+    // Structured emailData so the WFH email mirrors leave / on-duty —
+    // Reason block = just the typed reason, Date / From-To shows the
+    // user's chosen dates (not the submission day).
+    const wfhEmailBase = {
+      applicantName: subject?.name || "An employee",
+      date:          fromIst,
+      toDate:        isRange ? toIst : undefined,
+      reason:        String(reason || "").trim() || undefined,
+    };
     if (finalStatus === "approved" && onBehalf) {
       await notifyApprovers({
         actorId:  myId,
@@ -181,6 +225,7 @@ export async function POST(req: NextRequest) {
         body:     `${rangeLabel}${skippedNote} · ${String(reason).slice(0, 120)}`,
         linkUrl:  "/dashboard/hr/approvals?tab=wfh",
         extraUserIds: [subjectUserId, ...extras],
+        emailData: wfhEmailBase,
       });
     } else {
       await Promise.all([
@@ -192,6 +237,7 @@ export async function POST(req: NextRequest) {
           body:     `Date: ${rangeLabel} — ${String(reason).slice(0, 120)}`,
           linkUrl:  "/dashboard/hr/approvals?tab=wfh",
           extraUserIds: extras,
+          emailData: wfhEmailBase,
         }),
         notifyUsers({
           actorId:  null,
@@ -201,9 +247,30 @@ export async function POST(req: NextRequest) {
           title:    `Work From Home request submitted`,
           body:     `Your request for ${rangeLabel} is awaiting approval.`,
           linkUrl:  "/dashboard/hr/attendance",
+          emailData: wfhEmailBase,
         }),
       ]);
     }
+
+    // POC heads-up — separate from the approver chain so the named
+    // backup gets a direct ping. Fire-and-forget so SMTP hiccups
+    // don't 500 the save. When POC is N/A (HR on-behalf), pocUser is
+    // null — skip the email.
+    if (pocUser && pocUser.email && pocUserId !== subjectUserId) {
+      void sendEmail({
+        to: pocUser.email,
+        content: pocAssignmentEmail({
+          pocName:       pocUser.name || "there",
+          applicantName: subject?.name || "An employee",
+          requestType:   "Work From Home",
+          dateLabel:     rangeLabel,
+          daysLabel:     `${created.length} day${created.length === 1 ? "" : "s"}`,
+          workStatus,
+          reason:        String(reason || "").trim() || undefined,
+        }),
+      });
+    }
+
     // Backwards-compat shape for the single-day path; range returns a list.
     return NextResponse.json(
       isRange
@@ -254,6 +321,17 @@ export async function PUT(req: NextRequest) {
 
     const dateLabel = new Date(record.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     const requesterName = record.user?.name || "An employee";
+    const approver = await prisma.user.findUnique({ where: { id: myId }, select: { name: true } });
+    const approverName = approver?.name || "An approver";
+
+    // Shared payload — mirrors leave / on-duty / regularize so every
+    // stage email shows the requester, the actual WFH date, and the
+    // user-typed reason instead of falling back to the body line.
+    const wfhEmailBase = {
+      applicantName: requesterName,
+      date:          record.date,
+      reason:        record.reason || undefined,
+    };
 
     // ── REJECT (any open stage) ────────────────────────────────────
     if (action === "reject") {
@@ -270,6 +348,7 @@ export async function PUT(req: NextRequest) {
         title:    `Your Work From Home for ${dateLabel} was rejected`,
         body:     approvalNote ? String(approvalNote).slice(0, 160) : undefined,
         linkUrl:  "/dashboard/hr/attendance",
+        emailData: { ...wfhEmailBase, approverName, stageLabel: "Rejected by", approvalNote: approvalNote ?? undefined },
       });
       return NextResponse.json(await prisma.wFHRequest.findUnique({ where: { id } }));
     }
@@ -305,6 +384,7 @@ export async function PUT(req: NextRequest) {
           title:    `${requesterName}'s WFH for ${dateLabel} needs final approval`,
           body:     `Manager approved — awaiting CEO / HR.${approvalNote ? `\nNote: ${String(approvalNote).slice(0, 240)}` : ""}`,
           linkUrl:  "/dashboard/hr/approvals?tab=wfh",
+          emailData: { ...wfhEmailBase, l1ApproverName: approverName, l1ApprovalNote: approvalNote ?? undefined },
         }),
         notifyUsers({
           actorId:  myId,
@@ -314,6 +394,7 @@ export async function PUT(req: NextRequest) {
           title:    `Your WFH for ${dateLabel} is partially approved`,
           body:     `Awaiting final approval from CEO / HR.${approvalNote ? `\nNote: ${String(approvalNote).slice(0, 240)}` : ""}`,
           linkUrl:  "/dashboard/hr/attendance",
+          emailData: { ...wfhEmailBase, l1ApproverName: approverName, l1ApprovalNote: approvalNote ?? undefined },
         }),
       ]);
       return NextResponse.json(await prisma.wFHRequest.findUnique({ where: { id } }));
@@ -348,6 +429,10 @@ export async function PUT(req: NextRequest) {
       },
     });
 
+    // L1 approver lookup so the final email lists manager + finaliser.
+    const l1Approver = record.approvedById
+      ? await prisma.user.findUnique({ where: { id: record.approvedById }, select: { name: true } })
+      : null;
     await notifyUsers({
       actorId:  myId,
       userIds:  [record.userId],
@@ -356,6 +441,14 @@ export async function PUT(req: NextRequest) {
       title:    `Your WFH for ${dateLabel} is approved`,
       body:     `Final approval granted.${approvalNote ? `\nNote: ${String(approvalNote).slice(0, 240)}` : ""}`,
       linkUrl:  "/dashboard/hr/attendance",
+      emailData: {
+        ...wfhEmailBase,
+        l1ApproverName: l1Approver?.name,
+        l1ApprovalNote: record.approvalNote ?? undefined,
+        approverName,
+        stageLabel:     "Approved by",
+        approvalNote:   approvalNote ?? undefined,
+      },
     });
     return NextResponse.json(await prisma.wFHRequest.findUnique({ where: { id } }));
   } catch (e) { return serverError(e, "PUT /api/hr/attendance/wfh"); }

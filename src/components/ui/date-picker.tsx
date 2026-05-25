@@ -25,6 +25,13 @@ export function DatePicker({
   yearEnd,
   futureYears,
   className,
+  /**
+   * Hard floor on which date the picker will accept (YYYY-MM-DD).
+   * Overrides the `yearStart`-derived January-1 default. Use this to
+   * block past dates on leave/WFH forms (today onwards). When undefined
+   * the picker keeps its century-wide range.
+   */
+  minDate,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -32,12 +39,13 @@ export function DatePicker({
   yearEnd?: number;
   futureYears?: number;
   className?: string;
+  minDate?: string;
 }) {
   const today = new Date();
   const thisYear = today.getFullYear();
   const effectiveEnd =
     yearEnd ?? (futureYears != null ? thisYear + futureYears : thisYear);
-  const min = `${yearStart}-01-01`;
+  const min = minDate ?? `${yearStart}-01-01`;
   const max = `${effectiveEnd}-12-31`;
   return <DateField value={value} onChange={onChange} min={min} max={max} className={className} />;
 }

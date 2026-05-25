@@ -72,6 +72,25 @@ export function canViewSalary(user: ClientUser): boolean {
 }
 
 /**
+ * Tighter gate than `isHRAdmin` — only CEO, role=hr_manager, and
+ * isDeveloper. Deliberately excludes special_access and role=admin.
+ *
+ * Used for restricted-admin leave types (LeaveType.adminOnly), where
+ * even broader admin tiers shouldn't be able to apply on someone's
+ * behalf. The classic case is Carry Over Leave — sensitive enough that
+ * only the actual HR Manager / CEO / a developer should be able to
+ * draw it down.
+ */
+export function canApplyRestrictedLeave(user: ClientUser): boolean {
+  if (!user) return false;
+  return (
+    user.orgLevel === "ceo" ||
+    user.isDeveloper === true ||
+    user.role === "hr_manager"
+  );
+}
+
+/**
  * "Can see reports / scores" tier — admin tier + managers + HoDs + HR
  * managers. Mirrors `canSeeReports` in the sidebar.
  */
@@ -91,17 +110,25 @@ export function canSeeReports(user: ClientUser): boolean {
 }
 
 /**
- * Tabs / rail links inside the HR Dashboard that a *normal HR Manager*
- * (not a full admin) is allowed to see. Full admins (developer / CEO /
- * special_access / role=admin) see everything; this whitelist only
- * applies when the viewer is hr_manager-only.
+ * Tabs / rail links inside the HR Dashboard that a *normal HR Member*
+ * (orgLevel="hr_manager" but NOT role="hr_manager") is allowed to see.
+ * Full admins (developer / CEO / special_access / role=admin) and the
+ * actual HR Manager (role="hr_manager") see everything via
+ * `isFullHRAdmin`; this whitelist applies only to the broader HR-Member
+ * tier so they get a curated subset.
  *
- * Excludes: Approvals, Leave Types, Shift Templates, Departments,
- * Tab Permissions — those are policy / org-wide configuration and stay
+ * Includes "approvals" so HR Members can act on the org-wide approvals
+ * queue alongside the HR Manager — the server-side gate in
+ * /api/hr/approvals already accepts orgLevel="hr_manager", so this was
+ * just a client-side visibility flip.
+ *
+ * Excludes (intentionally): Leave Types, Shift Templates, Tab
+ * Permissions — those are policy / org-wide configuration and stay
  * admin-only.
  */
 export const HR_MANAGER_ALLOWED_TABS = new Set<string>([
   "attendance-dashboard",
+  "approvals",
   "leaves",
   "holidays",
   "assets",
