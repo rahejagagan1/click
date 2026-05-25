@@ -1118,8 +1118,6 @@ export default function WeeklyReportPage() {
             if (!r.heroCase)             return `Writer row ${i + 1}: Hero Case (Yes/No) is required.`;
             if (!r.tatFirstDraft.trim())       return `Writer row ${i + 1}: TAT — First Draft is required.`;
             if (!r.tatRevision.trim())        return `Writer row ${i + 1}: TAT — Revision is required.`;
-            if (!r.reasonTatExceeding.trim()) return `Writer row ${i + 1}: Reason for TAT Exceeding is required.`;
-            if (!r.actionTaken.trim())        return `Writer row ${i + 1}: Action Taken is required.`;
             if (!r.qualityScore.trim())       return `Writer row ${i + 1}: Quality Score is required.`;
         }
         for (let i = 0; i < cRows.length; i++) {
@@ -1129,8 +1127,6 @@ export default function WeeklyReportPage() {
             if (!r.heroCase)             return `Editor row ${i + 1}: Hero Case (Yes/No) is required.`;
             if (!r.tatFirstDraft.trim())       return `Editor row ${i + 1}: TAT — First Draft is required.`;
             if (!r.tatRevision.trim())        return `Editor row ${i + 1}: TAT for Revision is required.`;
-            if (!r.reasonTatExceeding.trim()) return `Editor row ${i + 1}: Reason for TAT Exceeding is required.`;
-            if (!r.actionTaken.trim())        return `Editor row ${i + 1}: Action Taken is required.`;
             if (!r.qualityScore.trim())       return `Editor row ${i + 1}: Quality Score is required.`;
         }
         for (let i = 0; i < overviewRows.length; i++) {
@@ -1293,8 +1289,8 @@ export default function WeeklyReportPage() {
                                 gives each column its own width. */}
                             <ResizableTh colIndex={5} widths={wColWidths} setWidths={setWColWidths}>TAT — First Draft <span className="text-red-300">*</span></ResizableTh>
                             <ResizableTh colIndex={6} widths={wColWidths} setWidths={setWColWidths}>TAT — Revision <span className="text-red-400">*</span></ResizableTh>
-                            <ResizableTh colIndex={7} widths={wColWidths} setWidths={setWColWidths}>Reason for TAT Exceeding <span className="text-red-400">*</span></ResizableTh>
-                            <ResizableTh colIndex={8} widths={wColWidths} setWidths={setWColWidths}>Action Taken <span className="text-red-400">*</span></ResizableTh>
+                            <ResizableTh colIndex={7} widths={wColWidths} setWidths={setWColWidths}>Reason for TAT Exceeding <span className="text-amber-200 italic text-[10px] font-medium">(optional)</span></ResizableTh>
+                            <ResizableTh colIndex={8} widths={wColWidths} setWidths={setWColWidths}>Action Taken <span className="text-amber-200 italic text-[10px] font-medium">(optional)</span></ResizableTh>
                             <ResizableTh colIndex={9} widths={wColWidths} setWidths={setWColWidths}>Quality Score <span className="text-red-300">*</span></ResizableTh>
                             <ResizableTh colIndex={10} widths={wColWidths} setWidths={setWColWidths}><span className="text-amber-200 italic text-[10px] font-medium">Remark (optional)</span></ResizableTh>
                             <Th>{" "}</Th>
@@ -1387,8 +1383,8 @@ export default function WeeklyReportPage() {
                                 made TAT share width state with Hero Case. */}
                             <ResizableTh colIndex={5} widths={cColWidths} setWidths={setCColWidths}>TAT for the First Draft <span className="text-red-300">*</span></ResizableTh>
                             <ResizableTh colIndex={6} widths={cColWidths} setWidths={setCColWidths}>TAT for Revision <span className="text-red-400">*</span></ResizableTh>
-                            <ResizableTh colIndex={7} widths={cColWidths} setWidths={setCColWidths}>Reason for TAT Exceeding <span className="text-red-400">*</span></ResizableTh>
-                            <ResizableTh colIndex={8} widths={cColWidths} setWidths={setCColWidths}>Action Taken <span className="text-red-400">*</span></ResizableTh>
+                            <ResizableTh colIndex={7} widths={cColWidths} setWidths={setCColWidths}>Reason for TAT Exceeding <span className="text-amber-200 italic text-[10px] font-medium">(optional)</span></ResizableTh>
+                            <ResizableTh colIndex={8} widths={cColWidths} setWidths={setCColWidths}>Action Taken <span className="text-amber-200 italic text-[10px] font-medium">(optional)</span></ResizableTh>
                             <ResizableTh colIndex={9} widths={cColWidths} setWidths={setCColWidths}>Quality Score <span className="text-red-300">*</span></ResizableTh>
                             <ResizableTh colIndex={10} widths={cColWidths} setWidths={setCColWidths}><span className="text-amber-200 italic text-[10px] font-medium">Remark (optional)</span></ResizableTh>
                             <Th>{" "}</Th>
