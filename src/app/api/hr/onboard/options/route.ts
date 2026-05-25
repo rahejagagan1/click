@@ -23,11 +23,12 @@ export async function GET() {
         orderBy: { name: "asc" },
         select: { id: true, name: true, code: true, daysPerYear: true },
       }),
+      // Reporting Manager / Inline Manager pickers — every active user
+      // can be picked, not just role-titled managers. HR sometimes
+      // wants ICs to report into peers or HoDs to dotted-line into
+      // each other; the old whitelist hid those people.
       prisma.user.findMany({
-        where: {
-          isActive: true,
-          orgLevel: { in: ["ceo", "hod", "manager", "hr_manager", "lead", "sub_lead"] },
-        },
+        where: { isActive: true },
         orderBy: { name: "asc" },
         select: { id: true, name: true, email: true, orgLevel: true },
       }),

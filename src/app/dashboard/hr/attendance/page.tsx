@@ -10,7 +10,7 @@ import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPi
 import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
 import SelectField from "@/components/ui/SelectField";
-import { isHRAdmin } from "@/lib/access";
+import { isHRAdmin, canApplyRestrictedLeave } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { desktopBypassHeader } from "@/lib/desktop-bypass";
 import { DateField } from "@/components/ui/date-field";
@@ -519,151 +519,12 @@ function RegularizeModal({ onClose, prefillDate }: { onClose: () => void; prefil
   );
 }
 
-function WFHModal({ onClose }: { onClose: () => void }) {
-  const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), reason: "" });
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState("");
-
-  // WFH allowance is 2 per calendar month (resets each month, no carry-over).
-  // We re-fetch whenever `form.date` changes so the chip reflects the
-  // month the user is actually picking — picking a future month with 0
-  // usage shouldn't show the current month's count.
-  const monthKey = form.date.slice(0, 7);
-  const { data: balance } = useSWR<{ used: number; limit: number; remaining: number }>(
-    `/api/hr/attendance/wfh/balance?month=${monthKey}`,
-    fetcher,
-  );
-  const atCap = !!balance && balance.remaining <= 0;
-
-  const submit = async () => {
-    setErr("");
-    if (!form.reason) return setErr("Reason is required");
-    setSaving(true);
-    const res = await fetch("/api/hr/attendance/wfh", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-    const data = await res.json();
-    if (!res.ok) { setErr(data.error || "Failed"); setSaving(false); return; }
-    mutate((k: string) => typeof k === "string" && k.includes("/api/hr/attendance/wfh"));
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.08] rounded-2xl w-full max-w-md shadow-2xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06]">
-          <h3 className="text-[14px] font-bold text-slate-800 dark:text-white">Work From Home Request</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-white"><X size={18} /></button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          {err && <p className="text-[12px] text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
-          {balance && (
-            <div className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-[12px] ${
-              atCap
-                ? "border-rose-200 bg-rose-50 dark:border-rose-500/20 dark:bg-rose-500/10"
-                : "border-slate-200 bg-slate-50 dark:border-white/[0.06] dark:bg-white/[0.03]"
-            }`}>
-              <div>
-                <span className={`font-semibold ${atCap ? "text-rose-700 dark:text-rose-300" : "text-slate-700 dark:text-slate-200"}`}>
-                  {balance.remaining} of {balance.limit} WFH left
-                </span>
-                <span className="ml-1 text-slate-500 dark:text-slate-400">
-                  this month
-                </span>
-              </div>
-              <span className="text-[10.5px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                {balance.used}/{balance.limit} used
-              </span>
-            </div>
-          )}
-          <div>
-            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>
-            <DateField value={form.date} onChange={(v) => setForm(f => ({ ...f, date: v }))} className="mt-1 w-full" />
-          </div>
-          <div>
-            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Reason <span className="text-rose-500">*</span></label>
-            <textarea value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} rows={3}
-              placeholder="Why are you working from home today?"
-              className="mt-1 w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none resize-none" />
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-white/[0.06]">
-          <button onClick={onClose} className="h-8 px-4 text-[13px] text-slate-500">Cancel</button>
-          <button onClick={submit} disabled={saving || atCap}
-            title={atCap ? "WFH limit reached for the selected month" : undefined}
-            className="h-8 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
-            {saving ? "Submitting..." : atCap ? "Limit reached" : "Submit"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function OnDutyModal({ onClose }: { onClose: () => void }) {
-  const [form, setForm] = useState({ date: new Date().toISOString().slice(0,10), fromTime: "", toTime: "", purpose: "", location: "" });
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState("");
-  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
-
-  const submit = async () => {
-    setErr("");
-    if (!form.purpose) return setErr("Purpose is required");
-    setSaving(true);
-    const res = await fetch("/api/hr/attendance/on-duty", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-    const data = await res.json();
-    if (!res.ok) { setErr(data.error || "Failed"); setSaving(false); return; }
-    mutate((k: string) => typeof k === "string" && k.includes("/api/hr/attendance/on-duty"));
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.08] rounded-2xl w-full max-w-md shadow-2xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06]">
-          <h3 className="text-[14px] font-bold text-slate-800 dark:text-white">On Duty Request</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-white"><X size={18} /></button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          {err && <p className="text-[12px] text-red-400 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
-          <div>
-            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Date *</label>
-            <DateField value={form.date} onChange={(v) => set("date", v)} className="mt-1 w-full" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">From Time</label>
-              <input type="time" value={form.fromTime} onChange={e => set("fromTime", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none" />
-            </div>
-            <div>
-              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">To Time</label>
-              <input type="time" value={form.toTime} onChange={e => set("toTime", e.target.value)}
-                className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none" />
-            </div>
-          </div>
-          <div>
-            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Purpose *</label>
-            <textarea value={form.purpose} onChange={e => set("purpose", e.target.value)} rows={2}
-              placeholder="Purpose of official duty..."
-              className="mt-1 w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none resize-none" />
-          </div>
-          <div>
-            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Location</label>
-            <input value={form.location} onChange={e => set("location", e.target.value)}
-              placeholder="e.g. Client office, Mumbai"
-              className="mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#008CFF]" />
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-white/[0.06]">
-          <button onClick={onClose} className="h-8 px-4 text-[13px] text-slate-500">Cancel</button>
-          <button onClick={submit} disabled={saving}
-            className="h-8 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50">
-            {saving ? "Submitting..." : "Submit"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// WFHModal / OnDutyModal lived here previously but were superseded by
+// `LeaveRequestForm` (the unified leave-style form that carries the
+// Handoff Details — POC, Work Status, Time of Unavailability). They
+// were never referenced in JSX from this page, so removing them removes
+// a stale entry-point that would have submitted without handoff fields
+// and been rejected by the API.
 
 export default function AttendancePage() {
   const { data: session } = useSession();
@@ -834,11 +695,22 @@ export default function AttendancePage() {
     if (!c) return null;
     return String(c).slice(0, 10); // YYYY-MM-DD (UTC component is fine — User.createdAt is a timestamp)
   })();
-  // Drop balance-only types (e.g. Carry Over Leave) — they're shown
-  // on the leave-balances grid but mustn't appear in the apply form.
+  // Remote / hybrid employees already work from home as their default
+  // mode — surfacing a "Work From Home" leave option would be confusing
+  // (they don't need to apply for what's already their baseline). Hide
+  // it for them; office-based folks still see it.
+  const myWorkLocation = String((profileData as any)?.employeeProfile?.workLocation ?? "office").toLowerCase();
+  const canApplyWfh = myWorkLocation !== "remote" && myWorkLocation !== "hybrid";
+  // Drop balance-only types (legacy `applicable=false` buckets) and
+  // restricted-admin types (`adminOnly`) when the viewer isn't CEO /
+  // HR Manager / developer. Server enforces the same gate so a
+  // hand-crafted POST still 403s.
+  const me = session?.user as any;
+  const canApplyRestricted = canApplyRestrictedLeave(me);
   const leaveTypes: { id: number; name: string }[] = Array.isArray(leaveTypesData)
     ? leaveTypesData
         .filter((t: any) => t.applicable !== false)
+        .filter((t: any) => t.adminOnly !== true || canApplyRestricted)
         .map((t: any) => ({ id: t.id, name: t.name }))
     : [];
 
@@ -884,6 +756,14 @@ export default function AttendancePage() {
   const todayRec  = myData?.todayRecord;
   const summary   = myData?.summary || {};
   const records   = myData?.records  || [];
+  // Mobile clock-in/out is normally blocked, but ANY non-dismissed
+  // On-Duty for today (pending / partially_approved / approved)
+  // unlocks it — same rule the server enforces. The flag is
+  // pre-computed server-side in /api/hr/attendance and ridden through
+  // myData so the UI doesn't need a separate fetch.
+  const hasOdToday: boolean = !!(myData?.hasOdToday ?? myData?.hasApprovedOdToday);
+  // Effective mobile-block: true only when on mobile AND no OD bypass.
+  const mobileBlocked = isMobileDevice && !hasOdToday;
   const days      = ["M","T","W","T","F","S","S"];
   const todayDow  = now.getDay() === 0 ? 6 : now.getDay() - 1;
 
@@ -961,6 +841,14 @@ export default function AttendancePage() {
     const dd = parts.find(p => p.type === "day")!.value;
     return `${y}-${m}-${dd}`;
   })();
+  // CEO and developers don't punch a clock — their schedules are flexible
+  // and the daily "Absent" markers don't represent anything meaningful for
+  // them. Skip synthesizing absent rows in their log. Real clock-ins (if
+  // any), weekends, and today's "pending" row are still kept so they can
+  // see the few times they did clock in + know what day it is + still
+  // click Clock-In if they want.
+  const skipAbsentSynthesis = user?.orgLevel === "ceo" || user?.isDeveloper === true;
+
   const recsWithToday = (() => {
     // Build the list of every IST calendar day in the current view, then fill
     // each day with the matching server record (if any) or a synthetic empty
@@ -1006,6 +894,11 @@ export default function AttendancePage() {
         const dow = d.getUTCDay(); // 0 = Sun, 6 = Sat
         const isWeekend = dow === 0 || dow === 6;
         const isToday = iso === istTodayIso;
+        // For CEO / developers, skip synthesizing the "absent" rows —
+        // they don't punch a clock, so the cross-mark noise is wrong.
+        // Today's pending row + weekends still get synthesized (today
+        // so they can still clock in; weekends for calendar context).
+        if (skipAbsentSynthesis && !isToday && !isWeekend) continue;
         out.push({
           id: `synthetic-${iso}`,
           date: `${iso}T00:00:00.000Z`,
@@ -1311,8 +1204,8 @@ export default function AttendancePage() {
                   "preserve white text" rule. Don't remove. */}
               {!todayRec?.clockIn ? (
                 <div className="flex flex-col gap-1 w-fit">
-                  <button onClick={isMobileDevice ? undefined : clockIn}
-                    disabled={clockingIn || isMobileDevice}
+                  <button onClick={mobileBlocked ? undefined : clockIn}
+                    disabled={clockingIn || mobileBlocked}
                     style={{
                       background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
                       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
@@ -1320,9 +1213,14 @@ export default function AttendancePage() {
                     className="h-8 px-4 bg-green-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
                     {clockingIn ? "Getting location…" : "Web Clock-In"}
                   </button>
-                  {isMobileDevice && (
+                  {mobileBlocked && (
                     <span className="text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
                       Only accessible on Laptop &amp; Desktop
+                    </span>
+                  )}
+                  {isMobileDevice && hasOdToday && (
+                    <span className="text-center text-[10px] leading-tight text-emerald-600 dark:text-emerald-400">
+                      Mobile enabled — On-Duty today
                     </span>
                   )}
                 </div>
@@ -1366,8 +1264,8 @@ export default function AttendancePage() {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-1 w-fit">
-                    <button onClick={isMobileDevice ? undefined : () => setConfirmingClockOut(true)}
-                      disabled={isMobileDevice}
+                    <button onClick={mobileBlocked ? undefined : () => setConfirmingClockOut(true)}
+                      disabled={mobileBlocked}
                       style={{
                         background: "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)",
                         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
@@ -1375,16 +1273,21 @@ export default function AttendancePage() {
                       className="h-8 px-4 bg-red-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-not-allowed">
                       Web Clock-Out
                     </button>
-                    {isMobileDevice && (
+                    {mobileBlocked && (
                       <span className="text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
                         Only accessible on Laptop &amp; Desktop
+                      </span>
+                    )}
+                    {isMobileDevice && hasOdToday && (
+                      <span className="text-center text-[10px] leading-tight text-emerald-600 dark:text-emerald-400">
+                        Mobile enabled — On-Duty today
                       </span>
                     )}
                   </div>
                 )
               ) : (
                 <div className="flex flex-col gap-1.5 w-fit">
-                  <button onClick={isMobileDevice ? undefined : clockIn} disabled={clockingIn || isMobileDevice}
+                  <button onClick={mobileBlocked ? undefined : clockIn} disabled={clockingIn || mobileBlocked}
                     style={{
                       background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
                       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
@@ -1392,9 +1295,14 @@ export default function AttendancePage() {
                     className="h-8 px-4 bg-green-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
                     {clockingIn ? "Getting location…" : "Web Clock-In"}
                   </button>
-                  {isMobileDevice && (
+                  {mobileBlocked && (
                     <span className="text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
                       Only accessible on Laptop &amp; Desktop
+                    </span>
+                  )}
+                  {isMobileDevice && hasOdToday && (
+                    <span className="text-center text-[10px] leading-tight text-emerald-600 dark:text-emerald-400">
+                      Mobile enabled — On-Duty today
                     </span>
                   )}
                 </div>
@@ -1415,7 +1323,7 @@ export default function AttendancePage() {
               {/* Quick links */}
               <div className="flex flex-col gap-1.5">
                 {[
-                  { label: "Work From Home",    Icon: Home,       onClick: () => openForm("wfh")       },
+                  ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
                   { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
                   { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
                   { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
@@ -1432,8 +1340,21 @@ export default function AttendancePage() {
         </div>{/* end Panel 3 */}
       </div>{/* end 3-panel header */}
 
-      {/* ── Logs & Requests ── */}
+      {/* ── Logs & Requests ──────────────────────────────────────
+          Hidden entirely for CEO + Developer users — their schedules
+          are flexible and the per-day log is just noise. The Stats
+          card + clock-in button at the top still apply if they ever
+          want to record a punch; only this big table is gone.
+          `skipAbsentSynthesis` is the same predicate we use above to
+          drop the synthesised "Absent" rows.
+
+          NOTE: the modals (RegularizeModal / LeaveRequestForm) sit
+          inside the same wrapper but render `fixed inset-0`, so they
+          must STAY in the tree even for CEO/dev — only the table
+          chrome is wrapped in the conditional. */}
       <div className="px-6 pt-5 pb-8">
+       {!skipAbsentSynthesis && (
+       <>
 
         {/* Section header */}
         <div className="flex items-center justify-between mb-1">
@@ -2197,6 +2118,8 @@ export default function AttendancePage() {
           </>
         )}
 
+       </>
+       )}
       {showRegModal && (
         <RegularizeModal
           prefillDate={regPrefillDate}

@@ -6,6 +6,9 @@ import { fetcher } from "@/lib/swr";
 import { Search, Sparkles, Plus, Minus, X, CalendarPlus, AlertTriangle, Home, Clock } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 import SelectField from "@/components/ui/SelectField";
+import PopupPanel from "@/components/ui/PopupPanel";
+import HandoffSection from "@/components/hr/HandoffSection";
+import type { PickerUser } from "@/components/hr/EmployeePicker";
 
 type LeaveTypeRow = { id: number; name: string; code: string; daysPerYear: number; applicable?: boolean };
 type Bal          = { id: number | null; total: number; used: number; pending: number };
@@ -177,6 +180,18 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
   });
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyError, setApplyError] = useState("");
+  // Handoff Details for the HR-on-behalf flow. POC supports an N/A
+  // option (HR may not know who's covering); workStatus is required
+  // but accepts "N/A" if HR doesn't have that context either.
+  // unavailability only renders in WFH mode.
+  const [handoffPoc,            setHandoffPoc]            = useState<PickerUser[]>([]);
+  const [handoffPocNa,          setHandoffPocNa]          = useState(false);
+  const [handoffWorkStatus,     setHandoffWorkStatus]     = useState("");
+  const [handoffUnavailability, setHandoffUnavailability] = useState("");
+  const resetHandoff = () => {
+    setHandoffPoc([]); setHandoffPocNa(false);
+    setHandoffWorkStatus(""); setHandoffUnavailability("");
+  };
   // Day-kind toggle for the apply-on-behalf form (mirrors the regular
   // leave application form). full → standard range; first/second half
   // collapse to one date and tag the reason so attendance reports the
@@ -290,6 +305,13 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
     if (applyMode === "leave" && typeof applyForm.leaveTypeId !== "number") {
       return setApplyError("Pick a leave type.");
     }
+    // Handoff Details — POC is N/A-eligible; workStatus is always
+    // required (HR can type "N/A" if they don't have context).
+    // unavailability is WFH-only and required when shown.
+    const pocId = handoffPocNa ? null : (handoffPoc[0]?.id ?? null);
+    if (!handoffPocNa && !pocId)                              return setApplyError("POC in Absence is required (or mark as N/A).");
+    if (!handoffWorkStatus.trim())                            return setApplyError("Work Status is required.");
+    if (applyMode === "wfh" && !handoffUnavailability.trim()) return setApplyError("Time of Unavailability is required.");
     setApplyBusy(true);
     try {
       let res: Response;
@@ -313,6 +335,8 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
             toDate:          toDateOut,
             reason:          reasonOut,
             useLwpFallback:  applyForm.useLwpFallback,
+            pocUserId:       pocId,
+            workStatus:      handoffWorkStatus.trim(),
           }),
         });
       } else {
@@ -325,10 +349,13 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            targetUserId: applyForm.userId,
-            date:         applyForm.fromDate,
-            toDate:       applyForm.toDate,
-            reason:       applyForm.reason.trim(),
+            targetUserId:   applyForm.userId,
+            date:           applyForm.fromDate,
+            toDate:         applyForm.toDate,
+            reason:         applyForm.reason.trim(),
+            pocUserId:      pocId,
+            workStatus:     handoffWorkStatus.trim(),
+            unavailability: handoffUnavailability.trim(),
           }),
         });
       }
@@ -336,6 +363,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
       if (!res.ok) { setApplyError(data?.error || `Failed to apply ${applyMode === "wfh" ? "WFH" : "leave"}.`); return; }
       setApplyOpen(false);
       setApplyForm((f) => ({ ...f, reason: "" }));
+      resetHandoff();
       mutate(url);
     } finally { setApplyBusy(false); }
   };
@@ -464,7 +492,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                 <td className="sticky left-0 z-[1] bg-inherit px-5 py-3 min-w-[260px]">
                   <div className="flex items-center gap-2.5">
                     {emp.profilePictureUrl ? (
-                      <img src={emp.profilePictureUrl} alt="" className="h-8 w-8 rounded-full object-cover ring-1 ring-slate-200" />
+                      <img src={emp.profilePictureUrl} alt="" referrerPolicy="no-referrer" className="h-8 w-8 rounded-full object-cover ring-1 ring-slate-200" />
                     ) : (
                       <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e8f1fc] text-[11px] font-semibold text-[#0f4e93] ring-1 ring-[#cfdef5]">
                         {(emp.name || "?").trim().slice(0, 1).toUpperCase()}
@@ -629,11 +657,6 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                 <h3 className="text-[15px] font-bold text-slate-800">
                   Apply {applyMode === "wfh" ? "WFH" : "Leave"} on behalf
                 </h3>
-                <p className="mt-0.5 text-[11.5px] text-slate-500">
-                  {applyMode === "wfh"
-                    ? "Goes through normal approval — lands in the manager's L1 queue, then CEO/HR finalises. Weekends are skipped on multi-day ranges."
-                    : "Goes through normal approval — lands in the manager's L1 queue. If balance is insufficient and LWP fallback is on, switches to Leave Without Pay."}
-                </p>
               </div>
               <button onClick={() => !applyBusy && setApplyOpen(false)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
                 <X size={16} />
@@ -692,8 +715,13 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                     placeholder="Search by name or email…"
                     className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
                   />
-                  {empOpen && (
-                    <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
+                  <PopupPanel
+                    open={empOpen}
+                    triggerRef={empPickerRef}
+                    onClose={() => setEmpOpen(false)}
+                    maxHeight={288}
+                    className="bg-white border border-slate-200 rounded-lg shadow-2xl overflow-y-auto"
+                  >
                       {filteredEmps.length === 0 ? (
                         <p className="px-3 py-2.5 text-[12.5px] text-slate-500">
                           {empQuery ? "No matching employees." : "No active employees."}
@@ -720,8 +748,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                           );
                         })
                       )}
-                    </div>
-                  )}
+                  </PopupPanel>
                 </div>
               </div>
 
@@ -899,6 +926,23 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                   className="mt-1 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
                 />
               </div>
+
+              {/* Handoff Details — POC + Work Status (+ Unavailability for
+                  WFH). POC is N/A-eligible here because HR may not know
+                  who's covering. The HandoffSection renders its own top
+                  divider for visual separation. */}
+              <HandoffSection
+                poc={handoffPoc}
+                onPocChange={setHandoffPoc}
+                workStatus={handoffWorkStatus}
+                onWorkStatusChange={setHandoffWorkStatus}
+                unavailability={handoffUnavailability}
+                onUnavailabilityChange={setHandoffUnavailability}
+                showUnavailability={applyMode === "wfh"}
+                allowNa
+                naSelected={handoffPocNa}
+                onNaChange={setHandoffPocNa}
+              />
 
               {applyMode === "leave" && (
                 <label className="flex items-start gap-2 rounded-lg bg-amber-50/60 px-3 py-2 ring-1 ring-inset ring-amber-200/60">

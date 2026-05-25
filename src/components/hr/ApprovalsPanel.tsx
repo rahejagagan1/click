@@ -188,11 +188,28 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+// Google's CDN (`lh3.googleusercontent.com`) blocks <img> loads that
+// send a Referer header — without `referrerPolicy="no-referrer"` the
+// browser shows the broken-image icon (a green silhouette in some
+// themes) instead of the photo. The onError swap covers expired /
+// deleted URLs by flipping the img out for the initials chip at
+// runtime so the user still sees something meaningful.
 function Avatar({ name, url, size = 32 }: { name: string; url?: string | null; size?: number }) {
   const initials = name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
-  return url ? (
-    <img src={url} alt={name} style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />
-  ) : (
+  const [broken, setBroken] = useState(false);
+  if (url && !broken) {
+    return (
+      <img
+        src={url}
+        alt={name}
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        style={{ width: size, height: size }}
+        className="rounded-full object-cover shrink-0"
+      />
+    );
+  }
+  return (
     <div style={{ width: size, height: size }} className="rounded-full bg-[#008CFF] text-white text-[11px] font-bold flex items-center justify-center shrink-0">
       {initials}
     </div>
@@ -272,10 +289,13 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
     };
   }, [rows]);
 
+  // [collapse-rev-2026-05-19] Marker comment to nudge Turbopack into
+  // producing a new chunk hash so the browser stops serving its cached
+  // pre-collapse bundle. Pure no-op — does not affect runtime behaviour.
   const filtered = useMemo(() => {
     const matches = (selected: Set<string>, v: string) =>
       selected.size === 0 || (!!v && selected.has(v));
-    return rows.filter((r: any) => {
+    const base = rows.filter((r: any) => {
       const u = r.user || {};
       const en = deriveEntity(u);
       const dp = deriveDepartment(u);
@@ -293,7 +313,35 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
       )) return false;
       return true;
     });
-  }, [rows, fBU, fDept, fLoc, fCost, fLegal, fStatus, search]);
+    // Collapse per-day WFH / OD rows that came from the same range
+    // submission into one leader row. Group key = userId + reason +
+    // createdAt-second + _kind (so a WFH and an OD with identical
+    // metadata stay separate). The leader carries `_groupIds` so a
+    // single approve/reject cascades to every underlying day.
+    if (tab !== "wfh") return base;
+    const buckets = new Map<string, any[]>();
+    for (const r of base) {
+      const key = [
+        r.userId,
+        (r.reason || "").trim(),
+        Math.floor(new Date(r.createdAt).getTime() / 1000),
+        r._kind ?? "wfh",
+      ].join("|");
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(r);
+    }
+    return Array.from(buckets.values()).map((group) => {
+      const sorted = [...group].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      const leader = sorted[0];
+      return {
+        ...leader,
+        _groupIds:  sorted.map((g) => g.id),
+        _groupSize: sorted.length,
+        _rangeFrom: new Date(sorted[0].date),
+        _rangeTo:   new Date(sorted[sorted.length - 1].date),
+      };
+    });
+  }, [rows, tab, fBU, fDept, fLoc, fCost, fLegal, fStatus, search]);
 
   const anyFilter = fBU.size || fDept.size || fLoc.size || fCost.size || fLegal.size || fStatus.size;
   const clearFilters = () => {
@@ -382,11 +430,16 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
   const [rejectPending, setRejectPending] = useState<{ ids: number[]; label: string } | null>(null);
 
   const actOne = (id: number, action: "approve" | "reject") => {
+    // If `id` is a collapsed range leader, fan out to every underlying
+    // day. The `filtered` list carries `_groupIds` on the leader row.
+    const row = filtered.find((r: any) => r.id === id);
+    const ids = Array.isArray(row?._groupIds) && row._groupIds.length > 0 ? row._groupIds : [id];
     if (action === "reject") {
-      setRejectPending({ ids: [id], label: "this request" });
+      const label = ids.length > 1 ? `all ${ids.length} day(s) in this range` : "this request";
+      setRejectPending({ ids, label });
       return;
     }
-    actOnIds([id], action);
+    actOnIds(ids, action);
   };
 
   // When embedded in the HR Dashboard, drop the full-screen wash + the
@@ -464,10 +517,29 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r: any) => {
+                  {filtered.map((r: any) => {
                     const u = r.user || {};
                     const dateObj = new Date(r.date || r.workedDate);
                     const fmt = (d: Date) => d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+                    const fmtShort = (d: Date) => d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+                    // Collapsed WFH/OD leaders carry `_rangeFrom` /
+                    // `_rangeTo` + `_groupSize`. Show "From – To · 7 days"
+                    // when it's a real range so HR can act on the whole
+                    // span in one click. Single-day rows fall through to
+                    // the plain date display.
+                    const groupSize = Number(r._groupSize ?? 1);
+                    const isRange = groupSize > 1 && r._rangeFrom && r._rangeTo;
+                    const dateCell: React.ReactNode = isRange
+                      ? (
+                          <>
+                            <span className="font-semibold text-slate-500">From</span> {fmtShort(new Date(r._rangeFrom))}{" "}
+                            <span className="font-semibold text-slate-500">→ To</span> {fmt(new Date(r._rangeTo))}
+                            <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-md bg-[#008CFF]/10 text-[#008CFF] text-[10px] font-bold tracking-wide">
+                              {groupSize} DAYS
+                            </span>
+                          </>
+                        )
+                      : fmt(dateObj);
                     const fmtTime = (iso: string | null | undefined) => iso
                       ? new Date(iso).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })
                       : "—";
@@ -510,7 +582,7 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                           </div>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
-                          <p className="text-[12.5px] text-slate-700 dark:text-slate-300">{fmt(dateObj)}</p>
+                          <p className="text-[12.5px] text-slate-700 dark:text-slate-300">{dateCell}</p>
                           <p className="text-[10.5px] text-slate-400 mt-0.5">
                             <span className="font-semibold text-slate-500">Submitted</span> · {fmtDt(r.createdAt)}
                           </p>
@@ -652,7 +724,11 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
-                    const acts = filtered.filter((r) => picked.has(r.id) && canActOn(r)).map((r) => r.id);
+                    // Expand grouped leaders to every underlying day so
+                    // the bulk action actually covers the full range.
+                    const acts = filtered
+                      .filter((r: any) => picked.has(r.id) && canActOn(r))
+                      .flatMap((r: any) => (Array.isArray(r._groupIds) && r._groupIds.length > 0 ? r._groupIds : [r.id]));
                     actOnIds(acts, "approve");
                   }}
                   disabled={picked.size === 0 || actioning}
@@ -662,7 +738,9 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                 </button>
                 <button
                   onClick={() => {
-                    const acts = filtered.filter((r) => picked.has(r.id) && canActOn(r)).map((r) => r.id);
+                    const acts = filtered
+                      .filter((r: any) => picked.has(r.id) && canActOn(r))
+                      .flatMap((r: any) => (Array.isArray(r._groupIds) && r._groupIds.length > 0 ? r._groupIds : [r.id]));
                     if (acts.length === 0) return;
                     setRejectPending({
                       ids: acts,

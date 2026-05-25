@@ -292,6 +292,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Structured emailData so the regularization email mirrors WFH / leave —
+    // Reason block shows just the user-typed reason, Date row shows the
+    // attendance day being regularized (not the submission day).
+    const regEmailBase = {
+      applicantName: target?.name || "An employee",
+      date:          targetDateOnly,
+      reason:        String(reason || "").trim() || undefined,
+    };
     await Promise.all([
       notifyUsers({
         actorId:  isAdminGrant ? myId : targetUserId,
@@ -303,6 +311,7 @@ export async function POST(req: NextRequest) {
           : `${target?.name || "An employee"} requested regularization`,
         body:     `Date: ${dateLabel} — ${String(reason).slice(0, 120)}`,
         linkUrl:  "/dashboard/hr/approvals?tab=regularize",
+        emailData: regEmailBase,
       }),
       notifyUsers({
         actorId:  isAdminGrant ? myId : null,
@@ -316,6 +325,7 @@ export async function POST(req: NextRequest) {
           ? `On record. Reason: ${String(reason).slice(0, 120)}`
           : `Your request for ${dateLabel} is awaiting HR approval.`,
         linkUrl:  "/dashboard/hr/attendance",
+        emailData: regEmailBase,
       }),
     ]);
     return NextResponse.json(reg, { status: 201 });
@@ -338,7 +348,7 @@ export async function PUT(req: NextRequest) {
 
     const reg = await prisma.attendanceRegularization.findUnique({
       where: { id },
-      include: { user: { select: { id: true, managerId: true } } },
+      include: { user: { select: { id: true, name: true, managerId: true } } },
     });
     if (!reg) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -356,6 +366,15 @@ export async function PUT(req: NextRequest) {
     //     manager can't unilaterally edit the audit trail.
     const isDirectManager = !!reg.user?.managerId && reg.user.managerId === myId;
     const dateLabelEarly = new Date(reg.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+    // Shared email payload for every notification path below — applicant
+    // name + the actual regularization date + the user's typed reason.
+    const approver = await prisma.user.findUnique({ where: { id: myId }, select: { name: true } });
+    const approverName = approver?.name || "An approver";
+    const regEmailBase = {
+      applicantName: reg.user?.name || "An employee",
+      date:          reg.date,
+      reason:        reg.reason || undefined,
+    };
 
     // ── REJECT ─────────────────────────────────────────────────────
     if (action === "reject") {
@@ -388,6 +407,7 @@ export async function PUT(req: NextRequest) {
         title: `Your regularization for ${dateLabelEarly} was rejected`,
         body: approvalNote ? String(approvalNote).slice(0, 160) : undefined,
         linkUrl: "/dashboard/hr/attendance",
+        emailData: { ...regEmailBase, approverName, stageLabel: "Rejected by", approvalNote: approvalNote ?? undefined },
       });
       return NextResponse.json(await prisma.attendanceRegularization.findUnique({ where: { id } }));
     }
@@ -436,12 +456,14 @@ export async function PUT(req: NextRequest) {
         title: `A regularization for ${dateLabelEarly} needs final approval`,
         body: approvalNote ? `Manager approved · ${String(approvalNote).slice(0, 140)}` : "Manager approved — awaiting CEO / HR.",
         linkUrl: "/dashboard/hr/approvals?tab=regularize",
+        emailData: { ...regEmailBase, l1ApproverName: approverName, l1ApprovalNote: approvalNote ?? undefined },
       });
       await notifyUsers({
         actorId: myId, userIds: [reg.userId], type: "regularization", entityId: reg.id,
         title: `Your regularization for ${dateLabelEarly} is partially approved`,
         body: "Awaiting final approval from CEO / HR.",
         linkUrl: "/dashboard/hr/attendance",
+        emailData: { ...regEmailBase, l1ApproverName: approverName, l1ApprovalNote: approvalNote ?? undefined },
       });
       return NextResponse.json(await prisma.attendanceRegularization.findUnique({ where: { id } }));
     }
@@ -561,6 +583,9 @@ export async function PUT(req: NextRequest) {
 
     // Final-approval notification — reject + L1 paths already returned
     // earlier, so by this point we're guaranteed L2-approved.
+    const l1Approver = reg.approvedById
+      ? await prisma.user.findUnique({ where: { id: reg.approvedById }, select: { name: true } })
+      : null;
     await notifyUsers({
       actorId:  myId,
       userIds:  [reg.userId],
@@ -569,6 +594,14 @@ export async function PUT(req: NextRequest) {
       title:    `Your regularization for ${dateLabelEarly} was approved`,
       body:     approvalNote ? String(approvalNote).slice(0, 160) : undefined,
       linkUrl:  "/dashboard/hr/attendance",
+      emailData: {
+        ...regEmailBase,
+        l1ApproverName: l1Approver?.name,
+        l1ApprovalNote: reg.approvalNote ?? undefined,
+        approverName,
+        stageLabel:     "Approved by",
+        approvalNote:   approvalNote ?? undefined,
+      },
     });
 
     return NextResponse.json(updated);

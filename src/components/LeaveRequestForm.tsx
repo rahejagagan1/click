@@ -1,10 +1,14 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { X, Info, Search, Check, ChevronDown } from "lucide-react";
 import { createPortal } from "react-dom";
 import { DatePicker } from "@/components/ui/date-picker";
+import EmployeePicker, { type PickerUser } from "@/components/hr/EmployeePicker";
+import HandoffSection from "@/components/hr/HandoffSection";
+import { leaveMinDate } from "@/lib/hr/leave-date-rules";
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 export type LeaveRequestKind = "wfh" | "on_duty" | "half_day" | "leave" | "regularize";
@@ -138,142 +142,6 @@ function LeaveTypePicker({
   );
 }
 
-// ── Employee autocomplete (Notify field) ─────────────────────────────────────
-function EmployeePicker({ selected, onChange }: {
-  selected: { id: number; name: string; email?: string; profilePictureUrl?: string | null }[];
-  onChange: (next: { id: number; name: string; email?: string; profilePictureUrl?: string | null }[]) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [open, setOpen]   = useState(false);
-  const anchorRef = useRef<HTMLDivElement>(null);
-  const popRef    = useRef<HTMLDivElement>(null);
-  // Tick state forces re-read of the anchor's rect after scroll / resize.
-  const [, forceTick] = useState(0);
-
-  const { data, error } = useSWR(
-    open && query.trim().length >= 1
-      ? `/api/hr/employees?search=${encodeURIComponent(query.trim())}&isActive=true`
-      : null,
-    fetcher,
-    { dedupingInterval: 500 }
-  );
-  const all: any[] = Array.isArray(data) ? data : [];
-  const selectedIds = useMemo(() => new Set(selected.map((s) => s.id)), [selected]);
-  const results = all.filter((u) => !selectedIds.has(u.id)).slice(0, 8);
-
-  // Re-render the popover when the modal scrolls or the window resizes so the
-  // anchor rect stays in sync.
-  useEffect(() => {
-    if (!open) return;
-    const bump = () => forceTick((n) => n + 1);
-    window.addEventListener("resize", bump);
-    window.addEventListener("scroll", bump, true);
-    return () => {
-      window.removeEventListener("resize", bump);
-      window.removeEventListener("scroll", bump, true);
-    };
-  }, [open]);
-
-  // Close when clicking outside both the anchor and the popover.
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (anchorRef.current?.contains(t)) return;
-      if (popRef.current?.contains(t))    return;
-      setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
-  const add = (u: any) => {
-    onChange([...selected, { id: u.id, name: u.name, email: u.email, profilePictureUrl: u.profilePictureUrl }]);
-    setQuery("");
-  };
-  const remove = (id: number) => onChange(selected.filter((s) => s.id !== id));
-
-  const trimmed = query.trim();
-  // Read the rect fresh on every render (no state gap). Safe because the
-  // anchor div is already mounted whenever the picker is visible.
-  const anchorRect = anchorRef.current?.getBoundingClientRect() ?? null;
-  const showPopover = open && trimmed.length >= 1;
-
-  return (
-    <div ref={anchorRef} className="relative">
-      <div className={`flex flex-wrap items-center gap-1.5 w-full min-h-10 px-3 py-1.5 rounded-lg border bg-white dark:bg-[#0a1526] border-slate-200 dark:border-white/[0.08] focus-within:border-[#008CFF] dark:focus-within:border-[#4a9cff] transition-colors`}>
-        {selected.map((s) => (
-          <span key={s.id} className="inline-flex items-center gap-1.5 h-6 pl-1 pr-1.5 rounded-full bg-[#008CFF]/10 text-[#008CFF] dark:bg-[#4a9cff]/15 dark:text-[#4a9cff] text-[11px] font-medium">
-            {s.profilePictureUrl ? (
-              <img src={s.profilePictureUrl} alt="" className="w-4 h-4 rounded-full object-cover" />
-            ) : (
-              <span className="w-4 h-4 rounded-full bg-[#008CFF]/25 text-[9px] flex items-center justify-center">
-                {s.name.slice(0, 1).toUpperCase()}
-              </span>
-            )}
-            {s.name}
-            <button type="button" onClick={() => remove(s.id)} className="hover:opacity-80" aria-label={`Remove ${s.name}`}>
-              <X size={11} strokeWidth={2.5} />
-            </button>
-          </span>
-        ))}
-        <div className="flex items-center flex-1 min-w-[120px]">
-          <Search size={13} strokeWidth={2} className="text-slate-400 mr-1.5 shrink-0" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-            onFocus={() => setOpen(true)}
-            placeholder={selected.length === 0 ? "Search employee" : "Add another…"}
-            className="flex-1 h-8 bg-transparent text-[13px] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none"
-          />
-        </div>
-      </div>
-
-      {showPopover && typeof document !== "undefined" && createPortal(
-        <div
-          ref={popRef}
-          className="max-h-56 overflow-y-auto bg-white dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg shadow-2xl"
-          style={{
-            position: "fixed",
-            top:   (anchorRect?.bottom ?? 0) + 4,
-            left:  anchorRect?.left  ?? 0,
-            width: anchorRect?.width ?? 240,
-            zIndex: 10000,
-          }}
-        >
-          {error ? (
-            <p className="px-3 py-3 text-[12px] text-red-500">Couldn't load employees</p>
-          ) : !data ? (
-            <p className="px-3 py-3 text-[12px] text-slate-400">Searching…</p>
-          ) : results.length === 0 ? (
-            <p className="px-3 py-3 text-[12px] text-slate-400">No employees found for "{trimmed}"</p>
-          ) : results.map((u) => (
-            <button
-              key={u.id}
-              type="button"
-              onMouseDown={(e) => { e.preventDefault(); add(u); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-[#008CFF]/[0.06] dark:hover:bg-[#4a9cff]/[0.08]"
-            >
-              {u.profilePictureUrl ? (
-                <img src={u.profilePictureUrl} alt="" className="w-7 h-7 rounded-full object-cover" />
-              ) : (
-                <span className="w-7 h-7 rounded-full bg-[#008CFF]/20 text-[#008CFF] text-[11px] font-semibold flex items-center justify-center">
-                  {u.name?.slice(0, 1).toUpperCase() || "?"}
-                </span>
-              )}
-              <div className="min-w-0">
-                <p className="text-[12.5px] text-slate-800 dark:text-white font-medium truncate">{u.name}</p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{u.email}</p>
-              </div>
-            </button>
-          ))}
-        </div>,
-        document.body
-      )}
-    </div>
-  );
-}
 
 // ── Main form ────────────────────────────────────────────────────────────────
 export default function LeaveRequestForm({
@@ -281,6 +149,12 @@ export default function LeaveRequestForm({
 }: LeaveRequestFormProps) {
   // IST-anchored so evening users don't see yesterday as the default.
   const today = prefillDate || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const { data: session } = useSession();
+  const me = session?.user as any;
+  // Restricted-admin tier (CEO / hr_manager / dev) can back-date; everyone
+  // else gets clamped to today + future via the date picker's minDate prop.
+  const minDate = leaveMinDate(me);
+
   const [fromDate, setFromDate] = useState(today);
   const [toDate,   setToDate]   = useState(today);
   // Start with no leave type chosen — the picker shows the "Select Leave"
@@ -296,6 +170,17 @@ export default function LeaveRequestForm({
   // half-day form (`kind=half_day`) keeps its own legacy flow and ignores this.
   const [dayKind, setDayKind] = useState<"full" | "first_half" | "second_half">("full");
   const isHalfLeave = kind === "leave" && dayKind !== "full";
+
+  // Handoff fields — apply to every kind EXCEPT regularize. Work Status
+  // is required for those forms; WFH additionally requires Time of
+  // Unavailability. POC has an opt-in N/A toggle: users / HR can mark
+  // it N/A when there's no specific cover assigned. When N/A is ticked,
+  // pocUserId submits as null.
+  const handoffApplies = kind !== "regularize";
+  const [poc, setPoc] = useState<PickerUser[]>([]);
+  const [pocNa, setPocNa] = useState(false);
+  const [workStatus, setWorkStatus] = useState("");
+  const [unavailability, setUnavailability] = useState("");
 
   // Working-day preview: walk from→to and count weekdays only. Mirrors the
   // server-side `countWorkingDays()` (which also subtracts holidays); the
@@ -323,9 +208,22 @@ export default function LeaveRequestForm({
     if (new Date(fromDate) > new Date(toDate)) return setErr("From date must be on/before To date");
     if (!note.trim()) return setErr("Reason is required.");
     if (kind === "leave" && !leaveTypeId) return setErr("Please choose a leave type");
+    // Handoff validation — required for Leave / WFH / On Duty / Half Day.
+    // POC can be N/A (pocNa toggle) — when ticked it satisfies the rule
+    // and the payload sends pocUserId=null.
+    if (handoffApplies && !pocNa && poc.length === 0)   return setErr("POC in Absence is required (or mark as N/A).");
+    if (handoffApplies && !workStatus.trim())           return setErr("Work Status is required.");
+    if (kind === "wfh" && !unavailability.trim()) return setErr("Time of Unavailability is required (type 'Available all day' if not applicable).");
 
     setSaving(true);
     const notifyUserIds = notify.map((u) => u.id);
+    // Common handoff payload — added to every payload that needs it
+    // below. Lets the server attribute the POC + work status without
+    // changing the per-kind URL routing.
+    const handoff = handoffApplies ? {
+      pocUserId:  pocNa ? null : (poc[0]?.id ?? null),
+      workStatus: workStatus.trim(),
+    } : {};
 
     let url = "";
     let payload: Record<string, unknown> = {};
@@ -336,13 +234,15 @@ export default function LeaveRequestForm({
       // Half-day WFH is encoded as a reason prefix so we don't need a schema
       // migration. Approval + attendance display both detect "[Half Day]".
       const reason = isHalfDayWfh ? `[Half Day] ${note}` : note;
-      payload = { date: fromDate, reason, notifyUserIds };
+      payload = { date: fromDate, reason, notifyUserIds, ...handoff, unavailability: unavailability.trim() };
       refreshKeys = ["/api/hr/attendance/wfh"];
     } else if (kind === "on_duty") {
       url = "/api/hr/attendance/on-duty";
-      payload = { date: fromDate, purpose: note, notifyUserIds };
+      payload = { date: fromDate, purpose: note, notifyUserIds, ...handoff };
       refreshKeys = ["/api/hr/attendance/on-duty"];
     } else if (kind === "regularize") {
+      // No handoff for regularize — it's the "I missed a clock-in" flow,
+      // not a request for time off, so POC + Work Status don't apply.
       url = "/api/hr/attendance/regularize";
       payload = { date: fromDate, reason: note, notifyUserIds };
       refreshKeys = ["/api/hr/attendance/regularize"];
@@ -351,7 +251,7 @@ export default function LeaveRequestForm({
       // fall back to a regularization so a request still reaches approvers.
       if (leaveTypeId) {
         url = "/api/hr/leaves";
-        payload = { leaveTypeId, fromDate, toDate: fromDate, reason: `[Half Day] ${note}`, notifyUserIds };
+        payload = { leaveTypeId, fromDate, toDate: fromDate, reason: `[Half Day] ${note}`, notifyUserIds, ...handoff };
         refreshKeys = ["/api/hr/leaves", "/api/hr/leaves/balance"];
       } else {
         url = "/api/hr/attendance/regularize";
@@ -368,7 +268,7 @@ export default function LeaveRequestForm({
         dayKind === "second_half" ? `[Second Half] ${note}` :
                                     note;
       const halfDayTo = isHalfLeave ? fromDate : toDate;
-      payload = { leaveTypeId, fromDate, toDate: halfDayTo, reason, notifyUserIds };
+      payload = { leaveTypeId, fromDate, toDate: halfDayTo, reason, notifyUserIds, ...handoff };
       refreshKeys = ["/api/hr/leaves", "/api/hr/leaves/balance"];
     }
 
@@ -403,16 +303,19 @@ export default function LeaveRequestForm({
         <div className="px-5 py-4 space-y-4 overflow-y-auto">
           {err && <p className="text-[12px] text-red-500 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
 
-          {/* Date range card */}
+          {/* Date range card — FROM and TO sit on the same row so the
+              two date pickers line up, with the "1 day" badge anchored
+              to the top-right of the card (not crammed beside FROM). */}
           <div className="rounded-lg border border-slate-200 dark:border-white/[0.08] p-3">
-            <div className="grid grid-cols-1 gap-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10.5px] uppercase tracking-widest font-semibold text-slate-500 dark:text-slate-400">Date range</p>
+              <span className="px-2 py-0.5 rounded-md bg-[#008CFF]/10 text-[#008CFF] dark:bg-[#4a9cff]/15 dark:text-[#4a9cff] text-[11px] font-semibold tabular-nums">
+                {days} day{days === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <p className="text-[10.5px] uppercase tracking-widest font-semibold text-slate-500 dark:text-slate-400">From</p>
-                  <span className="px-2 py-0.5 rounded-md bg-[#008CFF]/10 text-[#008CFF] dark:bg-[#4a9cff]/15 dark:text-[#4a9cff] text-[11px] font-semibold tabular-nums">
-                    {days} day{days === 1 ? "" : "s"}
-                  </span>
-                </div>
+                <p className="text-[10.5px] uppercase tracking-widest font-semibold text-slate-500 dark:text-slate-400 mb-1.5">From</p>
                 <DatePicker
                   value={fromDate}
                   onChange={(v) => {
@@ -421,19 +324,23 @@ export default function LeaveRequestForm({
                     else if (v && (!toDate || new Date(v) > new Date(toDate))) setToDate(v);
                   }}
                   futureYears={2}
+                  minDate={minDate}
+                  className="w-full"
                 />
               </div>
               <div>
                 <p className="text-[10.5px] uppercase tracking-widest font-semibold text-slate-500 dark:text-slate-400 mb-1.5">To</p>
                 {isHalfLeave ? (
-                  <p className="text-[12.5px] text-slate-500 italic">
-                    Same as From (half-day request).
+                  <p className="text-[12.5px] text-slate-500 italic h-9 flex items-center">
+                    Same as From (half-day).
                   </p>
                 ) : (
                   <DatePicker
                     value={toDate}
                     onChange={setToDate}
                     futureYears={2}
+                    minDate={fromDate || minDate}
+                    className="w-full"
                   />
                 )}
               </div>
@@ -554,6 +461,25 @@ export default function LeaveRequestForm({
               className="mt-1.5 w-full px-3 py-2 rounded-lg border bg-white dark:bg-[#0a1526] border-slate-200 dark:border-white/[0.08] text-[13px] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#008CFF] dark:focus:border-[#4a9cff] resize-none"
             />
           </div>
+
+          {/* Handoff details — POC + Work Status (+ Unavailability for WFH).
+              Skipped for the regularize flow, where it doesn't apply.
+              POC is N/A-eligible — when ticked, the picker hides and
+              submit sends pocUserId=null. */}
+          {handoffApplies && (
+            <HandoffSection
+              poc={poc}
+              onPocChange={setPoc}
+              workStatus={workStatus}
+              onWorkStatusChange={setWorkStatus}
+              showUnavailability={kind === "wfh"}
+              unavailability={unavailability}
+              onUnavailabilityChange={setUnavailability}
+              allowNa
+              naSelected={pocNa}
+              onNaChange={setPocNa}
+            />
+          )}
 
           {/* Notify */}
           <div>

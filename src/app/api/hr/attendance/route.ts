@@ -120,9 +120,24 @@ export async function GET(req: NextRequest) {
     }
 
     const today = istTodayDateOnly();
-    const todayRecord = await prisma.attendance.findUnique({
-      where: { userId_date: { userId: targetUserId, date: today } },
-    });
+    const [todayRecord, odToday] = await Promise.all([
+      prisma.attendance.findUnique({
+        where: { userId_date: { userId: targetUserId, date: today } },
+      }),
+      // Surfaced to the UI so the home + attendance pages can keep the
+      // clock-in / clock-out buttons enabled on mobile when the viewer
+      // has an On-Duty covering today. Pending counts — mirrors the
+      // server bypass in the clock-in / clock-out POST handlers (an
+      // OD in any status that isn't rejected/cancelled unlocks mobile).
+      prisma.onDutyRequest.findFirst({
+        where: {
+          userId: targetUserId,
+          date: today,
+          status: { notIn: ["rejected", "cancelled"] },
+        },
+        select: { id: true },
+      }),
+    ]);
     let todayRecordWithSessions: any = todayRecord;
     if (todayRecord) {
       // Today's record may not be in the requested range (e.g. when the
@@ -143,7 +158,17 @@ export async function GET(req: NextRequest) {
       };
     }
 
-    return NextResponse.json({ records: recordsWithSessions, summary, todayRecord: todayRecordWithSessions });
+    return NextResponse.json({
+      records: recordsWithSessions,
+      summary,
+      todayRecord: todayRecordWithSessions,
+      // True when any non-rejected/cancelled OD record exists for
+      // today — that's what unlocks the mobile clock-in/out bypass.
+      // Old name `hasApprovedOdToday` is kept as an alias so any
+      // unreleased client code still works during the deploy window.
+      hasOdToday: !!odToday,
+      hasApprovedOdToday: !!odToday,
+    });
   } catch (e) {
     return serverError(e, "GET /api/hr/attendance");
   }

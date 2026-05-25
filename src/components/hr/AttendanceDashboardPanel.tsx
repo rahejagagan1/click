@@ -13,17 +13,34 @@ type Row = {
   profilePictureUrl: string | null;
   teamCapsule: string | null;
   employeeId: string | null; designation: string | null; department: string | null;
+  // Two related-but-distinct policy fields. workLocation is the
+  // org's classification (office / remote / hybrid); attendanceCaptureScheme
+  // is the operational mode their punches are tracked under
+  // (On-Site / Remote / Hybrid). Often only the scheme has been
+  // updated for remote workers, so the off-site banner consults both.
   workLocation: string | null;
+  attendanceCaptureScheme: string | null;
   clockIn: string | null; clockOut: string | null; totalMinutes: number;
   rawStatus: string; locationAddress: string | null; locationMode: string | null;
   locationLat: number | null; locationLng: number | null;
-  status: "office" | "remote" | "on_leave" | "absent";
+  // Office-geofence result computed at clock-in. Null for legacy
+  // punches that pre-date the feature or when OFFICE_LAT/LNG weren't
+  // configured. The UI surfaces an "At Office" badge when
+  // atOffice=true and a "Off-site" warning when atOffice=false.
+  atOffice:            boolean | null;
+  distanceFromOfficeM: number | null;
+  status: "office" | "remote" | "hybrid" | "wfh" | "on_leave" | "absent";
   wfhToday: boolean;
 };
 
 type Counts = {
   total: number; present: number; office: number; remote: number;
-  wfh: number; onLeave: number; notClockedIn: number; late: number;
+  hybrid: number;
+  // wfh        = wfhToday intent count (for the WFH tab badge)
+  // wfhWorking = status-based count (WFH applicants who clocked in) —
+  //              used by the donut so segments don't overlap with absent
+  wfh: number; wfhWorking: number;
+  onLeave: number; notClockedIn: number; late: number;
 };
 
 const fmtTime = (iso: string | null) =>
@@ -52,6 +69,8 @@ function StatusDonut({ c }: { c: Counts }) {
   const segs = [
     { label: "In Office",      n: c.office,       color: "#10b981" },
     { label: "Remote",         n: c.remote,       color: "#008CFF" },
+    { label: "Hybrid",         n: c.hybrid,       color: "#14b8a6" },
+    { label: "WFH",            n: c.wfhWorking,   color: "#f59e0b" },
     { label: "On Leave",       n: c.onLeave,      color: "#8b5cf6" },
     { label: "Not Clocked In", n: c.notClockedIn, color: "#cbd5e1" },
   ];
@@ -393,11 +412,28 @@ function Stat({ label, value, tint, suffix }: { label: string; value: number; ti
   );
 }
 
+// Google's CDN (`lh3.googleusercontent.com`) blocks <img> loads that
+// send a Referer header — without `referrerPolicy="no-referrer"` the
+// browser shows a broken-image icon (a green silhouette in some
+// themes) instead of the photo. The onError swap covers expired /
+// deleted URLs by flipping the img out for the initials chip at
+// runtime so the user still sees something meaningful.
 function Avatar({ name, url, size = 32 }: { name: string; url?: string | null; size?: number }) {
   const initials = name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
-  return url ? (
-    <img src={url} alt={name} style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />
-  ) : (
+  const [broken, setBroken] = useState(false);
+  if (url && !broken) {
+    return (
+      <img
+        src={url}
+        alt={name}
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        style={{ width: size, height: size }}
+        className="rounded-full object-cover shrink-0"
+      />
+    );
+  }
+  return (
     <div style={{ width: size, height: size }} className="rounded-full bg-[#008CFF] text-white text-[11px] font-bold flex items-center justify-center shrink-0">
       {initials}
     </div>
@@ -408,6 +444,8 @@ function StatusPill({ s, rawStatus }: { s: Row["status"]; rawStatus: string }) {
   const map: Record<Row["status"], { bg: string; text: string; label: string; dot: string }> = {
     office:   { bg: "bg-emerald-50",  text: "text-emerald-700",  label: "In Office",    dot: "#10b981" },
     remote:   { bg: "bg-[#008CFF]/10", text: "text-[#008CFF]",   label: "Remote",       dot: "#008CFF" },
+    hybrid:   { bg: "bg-teal-50",     text: "text-teal-700",     label: "Hybrid",       dot: "#14b8a6" },
+    wfh:      { bg: "bg-amber-50",    text: "text-amber-700",    label: "WFH",          dot: "#f59e0b" },
     on_leave: { bg: "bg-violet-50",   text: "text-violet-700",   label: "On Leave",     dot: "#8b5cf6" },
     absent:   { bg: "bg-slate-100",   text: "text-slate-600",    label: "Not Clocked In", dot: "#94a3b8" },
   };
@@ -436,7 +474,7 @@ export default function AttendanceDashboardPanel() {
     { refreshInterval: 60_000 }
   );
 
-  const [tab, setTab] = useState<"all" | "office" | "remote" | "wfh" | "on_leave" | "absent">("all");
+  const [tab, setTab] = useState<"all" | "office" | "remote" | "hybrid" | "wfh" | "on_leave" | "absent">("all");
   const [search, setSearch] = useState("");
   const [fDept, setFDept] = useState<Set<string>>(new Set());
 
@@ -455,7 +493,7 @@ export default function AttendanceDashboardPanel() {
   const monthRows = monthData?.rows ?? [];
 
   const rows: Row[] = data?.rows ?? [];
-  const counts: Counts = data?.counts ?? { total: 0, present: 0, office: 0, remote: 0, wfh: 0, onLeave: 0, notClockedIn: 0, late: 0 };
+  const counts: Counts = data?.counts ?? { total: 0, present: 0, office: 0, remote: 0, hybrid: 0, wfh: 0, wfhWorking: 0, onLeave: 0, notClockedIn: 0, late: 0 };
 
   const deptOpts = useMemo(() => {
     const dSet = new Set<string>();
@@ -513,6 +551,7 @@ export default function AttendanceDashboardPanel() {
     { key: "all",      label: "All",              n: counts.total        },
     { key: "office",   label: "In Office",        n: counts.office       },
     { key: "remote",   label: "Remote Clock-in",  n: counts.remote       },
+    { key: "hybrid",   label: "Hybrid",           n: counts.hybrid       },
     { key: "wfh",      label: "WFH",              n: counts.wfh          },
     { key: "on_leave", label: "On Leave",         n: counts.onLeave      },
     { key: "absent",   label: "Not Clocked In",   n: counts.notClockedIn },
@@ -619,6 +658,79 @@ export default function AttendanceDashboardPanel() {
           ) : filtered.length === 0 ? (
             <p className="py-16 text-center text-[13px] text-slate-400">No employees match the current filters</p>
           ) : (
+            <>
+            {/* ── Off-site punch warning ─────────────────────────────────
+                Surfaces today's clock-ins that landed OUTSIDE the office
+                geofence (OFFICE_RADIUS_M in env). Skipped entirely on
+                the WFH / Remote tabs — those folks are off-site by
+                design.
+
+                Excluded from the flag list:
+                  • atOffice !== false           → already in office or no GPS
+                  • locationMode !== "office"    → punch recorded as remote
+                  • workLocation = remote/hybrid → org policy is remote
+                  • attendanceCaptureScheme =
+                       remote/hybrid             → capture mode is remote
+                       (often the only field
+                       HR updates for fully-
+                       remote workers)
+                  • wfhToday = true              → approved WFH for today
+                Together those gates collapse the banner to a clean
+                "office workers who clocked in from somewhere unexpected"
+                list. */}
+            {(() => {
+              if (tab !== "all" && tab !== "office") return null;
+              const offSite = filtered.filter((r) => {
+                if (r.atOffice !== false)              return false;
+                if (r.locationMode !== "office")        return false;
+                if (r.wfhToday)                         return false;
+                const wl = (r.workLocation ?? "").toLowerCase();
+                if (wl === "remote" || wl === "hybrid") return false;
+                const cs = (r.attendanceCaptureScheme ?? "").toLowerCase();
+                if (cs === "remote" || cs === "hybrid") return false;
+                return true;
+              });
+              if (offSite.length === 0) return null;
+              return (
+                <div className="mb-3 rounded-lg ring-1 ring-inset ring-amber-200 bg-amber-50/70 px-4 py-3">
+                  <p className="text-[12px] font-bold text-amber-800 mb-1.5 inline-flex items-center gap-1.5">
+                    <MapPin size={13} strokeWidth={2.2} />
+                    {offSite.length === 1
+                      ? "1 off-site clock-in flagged today"
+                      : `${offSite.length} off-site clock-ins flagged today`}
+                  </p>
+                  <p className="text-[11px] text-amber-700/90 mb-2">
+                    These employees clocked in from <strong>outside the office geofence</strong>.
+                    Could be a WiFi-positioning misfire, or genuinely off-site. Click a name to investigate.
+                  </p>
+                  <ul className="flex flex-wrap gap-1.5">
+                    {offSite.slice(0, 10).map((r) => (
+                      <li key={r.id}>
+                        <Link
+                          href={`/dashboard/hr/people/${r.id}`}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md ring-1 ring-inset ring-amber-300 bg-white hover:bg-amber-100 text-[11px] font-semibold text-amber-800 transition-colors"
+                          title={`${r.name} — ${r.distanceFromOfficeM ?? "?"} m from office`}
+                        >
+                          {r.name}
+                          <span className="text-amber-600 font-normal">
+                            {r.distanceFromOfficeM != null && r.distanceFromOfficeM < 1000
+                              ? ` · ${r.distanceFromOfficeM}m`
+                              : r.distanceFromOfficeM != null
+                                ? ` · ${(r.distanceFromOfficeM / 1000).toFixed(1)}km`
+                                : ""}
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                    {offSite.length > 10 && (
+                      <li className="text-[11px] text-amber-700 inline-flex items-center px-1">
+                        +{offSite.length - 10} more
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              );
+            })()}
             <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
             <table className="w-full">
               <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur-sm">
@@ -652,26 +764,53 @@ export default function AttendanceDashboardPanel() {
                     </td>
                     {/* Where they clocked in from. Mode-coloured pin + truncated
                         address with the full address as a tooltip; clicking
-                        opens Google Maps if we have GPS coords for the row. */}
+                        opens Google Maps if we have GPS coords for the row.
+                        The "At Office" / "Off-site" badge below the address
+                        is computed server-side from OFFICE_LAT/LNG + the
+                        clock-in's Haversine distance, so it doesn't depend on
+                        Nominatim's sometimes-wrong sector label. */}
                     <td className="px-4 py-3 text-[12.5px] text-slate-700 max-w-[200px]">
                       {r.clockIn && (r.locationAddress || r.locationLat != null) ? (
-                        r.locationLat != null && r.locationLng != null ? (
-                          <a
-                            href={`https://www.google.com/maps/search/?api=1&query=${r.locationLat},${r.locationLng}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            title={r.locationAddress || `${r.locationLat}, ${r.locationLng}`}
-                            className="inline-flex items-center gap-1.5 max-w-full truncate hover:text-[#008CFF] hover:underline"
-                          >
-                            <MapPin size={12} className={r.locationMode === "remote" ? "text-violet-500" : "text-emerald-500"} />
-                            <span className="truncate">{r.locationAddress || "View on map"}</span>
-                          </a>
-                        ) : (
-                          <span title={r.locationAddress ?? undefined} className="inline-flex items-center gap-1.5 max-w-full truncate">
-                            <MapPin size={12} className={r.locationMode === "remote" ? "text-violet-500" : "text-emerald-500"} />
-                            <span className="truncate">{r.locationAddress}</span>
-                          </span>
-                        )
+                        <div className="flex flex-col gap-1 min-w-0">
+                          {r.locationLat != null && r.locationLng != null ? (
+                            <a
+                              href={`https://www.google.com/maps/search/?api=1&query=${r.locationLat},${r.locationLng}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={r.locationAddress || `${r.locationLat}, ${r.locationLng}`}
+                              className="inline-flex items-center gap-1.5 max-w-full truncate hover:text-[#008CFF] hover:underline"
+                            >
+                              <MapPin size={12} className={r.locationMode === "remote" ? "text-violet-500" : "text-emerald-500"} />
+                              <span className="truncate">{r.locationAddress || "View on map"}</span>
+                            </a>
+                          ) : (
+                            <span title={r.locationAddress ?? undefined} className="inline-flex items-center gap-1.5 max-w-full truncate">
+                              <MapPin size={12} className={r.locationMode === "remote" ? "text-violet-500" : "text-emerald-500"} />
+                              <span className="truncate">{r.locationAddress}</span>
+                            </span>
+                          )}
+                          {r.atOffice === true && (
+                            <span
+                              className="inline-flex items-center gap-1 self-start text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ring-1 ring-inset ring-emerald-200 bg-emerald-50 text-emerald-700"
+                              title={`Clocked in ${r.distanceFromOfficeM ?? 0} m from office`}
+                            >
+                              <CheckCircle2 size={10} strokeWidth={2.5} /> At Office
+                            </span>
+                          )}
+                          {r.atOffice === false && (
+                            <span
+                              className="inline-flex items-center gap-1 self-start text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ring-1 ring-inset ring-amber-200 bg-amber-50 text-amber-700"
+                              title={`Clocked in ${r.distanceFromOfficeM ?? "?"} m from office`}
+                            >
+                              <MapPin size={10} strokeWidth={2.5} />
+                              {(r.distanceFromOfficeM != null && r.distanceFromOfficeM < 1000)
+                                ? `${r.distanceFromOfficeM} m off-site`
+                                : (r.distanceFromOfficeM != null
+                                    ? `${(r.distanceFromOfficeM / 1000).toFixed(1)} km off-site`
+                                    : "Off-site")}
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-slate-400">—</span>
                       )}
@@ -682,6 +821,7 @@ export default function AttendanceDashboardPanel() {
               </tbody>
             </table>
             </div>
+            </>
           )
         ) : (
           monthLoading ? (

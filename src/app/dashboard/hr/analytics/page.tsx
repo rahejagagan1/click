@@ -101,6 +101,7 @@ function EventsWidget({
       <img
         src={p.profilePictureUrl || ""}
         alt={p.name}
+        referrerPolicy="no-referrer"
         className="w-8 h-8 rounded-full object-cover bg-[#e8ecf0]"
         onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }}
       />
