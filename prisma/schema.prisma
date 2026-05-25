@@ -1574,6 +1574,11 @@ model PayrollRun {
   paidBy        Int?
   totalCTC      Decimal  @default(0) @db.Decimal(14, 2)
   totalNetPay   Decimal  @default(0) @db.Decimal(14, 2)
+  // Per-outer-step completion state for the 6-card Run Payroll wizard.
+  // Keys are step numbers as strings ("1".."6"); values are
+  // "pending" | "complete". Populated as HR clicks "Mark as Complete"
+  // inside each step's side-panel.
+  stepStates    Json     @default("{}")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

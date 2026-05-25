@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
+import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 
 // GET /api/hr/payroll/runs/[id]/totals
 //
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
-  if (!isHRAdmin(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!canViewSalary(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
     const { id: idRaw } = await params;

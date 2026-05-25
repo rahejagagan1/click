@@ -69,19 +69,37 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         const writerIdSet = new Set(writerIds);
         const writerNameById = new Map(writers.map((w) => [w.id, w.name]));
 
-        // Pull every case that has a milestone subtask completed in the
-        // week and is connected to a team writer through one of three
-        // routes (most-truthful first): the subtask's assignee join
-        // table, the subtask's legacy single assignee, or the case's
-        // primary writerUserId. We then dedupe per (case × writer) in
-        // code so every assigned writer gets their own row.
+        // Pull every case that EITHER:
+        //   • has a milestone subtask completed in this week, OR
+        //   • has a milestone subtask currently in progress (startDate set,
+        //     dateDone null) — covers work started this week + carryover
+        //     from earlier weeks that's still open.
+        // Each branch is additionally constrained to team writers through
+        // one of three routes (most-truthful first): the subtask's
+        // assignee join table, the subtask's legacy single assignee, or
+        // the case's primary writerUserId. We dedupe per (case × writer)
+        // in code so every assigned writer gets their own row.
         const cases = await prisma.case.findMany({
             where: {
-                subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd } } },
                 OR: [
-                    { subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd }, assignees: { some: { userId: { in: writerIds } } } } } },
-                    { subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd }, assigneeUserId: { in: writerIds } } } },
-                    { writerUserId: { in: writerIds } },
+                    // Branch A: a milestone subtask was completed in-week.
+                    {
+                        subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd } } },
+                        OR: [
+                            { subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd }, assignees: { some: { userId: { in: writerIds } } } } } },
+                            { subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd }, assigneeUserId: { in: writerIds } } } },
+                            { writerUserId: { in: writerIds } },
+                        ],
+                    },
+                    // Branch B: a milestone subtask is currently in progress.
+                    {
+                        subtasks: { some: { startDate: { not: null }, dateDone: null } },
+                        OR: [
+                            { subtasks: { some: { startDate: { not: null }, dateDone: null, assignees: { some: { userId: { in: writerIds } } } } } },
+                            { subtasks: { some: { startDate: { not: null }, dateDone: null, assigneeUserId: { in: writerIds } } } },
+                            { writerUserId: { in: writerIds } },
+                        ],
+                    },
                 ],
             },
             include: {
@@ -105,16 +123,25 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
             const firstDraftSub = c.subtasks.find((s) => isWriterFirstDraftMilestone(s.name)) ?? null;
             const revisionSub   = c.subtasks.find((s) => isRevisionSubtask(s.name))   ?? null;
 
-            const fdInWeek = !!firstDraftSub?.dateDone &&
+            // Two relevance flags per milestone: done-in-week (existing
+            // behaviour) and in-progress (started, not yet done — covers
+            // both started-this-week and earlier-week carryover).
+            const fdDoneInWeek  = !!firstDraftSub?.dateDone &&
                 firstDraftSub.dateDone >= weekStart && firstDraftSub.dateDone <= weekEnd;
-            const revInWeek = !!revisionSub?.dateDone &&
+            const fdInProgress  = !!firstDraftSub?.startDate && !firstDraftSub.dateDone;
+            const revDoneInWeek = !!revisionSub?.dateDone &&
                 revisionSub.dateDone >= weekStart && revisionSub.dateDone <= weekEnd;
-            if (!fdInWeek && !revInWeek) continue;
+            const revInProgress = !!revisionSub?.startDate && !revisionSub.dateDone;
 
-            // Per-milestone assignee resolution (in team only).
-            // Priority: SubtaskAssignee → Subtask.assigneeUserId → Case.writerUserId.
+            const fdRelevant  = fdDoneInWeek  || fdInProgress;
+            const revRelevant = revDoneInWeek || revInProgress;
+            if (!fdRelevant && !revRelevant) continue;
+
+            // Per-milestone assignee resolution (in team only). Same
+            // priority for both done-in-week and in-progress states:
+            // SubtaskAssignee → Subtask.assigneeUserId → Case.writerUserId.
             const fdAssignees = new Set<number>();
-            if (fdInWeek && firstDraftSub) {
+            if (fdRelevant && firstDraftSub) {
                 for (const a of firstDraftSub.assignees) {
                     if (writerIdSet.has(a.userId)) {
                         fdAssignees.add(a.userId);
@@ -129,7 +156,7 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
                 }
             }
             const revAssignees = new Set<number>();
-            if (revInWeek && revisionSub) {
+            if (revRelevant && revisionSub) {
                 for (const a of revisionSub.assignees) {
                     if (writerIdSet.has(a.userId)) {
                         revAssignees.add(a.userId);
@@ -147,21 +174,29 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
             const credited = new Set<number>([...fdAssignees, ...revAssignees]);
             if (credited.size === 0) continue;
 
+            // TAT per milestone:
+            //   • done-in-week → computed (DB value or on-the-fly).
+            //   • in-progress  → literal "In progress" (no dateDone, no TAT).
+            //   • otherwise    → "N/A".
             let tatFirstDraftCase = "N/A";
-            if (fdInWeek && firstDraftSub) {
+            if (fdDoneInWeek && firstDraftSub) {
                 const t = resolveSubtaskTat(firstDraftSub) ||
                     (firstDraftSub.dateDone && c.caseStartDate
                         ? formatTatDays(calcBusinessDaysTat(c.caseStartDate, firstDraftSub.dateDone))
                         : "");
                 tatFirstDraftCase = t || "N/A";
+            } else if (fdInProgress) {
+                tatFirstDraftCase = "In progress";
             }
             let tatRevisionCase = "N/A";
-            if (revInWeek && revisionSub) {
+            if (revDoneInWeek && revisionSub) {
                 const t = resolveSubtaskTat(revisionSub) ||
                     (revisionSub.dateDone && firstDraftSub?.dateDone
                         ? formatTatDays(calcBusinessDaysTat(firstDraftSub.dateDone, revisionSub.dateDone))
                         : "");
                 tatRevisionCase = t || "N/A";
+            } else if (revInProgress) {
+                tatRevisionCase = "In progress";
             }
 
             const isHero = !!(
