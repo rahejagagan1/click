@@ -81,16 +81,33 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         const editorIdSet = new Set(editorIds);
         const editorNameById = new Map(editors.map((e) => [e.id, e.name]));
 
-        // Same approach as writer-cases: pull cases with a milestone
-        // subtask completed in-week, linked to a team editor via
-        // SubtaskAssignee, Subtask.assigneeUserId, or Case.editorUserId.
+        // Same approach as writer-cases: a case qualifies when EITHER
+        // a milestone subtask was completed in-week OR a milestone is
+        // currently in progress (startDate set, dateDone null — covers
+        // started-this-week + earlier-week carryover). Each branch is
+        // additionally constrained to team editors via SubtaskAssignee,
+        // Subtask.assigneeUserId, or Case.editorUserId.
         const cases = await prisma.case.findMany({
             where: {
-                subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd } } },
                 OR: [
-                    { subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd }, assignees: { some: { userId: { in: editorIds } } } } } },
-                    { subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd }, assigneeUserId: { in: editorIds } } } },
-                    { editorUserId: { in: editorIds } },
+                    // Branch A: a milestone subtask was completed in-week.
+                    {
+                        subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd } } },
+                        OR: [
+                            { subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd }, assignees: { some: { userId: { in: editorIds } } } } } },
+                            { subtasks: { some: { dateDone: { gte: weekStart, lte: weekEnd }, assigneeUserId: { in: editorIds } } } },
+                            { editorUserId: { in: editorIds } },
+                        ],
+                    },
+                    // Branch B: a milestone subtask is currently in progress.
+                    {
+                        subtasks: { some: { startDate: { not: null }, dateDone: null } },
+                        OR: [
+                            { subtasks: { some: { startDate: { not: null }, dateDone: null, assignees: { some: { userId: { in: editorIds } } } } } },
+                            { subtasks: { some: { startDate: { not: null }, dateDone: null, assigneeUserId: { in: editorIds } } } },
+                            { editorUserId: { in: editorIds } },
+                        ],
+                    },
                 ],
             },
             include: {
@@ -114,16 +131,24 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
             const editingSub  = c.subtasks.find((s) => isEditingSubtask(s.name)) ?? null;
             const revisionSub = c.subtasks.find((s) => isEditingRevisionSubtask(s.name)) ?? null;
 
-            const editInWeek = !!editingSub?.dateDone &&
+            // Two relevance flags per milestone: done-in-week (existing
+            // behaviour) and in-progress (started, not yet done).
+            const editDoneInWeek = !!editingSub?.dateDone &&
                 editingSub.dateDone >= weekStart && editingSub.dateDone <= weekEnd;
-            const revInWeek = !!revisionSub?.dateDone &&
+            const editInProgress = !!editingSub?.startDate && !editingSub.dateDone;
+            const revDoneInWeek  = !!revisionSub?.dateDone &&
                 revisionSub.dateDone >= weekStart && revisionSub.dateDone <= weekEnd;
-            if (!editInWeek && !revInWeek) continue;
+            const revInProgress  = !!revisionSub?.startDate && !revisionSub.dateDone;
 
-            // Per-milestone assignee resolution (in team only).
-            // Priority: SubtaskAssignee → Subtask.assigneeUserId → Case.editorUserId.
+            const editRelevant = editDoneInWeek || editInProgress;
+            const revRelevant  = revDoneInWeek  || revInProgress;
+            if (!editRelevant && !revRelevant) continue;
+
+            // Per-milestone assignee resolution (in team only). Same
+            // priority for both done-in-week and in-progress states:
+            // SubtaskAssignee → Subtask.assigneeUserId → Case.editorUserId.
             const editAssignees = new Set<number>();
-            if (editInWeek && editingSub) {
+            if (editRelevant && editingSub) {
                 for (const a of editingSub.assignees) {
                     if (editorIdSet.has(a.userId)) {
                         editAssignees.add(a.userId);
@@ -138,7 +163,7 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
                 }
             }
             const revAssignees = new Set<number>();
-            if (revInWeek && revisionSub) {
+            if (revRelevant && revisionSub) {
                 for (const a of revisionSub.assignees) {
                     if (editorIdSet.has(a.userId)) {
                         revAssignees.add(a.userId);
@@ -156,17 +181,25 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
             const credited = new Set<number>([...editAssignees, ...revAssignees]);
             if (credited.size === 0) continue;
 
+            // TAT per milestone:
+            //   • done-in-week → computed (DB value or on-the-fly).
+            //   • in-progress  → literal "In progress" (no dateDone).
+            //   • otherwise    → "N/A".
             let tatEditingCase = "N/A";
-            if (editInWeek && editingSub) {
+            if (editDoneInWeek && editingSub) {
                 tatEditingCase = resolveSubtaskTat(editingSub) || "N/A";
+            } else if (editInProgress) {
+                tatEditingCase = "In progress";
             }
             let tatRevisionCase = "N/A";
-            if (revInWeek && revisionSub) {
+            if (revDoneInWeek && revisionSub) {
                 const t = resolveSubtaskTat(revisionSub) ||
                     (revisionSub.dateDone && editingSub?.dateDone
                         ? formatTatDays(calcBusinessDaysTat(editingSub.dateDone, revisionSub.dateDone))
                         : "");
                 tatRevisionCase = t || "N/A";
+            } else if (revInProgress) {
+                tatRevisionCase = "In progress";
             }
 
             const isHero = !!(

@@ -392,7 +392,8 @@ export default function Sidebar() {
                                 const financesActive = pathname.startsWith("/dashboard/hr/payroll");
                                 return (
                                     <div ref={financesTrigger} {...financesHandlers}
-                                        className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", financesActive || financesOpen ? A : E)}>
+                                        onClick={() => { setFinancesOpen(false); router.push("/dashboard/hr/payroll/summary"); }}
+                                        className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer select-none", financesActive || financesOpen ? A : E)}>
                                         <CircleDollarSign size={15} strokeWidth={1.75} className={financesActive || financesOpen ? "text-[#0f6ecd]" : ""} />
                                         My Finances
                                     </div>
