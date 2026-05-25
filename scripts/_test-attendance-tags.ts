@@ -1,3 +1,7 @@
+// `export {}` makes this file a module so its top-level `type` / `const`
+// declarations don't collide with other test scripts in the same project.
+export {};
+
 /**
  * Pure-function audit of the Late / Missed / On-break tag predicates
  * used in the user-profile Attendance tab (EmployeeTimePanel) and in

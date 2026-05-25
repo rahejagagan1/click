@@ -28,7 +28,7 @@ export async function GET() {
       select: {
         id: true, name: true, email: true, role: true, orgLevel: true,
         teamCapsule: true, profilePictureUrl: true,
-        employeeProfile: { select: { department: true, designation: true, employeeId: true, workLocation: true } },
+        employeeProfile: { select: { department: true, designation: true, employeeId: true, workLocation: true, attendanceCaptureScheme: true } },
       },
     });
     // Drop anyone whose Attendance toggle is OFF — they're "off the
@@ -95,6 +95,11 @@ export async function GET() {
         designation:  u.employeeProfile?.designation ?? null,
         department:   u.employeeProfile?.department  ?? null,
         workLocation: u.employeeProfile?.workLocation ?? null,
+        // Capture scheme is the OPERATIONAL flavour of where this user
+        // is supposed to punch in from. Often "Remote" even when
+        // workLocation is left at the default "office" — we use both
+        // signals when deciding whether to flag an off-site clock-in.
+        attendanceCaptureScheme: (u.employeeProfile as any)?.attendanceCaptureScheme ?? null,
         clockIn:      rec?.clockIn  ?? null,
         clockOut:     rec?.clockOut ?? null,
         totalMinutes: rec?.totalMinutes ?? 0,
@@ -103,6 +108,12 @@ export async function GET() {
         locationMode:    mode,
         locationLat:     loc?.lat   ?? null,
         locationLng:     loc?.lng   ?? null,
+        // Office-geofence result computed at clock-in time and stored
+        // in the location JSON blob. Both fields are nullable —
+        // undefined for older punches that pre-date the geofence
+        // feature, or when OFFICE_LAT/LNG weren't configured.
+        atOffice:             loc?.atOffice ?? null,
+        distanceFromOfficeM:  loc?.distanceFromOfficeM ?? null,
         status, // derived: on_leave | remote | office | absent
         wfhToday: wfhTodayIds.has(u.id),
       };

@@ -4,6 +4,9 @@ import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { notifyApprovers, notifyUsers } from "@/lib/notifications";
 import { istTimeOnDate, istDateOnlyFrom, istMonthRange } from "@/lib/ist-date";
 import { stringifyAttLoc } from "@/lib/attendance-location";
+import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
+import { sendEmail } from "@/lib/email/sender";
+import { pocAssignmentEmail } from "@/lib/email/templates";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +61,29 @@ export async function POST(req: NextRequest) {
     const toDateRaw = body.toDate ?? null;
     if (!date || !reason) return NextResponse.json({ error: "date and reason required" }, { status: 400 });
     const extras = Array.isArray(notifyUserIds) ? notifyUserIds.filter((x: any) => Number.isInteger(x)) : [];
+
+    // Past-date gate: regular users can't pre-emptively backdate a WFH
+    // request — that goes through Regularization. CEO / role=hr_manager
+    // / isDeveloper bypass via canApplyRestrictedLeave.
+    const pastErr = checkPastDateAllowed(date, self);
+    if (pastErr) return NextResponse.json({ error: pastErr }, { status: 400 });
+
+    // Handoff fields — company-standard WFH format. POC + Work Status +
+    // Time of Unavailability are all required. Validated upstream by
+    // the UI; server enforces defensively.
+    const pocUserId      = Number.isFinite(Number(body.pocUserId)) ? Number(body.pocUserId) : null;
+    const workStatus     = typeof body.workStatus     === "string" ? body.workStatus.trim()     : "";
+    const unavailability = typeof body.unavailability === "string" ? body.unavailability.trim() : "";
+    if (!pocUserId)      return NextResponse.json({ error: "POC in Absence is required." }, { status: 400 });
+    if (!workStatus)     return NextResponse.json({ error: "Work Status is required." }, { status: 400 });
+    if (!unavailability) return NextResponse.json({ error: "Time of Unavailability is required." }, { status: 400 });
+    const pocUser = await prisma.user.findUnique({
+      where: { id: pocUserId },
+      select: { id: true, name: true, email: true, isActive: true },
+    });
+    if (!pocUser || !pocUser.isActive) {
+      return NextResponse.json({ error: "Selected POC is not an active employee." }, { status: 400 });
+    }
 
     // HR on-behalf: when targetUserId is set and the caller is HR-admin,
     // the WFH is created for that user instead of the caller. forceGrant
@@ -152,13 +178,17 @@ export async function POST(req: NextRequest) {
     const created = await prisma.$transaction(
       daysToCreate.map((d) =>
         prisma.wFHRequest.create({
-          data: {
+          // pocUserId / workStatus / unavailability may be unknown to the
+          // typed client until `prisma generate` reruns (Windows DLL lock).
+          // Runtime is fine — the migration already added all three.
+          data: ({
             userId: subjectUserId,
             date: d,
             reason,
             status: finalStatus,
             approvedById: finalStatus === "approved" ? myId : null,
-          },
+            pocUserId, workStatus, unavailability,
+          } as any),
         }),
       ),
     );
@@ -218,6 +248,25 @@ export async function POST(req: NextRequest) {
         }),
       ]);
     }
+
+    // POC heads-up — separate from the approver chain so the named
+    // backup gets a direct ping. Fire-and-forget so SMTP hiccups
+    // don't 500 the save.
+    if (pocUser.email && pocUserId !== subjectUserId) {
+      void sendEmail({
+        to: pocUser.email,
+        content: pocAssignmentEmail({
+          pocName:       pocUser.name || "there",
+          applicantName: subject?.name || "An employee",
+          requestType:   "Work From Home",
+          dateLabel:     rangeLabel,
+          daysLabel:     `${created.length} day${created.length === 1 ? "" : "s"}`,
+          workStatus,
+          reason:        String(reason || "").trim() || undefined,
+        }),
+      });
+    }
+
     // Backwards-compat shape for the single-day path; range returns a list.
     return NextResponse.json(
       isRange
