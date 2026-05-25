@@ -68,23 +68,6 @@ export async function POST(req: NextRequest) {
     const pastErr = checkPastDateAllowed(date, self);
     if (pastErr) return NextResponse.json({ error: pastErr }, { status: 400 });
 
-    // Handoff fields — company-standard WFH format. POC + Work Status +
-    // Time of Unavailability are all required. Validated upstream by
-    // the UI; server enforces defensively.
-    const pocUserId      = Number.isFinite(Number(body.pocUserId)) ? Number(body.pocUserId) : null;
-    const workStatus     = typeof body.workStatus     === "string" ? body.workStatus.trim()     : "";
-    const unavailability = typeof body.unavailability === "string" ? body.unavailability.trim() : "";
-    if (!pocUserId)      return NextResponse.json({ error: "POC in Absence is required." }, { status: 400 });
-    if (!workStatus)     return NextResponse.json({ error: "Work Status is required." }, { status: 400 });
-    if (!unavailability) return NextResponse.json({ error: "Time of Unavailability is required." }, { status: 400 });
-    const pocUser = await prisma.user.findUnique({
-      where: { id: pocUserId },
-      select: { id: true, name: true, email: true, isActive: true },
-    });
-    if (!pocUser || !pocUser.isActive) {
-      return NextResponse.json({ error: "Selected POC is not an active employee." }, { status: 400 });
-    }
-
     // HR on-behalf: when targetUserId is set and the caller is HR-admin,
     // the WFH is created for that user instead of the caller. forceGrant
     // skips the monthly 2-of-2 cap (HR is overriding policy intentionally)
@@ -101,6 +84,27 @@ export async function POST(req: NextRequest) {
     }
     const subjectUserId = onBehalf ? targetUserId! : myId;
     const isHRGrant     = onBehalf && callerIsHRAdmin && forceGrant;
+
+    // Handoff fields — company-standard WFH format. POC + Work Status +
+    // Time of Unavailability are all required. Validated upstream by
+    // the UI; server enforces defensively. Exception: HR filing on
+    // behalf can mark POC as N/A (null) when no cover is assigned yet —
+    // workStatus + unavailability are still required but accept "N/A".
+    const pocUserId      = Number.isFinite(Number(body.pocUserId)) ? Number(body.pocUserId) : null;
+    const workStatus     = typeof body.workStatus     === "string" ? body.workStatus.trim()     : "";
+    const unavailability = typeof body.unavailability === "string" ? body.unavailability.trim() : "";
+    if (!pocUserId && !onBehalf) return NextResponse.json({ error: "POC in Absence is required." }, { status: 400 });
+    if (!workStatus)             return NextResponse.json({ error: "Work Status is required." }, { status: 400 });
+    if (!unavailability)         return NextResponse.json({ error: "Time of Unavailability is required." }, { status: 400 });
+    const pocUser = pocUserId
+      ? await prisma.user.findUnique({
+          where: { id: pocUserId },
+          select: { id: true, name: true, email: true, isActive: true },
+        })
+      : null;
+    if (pocUserId && (!pocUser || !pocUser.isActive)) {
+      return NextResponse.json({ error: "Selected POC is not an active employee." }, { status: 400 });
+    }
 
     // Normalise to IST calendar days so any UTC-vs-IST drift around 18:30 UTC
     // doesn't shift which day a request belongs to.
@@ -251,8 +255,9 @@ export async function POST(req: NextRequest) {
 
     // POC heads-up — separate from the approver chain so the named
     // backup gets a direct ping. Fire-and-forget so SMTP hiccups
-    // don't 500 the save.
-    if (pocUser.email && pocUserId !== subjectUserId) {
+    // don't 500 the save. When POC is N/A (HR on-behalf), pocUser is
+    // null — skip the email.
+    if (pocUser && pocUser.email && pocUserId !== subjectUserId) {
       void sendEmail({
         to: pocUser.email,
         content: pocAssignmentEmail({

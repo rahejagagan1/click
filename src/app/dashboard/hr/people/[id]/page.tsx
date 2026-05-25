@@ -17,6 +17,8 @@ import { DateField } from "@/components/ui/date-field";
 import { isHRAdmin as canViewAsHRAdmin } from "@/lib/access";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
 import SelectField from "@/components/ui/SelectField";
+import HandoffSection from "@/components/hr/HandoffSection";
+import type { PickerUser } from "@/components/hr/EmployeePicker";
 
 // "Edit Profile" is HR-admin-only — the canonical place to update any
 // employee field, including salary (which the panel embeds). The
@@ -2118,6 +2120,19 @@ function EmployeeTimePanel({
   const [leaveForm,   setLeaveForm]     = useState<{ leaveTypeId: number | ""; fromDate: string; toDate: string; reason: string }>({
     leaveTypeId: "", fromDate: "", toDate: "", reason: "",
   });
+
+  // Handoff Details — POC + Work Status (+ Unavailability for WFH). Same
+  // contract the company's standard leave/WFH form enforces; both APIs
+  // reject the request when these are missing, so the HR-on-behalf
+  // modal has to surface them too. State sits at the modal level so
+  // switching between Leave / WFH tabs doesn't drop a typed-in value.
+  const [handoffPoc,            setHandoffPoc]            = useState<PickerUser[]>([]);
+  const [handoffWorkStatus,     setHandoffWorkStatus]     = useState("");
+  const [handoffUnavailability, setHandoffUnavailability] = useState("");
+  // HR filing on behalf can mark POC as N/A — the user's own
+  // request flow keeps POC required (allowNa stays default-false there).
+  const [handoffPocNa,          setHandoffPocNa]          = useState(false);
+  const resetHandoff = () => { setHandoffPoc([]); setHandoffWorkStatus(""); setHandoffUnavailability(""); setHandoffPocNa(false); };
   const [leaveTypes,  setLeaveTypes]    = useState<{ id: number; name: string }[]>([]);
   // Per-type available balance for the target user, keyed by leaveTypeId.
   // available = totalDays - usedDays - pendingDays. Refetched each time the
@@ -2206,6 +2221,13 @@ function EmployeeTimePanel({
 
   const submitWfh = async () => {
     if (!wfhForm.date || !wfhForm.reason.trim()) { alert("From date and reason are required."); return; }
+    // Handoff Details mirror the standard WFH form; the API rejects the
+    // request with a 400 if any of these are missing, so we surface the
+    // error inline before firing.
+    const pocId = handoffPoc[0]?.id ?? null;
+    if (!pocId)                          { alert("POC in Absence is required."); return; }
+    if (!handoffWorkStatus.trim())       { alert("Work Status is required."); return; }
+    if (!handoffUnavailability.trim())   { alert("Time of Unavailability is required."); return; }
     const effectiveTo = wfhForm.toDate && wfhForm.toDate >= wfhForm.date ? wfhForm.toDate : wfhForm.date;
     setSubmitting(true);
     try {
@@ -2216,15 +2238,19 @@ function EmployeeTimePanel({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          targetUserId: userId,
-          date:         wfhForm.date,
-          toDate:       effectiveTo,
-          reason:       wfhForm.reason.trim(),
+          targetUserId:   userId,
+          date:           wfhForm.date,
+          toDate:         effectiveTo,
+          reason:         wfhForm.reason.trim(),
+          pocUserId:      pocId,
+          workStatus:     handoffWorkStatus.trim(),
+          unavailability: handoffUnavailability.trim(),
         }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { alert(d.error || "Failed to grant WFH"); return; }
       setWfhOpen(false);
+      resetHandoff();
       refreshAttendanceCaches();
     } finally { setSubmitting(false); }
   };
@@ -2258,6 +2284,11 @@ function EmployeeTimePanel({
     if (!leaveForm.leaveTypeId) { alert("Leave type is required."); return; }
     if (!leaveForm.fromDate || !leaveForm.toDate) { alert("From and To dates are required."); return; }
     if (!leaveForm.reason.trim()) { alert("Reason is required."); return; }
+    // Handoff Details — same contract as the standard leave form; the
+    // API enforces these (no Time-of-Unavailability for plain leave).
+    const pocId = handoffPoc[0]?.id ?? null;
+    if (!pocId)                    { alert("POC in Absence is required."); return; }
+    if (!handoffWorkStatus.trim()) { alert("Work Status is required."); return; }
     setSubmitting(true);
     try {
       const res = await fetch("/api/hr/leaves", {
@@ -2270,11 +2301,14 @@ function EmployeeTimePanel({
           fromDate:        leaveForm.fromDate,
           toDate:          leaveForm.toDate,
           reason:          leaveForm.reason.trim(),
+          pocUserId:       pocId,
+          workStatus:      handoffWorkStatus.trim(),
         }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { alert(d.error || "Failed to grant leave"); return; }
       setLeaveOpen(false);
+      resetHandoff();
       refreshAttendanceCaches();
     } finally { setSubmitting(false); }
   };
@@ -3196,7 +3230,7 @@ function EmployeeTimePanel({
                 </h3>
                 <p className="text-[11.5px] text-slate-500">For {userName}</p>
               </div>
-              <button onClick={() => setLeaveOpen(false)} className="text-slate-400 hover:text-slate-700">
+              <button onClick={() => { setLeaveOpen(false); resetHandoff(); }} className="text-slate-400 hover:text-slate-700">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -3276,6 +3310,16 @@ function EmployeeTimePanel({
                     className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
                   />
                 </div>
+                {/* Handoff Details — POC + Work Status. Required by the
+                    leave API exactly the same as the user's own form. */}
+                <div className="pt-2 border-t border-slate-100">
+                  <HandoffSection
+                    poc={handoffPoc}
+                    onPocChange={setHandoffPoc}
+                    workStatus={handoffWorkStatus}
+                    onWorkStatusChange={setHandoffWorkStatus}
+                  />
+                </div>
               </div>
             ) : (
               <div className="space-y-3 px-5 py-4">
@@ -3309,12 +3353,26 @@ function EmployeeTimePanel({
                     className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
                   />
                 </div>
+                {/* Handoff Details — POC + Work Status + Time of
+                    Unavailability (WFH-only). The WFH API rejects the
+                    request without all three. */}
+                <div className="pt-2 border-t border-slate-100">
+                  <HandoffSection
+                    poc={handoffPoc}
+                    onPocChange={setHandoffPoc}
+                    workStatus={handoffWorkStatus}
+                    onWorkStatusChange={setHandoffWorkStatus}
+                    unavailability={handoffUnavailability}
+                    onUnavailabilityChange={setHandoffUnavailability}
+                    showUnavailability
+                  />
+                </div>
               </div>
             )}
 
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
               <button
-                onClick={() => setLeaveOpen(false)}
+                onClick={() => { setLeaveOpen(false); resetHandoff(); }}
                 className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50"
               >
                 Cancel
