@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
+import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 
 // POST /api/hr/payroll/generate — produce draft payslips for a payroll run.
 // Math model:
@@ -8,22 +8,22 @@ import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 //   lopDays      = absent + 0.5 × half_day + unpaid-leave weekdays in month
 //   paidDays     = workingDays − lopDays
 //   lopFactor    = paidDays / workingDays
-//   gross        = (basic + hra + specialAllowance) / 12 × lopFactor + bonus
-//   deductions   = (pf + esi) × lopFactor + flat(pt | tds/12)
-//   net          = gross − deductions
+//   gross        = (basic + hra + specialAllowance) / 12 × lopFactor
+//                  + bonus + Σ AdhocLineItem(kind=payment)
+//   deductions   = (pf + esi) × lopFactor
+//                  + flat(pt) + tds/12
+//                  + Σ AdhocLineItem(kind=deduction)
+//   then TaxOverride rows replace the matching PT/ESI/TDS/LWF amounts.
+//   SalaryHold (kind=processing) — skip payslip entirely.
+//   SalaryHold (kind=payout)     — generate payslip but stamp status=on_hold.
 //
 // The bonus pull picks EmployeeBonus rows with paymentStatus='due_future'
-// and effectiveDate inside the run month — paid_past rows are ledger-only
-// and don't affect the monthly cheque.
-//
-// Run status transitions here: draft|generated → processing → generated.
-// "locked" and "paid" live in dedicated transition endpoints — never set
-// from here.
+// and effectiveDate inside the run month — paid_past rows are ledger-only.
 export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
-  if (!isHRAdmin(user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!canViewSalary(user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
     const { runId } = await req.json();
@@ -45,8 +45,8 @@ export async function POST(req: NextRequest) {
     const lastDay  = new Date(Date.UTC(run.year, run.month + 1, 0));
     const daysInMonth = lastDay.getUTCDate();
 
-    // One EmployeeBonus query for the whole run rather than per-user — much
-    // cheaper. Map by userId so the per-employee block is a hash lookup.
+    // Bulk-fetch all cycle-scoped overrides once and bucket by userId so
+    // the per-employee block stays a hash lookup, not N+1 queries.
     const bonusRows = await prisma.$queryRawUnsafe<{ userId: number; amount: string }[]>(
       `SELECT "userId", SUM(amount)::text AS amount
          FROM "EmployeeBonus"
@@ -60,20 +60,57 @@ export async function POST(req: NextRequest) {
       bonusRows.map(r => [r.userId, parseFloat(r.amount) || 0]),
     );
 
-    let totalNetPay = 0, totalCTC = 0;
+    const adhocRows = await prisma.$queryRawUnsafe<{ userId: number; kind: string; amount: string }[]>(
+      `SELECT "userId", kind, SUM(amount)::text AS amount
+         FROM "AdhocLineItem"
+        WHERE month = $1 AND year = $2
+        GROUP BY "userId", kind`,
+      run.month, run.year,
+    );
+    const adhocPayByUser = new Map<number, number>();
+    const adhocDedByUser = new Map<number, number>();
+    for (const r of adhocRows) {
+      const v = parseFloat(r.amount) || 0;
+      if (r.kind === "payment")        adhocPayByUser.set(r.userId, v);
+      else if (r.kind === "deduction") adhocDedByUser.set(r.userId, v);
+    }
 
-    const payslipsData = await Promise.all(activeStructures.map(async (s) => {
+    const holdRows = await prisma.$queryRawUnsafe<{ userId: number; kind: string }[]>(
+      `SELECT "userId", kind FROM "SalaryHold" WHERE month = $1 AND year = $2`,
+      run.month, run.year,
+    );
+    const holdByUser = new Map<number, string>(holdRows.map(h => [h.userId, h.kind]));
+
+    const overrideRows = await prisma.$queryRawUnsafe<{
+      userId: number; kind: string; employeeOverride: string | null; employerOverride: string | null;
+    }[]>(
+      `SELECT "userId", kind, "employeeOverride", "employerOverride"
+         FROM "TaxOverride" WHERE month = $1 AND year = $2`,
+      run.month, run.year,
+    );
+    const overrideByUserKind = new Map<string, { emp: number | null; empr: number | null }>();
+    for (const o of overrideRows) {
+      overrideByUserKind.set(`${o.userId}:${o.kind}`, {
+        emp:  o.employeeOverride !== null ? parseFloat(o.employeeOverride) : null,
+        empr: o.employerOverride !== null ? parseFloat(o.employerOverride) : null,
+      });
+    }
+
+    let totalNetPay = 0, totalCTC = 0, skipped = 0;
+
+    const payslipsData: any[] = [];
+
+    for (const s of activeStructures) {
+      // processing-hold employees skip payslip generation entirely.
+      if (holdByUser.get(s.userId) === "processing") { skipped += 1; continue; }
+
       // LOP from attendance — absent = 1, half_day = 0.5. on_leave is paid
-      // here; unpaid leaves are netted out separately below via the leave
-      // join because the approve flow stamps every leave as on_leave.
+      // here; unpaid leaves are netted out separately below.
       const [absentCount, halfDayCount] = await Promise.all([
         prisma.attendance.count({ where: { userId: s.userId, date: { gte: firstDay, lte: lastDay }, status: "absent" } }),
         prisma.attendance.count({ where: { userId: s.userId, date: { gte: firstDay, lte: lastDay }, status: "half_day" } }),
       ]);
 
-      // Unpaid-leave subtraction: approved leaves on a LeaveType where
-      // isPaid=false, clipped to the run month and weekdays only (matches
-      // the attendance write in src/app/api/hr/leaves/[id]/route.ts).
       const unpaidLeaves = await prisma.leaveApplication.findMany({
         where: {
           userId:   s.userId,
@@ -101,32 +138,44 @@ export async function POST(req: NextRequest) {
       const paidDays   = Math.max(0, daysInMonth - lopDays);
       const lopFactor  = paidDays / daysInMonth;
 
-      // Gross components: derived from the salary structure's annual
-      // amounts (not CTC), so PF/TDS/PT in the structure don't get
-      // double-counted. Interns store everything in `basic`.
       const basic     = parseFloat(s.basic.toString());
       const hra       = parseFloat(s.hra.toString());
       const special   = parseFloat(s.specialAllowance.toString());
       const monthlyEarnings = (basic + hra + special) / 12;
 
       const bonus     = bonusByUser.get(s.userId) || 0;
-      const gross     = monthlyEarnings * lopFactor + bonus;
+      const adhocPay  = adhocPayByUser.get(s.userId) || 0;
+      const adhocDed  = adhocDedByUser.get(s.userId) || 0;
+      const gross     = monthlyEarnings * lopFactor + bonus + adhocPay;
 
-      // Deductions: PF / ESI prorate with attendance (no PF on LOP days);
-      // PT is a flat monthly figure but is waived when LOP > 5 days (Indian
-      // standard threshold — kept as a constant for now). TDS is the
-      // annual figure / 12.
-      const pf        = parseFloat(s.pfEmployee.toString()) * lopFactor;
-      const esi       = parseFloat(s.esiEmployee.toString()) * lopFactor;
-      const pt        = lopDays > 5 ? 0 : parseFloat(s.professionalTax.toString());
-      const tds       = parseFloat(s.tds.toString()) / 12;
-      const totalDed  = pf + esi + pt + tds;
+      // Computed statutory amounts, then per-(user,kind) override replaces.
+      const pfBase    = parseFloat(s.pfEmployee.toString()) * lopFactor;
+      const esiCalc   = parseFloat(s.esiEmployee.toString()) * lopFactor;
+      const ptCalc    = lopDays > 5 ? 0 : parseFloat(s.professionalTax.toString());
+      const tdsCalc   = parseFloat(s.tds.toString()) / 12;
+
+      const ptOvr  = overrideByUserKind.get(`${s.userId}:PT`);
+      const esiOvr = overrideByUserKind.get(`${s.userId}:ESI`);
+      const tdsOvr = overrideByUserKind.get(`${s.userId}:TDS`);
+      const lwfOvr = overrideByUserKind.get(`${s.userId}:LWF`);
+
+      const pt   = ptOvr?.emp  ?? ptCalc;
+      const esi  = esiOvr?.emp ?? esiCalc;
+      const tds  = tdsOvr?.emp ?? tdsCalc;
+      const lwf  = lwfOvr?.emp ?? 0;
+      const pf   = pfBase;
+
+      const totalDed  = pf + esi + pt + tds + lwf + adhocDed;
       const net       = gross - totalDed;
 
-      totalCTC    += parseFloat(s.ctc.toString()) / 12;
-      totalNetPay += net;
+      // payout-hold rows still generate (so HR sees the math) but with
+      // status=on_hold — payslip release endpoints check this flag.
+      const isPayoutHold = holdByUser.get(s.userId) === "payout";
 
-      return {
+      totalCTC    += parseFloat(s.ctc.toString()) / 12;
+      if (!isPayoutHold) totalNetPay += net;
+
+      payslipsData.push({
         userId: s.userId,
         payrollRunId: runId,
         salaryStructureId: s.id,
@@ -142,9 +191,9 @@ export async function POST(req: NextRequest) {
         tds:             tds.toFixed(2),
         pfEmployee:      pf.toFixed(2),
         professionalTax: pt.toFixed(2),
-        status:          "generated",
-      };
-    }));
+        status:          isPayoutHold ? "on_hold" : "generated",
+      });
+    }
 
     await Promise.all(payslipsData.map(p =>
       prisma.payslip.upsert({
@@ -159,6 +208,6 @@ export async function POST(req: NextRequest) {
       data:  { status: "generated", totalCTC: totalCTC.toFixed(2), totalNetPay: totalNetPay.toFixed(2) },
     });
 
-    return NextResponse.json({ run: updated, payslipsGenerated: payslipsData.length });
+    return NextResponse.json({ run: updated, payslipsGenerated: payslipsData.length, skipped });
   } catch (e) { return serverError(e, "POST /api/hr/payroll/generate"); }
 }

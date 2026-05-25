@@ -3,20 +3,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { requireAuth, resolveUserId, canViewSalary, serverError } from "@/lib/api-auth";
 import { writeAuditLog } from "@/lib/audit-log";
 
 export const dynamic = "force-dynamic";
-
-function isHRAdmin(u: any): boolean {
-  return (
-    u?.orgLevel === "ceo" ||
-    u?.isDeveloper === true ||
-    u?.orgLevel === "special_access" ||
-    u?.role === "admin" ||
-    u?.orgLevel === "hr_manager"
-  );
-}
 
 type BonusRow = {
   id: number;
@@ -36,10 +26,40 @@ export async function GET(req: NextRequest) {
   try {
     const self = session!.user as any;
     const myId = await resolveUserId(session);
-    const admin = isHRAdmin(self);
+    const admin = canViewSalary(self);
 
     const { searchParams } = new URL(req.url);
+    const monthRaw = searchParams.get("month");  // 0-indexed (Jan=0)
+    const yearRaw  = searchParams.get("year");
     const requested = searchParams.get("userId");
+
+    // Admin-only: ?month=N&year=YYYY returns every bonus whose
+    // effectiveDate falls inside that calendar month, including the
+    // affected employee's name + role for table rendering. Used by
+    // the Run Payroll page's Step 3 (Bonus, Salary Revisions & Overtime)
+    // panel to enumerate the whole cycle's bonuses.
+    if (monthRaw !== null && yearRaw !== null) {
+      if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const month = parseInt(monthRaw);
+      const year  = parseInt(yearRaw);
+      if (!Number.isFinite(month) || month < 0 || month > 11 || !Number.isFinite(year)) {
+        return NextResponse.json({ error: "Bad month/year" }, { status: 400 });
+      }
+      const start = new Date(Date.UTC(year, month, 1));
+      const end   = new Date(Date.UTC(year, month + 1, 1));
+      const items = await prisma.$queryRawUnsafe<(BonusRow & { name: string; role: string })[]>(
+        `SELECT b.id, b."userId", b.amount, b.reason, b."effectiveDate",
+                b."bonusType", b."paymentStatus", b."createdAt", b."createdBy",
+                u.name, u.role::text AS role
+           FROM "EmployeeBonus" b
+           JOIN "User" u ON u.id = b."userId"
+          WHERE b."effectiveDate" >= $1 AND b."effectiveDate" < $2
+          ORDER BY b."effectiveDate" ASC, b.id ASC`,
+        start, end,
+      );
+      return NextResponse.json({ items });
+    }
+
     let userId: number;
     if (requested) {
       const n = parseInt(requested);
@@ -72,7 +92,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
-  if (!isHRAdmin(session!.user)) {
+  if (!canViewSalary(session!.user)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   try {
@@ -122,7 +142,7 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
-  if (!isHRAdmin(session!.user)) {
+  if (!canViewSalary(session!.user)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   try {

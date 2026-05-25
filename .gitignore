@@ -34,6 +34,16 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+/env/
+
+# Local DB backups + raw dumps — never commit data exports
+/backups/
+*.dump
+*.sql.gz
+
+# One-off ops / diagnostic scripts — not part of the runtime app.
+# Existing tracked scripts remain in git; new untracked ones stay local.
+/scripts/
 
 # vercel
 .vercel
