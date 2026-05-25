@@ -188,11 +188,28 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+// Google's CDN (`lh3.googleusercontent.com`) blocks <img> loads that
+// send a Referer header — without `referrerPolicy="no-referrer"` the
+// browser shows the broken-image icon (a green silhouette in some
+// themes) instead of the photo. The onError swap covers expired /
+// deleted URLs by flipping the img out for the initials chip at
+// runtime so the user still sees something meaningful.
 function Avatar({ name, url, size = 32 }: { name: string; url?: string | null; size?: number }) {
   const initials = name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
-  return url ? (
-    <img src={url} alt={name} style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />
-  ) : (
+  const [broken, setBroken] = useState(false);
+  if (url && !broken) {
+    return (
+      <img
+        src={url}
+        alt={name}
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        style={{ width: size, height: size }}
+        className="rounded-full object-cover shrink-0"
+      />
+    );
+  }
+  return (
     <div style={{ width: size, height: size }} className="rounded-full bg-[#008CFF] text-white text-[11px] font-bold flex items-center justify-center shrink-0">
       {initials}
     </div>

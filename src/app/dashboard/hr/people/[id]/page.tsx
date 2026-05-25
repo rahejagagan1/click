@@ -162,8 +162,11 @@ export default function EmployeeDetailPage() {
   // Manager list for the Edit Profile → Job & Work section. Only fetched
   // when the viewer can actually open that tab to avoid an extra round
   // trip for non-admin viewers.
+  // `?all=true` returns every active employee (not just manager-tier
+  // roles) so HR can pick any colleague as the reporting line — even
+  // if that person isn't tagged as a manager themselves.
   const { data: managers = [] } = useSWR<Array<{ id: number; name: string }>>(
-    () => (canViewAsHRAdmin(me) ? "/api/managers" : null),
+    () => (canViewAsHRAdmin(me) ? "/api/managers?all=true" : null),
     fetcher,
   );
   // Same gate the PUT endpoint enforces — anyone in this set can edit other
@@ -1115,17 +1118,52 @@ export default function EmployeeDetailPage() {
           <SectionEditModal
             userId={userId}
             title="Organization"
-            hint="Business Unit and Cost Center are locked to NB Media org-wide. Manager fields stay with the legacy Edit Profile tab (developer-only)."
+            hint="Edit any organisational attribute. Reporting Manager + L2 Manager save through the same endpoint as the legacy Edit Profile tab — developers aren't selectable as managers."
             onClose={close}
             values={{
-              department:    p.department ?? "",
-              jobLocation:   p.jobLocation ?? "",
-              legalEntity:   p.legalEntity ?? "",
+              businessUnit:    p.businessUnit ?? "NB Media",
+              department:      p.department ?? "",
+              jobLocation:     p.jobLocation ?? "",
+              // Default Cost Center to "NB Media" when empty so HR
+              // doesn't have to retype the same value for every new
+              // hire. They can still override per-employee.
+              costCenter:      p.costCenter ?? "NB Media",
+              legalEntity:     p.legalEntity ?? "",
+              managerId:       user.manager?.id != null ? String(user.manager.id) : "",
+              inlineManagerId: user.inlineManager?.id != null ? String(user.inlineManager.id) : "",
             }}
             fields={[
-              { key: "department",  label: "Department",   type: "select", options: ["AI", "Editing", "Human Resource", "Management", "Packaging Team", "Quality Assurance", "Research", "Social Media", "Writing"] },
-              { key: "jobLocation", label: "Location",     type: "select", options: ["Mohali", "Delhi", "Mumbai", "Remote"] },
-              { key: "legalEntity", label: "Legal Entity", type: "select", options: ["NB Media Productions"] },
+              { key: "businessUnit", label: "Business Unit", type: "select", options: ["NB Media"] },
+              { key: "department",   label: "Department",    type: "select", options: ["AI", "Editing", "Human Resource", "Management", "Packaging Team", "Quality Assurance", "Research", "Social Media", "Writing"] },
+              { key: "jobLocation",  label: "Location",      type: "select", options: ["Mohali", "Delhi", "Mumbai", "Remote"] },
+              { key: "costCenter",   label: "Cost Center",   placeholder: "NB Media" },
+              { key: "legalEntity",  label: "Legal Entity",  type: "select", options: ["NB Media Productions"] },
+              // Manager dropdowns — populated from /api/managers?all=true
+              // which lists every active non-developer employee. Empty
+              // string in the option list = "— No manager —" so HR can
+              // unset the reporting line entirely.
+              {
+                key: "managerId",
+                label: "Reporting Manager",
+                type: "select",
+                options: [
+                  { value: "", label: "— No manager —" },
+                  ...managers
+                    .filter((m: any) => m.id !== userId)
+                    .map((m: any) => ({ value: String(m.id), label: m.name })),
+                ],
+              },
+              {
+                key: "inlineManagerId",
+                label: "L2 Manager",
+                type: "select",
+                options: [
+                  { value: "", label: "— No L2 manager —" },
+                  ...managers
+                    .filter((m: any) => m.id !== userId)
+                    .map((m: any) => ({ value: String(m.id), label: m.name })),
+                ],
+              },
             ]}
           />
         );
@@ -2482,7 +2520,13 @@ function EmployeeTimePanel({
         );
       })()}
 
-      {/* ── Logs & Requests sub-tabs (visual parity with the ME tab) ── */}
+      {/* ── Logs & Requests sub-tabs (visual parity with the ME tab) ──
+          Hidden entirely when the target user is CEO / developer —
+          their schedules are flexible and the per-day log doesn't
+          represent anything meaningful. The modals below the table
+          stay rendered so HR's on-behalf actions still work. */}
+      {!skipAbsentSynthesis && (
+      <>
       <div className="mb-3 flex items-center justify-between border-b border-slate-100 px-1">
         <p className="text-[13px] font-semibold text-slate-800">Logs &amp; Requests</p>
       </div>
@@ -2928,6 +2972,8 @@ function EmployeeTimePanel({
           </tbody>
         </table>
       </div>
+      </>
+      )}
 
       {/* Regularize-on-behalf modal — admin only */}
       {regOpen && isHRAdmin ? (

@@ -1,11 +1,14 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { X, Info, Search, Check, ChevronDown } from "lucide-react";
 import { createPortal } from "react-dom";
 import { DatePicker } from "@/components/ui/date-picker";
-import EmployeePicker from "@/components/hr/EmployeePicker";
+import EmployeePicker, { type PickerUser } from "@/components/hr/EmployeePicker";
+import HandoffSection from "@/components/hr/HandoffSection";
+import { leaveMinDate } from "@/lib/hr/leave-date-rules";
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 export type LeaveRequestKind = "wfh" | "on_duty" | "half_day" | "leave" | "regularize";
@@ -146,6 +149,12 @@ export default function LeaveRequestForm({
 }: LeaveRequestFormProps) {
   // IST-anchored so evening users don't see yesterday as the default.
   const today = prefillDate || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const { data: session } = useSession();
+  const me = session?.user as any;
+  // Restricted-admin tier (CEO / hr_manager / dev) can back-date; everyone
+  // else gets clamped to today + future via the date picker's minDate prop.
+  const minDate = leaveMinDate(me);
+
   const [fromDate, setFromDate] = useState(today);
   const [toDate,   setToDate]   = useState(today);
   // Start with no leave type chosen — the picker shows the "Select Leave"
@@ -161,6 +170,14 @@ export default function LeaveRequestForm({
   // half-day form (`kind=half_day`) keeps its own legacy flow and ignores this.
   const [dayKind, setDayKind] = useState<"full" | "first_half" | "second_half">("full");
   const isHalfLeave = kind === "leave" && dayKind !== "full";
+
+  // Handoff fields — apply to every kind EXCEPT regularize. POC + Work
+  // Status are required for those forms; WFH additionally requires
+  // Time of Unavailability.
+  const handoffApplies = kind !== "regularize";
+  const [poc, setPoc] = useState<PickerUser[]>([]);
+  const [workStatus, setWorkStatus] = useState("");
+  const [unavailability, setUnavailability] = useState("");
 
   // Working-day preview: walk from→to and count weekdays only. Mirrors the
   // server-side `countWorkingDays()` (which also subtracts holidays); the
@@ -188,9 +205,20 @@ export default function LeaveRequestForm({
     if (new Date(fromDate) > new Date(toDate)) return setErr("From date must be on/before To date");
     if (!note.trim()) return setErr("Reason is required.");
     if (kind === "leave" && !leaveTypeId) return setErr("Please choose a leave type");
+    // Handoff validation — required for Leave / WFH / On Duty / Half Day.
+    if (handoffApplies && poc.length === 0)   return setErr("POC in Absence is required.");
+    if (handoffApplies && !workStatus.trim()) return setErr("Work Status is required.");
+    if (kind === "wfh" && !unavailability.trim()) return setErr("Time of Unavailability is required (type 'Available all day' if not applicable).");
 
     setSaving(true);
     const notifyUserIds = notify.map((u) => u.id);
+    // Common handoff payload — added to every payload that needs it
+    // below. Lets the server attribute the POC + work status without
+    // changing the per-kind URL routing.
+    const handoff = handoffApplies ? {
+      pocUserId:  poc[0].id,
+      workStatus: workStatus.trim(),
+    } : {};
 
     let url = "";
     let payload: Record<string, unknown> = {};
@@ -201,13 +229,15 @@ export default function LeaveRequestForm({
       // Half-day WFH is encoded as a reason prefix so we don't need a schema
       // migration. Approval + attendance display both detect "[Half Day]".
       const reason = isHalfDayWfh ? `[Half Day] ${note}` : note;
-      payload = { date: fromDate, reason, notifyUserIds };
+      payload = { date: fromDate, reason, notifyUserIds, ...handoff, unavailability: unavailability.trim() };
       refreshKeys = ["/api/hr/attendance/wfh"];
     } else if (kind === "on_duty") {
       url = "/api/hr/attendance/on-duty";
-      payload = { date: fromDate, purpose: note, notifyUserIds };
+      payload = { date: fromDate, purpose: note, notifyUserIds, ...handoff };
       refreshKeys = ["/api/hr/attendance/on-duty"];
     } else if (kind === "regularize") {
+      // No handoff for regularize — it's the "I missed a clock-in" flow,
+      // not a request for time off, so POC + Work Status don't apply.
       url = "/api/hr/attendance/regularize";
       payload = { date: fromDate, reason: note, notifyUserIds };
       refreshKeys = ["/api/hr/attendance/regularize"];
@@ -216,7 +246,7 @@ export default function LeaveRequestForm({
       // fall back to a regularization so a request still reaches approvers.
       if (leaveTypeId) {
         url = "/api/hr/leaves";
-        payload = { leaveTypeId, fromDate, toDate: fromDate, reason: `[Half Day] ${note}`, notifyUserIds };
+        payload = { leaveTypeId, fromDate, toDate: fromDate, reason: `[Half Day] ${note}`, notifyUserIds, ...handoff };
         refreshKeys = ["/api/hr/leaves", "/api/hr/leaves/balance"];
       } else {
         url = "/api/hr/attendance/regularize";
@@ -233,7 +263,7 @@ export default function LeaveRequestForm({
         dayKind === "second_half" ? `[Second Half] ${note}` :
                                     note;
       const halfDayTo = isHalfLeave ? fromDate : toDate;
-      payload = { leaveTypeId, fromDate, toDate: halfDayTo, reason, notifyUserIds };
+      payload = { leaveTypeId, fromDate, toDate: halfDayTo, reason, notifyUserIds, ...handoff };
       refreshKeys = ["/api/hr/leaves", "/api/hr/leaves/balance"];
     }
 
@@ -286,6 +316,7 @@ export default function LeaveRequestForm({
                     else if (v && (!toDate || new Date(v) > new Date(toDate))) setToDate(v);
                   }}
                   futureYears={2}
+                  minDate={minDate}
                 />
               </div>
               <div>
@@ -299,6 +330,7 @@ export default function LeaveRequestForm({
                     value={toDate}
                     onChange={setToDate}
                     futureYears={2}
+                    minDate={fromDate || minDate}
                   />
                 )}
               </div>
@@ -419,6 +451,20 @@ export default function LeaveRequestForm({
               className="mt-1.5 w-full px-3 py-2 rounded-lg border bg-white dark:bg-[#0a1526] border-slate-200 dark:border-white/[0.08] text-[13px] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#008CFF] dark:focus:border-[#4a9cff] resize-none"
             />
           </div>
+
+          {/* Handoff details — POC + Work Status (+ Unavailability for WFH).
+              Skipped for the regularize flow, where it doesn't apply. */}
+          {handoffApplies && (
+            <HandoffSection
+              poc={poc}
+              onPocChange={setPoc}
+              workStatus={workStatus}
+              onWorkStatusChange={setWorkStatus}
+              showUnavailability={kind === "wfh"}
+              unavailability={unavailability}
+              onUnavailabilityChange={setUnavailability}
+            />
+          )}
 
           {/* Notify */}
           <div>

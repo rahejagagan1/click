@@ -4,6 +4,9 @@ import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-au
 import { canApplyRestrictedLeave } from "@/lib/access";
 import { notifyUsers } from "@/lib/notifications";
 import { countWorkingDays } from "@/lib/hr/working-days";
+import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
+import { sendEmail } from "@/lib/email/sender";
+import { pocAssignmentEmail } from "@/lib/email/templates";
 
 // GET /api/hr/leaves — list leave applications
 export async function GET(req: NextRequest) {
@@ -94,6 +97,25 @@ export async function POST(req: NextRequest) {
 
     const from = new Date(fromDate), to = new Date(toDate);
     if (from > to) return NextResponse.json({ error: "Invalid date range" }, { status: 400 });
+
+    // Past-date gate: regular users can't back-date leave. CEO /
+    // role=hr_manager / isDeveloper (canApplyRestrictedLeave) can.
+    const pastErr = checkPastDateAllowed(fromDate, self);
+    if (pastErr) return NextResponse.json({ error: pastErr }, { status: 400 });
+
+    // Handoff fields — required by the company leave format. POC must
+    // be a real active user; workStatus must be a non-empty string.
+    const pocUserId  = Number.isFinite(Number(body.pocUserId))  ? Number(body.pocUserId)  : null;
+    const workStatus = typeof body.workStatus === "string" ? body.workStatus.trim() : "";
+    if (!pocUserId) return NextResponse.json({ error: "POC in Absence is required." }, { status: 400 });
+    if (!workStatus) return NextResponse.json({ error: "Work Status is required." }, { status: 400 });
+    const pocUser = await prisma.user.findUnique({
+      where: { id: pocUserId },
+      select: { id: true, name: true, email: true, isActive: true },
+    });
+    if (!pocUser || !pocUser.isActive) {
+      return NextResponse.json({ error: "Selected POC is not an active employee." }, { status: 400 });
+    }
 
     // Block balance-only types (e.g. Carry Over Leave) — the UI hides
     // them but a hand-crafted POST would otherwise sneak through.
@@ -195,12 +217,18 @@ export async function POST(req: NextRequest) {
     const finalStatus = "pending";
 
     const application = await prisma.$transaction(async (tx) => {
+      // pocUserId / workStatus may be unknown to the typed client until
+      // `prisma generate` reruns (Windows DLL lock blocks regen on the
+      // dev box) — runtime is fine because the migration already added
+      // both columns. `as any` keeps TypeScript happy without losing
+      // anything at runtime.
       const app = await tx.leaveApplication.create({
-        data: {
+        data: ({
           userId: subjectUserId, leaveTypeId, fromDate: from, toDate: to, totalDays, reason,
           status: finalStatus,
           notifyUserIds: extras,
-        },
+          pocUserId, workStatus,
+        } as any),
         include: { leaveType: true, user: { select: { managerId: true, name: true } } },
       });
       // Balance debit: reserve as `pending`. It moves to `used` when the
@@ -283,6 +311,24 @@ export async function POST(req: NextRequest) {
         body:     `${dateLabel} (${daysLabel}) — awaiting manager approval.`,
         linkUrl:  "/dashboard/hr/leaves",
         emailData: leaveEmailData,
+      });
+    }
+
+    // POC heads-up — separate from the approver chain so the named
+    // backup gets notified even if approvers haven't actioned the
+    // request yet. Fire-and-forget so SMTP hiccups don't 500 the save.
+    if (pocUser.email && pocUserId !== subjectUserId) {
+      void sendEmail({
+        to: pocUser.email,
+        content: pocAssignmentEmail({
+          pocName:        pocUser.name || "there",
+          applicantName:  requesterName,
+          requestType:    `Leave (${typeName})`,
+          dateLabel,
+          daysLabel,
+          workStatus,
+          reason:         reason || undefined,
+        }),
       });
     }
 
