@@ -28,6 +28,16 @@ export default function HandoffSection({
    * be unavailable; the whole day is the "unavailable" window).
    */
   showUnavailability = false,
+  /**
+   * When true, render a "Mark POC as N/A" toggle above the picker.
+   * Used by the HR-on-behalf modal: HR filing a leave for someone
+   * else often doesn't know (or care) who's covering, so they can
+   * tick N/A and submit without picking. The parent decides what
+   * "N/A" means downstream (typically: send `pocUserId: null`).
+   */
+  allowNa = false,
+  naSelected = false,
+  onNaChange,
 }: {
   poc: PickerUser[];
   onPocChange: (next: PickerUser[]) => void;
@@ -36,6 +46,9 @@ export default function HandoffSection({
   unavailability?: string;
   onUnavailabilityChange?: (v: string) => void;
   showUnavailability?: boolean;
+  allowNa?: boolean;
+  naSelected?: boolean;
+  onNaChange?: (next: boolean) => void;
 }) {
   return (
     <section>
@@ -51,17 +64,40 @@ export default function HandoffSection({
             multi-select by default; the parent enforces "single" by
             slicing to [0] before reading and refusing to pass more
             than one user back. We mirror that constraint here by
-            only ever invoking onPocChange with at-most-one entry. */}
+            only ever invoking onPocChange with at-most-one entry.
+
+            When `allowNa` is on, render a small N/A toggle: HR filing
+            on behalf may not have a real cover assigned. Ticking N/A
+            hides the picker; the parent submits with pocUserId=null. */}
         <div>
-          <FieldLabel required>POC in Absence</FieldLabel>
-          <EmployeePicker
-            selected={poc.slice(0, 1)}
-            onChange={(next) => onPocChange(next.slice(-1))}
-            placeholder="Search employee covering for you"
-          />
-          <FieldHint>
-            They'll get an email so they know they're covering for you.
-          </FieldHint>
+          <FieldLabel required={!naSelected}>POC in Absence</FieldLabel>
+          {allowNa && (
+            <label className="mb-2 flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={naSelected}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  onNaChange?.(next);
+                  if (next) onPocChange([]); // clear picker when switching to N/A
+                }}
+                className="w-3.5 h-3.5 accent-[#008CFF]"
+              />
+              Mark as N/A (no specific cover assigned)
+            </label>
+          )}
+          {!naSelected && (
+            <>
+              <EmployeePicker
+                selected={poc.slice(0, 1)}
+                onChange={(next) => onPocChange(next.slice(-1))}
+                placeholder="Search employee covering for you"
+              />
+              <FieldHint>
+                They'll get an email so they know they're covering for you.
+              </FieldHint>
+            </>
+          )}
         </div>
 
         {/* Work Status — multi-line textarea. 4 rows matches the doc's
