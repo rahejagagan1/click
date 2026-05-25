@@ -85,15 +85,14 @@ export async function POST(req: NextRequest) {
     const subjectUserId = onBehalf ? targetUserId! : myId;
     const isHRGrant     = onBehalf && callerIsHRAdmin && forceGrant;
 
-    // Handoff fields — company-standard WFH format. POC + Work Status +
-    // Time of Unavailability are all required. Validated upstream by
-    // the UI; server enforces defensively. Exception: HR filing on
-    // behalf can mark POC as N/A (null) when no cover is assigned yet —
-    // workStatus + unavailability are still required but accept "N/A".
+    // Handoff fields — company-standard WFH format. Work Status + Time
+    // of Unavailability are always required. POC is N/A-able: the form
+    // has a "Mark as N/A" toggle for cases where no specific cover is
+    // assigned, which sends pocUserId=null. When a POC is named, it
+    // must be a real active user.
     const pocUserId      = Number.isFinite(Number(body.pocUserId)) ? Number(body.pocUserId) : null;
     const workStatus     = typeof body.workStatus     === "string" ? body.workStatus.trim()     : "";
     const unavailability = typeof body.unavailability === "string" ? body.unavailability.trim() : "";
-    if (!pocUserId && !onBehalf) return NextResponse.json({ error: "POC in Absence is required." }, { status: 400 });
     if (!workStatus)             return NextResponse.json({ error: "Work Status is required." }, { status: 400 });
     if (!unavailability)         return NextResponse.json({ error: "Time of Unavailability is required." }, { status: 400 });
     const pocUser = pocUserId
