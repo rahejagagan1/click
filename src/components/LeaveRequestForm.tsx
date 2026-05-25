@@ -303,16 +303,19 @@ export default function LeaveRequestForm({
         <div className="px-5 py-4 space-y-4 overflow-y-auto">
           {err && <p className="text-[12px] text-red-500 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
 
-          {/* Date range card */}
+          {/* Date range card — FROM and TO sit on the same row so the
+              two date pickers line up, with the "1 day" badge anchored
+              to the top-right of the card (not crammed beside FROM). */}
           <div className="rounded-lg border border-slate-200 dark:border-white/[0.08] p-3">
-            <div className="grid grid-cols-1 gap-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10.5px] uppercase tracking-widest font-semibold text-slate-500 dark:text-slate-400">Date range</p>
+              <span className="px-2 py-0.5 rounded-md bg-[#008CFF]/10 text-[#008CFF] dark:bg-[#4a9cff]/15 dark:text-[#4a9cff] text-[11px] font-semibold tabular-nums">
+                {days} day{days === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <p className="text-[10.5px] uppercase tracking-widest font-semibold text-slate-500 dark:text-slate-400">From</p>
-                  <span className="px-2 py-0.5 rounded-md bg-[#008CFF]/10 text-[#008CFF] dark:bg-[#4a9cff]/15 dark:text-[#4a9cff] text-[11px] font-semibold tabular-nums">
-                    {days} day{days === 1 ? "" : "s"}
-                  </span>
-                </div>
+                <p className="text-[10.5px] uppercase tracking-widest font-semibold text-slate-500 dark:text-slate-400 mb-1.5">From</p>
                 <DatePicker
                   value={fromDate}
                   onChange={(v) => {
@@ -322,13 +325,14 @@ export default function LeaveRequestForm({
                   }}
                   futureYears={2}
                   minDate={minDate}
+                  className="w-full"
                 />
               </div>
               <div>
                 <p className="text-[10.5px] uppercase tracking-widest font-semibold text-slate-500 dark:text-slate-400 mb-1.5">To</p>
                 {isHalfLeave ? (
-                  <p className="text-[12.5px] text-slate-500 italic">
-                    Same as From (half-day request).
+                  <p className="text-[12.5px] text-slate-500 italic h-9 flex items-center">
+                    Same as From (half-day).
                   </p>
                 ) : (
                   <DatePicker
@@ -336,6 +340,7 @@ export default function LeaveRequestForm({
                     onChange={setToDate}
                     futureYears={2}
                     minDate={fromDate || minDate}
+                    className="w-full"
                   />
                 )}
               </div>
