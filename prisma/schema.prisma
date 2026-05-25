@@ -652,6 +652,7 @@ model WeeklyReport {
   researcherRows Json?   @db.JsonB   // Section A3: Researcher performance rows
   overviewRows   Json?   @db.JsonB   // Section B: Quick overview rows
   viewsRows      Json?   @db.JsonB   // Section D: Views and Changes rows (Andrew)
+  shortsRows     Json?   @db.JsonB   // Section E: Views and Changes (YT Shorts) rows (Andrew)
   dataJson     Json?   @db.JsonB   // Legacy fallback (kept for old records)
   /// Frozen team roster at submit/lock time so historical reports
   /// keep showing who was on the team that week even if those users
@@ -749,6 +750,7 @@ model MonthlyReport {
   andrewBRows   Json?  @db.JsonB  // Section B: Monthly overview rows
   andrewCRows   Json?  @db.JsonB  // Section C: Rohini & Shika thumbnail rows
   andrewDRows   Json?  @db.JsonB  // Section D: Views and Changes rows
+  andrewERows   Json?  @db.JsonB  // Section E (weekly) / Section D shorts (monthly) — YT Shorts capsule/channel views
 
   // Tanvi Dogra HR Manager monthly report
   hrMonthlyData Json?  @db.JsonB  // All HR monthly report sections
