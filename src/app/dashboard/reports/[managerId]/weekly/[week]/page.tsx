@@ -737,6 +737,7 @@ export default function WeeklyReportPage() {
     const [sectionDRows, setSectionDRows] = useState<SectionDRow[]>([
         mkSectionD("d-1", "M7"),
         mkSectionD("d-2", "M7CS"),
+        mkSectionD("d-3", "Bodycam"),
     ]);
     const setSD = (idx: number, f: keyof SectionDRow, v: string) =>
         setSectionDRows((p) => p.map((r, i) => i === idx ? { ...r, [f]: v } : r));
@@ -1211,7 +1212,7 @@ export default function WeeklyReportPage() {
             setAbhishekRows([mkAbhishek("ab-1")]);
             setSectionBRows([mkSectionB("b-1", "Andrew"), mkSectionB("b-2", "Abhishek")]);
             setSectionCRows([mkSectionC("c-1", "Rohini"), mkSectionC("c-2", "Shikha")]);
-            setSectionDRows([mkSectionD("d-1", "M7"), mkSectionD("d-2", "M7CS")]);
+            setSectionDRows([mkSectionD("d-1", "M7"), mkSectionD("d-2", "M7CS"), mkSectionD("d-3", "Bodycam")]);
         } catch (e: any) {
             setSubmitError(e.message);
         }
@@ -1974,6 +1975,7 @@ export default function WeeklyReportPage() {
                                     >
                                         <option value="M7">M7</option>
                                         <option value="M7CS">M7CS</option>
+                                        <option value="Bodycam">Bodycam</option>
                                     </select>
                                 </Td>
                                 <Td><EditInput value={row.totalViews}      onChange={(v) => setSD(idx, "totalViews",      v)} placeholder="e.g. 693k"  disabled={isLocked || viewOnly} /></Td>
