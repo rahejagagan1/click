@@ -929,22 +929,20 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
 
               {/* Handoff Details — POC + Work Status (+ Unavailability for
                   WFH). POC is N/A-eligible here because HR may not know
-                  who's covering. The same picker, validation rules and
-                  email-on-approval flow as the user's own form. */}
-              <div className="pt-2 border-t border-slate-100">
-                <HandoffSection
-                  poc={handoffPoc}
-                  onPocChange={setHandoffPoc}
-                  workStatus={handoffWorkStatus}
-                  onWorkStatusChange={setHandoffWorkStatus}
-                  unavailability={handoffUnavailability}
-                  onUnavailabilityChange={setHandoffUnavailability}
-                  showUnavailability={applyMode === "wfh"}
-                  allowNa
-                  naSelected={handoffPocNa}
-                  onNaChange={setHandoffPocNa}
-                />
-              </div>
+                  who's covering. The HandoffSection renders its own top
+                  divider for visual separation. */}
+              <HandoffSection
+                poc={handoffPoc}
+                onPocChange={setHandoffPoc}
+                workStatus={handoffWorkStatus}
+                onWorkStatusChange={setHandoffWorkStatus}
+                unavailability={handoffUnavailability}
+                onUnavailabilityChange={setHandoffUnavailability}
+                showUnavailability={applyMode === "wfh"}
+                allowNa
+                naSelected={handoffPocNa}
+                onNaChange={setHandoffPocNa}
+              />
 
               {applyMode === "leave" && (
                 <label className="flex items-start gap-2 rounded-lg bg-amber-50/60 px-3 py-2 ring-1 ring-inset ring-amber-200/60">

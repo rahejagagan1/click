@@ -2221,11 +2221,11 @@ function EmployeeTimePanel({
 
   const submitWfh = async () => {
     if (!wfhForm.date || !wfhForm.reason.trim()) { alert("From date and reason are required."); return; }
-    // Handoff Details mirror the standard WFH form; the API rejects the
-    // request with a 400 if any of these are missing, so we surface the
-    // error inline before firing.
-    const pocId = handoffPoc[0]?.id ?? null;
-    if (!pocId)                          { alert("POC in Absence is required."); return; }
+    // Handoff Details mirror the standard WFH form. HR on-behalf can
+    // mark POC as N/A — when that's ticked we send pocUserId=null and
+    // skip the required check.
+    const pocId = handoffPocNa ? null : (handoffPoc[0]?.id ?? null);
+    if (!handoffPocNa && !pocId)         { alert("POC in Absence is required (or mark as N/A)."); return; }
     if (!handoffWorkStatus.trim())       { alert("Work Status is required."); return; }
     if (!handoffUnavailability.trim())   { alert("Time of Unavailability is required."); return; }
     const effectiveTo = wfhForm.toDate && wfhForm.toDate >= wfhForm.date ? wfhForm.toDate : wfhForm.date;
@@ -2258,6 +2258,11 @@ function EmployeeTimePanel({
   const submitOnDuty = async () => {
     if (!odForm.date)            { alert("From date is required."); return; }
     if (!odForm.purpose.trim())  { alert("Purpose is required."); return; }
+    // Handoff Details — workStatus is required server-side. POC is
+    // N/A-eligible here for the HR-on-behalf path.
+    const pocId = handoffPocNa ? null : (handoffPoc[0]?.id ?? null);
+    if (!handoffPocNa && !pocId)   { alert("POC in Absence is required (or mark as N/A)."); return; }
+    if (!handoffWorkStatus.trim()) { alert("Work Status is required."); return; }
     const effectiveTo = odForm.toDate && odForm.toDate >= odForm.date ? odForm.toDate : odForm.date;
     setSubmitting(true);
     try {
@@ -2270,12 +2275,15 @@ function EmployeeTimePanel({
           toDate:       effectiveTo,
           location:     odForm.location.trim() || undefined,
           purpose:      odForm.purpose.trim(),
+          pocUserId:    pocId,
+          workStatus:   handoffWorkStatus.trim(),
         }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { alert(d.error || "Failed to submit on-duty request."); return; }
       setOdOpen(false);
       setOdForm({ date: "", toDate: "", location: "", purpose: "" });
+      resetHandoff();
       refreshAttendanceCaches();
     } finally { setSubmitting(false); }
   };
@@ -2284,10 +2292,10 @@ function EmployeeTimePanel({
     if (!leaveForm.leaveTypeId) { alert("Leave type is required."); return; }
     if (!leaveForm.fromDate || !leaveForm.toDate) { alert("From and To dates are required."); return; }
     if (!leaveForm.reason.trim()) { alert("Reason is required."); return; }
-    // Handoff Details — same contract as the standard leave form; the
-    // API enforces these (no Time-of-Unavailability for plain leave).
-    const pocId = handoffPoc[0]?.id ?? null;
-    if (!pocId)                    { alert("POC in Absence is required."); return; }
+    // Handoff Details — same contract as the standard leave form. POC
+    // may be N/A on HR-on-behalf; workStatus stays required.
+    const pocId = handoffPocNa ? null : (handoffPoc[0]?.id ?? null);
+    if (!handoffPocNa && !pocId)   { alert("POC in Absence is required (or mark as N/A)."); return; }
     if (!handoffWorkStatus.trim()) { alert("Work Status is required."); return; }
     setSubmitting(true);
     try {
@@ -3136,10 +3144,21 @@ function EmployeeTimePanel({
                   className="mt-1 w-full resize-none rounded border border-slate-200 px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-[#008CFF]"
                 />
               </div>
+              {/* Handoff Details — workStatus is required; POC supports N/A
+                  for HR-on-behalf where no specific cover is assigned. */}
+              <HandoffSection
+                poc={handoffPoc}
+                onPocChange={setHandoffPoc}
+                workStatus={handoffWorkStatus}
+                onWorkStatusChange={setHandoffWorkStatus}
+                allowNa
+                naSelected={handoffPocNa}
+                onNaChange={setHandoffPocNa}
+              />
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
               <button
-                onClick={() => setOdOpen(false)}
+                onClick={() => { setOdOpen(false); resetHandoff(); }}
                 className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50"
               >
                 Cancel
@@ -3311,15 +3330,17 @@ function EmployeeTimePanel({
                   />
                 </div>
                 {/* Handoff Details — POC + Work Status. Required by the
-                    leave API exactly the same as the user's own form. */}
-                <div className="pt-2 border-t border-slate-100">
-                  <HandoffSection
-                    poc={handoffPoc}
-                    onPocChange={setHandoffPoc}
-                    workStatus={handoffWorkStatus}
-                    onWorkStatusChange={setHandoffWorkStatus}
-                  />
-                </div>
+                    leave API exactly the same as the user's own form.
+                    Allow N/A so HR can skip POC when no cover assigned. */}
+                <HandoffSection
+                  poc={handoffPoc}
+                  onPocChange={setHandoffPoc}
+                  workStatus={handoffWorkStatus}
+                  onWorkStatusChange={setHandoffWorkStatus}
+                  allowNa
+                  naSelected={handoffPocNa}
+                  onNaChange={setHandoffPocNa}
+                />
               </div>
             ) : (
               <div className="space-y-3 px-5 py-4">
@@ -3355,18 +3376,20 @@ function EmployeeTimePanel({
                 </div>
                 {/* Handoff Details — POC + Work Status + Time of
                     Unavailability (WFH-only). The WFH API rejects the
-                    request without all three. */}
-                <div className="pt-2 border-t border-slate-100">
-                  <HandoffSection
-                    poc={handoffPoc}
-                    onPocChange={setHandoffPoc}
-                    workStatus={handoffWorkStatus}
-                    onWorkStatusChange={setHandoffWorkStatus}
-                    unavailability={handoffUnavailability}
-                    onUnavailabilityChange={setHandoffUnavailability}
-                    showUnavailability
-                  />
-                </div>
+                    request without workStatus / unavailability; POC is
+                    N/A-eligible for HR-on-behalf. */}
+                <HandoffSection
+                  poc={handoffPoc}
+                  onPocChange={setHandoffPoc}
+                  workStatus={handoffWorkStatus}
+                  onWorkStatusChange={setHandoffWorkStatus}
+                  unavailability={handoffUnavailability}
+                  onUnavailabilityChange={setHandoffUnavailability}
+                  showUnavailability
+                  allowNa
+                  naSelected={handoffPocNa}
+                  onNaChange={setHandoffPocNa}
+                />
               </div>
             )}
 
