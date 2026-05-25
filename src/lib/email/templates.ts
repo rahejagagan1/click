@@ -56,6 +56,14 @@ const fmtDate = (d: string | Date) =>
   new Date(d).toLocaleDateString("en-IN", {
     day: "2-digit", month: "short", year: "numeric", weekday: "short",
   });
+// Month-only formatter — used for category=attendance violations, where
+// the value tracked is the calendar month ("May 2026") rather than a
+// specific day. Stays consistent with the in-app violation detail
+// row's display in /dashboard/violations.
+const fmtMonthYear = (d: string | Date) =>
+  new Date(d).toLocaleDateString("en-IN", {
+    month: "long", year: "numeric",
+  });
 
 // ── Helper: build subject + html + text from a request payload ─────────
 type RequestArgs = {
@@ -69,7 +77,10 @@ function requestEmail(opts: { typeLabel: string; verb: "submitted" | "approved" 
   const verbWord = opts.verb === "submitted" ? "submitted" : opts.verb === "approved" ? "was approved" : "was rejected";
   const link = `${appUrl()}${opts.inboxPath ?? "/dashboard/hr/inbox"}`;
 
-  const subject = `${opts.applicantName} ${verbWord} a ${opts.typeLabel} request`;
+  // a / an based on the first letter of the type label so we don't say
+  // "submitted a On-Duty request". Vowel-sound check covers most cases.
+  const article = /^[aeiouAEIOU]/.test(opts.typeLabel) ? "an" : "a";
+  const subject = `${opts.applicantName} ${verbWord} ${article} ${opts.typeLabel} request`;
 
   const detailsTable = opts.details
     .map(([k, v]) => detailRow(escape(k), escape(v)))
@@ -77,7 +88,7 @@ function requestEmail(opts: { typeLabel: string; verb: "submitted" | "approved" 
 
   const body = `
     <p style="margin:0 0 16px;font-size:14px;line-height:1.6">
-      <strong>${escape(opts.applicantName)}</strong> ${verbWord} a
+      <strong>${escape(opts.applicantName)}</strong> ${verbWord} ${article}
       ${escape(opts.typeLabel)} request.
     </p>
     ${opts.reason ? `
@@ -194,18 +205,60 @@ export function wfhRequestEmail(args: {
 
 export function onDutyRequestEmail(args: {
   applicantName: string;
+  /** Single-day date; for ranges, pass `fromDate` + `toDate` + `totalDays`. */
   date: string | Date;
+  /** Optional range end. When set + different from `date`, the email
+   *  renders FROM / TO / TOTAL DAYS instead of a single DATE row —
+   *  mirrors the leave email's structure so HR sees the same fields
+   *  in the same order across every request type. */
+  toDate?: string | Date;
+  totalDays?: number | string;
+  /** Optional time window — surfaced as a TIME row when both ends are
+   *  present (e.g. "10:00 – 14:00"). Skipped otherwise. */
+  fromTime?: string;
+  toTime?: string;
   location?: string;
   reason?: string;
+  /** Optional approver context — same shape as the leave / WFH emails so
+   *  L1 / L2 stages surface the manager + finaliser rows. */
+  approverName?: string;
+  stageLabel?:   string;
+  approvalNote?: string;
+  l1ApproverName?: string;
+  l1ApprovalNote?: string;
 }): EmailContent {
+  // Lead with the request "type" row so OD emails read the same shape
+  // as a leave email's "Leave Type: Casual Leave" header line.
+  const details: Array<[string, string]> = [["Request Type", "On-Duty"]];
+
+  // Date / range. For a range (toDate set and different from date)
+  // show FROM + TO + TOTAL DAYS, mirroring leaveRequestEmail. Single-
+  // day requests keep a clean single DATE row.
+  const isRange = args.toDate && fmtDate(args.toDate) !== fmtDate(args.date);
+  if (isRange) {
+    details.push(["From", fmtDate(args.date)]);
+    details.push(["To",   fmtDate(args.toDate!)]);
+    const days = args.totalDays;
+    if (days != null) {
+      details.push(["Total Days", `${days} day${Number(days) === 1 ? "" : "s"}`]);
+    }
+  } else {
+    details.push(["Date", fmtDate(args.date)]);
+  }
+
+  if (args.fromTime && args.toTime) {
+    details.push(["Time", `${args.fromTime} – ${args.toTime}`]);
+  }
+  if (args.location) details.push(["Location", args.location]);
+  if (args.l1ApproverName) details.push(["Manager Approved By", args.l1ApproverName]);
+  if (args.l1ApprovalNote) details.push(["Manager Note",        args.l1ApprovalNote]);
+  if (args.approverName)   details.push([args.stageLabel || "Approved by", args.approverName]);
+  if (args.approvalNote)   details.push(["Approver Note",       args.approvalNote]);
   return requestEmail({
     typeLabel: "On-Duty",
     verb: "submitted",
     applicantName: args.applicantName,
-    details: [
-      ["Date", fmtDate(args.date)],
-      ...(args.location ? [["Location", args.location] as [string, string]] : []),
-    ],
+    details,
     reason: args.reason,
   });
 }
@@ -214,12 +267,24 @@ export function regularizationRequestEmail(args: {
   applicantName: string;
   date: string | Date;
   reason?: string;
+  /** Optional approver context — same shape as the leave / WFH / on-duty
+   *  emails so L1 / L2 stages surface the manager + finaliser rows. */
+  approverName?: string;
+  stageLabel?:   string;
+  approvalNote?: string;
+  l1ApproverName?: string;
+  l1ApprovalNote?: string;
 }): EmailContent {
+  const details: Array<[string, string]> = [["Date", fmtDate(args.date)]];
+  if (args.l1ApproverName) details.push(["Manager Approved By", args.l1ApproverName]);
+  if (args.l1ApprovalNote) details.push(["Manager Note",        args.l1ApprovalNote]);
+  if (args.approverName)   details.push([args.stageLabel || "Approved by", args.approverName]);
+  if (args.approvalNote)   details.push(["Approver Note",       args.approvalNote]);
   return requestEmail({
     typeLabel: "attendance regularization",
     verb: "submitted",
     applicantName: args.applicantName,
-    details: [["Date", fmtDate(args.date)]],
+    details,
     reason: args.reason,
   });
 }
@@ -229,15 +294,27 @@ export function compOffRequestEmail(args: {
   workedDate: string | Date;
   creditDays: number | string;
   reason?: string;
+  /** Approver chain — same shape as leave / WFH / on-duty / regularize so
+   *  the L1 / L2 stages surface manager + finaliser rows. */
+  approverName?: string;
+  stageLabel?:   string;
+  approvalNote?: string;
+  l1ApproverName?: string;
+  l1ApprovalNote?: string;
 }): EmailContent {
+  const details: Array<[string, string]> = [
+    ["Worked Date", fmtDate(args.workedDate)],
+    ["Credit",      `${args.creditDays} day${Number(args.creditDays) === 1 ? "" : "s"}`],
+  ];
+  if (args.l1ApproverName) details.push(["Manager Approved By", args.l1ApproverName]);
+  if (args.l1ApprovalNote) details.push(["Manager Note",        args.l1ApprovalNote]);
+  if (args.approverName)   details.push([args.stageLabel || "Approved by", args.approverName]);
+  if (args.approvalNote)   details.push(["Approver Note",       args.approvalNote]);
   return requestEmail({
     typeLabel: "comp-off credit",
     verb: "submitted",
     applicantName: args.applicantName,
-    details: [
-      ["Worked Date", fmtDate(args.workedDate)],
-      ["Credit",      `${args.creditDays} day${Number(args.creditDays) === 1 ? "" : "s"}`],
-    ],
+    details,
     reason: args.reason,
   });
 }
@@ -736,7 +813,16 @@ export function violationCreatedEmail(args: {
   const stat  = STATUS_LABEL[args.status] ?? args.status;
   const statColor = STATUS_COLOR[args.status] ?? "#64748b";
   const sevTint = SEVERITY_TINT[args.severity] ?? SEVERITY_TINT.medium;
-  const dateLabel = args.violationDate ? fmtDate(args.violationDate) : null;
+  // Attendance violations are tracked per-MONTH (e.g. "3 lates in May")
+  // so the email surfaces "Month" + "May 2026" instead of the day-level
+  // "Date" / "01 May, 2026". Every other category keeps the day-level
+  // wording — matches the in-app violation detail row in
+  // /dashboard/violations and the month-picker form input.
+  const isAttendance = (args.category ?? "").toLowerCase() === "attendance";
+  const dateLabel = args.violationDate
+    ? (isAttendance ? fmtMonthYear(args.violationDate) : fmtDate(args.violationDate))
+    : null;
+  const dateRowLabel = isAttendance ? "Month" : "Date";
 
   // Severity-tinted alert banner — replaces the generic "policy
   // violation has been recorded" line with a colour-coded callout that
@@ -750,7 +836,7 @@ export function violationCreatedEmail(args: {
   const rows: string[] = [];
   if (args.category)     rows.push(vRow("Category",  escape(args.category)));
   rows.push(vRow("Status", `<span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700;background:${statColor}1a;color:${statColor}">${escape(stat)}</span>`));
-  if (dateLabel)         rows.push(vRow("Date",      escape(dateLabel)));
+  if (dateLabel)         rows.push(vRow(dateRowLabel, escape(dateLabel)));
   if (args.reporterName) rows.push(vRow("Reported by", escape(args.reporterName)));
 
   const body = `
@@ -780,7 +866,7 @@ export function violationCreatedEmail(args: {
     args.category ? `Category: ${args.category}` : null,
     `Severity: ${sev}`,
     `Status: ${stat}`,
-    dateLabel ? `Date: ${dateLabel}` : null,
+    dateLabel ? `${dateRowLabel}: ${dateLabel}` : null,
     args.reporterName ? `Reported by: ${args.reporterName}` : null,
     args.description ? `\nDescription:\n${args.description}` : null,
     args.actionTaken ? `\nAction taken:\n${args.actionTaken}` : null,
@@ -915,6 +1001,78 @@ export function violationInProgressReminderEmail(args: {
     `Open for: ${args.daysOpen} day${args.daysOpen === 1 ? "" : "s"}`,
     args.reporterName ? `Reported by: ${args.reporterName}` : null,
     args.actionTaken ? `\nLast action taken:\n${args.actionTaken}` : null,
+    ``,
+    `Open: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html: SHELL(subject, body), text };
+}
+
+// ── POC assignment ────────────────────────────────────────────────────
+// Sent to the employee picked as "POC in Absence" on any leave-style
+// request (Leave / WFH / On Duty / Half Day / Comp Off). Heads-up that
+// they've been named as the backup so they can take over pending work
+// + intercept any teams coordinating with the applicant while they're
+// out.
+export function pocAssignmentEmail(args: {
+  pocName: string;
+  applicantName: string;
+  /** Free-form: "Leave (Casual Leave)" / "Work From Home" / "On Duty" / etc. */
+  requestType: string;
+  /** Human-readable date or range. "Fri, 22 May 2026" or "22–23 May". */
+  dateLabel: string;
+  /** Optional. e.g. "2 days". */
+  daysLabel?: string;
+  /** Pending tasks the applicant left for the POC to cover. */
+  workStatus: string;
+  /** Why the applicant is out (free text from the form). */
+  reason?: string;
+}): EmailContent {
+  // Subject locked in the design discussion:
+  //   "You're the POC for {Name}'s leave (22-23 May)"
+  // Generic enough to read naturally for WFH / On Duty too.
+  const subject = `You're the POC for ${args.applicantName}'s ${args.requestType.toLowerCase()} (${args.dateLabel})`;
+  const link = `${appUrl()}/dashboard/hr/approvals`;
+
+  const banner = `
+    <div style="margin:0 0 16px;padding:14px 16px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px">
+      <p style="margin:0;font-size:10.5px;color:#1e40af;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">You're the POC</p>
+      <p style="margin:6px 0 0;font-size:14px;color:#1f2937;font-weight:600;line-height:1.4">
+        ${escape(args.applicantName)} listed you as their point of contact while they're out.
+      </p>
+    </div>`;
+
+  const rows: string[] = [];
+  rows.push(vRow("Request Type", escape(args.requestType)));
+  rows.push(vRow("Date",         escape(args.dateLabel)));
+  if (args.daysLabel) rows.push(vRow("Duration", escape(args.daysLabel)));
+  if (args.reason)    rows.push(vRow("Reason",   escape(args.reason)));
+
+  const body = `
+    <p style="margin:0 0 14px;font-size:14px;color:#1f2937;line-height:1.6">
+      Hi ${escape(args.pocName)},
+    </p>
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      A heads-up: <strong>${escape(args.applicantName)}</strong> picked you as
+      the named point of contact for their upcoming time away. If teams
+      need anything during this window, expect them to reach out to you.
+    </p>
+    ${banner}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      ${rows.join("")}
+    </table>
+    ${sectionCard("Work status they left for you", args.workStatus)}
+    <p style="margin:20px 0 0;padding:12px 14px;background:#f8fafc;border-left:3px solid #0f6ecd;border-radius:0 6px 6px 0;font-size:12.5px;color:#475569;line-height:1.55">
+      You don't need to approve this — the regular L1 / L2 chain still
+      processes the request. This is just so you're not surprised.
+    </p>
+    ${ctaButton("View on dashboard", link)}
+  `;
+  const text = [
+    `Hi ${args.pocName},`,
+    `${args.applicantName} listed you as their POC for ${args.requestType} on ${args.dateLabel}${args.daysLabel ? ` (${args.daysLabel})` : ""}.`,
+    args.reason ? `\nReason: ${args.reason}` : null,
+    `\nWork status they left for you:`,
+    args.workStatus,
     ``,
     `Open: ${link}`,
   ].filter(Boolean).join("\n");

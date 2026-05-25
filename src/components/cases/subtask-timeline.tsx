@@ -73,7 +73,7 @@ export default function SubtaskTimeline({ subtasks }: { subtasks: SubtaskData[] 
                                     return people.map((person, idx) => (
                                         <span key={idx} className="flex items-center gap-1 text-[11px] text-slate-500">
                                             {person.profilePictureUrl ? (
-                                                <img src={person.profilePictureUrl} alt="" className="w-4 h-4 rounded-full object-cover" />
+                                                <img src={person.profilePictureUrl} alt="" referrerPolicy="no-referrer" className="w-4 h-4 rounded-full object-cover" />
                                             ) : (
                                                 <span className="w-4 h-4 rounded-full bg-violet-500/30 flex items-center justify-center text-[8px] text-violet-300">
                                                     {person.name.charAt(0)}

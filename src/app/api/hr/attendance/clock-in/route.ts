@@ -6,8 +6,8 @@ import { parseBody } from "@/lib/validate";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { istTodayDateOnly, istHour } from "@/lib/ist-date";
 import { isMobileRequest } from "@/lib/is-mobile-device";
-import { hasDesktopBypassHeader } from "@/lib/desktop-bypass";
 import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
+import { evaluateOfficeGeofence } from "@/lib/office-geofence";
 
 // Real GPS coordinates required so the attendance log always has a verifiable
 // physical location. Address is optional and capped to keep payloads small.
@@ -21,22 +21,6 @@ export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
 
-  // Mobile devices are blocked from clock-in UNLESS the request carries
-  // the desktop-bypass header. The client sends that header when the
-  // page URL contains `?desktop=1` (see src/lib/desktop-bypass.ts).
-  // Use cases:
-  //   • Laptop genuinely unavailable (sick day, travel) — employee opens
-  //     the URL with the bypass on their phone, clocks in, then files a
-  //     regularization for HR's audit trail.
-  //   • Developers also bypass via session.user.isDeveloper — they don't
-  //     need the URL trick.
-  if (isMobileRequest(req.headers) && !hasDesktopBypassHeader(req.headers)) {
-    return NextResponse.json(
-      { error: "Clock-in is only available on Laptop & Desktop.", code: "desktop_only" },
-      { status: 403 },
-    );
-  }
-
   try {
     const user = session!.user as any;
     let userId: number = user.dbId;
@@ -45,6 +29,33 @@ export async function POST(req: NextRequest) {
       userId = dbUser?.id!;
     }
     if (!userId) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+    // Mobile guard. Default policy: clock-in is desktop / laptop only —
+    // we don't want people clocking in from their phone in the car.
+    // Exception: when the user has an On-Duty for today (in ANY status
+    // that isn't rejected or cancelled), the expectation is they're
+    // off-site (client visit, field work, etc.) and a desktop just
+    // isn't available. Pending counts too — once HR is reviewing the
+    // request, the employee is already de-facto on the road and
+    // shouldn't be blocked from punching in while waiting for the
+    // final approval click.
+    if (isMobileRequest(req.headers)) {
+      const today = istTodayDateOnly();
+      const odForToday = await prisma.onDutyRequest.findFirst({
+        where: {
+          userId,
+          date: today,
+          status: { notIn: ["rejected", "cancelled"] },
+        },
+        select: { id: true },
+      });
+      if (!odForToday) {
+        return NextResponse.json(
+          { error: "Clock-in is only available on Laptop & Desktop. Mobile clock-in is unlocked on dates with an On-Duty request (pending or approved).", code: "desktop_only" },
+          { status: 403 },
+        );
+      }
+    }
 
     // Attendance tracking can be turned off per-employee (HR Dashboard →
     // Permissions → Payroll & Attendance). CEO + developers default OFF;
@@ -97,9 +108,17 @@ export async function POST(req: NextRequest) {
 
     const wl = (profile?.workLocation || "office").toLowerCase();
     const isRemote = !!approvedWfh || wl === "remote" || wl === "hybrid";
+    // Office geofence — compute distance + atOffice flag now so the
+    // attendance dashboard can render a reliable "At Office" badge
+    // independent of Nominatim's address text. Returns undefined
+    // fields when the office isn't configured (OFFICE_LAT / OFFICE_LNG
+    // missing), in which case we silently store nothing.
+    const geofence = evaluateOfficeGeofence(bodyLat, bodyLng);
     const location = stringifyAttLoc({
       mode: isRemote ? "remote" : "office",
       lat: bodyLat, lng: bodyLng, address: bodyAddr,
+      atOffice:             geofence.atOffice,
+      distanceFromOfficeM:  geofence.distanceM,
     });
 
     // ── Multi-session clock-in ──────────────────────────────────────────
