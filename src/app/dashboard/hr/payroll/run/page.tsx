@@ -5,10 +5,11 @@ import { useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { isHRAdmin } from "@/lib/access";
+import { canViewSalary } from "@/lib/access";
 import {
   ChevronLeft, ChevronRight, Calendar,
   CheckCircle2, PlayCircle, UserPlus, Wallet, ShieldCheck, Lock,
+  Calendar as CalendarIcon, Briefcase, SlidersHorizontal, Hourglass, UserCheck,
   X,
 } from "lucide-react";
 
@@ -108,7 +109,11 @@ const PAYROLL_TABS = [
   { key: "settings",  label: "SETTINGS",          href: "#" },
 ];
 
-export default function RunPayrollPage() {
+// Exported as a named component so the HR Admin page can embed this UI
+// in its tab=payroll slot (without showing the standalone-page tabs).
+// `embedded=true` skips the module + payroll tab strips and the outer
+// page chrome so the panel slots cleanly into the admin layout.
+export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const { data: session } = useSession();
   const user = (session?.user ?? null) as any;
 
@@ -118,7 +123,7 @@ export default function RunPayrollPage() {
   const [busyStep, setBusyStep] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
-  const isAdmin = !!user && isHRAdmin(user);
+  const isAdmin = !!user && canViewSalary(user);
 
   const { data: runsRaw } = useSWR<PayrollRun[]>(isAdmin ? "/api/hr/payroll/runs" : null, fetcher);
   const runs = Array.isArray(runsRaw) ? runsRaw : [];
@@ -139,6 +144,21 @@ export default function RunPayrollPage() {
   const activityUrl = selected?.run ? `/api/hr/payroll/runs/${selected.run.id}/activity` : null;
   const { data: activity } = useSWR<any>(isAdmin && activityUrl ? activityUrl : null, fetcher);
 
+  // Previous-month totals — used to render the "APR INR -25,14,177 ↓"
+  // delta lines under each money stat. We grab the PayrollRun for the
+  // calendar month before the selected one and hit its /totals endpoint.
+  // When the month before doesn't have a run yet (or this is the first
+  // payroll cycle ever), the trend lines just don't render — no error.
+  const prevRun = useMemo(() => {
+    if (!selected) return null;
+    const m = selected.month0 === 0 ? 11           : selected.month0 - 1;
+    const y = selected.month0 === 0 ? selected.year - 1 : selected.year;
+    return runs.find((r) => r.year === y && r.month === m) ?? null;
+  }, [selected, runs]);
+  const prevTotalsUrl = prevRun ? `/api/hr/payroll/runs/${prevRun.id}/totals` : null;
+  const { data: prevTotals } = useSWR<any>(isAdmin && prevTotalsUrl ? prevTotalsUrl : null, fetcher);
+  const prevMonthLabel = prevRun ? MONTHS_LONG[prevRun.month] : null;
+
   if (user && !isAdmin) {
     return (
       <div className="min-h-screen bg-[#f4f7f8] flex items-center justify-center">
@@ -154,19 +174,44 @@ export default function RunPayrollPage() {
   const monthDayCount   = selected ? daysInMonth(selected.year, selected.month0 + 1) : 0;
   const monthRangeText  = selected ? `(${MONTHS_LONG[selected.month0]} 1 - ${MONTHS_LONG[selected.month0]} ${monthDayCount}, ${monthDayCount} days)` : "";
 
-  // Step completion is derived from PayrollRun.status:
-  //   draft       → 0/6  (no payslips yet)
-  //   processing  → 3/6  (run is being generated)
-  //   generated   → 4/6  (payslips exist, awaiting review)
-  //   locked      → 5/6  (HR locked, awaiting payment)
-  //   paid        → 6/6  (finance confirmed money out — completed)
+  // statusForSteps still gates the Process / Lock / Mark-Paid buttons in
+  // the bottom action row — those buttons mutate run.status, not stepStates.
   const statusForSteps = selected?.run?.status ?? null;
-  const stepsCompleted =
-    statusForSteps === "paid"       ? 6 :
-    statusForSteps === "locked"     ? 5 :
-    statusForSteps === "generated"  ? 4 :
-    statusForSteps === "processing" ? 3 :
-                                      0;
+
+  // Step completion now reads from PayrollRun.stepStates (per-step
+  // "complete"/"pending" set by Mark-as-Complete buttons). Engine-status
+  // is no longer the source of truth — the 6 outer cards are prep steps,
+  // and the lock/pay actions live below the grid.
+  const stepStateUrl = selected?.run?.id ? `/api/hr/payroll/runs/${selected.run.id}/step-state` : null;
+  const { data: stepStateData } = useSWR<{ states: Record<string, string> }>(stepStateUrl, fetcher);
+  const stepStates: Record<string, string> = stepStateData?.states ?? {};
+  const stepDone = (n: number) => stepStates[String(n)] === "complete";
+  const stepsCompleted = [1, 2, 3, 4, 5, 6].filter(stepDone).length;
+
+  // Wraps the PATCH for "Mark as Complete" inside any Step panel.
+  // Creates a PayrollRun on the fly if none exists yet — without it,
+  // there's no row to attach stepStates JSON to.
+  async function markStepComplete(step: number) {
+    try {
+      const run = await ensureRun();
+      if (!run) return;
+      const res = await fetch(`/api/hr/payroll/runs/${run.id}/step-state`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ step, state: "complete" }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setBanner({ kind: "err", text: j?.error || "Could not mark step complete" });
+        return;
+      }
+      await mutate(`/api/hr/payroll/runs/${run.id}/step-state`);
+      await mutate("/api/hr/payroll/runs");
+      setBanner({ kind: "ok", text: `Step ${step} marked as complete.` });
+    } catch (e: any) {
+      setBanner({ kind: "err", text: e?.message || "Could not mark step complete" });
+    }
+  }
 
   // ─── Step action handlers ──────────────────────────────────────────────
   // All payroll-mutating actions go through the existing engine endpoints;
@@ -244,34 +289,54 @@ export default function RunPayrollPage() {
   // Pre-Payroll Check modal state — opens a side panel showing every
   // generated payslip with its key numbers so HR can review before lock.
   const [preCheckOpen, setPreCheckOpen] = useState(false);
+  // Step 1 (Leave, Attendance & Payable Units) panel.
+  const [step1Open, setStep1Open] = useState(false);
+  // Step 2 (New Joinees & Exits) panel.
+  const [step2Open, setStep2Open] = useState(false);
+  // Step 3 (Bonus, Salary Revisions & Overtime) panel.
+  const [step3Open, setStep3Open] = useState(false);
+  // Step 4 (Reimbursement, Adhoc Payment, Deduction) panel.
+  const [step4Open, setStep4Open] = useState(false);
+  // Step 5 (Salaries on Hold & Arrears) panel.
+  const [step5Open, setStep5Open] = useState(false);
+  // Step 6 (Override PT, ESI, TDS, LWF) panel.
+  const [step6Open, setStep6Open] = useState(false);
 
   // ─── Render ────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[#f4f7f8]">
-      <div className="flex items-center bg-white border-b border-slate-200 px-4 overflow-x-auto">
-        {MODULE_TABS.map((t) => (
-          <Link key={t.key} href={t.href}
-            className={`px-4 py-3 text-[11px] font-bold tracking-widest border-b-2 transition-colors whitespace-nowrap ${
-              t.key === "payroll" ? "border-[#6f42c1] text-[#6f42c1]" : "border-transparent text-slate-400 hover:text-slate-600"
-            }`}>{t.label}</Link>
-        ))}
-      </div>
+    <div className={embedded ? "" : "min-h-screen bg-[#f4f7f8]"}>
+      {/* The module / payroll-area top tabs are STANDALONE-only — when
+          the panel is embedded inside the HR Admin layout, the admin's
+          inner sidebar provides the navigation context and these
+          additional strips would just stack two tab rows on top of
+          each other. */}
+      {!embedded && (
+        <>
+          <div className="flex items-center bg-white border-b border-slate-200 px-4 overflow-x-auto">
+            {MODULE_TABS.map((t) => (
+              <Link key={t.key} href={t.href}
+                className={`px-4 py-3 text-[11px] font-bold tracking-widest border-b-2 transition-colors whitespace-nowrap ${
+                  t.key === "payroll" ? "border-[#6f42c1] text-[#6f42c1]" : "border-transparent text-slate-400 hover:text-slate-600"
+                }`}>{t.label}</Link>
+            ))}
+          </div>
+          <div className="flex items-center bg-white border-b border-slate-100 px-4 overflow-x-auto">
+            {PAYROLL_TABS.map((t) => (
+              <Link key={t.key} href={t.href}
+                className={`relative px-4 py-3 text-[11px] font-bold tracking-widest transition-colors whitespace-nowrap ${
+                  t.key === "run" ? "text-[#0f4e93]" : "text-slate-400 hover:text-slate-600"
+                }`}>
+                {t.label}
+                {t.key === "run" && (
+                  <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-0 w-0 h-0 border-l-[6px] border-r-[6px] border-b-[6px] border-l-transparent border-r-transparent border-b-[#0f4e93]" />
+                )}
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
 
-      <div className="flex items-center bg-white border-b border-slate-100 px-4 overflow-x-auto">
-        {PAYROLL_TABS.map((t) => (
-          <Link key={t.key} href={t.href}
-            className={`relative px-4 py-3 text-[11px] font-bold tracking-widest transition-colors whitespace-nowrap ${
-              t.key === "run" ? "text-[#0f4e93]" : "text-slate-400 hover:text-slate-600"
-            }`}>
-            {t.label}
-            {t.key === "run" && (
-              <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-0 w-0 h-0 border-l-[6px] border-r-[6px] border-b-[6px] border-l-transparent border-r-transparent border-b-[#0f4e93]" />
-            )}
-          </Link>
-        ))}
-      </div>
-
-      <div className="mx-auto max-w-7xl space-y-5 p-6">
+      <div className={embedded ? "space-y-5" : "mx-auto max-w-7xl space-y-5 p-6"}>
         <div className="flex items-center gap-2">
           <h1 className="text-[20px] font-bold text-slate-800">NB Media</h1>
           <button className="text-slate-400 hover:text-slate-600" aria-label="Switch entity">▾</button>
@@ -297,6 +362,11 @@ export default function RunPayrollPage() {
           employeeDeposit={totals?.employeeDeposit ?? 0}
           totalDeductions={totals?.totalDeductions ?? 0}
           totalContributions={totals?.totalContributions ?? 0}
+          prevMonthLabel={prevMonthLabel}
+          prevTotalPayrollCost={prevTotals?.totalPayrollCost ?? null}
+          prevEmployeeDeposit={prevTotals?.employeeDeposit ?? null}
+          prevTotalDeductions={prevTotals?.totalDeductions ?? null}
+          prevTotalContributions={prevTotals?.totalContributions ?? null}
         />
 
         {banner && (
@@ -320,39 +390,56 @@ export default function RunPayrollPage() {
             </div>
 
             <div className="mb-4 rounded-lg border border-sky-100 bg-sky-50/70 px-3 py-2 text-[12px] text-slate-700">
-              Ready to run payroll? Click <a className="font-semibold text-[#0f4e93] hover:underline" href="#">here</a> for a step-by-step guide.
+              Ready to run payroll? Click <a className="font-semibold text-[#0f4e93] hover:underline" href="#">here</a> for a step-by-step guide.{" "}
+              <a className="font-semibold text-[#0f4e93] hover:underline" href="#">Labour Codes 2025</a> are now in effect — please review your settings.
             </div>
 
+            {/* Six data-prep steps. Each card opens its own sub-flow when
+                clicked (Step 1/2 are scaffolds for now); engine actions
+                ((Process Payroll / Review / Lock) moved to the action row
+                below so the cards remain pure data-prep, matching Keka. */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* Step 1: Leave & Attendance — manage from attendance page */}
-              <StepCard step={1} title="Leave, Attendance & Payable Units" blurb="Lock attendance + leave for the cycle." Icon={Calendar}
-                href="/dashboard/hr/attendance" done={stepsCompleted >= 1} />
-              {/* Step 2: Joinees & Exits */}
-              <StepCard step={2} title="New Joinees & Exits" blurb="Pro-rate new joiners and exits." Icon={UserPlus}
-                href="/dashboard/hr/hiring" done={stepsCompleted >= 2} />
-              {/* Step 3: Other payments — links to admin tab where bonuses live */}
-              <StepCard step={3} title="Other Payments & Deductions" blurb="One-off bonuses / deductions for this cycle." Icon={Wallet}
-                href={selected?.run ? `/dashboard/hr/admin?tab=payroll&runId=${selected.run.id}` : "/dashboard/hr/admin?tab=payroll"}
-                done={stepsCompleted >= 3} />
-              {/* Step 4: Run payroll — generate payslips */}
-              <StepCard step={4} title="Run Payroll" blurb="Compute every payslip from the salary structure." Icon={PlayCircle}
+              <StepCard step={1} title="Leave, Attendance & Payable Units"  subtitle={stepDone(1) ? "Marked as complete" : "No Action taken"} Icon={CalendarIcon}
+                onClick={() => setStep1Open(true)} done={stepDone(1)} />
+              <StepCard step={2} title="New Joinees & Exits"                subtitle={stepDone(2) ? "Marked as complete" : "No Action taken"} Icon={UserPlus}
+                onClick={() => setStep2Open(true)} done={stepDone(2)} />
+              <StepCard step={3} title="Bonus, Salary Revisions & Overtime" subtitle={stepDone(3) ? "Marked as complete" : "No Action taken"} Icon={Briefcase}
+                onClick={() => setStep3Open(true)} done={stepDone(3)} />
+              <StepCard step={4} title="Reimbursement, Adhoc Payment, Deduction" subtitle={stepDone(4) ? "Marked as complete" : "No Action taken"} Icon={SlidersHorizontal}
+                onClick={() => setStep4Open(true)} done={stepDone(4)} />
+              <StepCard step={5} title="Salaries on Hold & Arrears"         subtitle={stepDone(5) ? "Marked as complete" : "No Action taken"} Icon={Hourglass}
+                onClick={() => setStep5Open(true)} done={stepDone(5)} />
+              <StepCard step={6} title="Override (PT, ESI, TDS, LWF)"       subtitle={stepDone(6) ? "Marked as complete" : "No Action taken"} Icon={UserCheck}
+                onClick={() => setStep6Open(true)} done={stepDone(6)} />
+            </div>
+
+            {/* Bottom action row — Process / Review / Lock — gated by run
+                status. These are the only buttons that actually mutate
+                the PayrollRun; the six step cards above just feed data
+                that the Process step then consumes. */}
+            <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+              <button
                 onClick={doRunSalary}
-                done={stepsCompleted >= 4}
-                busy={busyStep === "run-salary"}
-                cta={statusForSteps === "generated" ? "Re-generate" : "Generate payslips"} />
-              {/* Step 5: Pre-payroll check — review payslips */}
-              <StepCard step={5} title="Pre-Payroll Check" blurb="Review the computed numbers before locking." Icon={ShieldCheck}
+                disabled={busyStep === "run-salary" || statusForSteps === "locked" || statusForSteps === "paid"}
+                className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {busyStep === "run-salary" ? "Processing…" : statusForSteps === "generated" ? "Re-process Payroll" : "Process Payroll"}
+              </button>
+              <button
                 onClick={() => setPreCheckOpen(true)}
-                done={stepsCompleted >= 5}
-                cta="Review payslips"
-                disabled={!selected?.run} />
-              {/* Step 6: Finalize — lock + pay */}
-              <StepCard step={6} title="Finalize" blurb="Lock the cycle, generate payslips, mark complete." Icon={Lock}
+                disabled={!selected?.run || (totals?.payslipCount ?? 0) === 0}
+                className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Review all employees
+              </button>
+              <button
                 onClick={() => statusForSteps === "locked" ? doTransition("mark_paid") : doTransition("lock")}
-                done={stepsCompleted >= 6}
-                busy={busyStep === "finalize"}
-                cta={statusForSteps === "locked" ? "Mark paid" : "Lock run"}
-                disabled={!selected?.run || stepsCompleted < 4} />
+                disabled={!selected?.run || busyStep === "finalize" || (totals?.payslipCount ?? 0) === 0 || statusForSteps === "paid"}
+                className="px-5 py-2 rounded-lg bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {busyStep === "finalize" ? "Working…" :
+                 statusForSteps === "locked" ? "Mark Paid" : "Lock Payroll"}
+              </button>
             </div>
           </div>
 
@@ -389,8 +476,80 @@ export default function RunPayrollPage() {
       {preCheckOpen && selected?.run && (
         <PreCheckPanel runId={selected.run.id} monthLabel={monthLabelShort} onClose={() => setPreCheckOpen(false)} />
       )}
+
+      {/* Step 1 — Leave, Attendance & Payable Units side panel */}
+      {step1Open && selected && (
+        <Step1Panel
+          year={selected.year}
+          month0={selected.month0}
+          monthLabel={monthLabelShort}
+          onClose={() => setStep1Open(false)}
+          onMarkedComplete={() => markStepComplete(1)}
+        />
+      )}
+
+      {/* Step 2 — New Joinees & Exits side panel */}
+      {step2Open && selected && (
+        <Step2Panel
+          year={selected.year}
+          month0={selected.month0}
+          monthLabel={monthLabelShort}
+          onClose={() => setStep2Open(false)}
+          onMarkedComplete={() => markStepComplete(2)}
+        />
+      )}
+
+      {/* Step 3 — Bonus, Salary Revisions & Overtime side panel */}
+      {step3Open && selected && (
+        <Step3Panel
+          year={selected.year}
+          month0={selected.month0}
+          monthLabel={monthLabelShort}
+          onClose={() => setStep3Open(false)}
+          onMarkedComplete={() => markStepComplete(3)}
+        />
+      )}
+
+      {/* Step 4 — Reimbursement, Adhoc Payment, Deduction side panel */}
+      {step4Open && selected && (
+        <Step4Panel
+          year={selected.year}
+          month0={selected.month0}
+          monthLabel={monthLabelShort}
+          onClose={() => setStep4Open(false)}
+          onMarkedComplete={() => markStepComplete(4)}
+        />
+      )}
+
+      {/* Step 5 — Salaries on Hold & Arrears side panel */}
+      {step5Open && selected && (
+        <Step5Panel
+          year={selected.year}
+          month0={selected.month0}
+          monthLabel={monthLabelShort}
+          onClose={() => setStep5Open(false)}
+          onMarkedComplete={() => markStepComplete(5)}
+        />
+      )}
+
+      {/* Step 6 — Override (PT, ESI, TDS, LWF) side panel */}
+      {step6Open && selected && (
+        <Step6Panel
+          year={selected.year}
+          month0={selected.month0}
+          monthLabel={monthLabelShort}
+          onClose={() => setStep6Open(false)}
+          onMarkedComplete={() => markStepComplete(6)}
+        />
+      )}
     </div>
   );
+}
+
+// Thin page wrapper — the actual logic lives in `RunPayrollPanel` so
+// the HR Admin page can embed it inline.
+export default function RunPayrollPage() {
+  return <RunPayrollPanel />;
 }
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
@@ -471,6 +630,8 @@ function MonthStrip({ cells, selectedKey, onSelect }: {
 function StatsRow({
   totalEmployees, calendarDays, processedCount,
   totalPayrollCost, employeeDeposit, totalDeductions, totalContributions,
+  prevMonthLabel,
+  prevTotalPayrollCost, prevEmployeeDeposit, prevTotalDeductions, prevTotalContributions,
 }: {
   totalEmployees: number;
   calendarDays: number;
@@ -479,22 +640,101 @@ function StatsRow({
   employeeDeposit: number;
   totalDeductions: number;
   totalContributions: number;
+  prevMonthLabel: string | null;
+  prevTotalPayrollCost:   number | null;
+  prevEmployeeDeposit:    number | null;
+  prevTotalDeductions:    number | null;
+  prevTotalContributions: number | null;
 }) {
+  // Single horizontal row matching Keka's payroll header. The first
+  // three blocks live inside one bordered group on the left (gray
+  // background); everything past the `=` operator is per-stat with
+  // optional previous-month trend lines beneath.
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5">
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-6 items-end">
-        <StatBlock label="TOTAL EMPLOYEES" value={String(totalEmployees)} />
-        <StatBlock label="CALENDAR DAYS"   value={String(calendarDays)} />
-        <StatBlock label="PAYROLL PROCESSED" value={`${processedCount}/${totalEmployees} EMPLOYEES`} small />
-        <div className="hidden lg:flex items-center justify-center text-[16px] font-bold text-slate-400">=</div>
-        <StatBlock label="TOTAL PAYROLL COST" value={fmtInr(totalPayrollCost)} />
-        <div className="hidden lg:flex items-center justify-center text-[16px] font-bold text-slate-400">+</div>
-        <StatBlock label="EMPLOYEE DEPOSIT" value={fmtInr(employeeDeposit)} info />
+      <div className="flex items-center gap-5 flex-wrap xl:flex-nowrap">
+        {/* Left grouping: Employees / Calendar Days / Payroll Processed */}
+        <div className="flex items-end gap-6 rounded-lg border border-slate-200 bg-slate-50 px-5 py-3">
+          <StatBlock label="TOTAL EMPLOYEES" value={String(totalEmployees)} />
+          <StatBlock label="CALENDAR DAYS"   value={String(calendarDays)} />
+          <StatBlock label="PAYROLL PROCESSED" value={`${processedCount}/${totalEmployees} EMPLOYEES`} small />
+        </div>
+
+        <Operator>=</Operator>
+
+        <MoneyStat
+          label="Total Payroll Cost"
+          value={totalPayrollCost}
+          prevLabel={prevMonthLabel}
+          prevValue={prevTotalPayrollCost}
+        />
+
+        <Operator>+</Operator>
+
+        <MoneyStat
+          label="Employee Deposit"
+          value={employeeDeposit}
+          prevLabel={prevMonthLabel}
+          prevValue={prevEmployeeDeposit}
+          info="Net pay only — excludes employer contributions and one-off payments."
+        />
+
+        <Operator>+</Operator>
+
+        <MoneyStat
+          label="Total Deductions"
+          value={totalDeductions}
+          prevLabel={prevMonthLabel}
+          prevValue={prevTotalDeductions}
+        />
+
+        <Operator>+</Operator>
+
+        <MoneyStat
+          label="Total contributions"
+          value={totalContributions}
+          prevLabel={prevMonthLabel}
+          prevValue={prevTotalContributions}
+        />
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-4 pt-4 border-t border-slate-100">
-        <StatBlock label="TOTAL DEDUCTIONS"    value={fmtInr(totalDeductions)} />
-        <StatBlock label="TOTAL CONTRIBUTIONS" value={fmtInr(totalContributions)} />
-      </div>
+    </div>
+  );
+}
+
+function Operator({ children }: { children: React.ReactNode }) {
+  return <div className="text-[18px] font-bold text-slate-400 self-end pb-1">{children}</div>;
+}
+
+// Money-valued stat with an optional "PREV INR <delta> ↑/↓" trend line
+// underneath. The delta is signed (current − prev), so a drop in cost
+// from one month to the next reads as a negative number with a ↓ arrow.
+function MoneyStat({ label, value, prevLabel, prevValue, info }: {
+  label: string;
+  value: number;
+  prevLabel: string | null;
+  prevValue: number | null;
+  info?: string;
+}) {
+  const showDelta = prevLabel && prevValue != null;
+  const delta = showDelta ? value - (prevValue as number) : null;
+  const arrow = delta == null ? "" : delta > 0 ? "↑" : delta < 0 ? "↓" : "";
+  // Red for any non-zero change — same look the Keka screenshot uses.
+  // (You could swap to green for cost reductions if you prefer; HR
+  // typically reads either direction as "needs attention" so we don't.)
+  const trendColor = delta && delta !== 0 ? "text-rose-500" : "text-slate-400";
+
+  return (
+    <div className="min-w-[140px]">
+      <p className="text-[11.5px] font-medium text-slate-500 flex items-center gap-1">
+        {label}
+        {info && <span title={info} className="text-slate-400 cursor-help">ⓘ</span>}
+      </p>
+      <p className="mt-0.5 text-[18px] font-bold text-slate-800 tabular-nums">{fmtInr(value)}</p>
+      {showDelta && (
+        <p className={`mt-0.5 text-[10.5px] font-semibold ${trendColor} tabular-nums`}>
+          {prevLabel} {fmtInr(delta!)} <span className="ml-0.5">{arrow}</span>
+        </p>
+      )}
     </div>
   );
 }
@@ -511,38 +751,50 @@ function StatBlock({ label, value, small, info }: { label: string; value: string
   );
 }
 
-function StepCard({ step, title, blurb, Icon, href, onClick, done, busy, cta, disabled }: {
+function StepCard({ step, title, subtitle, Icon, href, onClick, done, busy, disabled }: {
   step: number;
   title: string;
-  blurb: string;
+  subtitle?: string;
   Icon: typeof Calendar;
   href?: string;
   onClick?: () => void;
   done?: boolean;
   busy?: boolean;
-  cta?: string;
   disabled?: boolean;
 }) {
+  // Keka-style card: title in indigo, subtitle in grey ("Last Changes on …
+  // BY Tanvi Dogra" once we wire per-step audit; "No Action taken"
+  // otherwise). No CTA chevron inside the card — clicking the whole
+  // card is the action.
   const isLink   = !!href && !onClick;
   const isAction = !!onClick;
 
+  // One muted tint per step number — matches the soft-coloured circles
+  // in the Keka mock (calendar=sky, joinees=rose, bonus=violet,
+  // reimbursement=teal, salaries-on-hold=amber, override=indigo).
+  const tints = [
+    { bg: "bg-sky-50",    fg: "text-sky-600"    },
+    { bg: "bg-rose-50",   fg: "text-rose-500"   },
+    { bg: "bg-violet-50", fg: "text-violet-600" },
+    { bg: "bg-teal-50",   fg: "text-teal-600"   },
+    { bg: "bg-amber-50",  fg: "text-amber-600"  },
+    { bg: "bg-indigo-50", fg: "text-indigo-600" },
+  ];
+  const tint = tints[(step - 1) % tints.length];
+
   const inner = (
     <div className="flex items-start gap-3">
-      <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
-        done ? "bg-emerald-100 text-emerald-700" : "bg-sky-50 text-[#0f4e93]"
+      <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+        done ? "bg-emerald-100 text-emerald-700" : `${tint.bg} ${tint.fg}`
       }`}>
-        {done ? <CheckCircle2 size={18} /> : <Icon size={18} />}
+        {done ? <CheckCircle2 size={20} /> : <Icon size={18} />}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-semibold text-slate-800 flex items-center gap-1.5">
-          <span className="text-[10px] text-slate-400 font-bold">STEP {step}</span>
-          <span className="truncate">{title}</span>
+        <p className="text-[13px] font-semibold text-[#0f4e93] truncate">
+          {title}
         </p>
-        <p className="mt-0.5 text-[11.5px] text-slate-500">{blurb}</p>
-        {cta && isAction && (
-          <p className={`mt-1 text-[11.5px] font-semibold ${busy ? "text-slate-400" : "text-[#0f4e93]"}`}>
-            {busy ? "Working…" : cta} {!busy && "→"}
-          </p>
+        {subtitle && (
+          <p className="mt-0.5 text-[11.5px] text-slate-500">{subtitle}</p>
         )}
       </div>
     </div>
@@ -635,5 +887,3051 @@ function PreCheckPanel({ runId, monthLabel, onClose }: { runId: number; monthLab
         </div>
       </aside>
     </>
+  );
+}
+
+// ─── Step 3 — Bonus, Salary Revisions & Overtime ────────────────────────────
+// Side panel with three sub-tabs:
+//   • Bonus            — fully wired to /api/hr/payroll/bonus (list + add + delete)
+//   • Salary Revisions — list of SalaryStructure rows whose effectiveFrom
+//                        falls in the selected month (read-only summary)
+//   • Overtime         — placeholder (no backend yet)
+//
+// `month0` is 0-indexed (Jan=0) so it matches PayrollRun.month.
+
+type BonusItem = {
+  id: number;
+  userId: number;
+  amount: string;
+  reason: string | null;
+  effectiveDate: string;
+  bonusType: string | null;
+  paymentStatus: string;
+  name?: string;
+  role?: string;
+};
+
+// Step 3 = Employee Salary Changes panel — 4-step internal wizard:
+//   1. BONUS              — one-off bonuses (fully wired to /api/hr/payroll/bonus)
+//   2. SALARY REVISION    — pending structure changes (placeholder; needs list endpoint)
+//   3. OVERTIME PAYMENT   — OT entries (placeholder; no backend yet)
+//   4. SHIFT ALLOWANCE    — shift allowance entries (placeholder; no backend yet)
+//
+// Sequential nav: Back + Save & Continue on steps 1-3; Back + Save & Close
+// + Mark as Complete on step 4. The wizard's `currentStep` is local state
+// — there's no per-substep persistence yet; once the outer PayrollRun
+// stepStates JSON column lands, "Mark as Complete" will flip step 3 of
+// the outer 6-step flow to done.
+type SubStep = 1 | 2 | 3 | 4;
+const SUB_STEPS: { n: SubStep; label: string }[] = [
+  { n: 1, label: "BONUS" },
+  { n: 2, label: "SALARY\nREVISION" },
+  { n: 3, label: "OVERTIME\nPAYMENT" },
+  { n: 4, label: "SHIFT\nALLOWANCE" },
+];
+
+function Step3Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
+  year: number;
+  month0: number;
+  monthLabel: string;
+  onClose: () => void;
+  onMarkedComplete?: () => void | Promise<void>;
+}) {
+  const [current, setCurrent] = useState<SubStep>(1);
+  const [showAdd, setShowAdd] = useState(false);
+
+  // Bonus list (step 1) — only data wired with a real backend right now.
+  const bonusUrl = `/api/hr/payroll/bonus?month=${month0}&year=${year}`;
+  const { data: bonusData } = useSWR<{ items: BonusItem[] }>(bonusUrl, fetcher);
+  const bonusItems = bonusData?.items ?? [];
+
+  async function handleDelete(id: number) {
+    if (!confirm("Remove this bonus?")) return;
+    const res = await fetch(`/api/hr/payroll/bonus?id=${id}`, { method: "DELETE" });
+    if (res.ok) mutate(bonusUrl);
+    else alert((await res.json().catch(() => ({})))?.error || "Delete failed");
+  }
+
+  function goBack()    { setCurrent((c) => (c > 1 ? ((c - 1) as SubStep) : c)); }
+  function goNext()    { setCurrent((c) => (c < 4 ? ((c + 1) as SubStep) : c)); }
+  async function complete() { try { await onMarkedComplete?.(); } finally { onClose(); } }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/40 z-40" onClick={onClose} />
+      <aside className="fixed top-0 right-0 bottom-0 w-full max-w-5xl bg-white shadow-2xl z-50 flex flex-col">
+        {/* ─── Header ─── */}
+        <header className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+          <h3 className="text-[15px] font-semibold text-slate-800">
+            Employee Salary Changes: {monthLabel}
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={20} /></button>
+        </header>
+
+        {/* ─── Wizard indicator + nav buttons row ─── */}
+        <div className="flex items-center justify-between px-8 py-4 border-b border-slate-100">
+          <div className="flex-1 flex items-center justify-center gap-10">
+            {SUB_STEPS.map((s, i) => {
+              const active = s.n === current;
+              return (
+                <div key={s.n} className="flex items-center gap-2">
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold transition-colors ${
+                      active
+                        ? "bg-[#6f42c1] text-white border-2 border-[#6f42c1]"
+                        : "bg-white text-slate-500 border-2 border-slate-300"
+                    }`}
+                  >
+                    {s.n}
+                  </div>
+                  <span
+                    className={`text-[11px] font-semibold tracking-wide whitespace-pre-line leading-tight ${
+                      active ? "text-[#6f42c1]" : "text-slate-500"
+                    }`}
+                  >
+                    {s.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {/* Right-side buttons */}
+          <div className="flex items-center gap-2 shrink-0">
+            {current > 1 && (
+              <button
+                onClick={goBack}
+                className="px-4 py-2 rounded-md border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Back
+              </button>
+            )}
+            {current < 4 ? (
+              <button
+                onClick={goNext}
+                className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499]"
+              >
+                Save &amp; Continue
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2 rounded-md border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Save &amp; Close
+                </button>
+                <button
+                  onClick={complete}
+                  className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499]"
+                >
+                  Mark as Complete
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ─── Body — main column + Help Resources rail ─── */}
+        <div className="flex-1 overflow-y-auto bg-slate-50">
+          <div className="flex gap-5 p-5">
+            <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-5">
+              {current === 1 && (
+                <BonusSubStep
+                  items={bonusItems}
+                  monthLabel={monthLabel}
+                  onAdd={() => setShowAdd(true)}
+                  onDelete={handleDelete}
+                />
+              )}
+              {current === 2 && <SalaryRevisionSubStep   year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 3 && <OvertimePaymentSubStep  year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 4 && <ShiftAllowanceSubStep   year={year} month0={month0} monthLabel={monthLabel} />}
+            </div>
+
+            {/* Help Resources rail — distinct content per sub-step */}
+            <aside className="hidden lg:block w-[280px] shrink-0">
+              <HelpResources step={current} />
+            </aside>
+          </div>
+        </div>
+      </aside>
+
+      {/* Add bonus modal */}
+      {showAdd && (
+        <AddBonusModal
+          year={year}
+          month0={month0}
+          monthLabel={monthLabel}
+          onClose={() => setShowAdd(false)}
+          onAdded={() => { mutate(bonusUrl); setShowAdd(false); }}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── Step 3 sub-steps ──────────────────────────────────────────────────────
+
+function BonusSubStep({ items, monthLabel, onAdd, onDelete }: {
+  items: BonusItem[];
+  monthLabel: string;
+  onAdd: () => void;
+  onDelete: (id: number) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const filtered = items.filter((b) =>
+    !search ||
+    (b.name || "").toLowerCase().includes(search.toLowerCase()) ||
+    (b.bonusType || "").toLowerCase().includes(search.toLowerCase()),
+  );
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Bonus</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        All pending bonuses to be paid (including any past unpaid bonuses) will be shown here.
+        New bonuses can also be added using the <span className="font-semibold">+ Add bonus</span> button.
+      </p>
+      <div className="flex items-center gap-2 mb-3">
+        <button
+          onClick={onAdd}
+          className="px-3 py-1.5 rounded-md border border-[#6f42c1]/40 text-[#6f42c1] text-[12px] font-semibold hover:bg-[#6f42c1]/5"
+        >
+          + Add bonus
+        </button>
+        <div className="ml-auto relative w-[260px]">
+          <input
+            value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search"
+            className="w-full h-8 pl-8 pr-3 text-[12px] rounded-md border border-slate-200 bg-white focus:outline-none focus:border-[#6f42c1]"
+          />
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[11px]">⌕</span>
+        </div>
+      </div>
+      <KekaTable
+        columns={["Employee", "Payout Date", "Bonus Type", "Amount", "Pay Action", "Comment"]}
+        rightAlignedColumns={[3]}
+      >
+        {filtered.length === 0 ? (
+          <EmptyRow colSpan={6} text={`No records found for ${monthLabel}.`} />
+        ) : (
+          filtered.map((b) => (
+            <tr key={b.id} className="border-b border-slate-100 hover:bg-slate-50/60">
+              <td className="px-4 py-3 text-slate-800">
+                {b.name ?? `User ${b.userId}`}
+                <span className="block text-[10.5px] text-slate-400">{b.role ?? "—"}</span>
+              </td>
+              <td className="px-4 py-3 text-slate-600 tabular-nums">{new Date(b.effectiveDate).toISOString().slice(0, 10)}</td>
+              <td className="px-4 py-3 text-slate-600">{b.bonusType || "—"}</td>
+              <td className="px-4 py-3 text-right tabular-nums font-semibold">{fmtInr(parseFloat(b.amount))}</td>
+              <td className="px-4 py-3 text-slate-600">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-emerald-50 text-emerald-700">
+                  {b.paymentStatus === "paid_past" ? "Paid" : "Pay"}
+                </span>
+              </td>
+              <td className="px-4 py-3 text-slate-500 text-[12px]">
+                {b.reason || <span className="text-slate-300">—</span>}
+                <button
+                  onClick={() => onDelete(b.id)}
+                  className="ml-2 text-[11px] text-rose-500 hover:underline"
+                >Remove</button>
+              </td>
+            </tr>
+          ))
+        )}
+      </KekaTable>
+      <Pagination count={filtered.length} />
+    </>
+  );
+}
+
+function SalaryRevisionSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+  type Row = {
+    id: number; userId: number; userName: string | null; employeeId: string | null;
+    oldCtc: string | null; newCtc: string | null; effectiveDate: string | null;
+    changedAt: string; actorName: string | null;
+  };
+  const url = `/api/hr/payroll/salary-revisions?month=${month0}&year=${year}`;
+  const { data } = useSWR<{ items: Row[] }>(url, fetcher);
+  const items = data?.items ?? [];
+
+  function pct(oldS: string | null, newS: string | null) {
+    const o = parseFloat(oldS ?? "0"); const n = parseFloat(newS ?? "0");
+    if (!o || !n) return "—";
+    const d = ((n - o) / o) * 100;
+    return `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`;
+  }
+
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Salary Revision</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        SalaryStructure changes (CTC modified) during {monthLabel}. Source: AuditLog. Edit individual structures via the employee profile's Finances tab.
+      </p>
+      <div className="flex items-center justify-end mb-3"><SearchBox /></div>
+      <KekaTable columns={["Employee Number", "Employee Name", "Old CTC", "New CTC", "Change %", "Effective From", "By"]}>
+        {items.length === 0 ? (
+          <EmptyRow colSpan={7} text={`No salary revisions for ${monthLabel}.`} />
+        ) : (
+          items.map((r) => (
+            <tr key={r.id} className="border-t border-slate-100">
+              <td className="px-3 py-2 text-[12.5px] font-mono text-slate-700">{r.employeeId ?? "—"}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-800">{r.userName ?? `User ${r.userId}`}</td>
+              <td className="px-3 py-2 text-[12.5px] tabular-nums text-slate-600">{r.oldCtc ? fmtInr(parseFloat(r.oldCtc)) : "—"}</td>
+              <td className="px-3 py-2 text-[12.5px] tabular-nums text-slate-800 font-semibold">{r.newCtc ? fmtInr(parseFloat(r.newCtc)) : "—"}</td>
+              <td className="px-3 py-2 text-[12.5px] text-emerald-600 font-semibold">{pct(r.oldCtc, r.newCtc)}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-700">{r.effectiveDate ? new Date(r.effectiveDate).toLocaleDateString() : "—"}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-500">{r.actorName ?? "—"}</td>
+            </tr>
+          ))
+        )}
+      </KekaTable>
+      <Pagination count={items.length} />
+    </>
+  );
+}
+
+// Typed adhoc sub-step (overtime / shift_allowance / arrears) — reuses the
+// AdhocLineItem table with a fixed `type` value so the engine treats it the
+// same as a normal adhoc payment.
+function TypedAdhocSubStep({ year, month0, monthLabel, type, title, blurb }: {
+  year: number; month0: number; monthLabel: string;
+  type: string; title: string; blurb: string;
+}) {
+  const url = `/api/hr/payroll/adhoc?month=${month0}&year=${year}&kind=payment`;
+  type AdhocRow = { id: number; userId: number; userName: string; type: string | null; amount: string; comment: string | null };
+  const { data } = useSWR<{ items: AdhocRow[] }>(url, fetcher);
+  const filtered = (data?.items ?? []).filter((r) => r.type === type);
+
+  async function remove(id: number) {
+    if (!confirm("Remove this entry?")) return;
+    const res = await fetch(`/api/hr/payroll/adhoc?id=${id}`, { method: "DELETE" });
+    if (res.ok) mutate(url);
+    else alert((await res.json().catch(() => ({})))?.error || "Delete failed");
+  }
+
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">{title}</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">{blurb}</p>
+      <div className="flex items-center justify-end mb-3"><SearchBox /></div>
+      <KekaTable columns={["Employee", "Amount", "Comment", "Action"]} rightAlignedColumns={[1]}>
+        {filtered.length === 0 ? (
+          <EmptyRow colSpan={4} text={`No ${title.toLowerCase()} entries for ${monthLabel}.`} />
+        ) : (
+          filtered.map((r) => (
+            <tr key={r.id} className="border-t border-slate-100">
+              <td className="px-3 py-2 text-[12.5px] text-slate-800">{r.userName}</td>
+              <td className="px-3 py-2 text-[12.5px] text-right tabular-nums font-semibold">{fmtInr(parseFloat(r.amount))}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-500">{r.comment ?? "—"}</td>
+              <td className="px-3 py-2"><button onClick={() => remove(r.id)} className="text-[11px] text-rose-500 hover:underline">Remove</button></td>
+            </tr>
+          ))
+        )}
+      </KekaTable>
+      <Pagination count={filtered.length} />
+      <p className="mt-3 text-[11px] text-slate-400">
+        These reuse <span className="font-mono">AdhocLineItem</span> (kind=payment, type={type}) so the engine includes them in gross.
+        Add new entries from Step 4 → Adhoc Payments with type set to <span className="font-mono">{type}</span>.
+      </p>
+    </>
+  );
+}
+
+function OvertimePaymentSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+  return <TypedAdhocSubStep year={year} month0={month0} monthLabel={monthLabel}
+    type="overtime"
+    title="Overtime Payment"
+    blurb={`Approved overtime payments queued for ${monthLabel}. Engine adds these to gross pay.`} />;
+}
+
+function ShiftAllowanceSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+  return <TypedAdhocSubStep year={year} month0={month0} monthLabel={monthLabel}
+    type="shift_allowance"
+    title="Shift Allowance Payment"
+    blurb={`Shift allowance entries for ${monthLabel}. Engine adds these to gross pay.`} />;
+}
+
+// ─── Step 3 helpers ─────────────────────────────────────────────────────────
+
+function KekaTable({ columns, children, rightAlignedColumns = [], firstColumnIsCheckbox = false }: {
+  columns: string[];
+  children: React.ReactNode;
+  rightAlignedColumns?: number[];
+  // When true, prepends an empty header cell with a checkbox (header
+  // checkbox is for "select all" — wired only when inline editing for
+  // adhoc payments / deductions lands).
+  firstColumnIsCheckbox?: boolean;
+}) {
+  return (
+    <div className="rounded-md border border-slate-200 overflow-hidden">
+      <table className="w-full text-[12.5px]">
+        <thead className="bg-slate-50 border-b border-slate-200">
+          <tr>
+            {firstColumnIsCheckbox && (
+              <th className="w-10 px-3 py-2.5">
+                <input type="checkbox" disabled className="rounded border-slate-300" />
+              </th>
+            )}
+            {columns.map((c, i) => (
+              <th
+                key={c}
+                className={`px-4 py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-slate-500 ${
+                  rightAlignedColumns.includes(i) ? "text-right" : "text-left"
+                }`}
+              >
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {
+  return (
+    <tr>
+      <td colSpan={colSpan} className="text-center text-[12.5px] text-slate-400 py-14">
+        {text}
+      </td>
+    </tr>
+  );
+}
+
+function Pagination({ count }: { count: number }) {
+  // Static for now — every sub-step shows ≤ a single page worth of rows.
+  // Real pagination only matters once we have hundreds of bonuses, which
+  // isn't a realistic Indian-org-size case for this UI.
+  const totalPages = Math.max(1, Math.ceil(count / 25));
+  return (
+    <div className="mt-3 flex items-center justify-end gap-3 text-[11px] text-slate-500">
+      <span>{count === 0 ? "0 to 0 of 0" : `1 to ${count} of ${count}`}</span>
+      <span className="text-slate-300">|</span>
+      <button disabled className="opacity-40">⏮</button>
+      <button disabled className="opacity-40">‹</button>
+      <span>Page {count === 0 ? 0 : 1} of {count === 0 ? 0 : totalPages}</span>
+      <button disabled className="opacity-40">›</button>
+      <button disabled className="opacity-40">⏭</button>
+    </div>
+  );
+}
+
+function HelpResources({ step }: { step: SubStep }) {
+  // Sub-step-specific FAQ links. Match Keka's wording so it reads as
+  // familiar to anyone who's used their product.
+  const sets: Record<SubStep, { question: string }[]> = {
+    1: [
+      { question: "Why am I not able to see bonus for an employee?" },
+      { question: "How can I pay more than 100% of promised bonus?" },
+      { question: "How can I process bonus separately from salary?" },
+      { question: "How can I manage TDS on bonus?" },
+    ],
+    2: [
+      { question: "How do I revise an employee's salary mid-month?" },
+      { question: "What does 'Release' do under Revision Action?" },
+      { question: "Can I hold a salary revision for next cycle?" },
+    ],
+    3: [
+      { question: "Why is zero overtime shown for few employees?" },
+      { question: "Why am I not able to see overtime for an employee?" },
+      { question: "How to add/update hourly pay formula for overtime?" },
+      { question: "Why overtime paid hours are less than total overtime worked?" },
+    ],
+    4: [
+      { question: "Why am I not able to see shift allowance for an employee?" },
+    ],
+  };
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <h5 className="text-[13px] font-semibold text-slate-800 mb-3 flex items-center justify-between">
+        Help Resources
+        <span className="text-slate-400 text-[14px]">▾</span>
+      </h5>
+      <ul className="space-y-2.5">
+        {sets[step].map((q) => (
+          <li key={q.question} className="flex items-start gap-2">
+            <a href="#" className="text-[12px] text-slate-700 hover:text-[#6f42c1] hover:underline flex-1">{q.question}</a>
+            <span className="text-slate-400">↗</span>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-4 pt-4 border-t border-slate-100">
+        <p className="text-[12px] font-semibold text-slate-800">Still need help?</p>
+        <p className="text-[11.5px] text-slate-500 mt-0.5">If your question isn't answered above, we're here for you.</p>
+      </div>
+    </div>
+  );
+}
+
+// Add-bonus modal — employee picker + amount + type + reason. Posts
+// to /api/hr/payroll/bonus then mutates the parent list.
+function AddBonusModal({ year, month0, monthLabel, onClose, onAdded }: {
+  year: number;
+  month0: number;
+  monthLabel: string;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const { data: empData } = useSWR<any[]>("/api/hr/employees", fetcher);
+  const employees = Array.isArray(empData) ? empData : (empData as any)?.employees ?? [];
+
+  const [userId, setUserId]               = useState<number | "">("");
+  const [amount, setAmount]               = useState<string>("");
+  const [bonusType, setBonusType]         = useState<string>("Performance Bonus");
+  const [reason, setReason]               = useState<string>("");
+  const [effectiveDate, setEffectiveDate] = useState<string>(() => {
+    // Default to the 1st of the selected payroll month so the bonus
+    // lands in the cycle by default.
+    return `${year}-${String(month0 + 1).padStart(2, "0")}-01`;
+  });
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState<string | null>(null);
+
+  const TYPES = [
+    "Performance Bonus", "Referral Bonus", "Joining Bonus", "Retention Bonus",
+    "Overtime", "Festival Bonus", "Other",
+  ];
+
+  async function submit() {
+    setError(null);
+    if (!userId) { setError("Pick an employee"); return; }
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) { setError("Amount must be positive"); return; }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/hr/payroll/bonus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, amount: amt, reason, effectiveDate, bonusType, paymentStatus: "due_future" }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Could not add");
+      }
+      onAdded();
+    } catch (e: any) {
+      setError(e?.message || "Could not add");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/60 z-[60]" onClick={onClose} />
+      <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 pointer-events-none">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 pointer-events-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-[14px] font-semibold text-slate-800">Add Bonus — {monthLabel}</h3>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={16} /></button>
+          </div>
+
+          {error && (
+            <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11.5px] text-rose-700">{error}</div>
+          )}
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Employee</label>
+              <select
+                value={userId}
+                onChange={(e) => setUserId(e.target.value ? Number(e.target.value) : "")}
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+              >
+                <option value="">Select…</option>
+                {employees.map((u: any) => (
+                  <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Amount (INR)</label>
+                <input
+                  type="number" min={0} step={1}
+                  value={amount} onChange={(e) => setAmount(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white tabular-nums"
+                  placeholder="e.g. 5000"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Effective Date</label>
+                <input
+                  type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Type</label>
+              <select
+                value={bonusType} onChange={(e) => setBonusType(e.target.value)}
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+              >
+                {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Reason / Note (optional)</label>
+              <textarea
+                value={reason} onChange={(e) => setReason(e.target.value)} rows={2}
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+                placeholder="e.g. Q1 over-performance"
+              />
+            </div>
+          </div>
+
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <button onClick={onClose} className="px-4 py-2 rounded-md border border-slate-200 text-[12.5px] text-slate-700 hover:bg-slate-50">Cancel</button>
+            <button
+              onClick={submit} disabled={saving}
+              className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499] disabled:opacity-60"
+            >
+              {saving ? "Adding…" : "Add bonus"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── Step 4 — Reimbursement, Adhoc Payment, Deduction ────────────────────────
+// 4-step internal wizard (mirrors Step 3's chrome):
+//   1. SALARY COMPONENT CLAIM — Flexi Benefit Plan / declared salary
+//      components claimed this month (placeholder; no backend yet)
+//   2. EXPENSES               — Cash Advance Requests + expense claims
+//      (placeholder; the existing Expense model exists but isn't yet
+//      filtered into this UI)
+//   3. ADHOC PAYMENTS         — one-off positive payouts not tied to a
+//      bonus type (placeholder; we may reuse EmployeeBonus with type
+//      "Adhoc" once we wire the inline editor)
+//   4. ADHOC DEDUCTIONS       — one-off negative deductions (no model
+//      yet; would need a new ImEmployeeDeduction model or signed amounts
+//      on EmployeeBonus)
+//
+// All four steps render the Keka-style scaffolding (info banner +
+// search + columns + empty state + pagination) so HR sees the expected
+// shape; backend wiring is per-step TODO.
+
+type Step4SubStep = 1 | 2 | 3 | 4;
+const STEP4_SUB_STEPS: { n: Step4SubStep; label: string }[] = [
+  { n: 1, label: "SALARY\nCOMPONENT\nCLAIM" },
+  { n: 2, label: "EXPENSES" },
+  { n: 3, label: "ADHOC\nPAYMENTS" },
+  { n: 4, label: "ADHOC\nDEDUCTIONS" },
+];
+
+function Step4Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
+  year: number;
+  month0: number;
+  monthLabel: string;
+  onClose: () => void;
+  onMarkedComplete?: () => void | Promise<void>;
+}) {
+  const [current, setCurrent] = useState<Step4SubStep>(1);
+
+  function goBack()   { setCurrent((c) => (c > 1 ? ((c - 1) as Step4SubStep) : c)); }
+  function goNext()   { setCurrent((c) => (c < 4 ? ((c + 1) as Step4SubStep) : c)); }
+  async function complete() { try { await onMarkedComplete?.(); } finally { onClose(); } }
+
+  // Avoid "unused parameter" TS warnings — these are reserved for when
+  // the backend wiring lands per-sub-step.
+  void year; void month0;
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/40 z-40" onClick={onClose} />
+      <aside className="fixed top-0 right-0 bottom-0 w-full max-w-5xl bg-white shadow-2xl z-50 flex flex-col">
+        {/* Header */}
+        <header className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+          <h3 className="text-[15px] font-semibold text-slate-800">
+            Reimbursement, Adhoc Payment, Deduction: {monthLabel}
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={20} /></button>
+        </header>
+
+        {/* Wizard indicator + nav buttons */}
+        <div className="flex items-center justify-between px-8 py-4 border-b border-slate-100">
+          <div className="flex-1 flex items-center justify-center gap-10">
+            {STEP4_SUB_STEPS.map((s) => {
+              const active = s.n === current;
+              return (
+                <div key={s.n} className="flex items-center gap-2">
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold transition-colors ${
+                      active
+                        ? "bg-[#6f42c1] text-white border-2 border-[#6f42c1]"
+                        : "bg-white text-slate-500 border-2 border-slate-300"
+                    }`}
+                  >
+                    {s.n}
+                  </div>
+                  <span
+                    className={`text-[11px] font-semibold tracking-wide whitespace-pre-line leading-tight ${
+                      active ? "text-[#6f42c1]" : "text-slate-500"
+                    }`}
+                  >
+                    {s.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {current > 1 && (
+              <button
+                onClick={goBack}
+                className="px-4 py-2 rounded-md border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Back
+              </button>
+            )}
+            {current < 4 ? (
+              <button
+                onClick={goNext}
+                className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499]"
+              >
+                Save &amp; Continue
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2 rounded-md border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Save &amp; Close
+                </button>
+                <button
+                  onClick={complete}
+                  className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499]"
+                >
+                  Mark as Complete
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto bg-slate-50">
+          <div className="flex gap-5 p-5">
+            <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-5">
+              {current === 1 && <SalaryComponentClaimSubStep year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 2 && <ExpensesSubStep             year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 3 && (
+                <AdhocLineItemsSubStep
+                  kind="payment"
+                  year={year}
+                  month0={month0}
+                  monthLabel={monthLabel}
+                />
+              )}
+              {current === 4 && (
+                <AdhocLineItemsSubStep
+                  kind="deduction"
+                  year={year}
+                  month0={month0}
+                  monthLabel={monthLabel}
+                />
+              )}
+            </div>
+            <aside className="hidden lg:block w-[280px] shrink-0">
+              <HelpResourcesStep4 step={current} />
+            </aside>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// ─── Step 4 sub-steps ──────────────────────────────────────────────────────
+
+function SalaryComponentClaimSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+  // Salary-component claims live in the existing Expense table, but
+  // distinguish themselves with category != travel/food/etc — for now
+  // we expose any Expense row whose category is "component" or whose
+  // title contains "FBP". When the dedicated FlexiBenefitClaim model lands
+  // this query will switch over.
+  type Row = { id: number; userId: number; userName: string; employeeId: string | null; title: string; category: string; amount: string; expenseDate: string; status: string };
+  const url = `/api/hr/payroll/expenses?month=${month0}&year=${year}`;
+  const { data } = useSWR<{ items: Row[] }>(url, fetcher);
+  const items = (data?.items ?? []).filter((r) => r.category === "component" || /fbp|component/i.test(r.title));
+
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Salary Component Claim</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        FBP / flexible-component claims with expense date in {monthLabel}. Source: Expense rows tagged as components.
+      </p>
+      <div className="flex items-center justify-end mb-3"><SearchBox /></div>
+      <KekaTable columns={["Employee", "Component", "Amount", "Date", "Status"]} rightAlignedColumns={[2]}>
+        {items.length === 0 ? (
+          <EmptyRow colSpan={5} text={`No component claims for ${monthLabel}.`} />
+        ) : (
+          items.map((r) => (
+            <tr key={r.id} className="border-t border-slate-100">
+              <td className="px-3 py-2 text-[12.5px] text-slate-800">{r.userName}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-700">{r.title}</td>
+              <td className="px-3 py-2 text-[12.5px] text-right tabular-nums font-semibold">{fmtInr(parseFloat(r.amount))}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-700">{new Date(r.expenseDate).toLocaleDateString()}</td>
+              <td className="px-3 py-2"><StatusPill status={r.status} /></td>
+            </tr>
+          ))
+        )}
+      </KekaTable>
+      <Pagination count={items.length} />
+    </>
+  );
+}
+
+function ExpensesSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+  type Row = { id: number; userId: number; userName: string; employeeId: string | null; title: string; category: string; amount: string; expenseDate: string; status: string };
+  const url = `/api/hr/payroll/expenses?month=${month0}&year=${year}`;
+  const { data } = useSWR<{ items: Row[] }>(url, fetcher);
+  const items = (data?.items ?? []).filter((r) => r.category !== "component" && !/fbp|component/i.test(r.title));
+
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Expenses</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        Pending and approved expense claims (travel, food, equipment, etc.) with expense date in {monthLabel}.
+      </p>
+      <div className="flex items-center justify-end mb-3"><SearchBox /></div>
+      <KekaTable columns={["Employee", "Title", "Category", "Amount", "Date", "Status"]} rightAlignedColumns={[3]}>
+        {items.length === 0 ? (
+          <EmptyRow colSpan={6} text={`No expense claims for ${monthLabel}.`} />
+        ) : (
+          items.map((r) => (
+            <tr key={r.id} className="border-t border-slate-100">
+              <td className="px-3 py-2 text-[12.5px] text-slate-800">{r.userName}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-700">{r.title}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-600 capitalize">{r.category}</td>
+              <td className="px-3 py-2 text-[12.5px] text-right tabular-nums font-semibold">{fmtInr(parseFloat(r.amount))}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-700">{new Date(r.expenseDate).toLocaleDateString()}</td>
+              <td className="px-3 py-2"><StatusPill status={r.status} /></td>
+            </tr>
+          ))
+        )}
+      </KekaTable>
+      <Pagination count={items.length} />
+    </>
+  );
+}
+
+// Adhoc Payments + Adhoc Deductions share the exact same UI shape
+// (table + Add Employee + import-previous + delete-selected); the only
+// thing that differs is the `kind` field on the row and the labels.
+// One component, one set of behaviors.
+type AdhocItem = {
+  id: number;
+  userId: number;
+  type: string | null;
+  amount: string;
+  comment: string | null;
+  name?: string;
+  role?: string;
+};
+
+function AdhocLineItemsSubStep({ kind, year, month0, monthLabel }: {
+  kind: "payment" | "deduction";
+  year: number;
+  month0: number;
+  monthLabel: string;
+}) {
+  const noun       = kind === "payment" ? "Payment"      : "Deduction";
+  const nounLower  = kind === "payment" ? "payment"      : "deduction";
+  const importThis = kind === "payment" ? "Import Adhoc Payments" : "Import Adhoc Deductions";
+
+  const url = `/api/hr/payroll/adhoc?month=${month0}&year=${year}&kind=${kind}`;
+  const { data } = useSWR<{ items: AdhocItem[] }>(url, fetcher);
+  const items = data?.items ?? [];
+
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [showAdd, setShowAdd] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const filtered = items.filter((it) =>
+    !search ||
+    (it.name || "").toLowerCase().includes(search.toLowerCase()) ||
+    (it.type || "").toLowerCase().includes(search.toLowerCase()),
+  );
+
+  function toggleOne(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleAll() {
+    if (selected.size === filtered.length) setSelected(new Set());
+    else setSelected(new Set(filtered.map((it) => it.id)));
+  }
+
+  async function handleDeleteSelected() {
+    if (selected.size === 0) return;
+    if (!confirm(`Delete ${selected.size} adhoc ${nounLower}${selected.size === 1 ? "" : "s"}?`)) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch("/api/hr/payroll/adhoc", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selected) }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Delete failed");
+      setSelected(new Set());
+      mutate(url);
+    } catch (e: any) {
+      setError(e?.message || "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleImportPrev() {
+    const srcMonth = month0 === 0 ? 11 : month0 - 1;
+    const srcYear  = month0 === 0 ? year - 1 : year;
+    if (!confirm(`Import adhoc ${nounLower}s from ${MONTHS_LONG[srcMonth]}-${srcYear} into ${monthLabel}? Employees who already have a row this month are skipped.`)) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch("/api/hr/payroll/adhoc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          copyFrom: { month: srcMonth, year: srcYear },
+          toMonth: month0,
+          toYear: year,
+          kind,
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j?.error || "Import failed");
+      alert(`Imported ${j.inserted ?? 0} row(s) from ${MONTHS_LONG[srcMonth]}-${srcYear}.`);
+      mutate(url);
+    } catch (e: any) {
+      setError(e?.message || "Import failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleImportFile() {
+    // CSV import — placeholder. When wired, parse the CSV client-side
+    // into [{userId, type, amount, comment}] and POST each row (or
+    // extend the API with a bulk-rows endpoint).
+    alert(`Bulk CSV import for adhoc ${nounLower}s is coming soon. Use "+ Add Employee" or "Import Data From Previous Month" for now.`);
+  }
+
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Adhoc {noun}s</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        {kind === "payment"
+          ? "Adhoc payments that are supposed to be paid to the employees in this month, can be managed below."
+          : "Adhoc deductions that are supposed to be deducted from the employees salary in this month, can be managed below."}
+      </p>
+
+      {error && (
+        <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11.5px] text-rose-700">
+          {error}
+        </div>
+      )}
+
+      {/* Toolbar */}
+      <div className="mb-3 space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setShowAdd(true)}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-md border border-[#6f42c1]/40 text-[#6f42c1] text-[12px] font-semibold hover:bg-[#6f42c1]/5 disabled:opacity-50"
+          >
+            + Add Employee
+          </button>
+          <span className="text-[11px] text-slate-400 font-semibold">OR</span>
+          <button
+            onClick={handleImportPrev}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-md border border-[#6f42c1]/40 text-[#6f42c1] text-[12px] font-semibold hover:bg-[#6f42c1]/5 disabled:opacity-50"
+          >
+            Import Data From Previous Month
+          </button>
+          <span className="text-[11px] text-slate-400 font-semibold">OR</span>
+          <button
+            onClick={handleImportFile}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-md border border-[#6f42c1]/40 text-[#6f42c1] text-[12px] font-semibold hover:bg-[#6f42c1]/5 disabled:opacity-50"
+          >
+            {importThis}
+          </button>
+          <button
+            onClick={handleDeleteSelected}
+            disabled={busy || selected.size === 0}
+            className={`px-3 py-1.5 rounded-md border text-[12px] font-semibold ${
+              selected.size > 0
+                ? "border-rose-300 text-rose-600 hover:bg-rose-50"
+                : "border-slate-200 text-slate-400 opacity-50 cursor-not-allowed"
+            }`}
+          >
+            Delete{selected.size > 0 ? ` (${selected.size})` : ""}
+          </button>
+        </div>
+        <div className="w-[260px]">
+          <div className="relative w-full">
+            <input
+              value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search"
+              className="w-full h-8 pl-8 pr-3 text-[12px] rounded-md border border-slate-200 bg-white focus:outline-none focus:border-[#6f42c1]"
+            />
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[11px]">⌕</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-md border border-slate-200 overflow-hidden">
+        <table className="w-full text-[12.5px]">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="w-10 px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={filtered.length > 0 && selected.size === filtered.length}
+                  onChange={toggleAll}
+                  className="rounded border-slate-300"
+                />
+              </th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Employee</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Adhoc {noun} Type</th>
+              <th className="px-4 py-2.5 text-right text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Amount</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Comment</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="text-center text-[12.5px] text-slate-400 py-14">No records found</td>
+              </tr>
+            ) : (
+              filtered.map((it) => (
+                <tr key={it.id} className="border-b border-slate-100 hover:bg-slate-50/60">
+                  <td className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(it.id)}
+                      onChange={() => toggleOne(it.id)}
+                      className="rounded border-slate-300"
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-slate-800">
+                    {it.name ?? `User ${it.userId}`}
+                    <span className="block text-[10.5px] text-slate-400">{it.role ?? "—"}</span>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{it.type || "—"}</td>
+                  <td className="px-4 py-3 text-right tabular-nums font-semibold">{fmtInr(parseFloat(it.amount))}</td>
+                  <td className="px-4 py-3 text-slate-500 text-[12px]">{it.comment || <span className="text-slate-300">—</span>}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={async () => {
+                        if (!confirm("Remove this row?")) return;
+                        await fetch(`/api/hr/payroll/adhoc?id=${it.id}`, { method: "DELETE" });
+                        mutate(url);
+                      }}
+                      className="text-[11.5px] text-rose-500 hover:underline"
+                    >Remove</button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Pagination count={filtered.length} />
+
+      {showAdd && (
+        <AddAdhocModal
+          kind={kind}
+          year={year}
+          month0={month0}
+          monthLabel={monthLabel}
+          existingUserIds={new Set(items.map((it) => it.userId))}
+          onClose={() => setShowAdd(false)}
+          onAdded={() => { mutate(url); setShowAdd(false); }}
+        />
+      )}
+    </>
+  );
+}
+
+function AddAdhocModal({ kind, year, month0, monthLabel, existingUserIds, onClose, onAdded }: {
+  kind: "payment" | "deduction";
+  year: number;
+  month0: number;
+  monthLabel: string;
+  existingUserIds: Set<number>;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const noun = kind === "payment" ? "Payment" : "Deduction";
+  const { data: empData } = useSWR<any>("/api/hr/employees", fetcher);
+  const employees: any[] = Array.isArray(empData) ? empData : (empData as any)?.employees ?? [];
+
+  const [userId, setUserId]   = useState<number | "">("");
+  const [type, setType]       = useState<string>(kind === "payment" ? "Other Payment" : "Other Deduction");
+  const [amount, setAmount]   = useState<string>("");
+  const [comment, setComment] = useState<string>("");
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+
+  // A short opinionated dropdown of common types — same pattern as
+  // AddBonusModal. HR can still type free-form by picking "Other" and
+  // editing the field — but for now keeping it dropdown-only.
+  const PAYMENT_TYPES   = ["Performance", "Joining Adhoc", "Referral Adhoc", "Reimbursement", "Travel", "Other Payment"];
+  const DEDUCTION_TYPES = ["Salary Advance Recovery", "Loan Recovery", "Penalty", "Notice Period Recovery", "Other Deduction"];
+  const TYPES = kind === "payment" ? PAYMENT_TYPES : DEDUCTION_TYPES;
+
+  async function submit() {
+    setError(null);
+    if (!userId) { setError("Pick an employee"); return; }
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) { setError("Amount must be positive"); return; }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/hr/payroll/adhoc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month: month0, year, kind, userId, type, amount: amt, comment }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Could not add");
+      }
+      onAdded();
+    } catch (e: any) {
+      setError(e?.message || "Could not add");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/60 z-[60]" onClick={onClose} />
+      <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 pointer-events-none">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 pointer-events-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-[14px] font-semibold text-slate-800">Add Adhoc {noun} — {monthLabel}</h3>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={16} /></button>
+          </div>
+
+          {error && (
+            <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11.5px] text-rose-700">{error}</div>
+          )}
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Employee</label>
+              <select
+                value={userId}
+                onChange={(e) => setUserId(e.target.value ? Number(e.target.value) : "")}
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+              >
+                <option value="">Select…</option>
+                {employees.map((u: any) => {
+                  const already = existingUserIds.has(u.id);
+                  return (
+                    <option key={u.id} value={u.id} disabled={already}>
+                      {u.name} ({u.role}){already ? " — already added this month" : ""}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Type</label>
+                <select
+                  value={type} onChange={(e) => setType(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+                >
+                  {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Amount (INR)</label>
+                <input
+                  type="number" min={0} step={1}
+                  value={amount} onChange={(e) => setAmount(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white tabular-nums"
+                  placeholder="e.g. 2000"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Comment (optional)</label>
+              <textarea
+                value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+                placeholder={kind === "payment" ? "e.g. Q1 performance kicker" : "e.g. Outstanding salary advance"}
+              />
+            </div>
+          </div>
+
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <button onClick={onClose} className="px-4 py-2 rounded-md border border-slate-200 text-[12.5px] text-slate-700 hover:bg-slate-50">Cancel</button>
+            <button
+              onClick={submit} disabled={saving}
+              className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499] disabled:opacity-60"
+            >
+              {saving ? "Adding…" : `Add ${noun.toLowerCase()}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── Step 4 sub-helpers ────────────────────────────────────────────────────
+
+function SearchBox() {
+  return (
+    <div className="relative w-[260px]">
+      <input
+        placeholder="Search"
+        className="w-full h-8 pl-8 pr-3 text-[12px] rounded-md border border-slate-200 bg-white focus:outline-none focus:border-[#6f42c1]"
+      />
+      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[11px]">⌕</span>
+    </div>
+  );
+}
+
+function ImportToolbar({ addLabel, importPrev, importThis }: {
+  addLabel: string;
+  importPrev: string;
+  importThis: string;
+}) {
+  // The "Delete" button is disabled until rows are selected via the
+  // header checkbox. Wire-up pending until inline editing lands.
+  return (
+    <div className="mb-3 space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <button className="px-3 py-1.5 rounded-md border border-[#6f42c1]/40 text-[#6f42c1] text-[12px] font-semibold hover:bg-[#6f42c1]/5">
+          {addLabel}
+        </button>
+        <span className="text-[11px] text-slate-400 font-semibold">OR</span>
+        <button className="px-3 py-1.5 rounded-md border border-[#6f42c1]/40 text-[#6f42c1] text-[12px] font-semibold hover:bg-[#6f42c1]/5">
+          {importPrev}
+        </button>
+        <span className="text-[11px] text-slate-400 font-semibold">OR</span>
+        <button className="px-3 py-1.5 rounded-md border border-[#6f42c1]/40 text-[#6f42c1] text-[12px] font-semibold hover:bg-[#6f42c1]/5">
+          {importThis}
+        </button>
+        <button disabled className="px-3 py-1.5 rounded-md border border-slate-200 text-slate-400 text-[12px] font-semibold opacity-50 cursor-not-allowed">
+          Delete
+        </button>
+      </div>
+      <div className="w-[260px]">
+        <SearchBox />
+      </div>
+    </div>
+  );
+}
+
+function HelpResourcesStep4({ step }: { step: Step4SubStep }) {
+  const sets: Record<Step4SubStep, { question: string }[]> = {
+    1: [
+      { question: "How do salary component claims get reimbursed?" },
+      { question: "Can I approve a claim during payroll?" },
+    ],
+    2: [
+      { question: "How are cash advance requests paid out?" },
+      { question: "Why am I not seeing an approved expense?" },
+    ],
+    3: [
+      { question: "How can I import adhoc payments from a CSV?" },
+      { question: "Adhoc payment vs bonus — which should I use?" },
+    ],
+    4: [
+      { question: "How can I import adhoc deductions from a CSV?" },
+      { question: "Can a deduction reduce net pay below zero?" },
+    ],
+  };
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <h5 className="text-[13px] font-semibold text-slate-800 mb-3 flex items-center justify-between">
+        Need help?
+        <span className="text-slate-400 text-[14px]">▾</span>
+      </h5>
+      <p className="text-[11.5px] text-slate-500 mb-3">If you have questions talk to us, we're here for you.</p>
+      <ul className="space-y-2.5">
+        {sets[step].map((q) => (
+          <li key={q.question} className="flex items-start gap-2">
+            <a href="#" className="text-[12px] text-slate-700 hover:text-[#6f42c1] hover:underline flex-1">{q.question}</a>
+            <span className="text-slate-400">↗</span>
+          </li>
+        ))}
+      </ul>
+      <a href="#" className="mt-3 inline-block text-[12px] font-semibold text-[#6f42c1] hover:underline">Talk to us →</a>
+    </div>
+  );
+}
+
+// ─── Step 5 — Salaries on Hold & Arrears ────────────────────────────────────
+// 3-step internal wizard:
+//   1. SALARY PROCESSING ON HOLD — entire payroll skipped for these employees
+//   2. SALARY PAYOUT ON HOLD     — payslip computed but money not released
+//   3. ARREARS                   — auto-computed (read-only; source pending)
+
+type Step5SubStep = 1 | 2 | 3;
+const STEP5_SUB_STEPS: { n: Step5SubStep; label: string }[] = [
+  { n: 1, label: "SALARY\nPROCESSING\nON HOLD" },
+  { n: 2, label: "SALARY\nPAYOUT ON\nHOLD" },
+  { n: 3, label: "ARREARS" },
+];
+
+function Step5Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
+  year: number;
+  month0: number;
+  monthLabel: string;
+  onClose: () => void;
+  onMarkedComplete?: () => void | Promise<void>;
+}) {
+  const [current, setCurrent] = useState<Step5SubStep>(1);
+
+  function goBack()   { setCurrent((c) => (c > 1 ? ((c - 1) as Step5SubStep) : c)); }
+  function goNext()   { setCurrent((c) => (c < 3 ? ((c + 1) as Step5SubStep) : c)); }
+  async function complete() { try { await onMarkedComplete?.(); } finally { onClose(); } }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/40 z-40" onClick={onClose} />
+      <aside className="fixed top-0 right-0 bottom-0 w-full max-w-5xl bg-white shadow-2xl z-50 flex flex-col">
+        <header className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+          <h3 className="text-[15px] font-semibold text-slate-800">
+            Salary on Hold &amp; Arrears: {monthLabel}
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={20} /></button>
+        </header>
+
+        <div className="flex items-center justify-between px-8 py-4 border-b border-slate-100">
+          <div className="flex-1 flex items-center justify-center gap-10">
+            {STEP5_SUB_STEPS.map((s) => {
+              const active = s.n === current;
+              return (
+                <div key={s.n} className="flex items-center gap-2">
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold transition-colors ${
+                      active
+                        ? "bg-[#6f42c1] text-white border-2 border-[#6f42c1]"
+                        : "bg-white text-slate-500 border-2 border-slate-300"
+                    }`}
+                  >
+                    {s.n}
+                  </div>
+                  <span
+                    className={`text-[11px] font-semibold tracking-wide whitespace-pre-line leading-tight ${
+                      active ? "text-[#6f42c1]" : "text-slate-500"
+                    }`}
+                  >
+                    {s.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {current > 1 && (
+              <button onClick={goBack} className="px-4 py-2 rounded-md border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50">Back</button>
+            )}
+            {current < 3 ? (
+              <button onClick={goNext} className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499]">Save &amp; Continue</button>
+            ) : (
+              <>
+                <button onClick={onClose} className="px-4 py-2 rounded-md border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50">Save &amp; Close</button>
+                <button onClick={complete} className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499]">Mark as Complete</button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto bg-slate-50">
+          <div className="flex gap-5 p-5">
+            <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-5">
+              {current === 1 && <SalaryHoldSubStep kind="processing" year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 2 && <SalaryHoldSubStep kind="payout"     year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 3 && <ArrearsSubStep year={year} month0={month0} monthLabel={monthLabel} />}
+            </div>
+            <aside className="hidden lg:block w-[280px] shrink-0">
+              <HelpResourcesStep5 step={current} />
+            </aside>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// Salary Processing on Hold + Salary Payout on Hold share this component;
+// `kind` is the only behavioural switch (plus column count: processing
+// adds an "Amount" column that payout doesn't have).
+
+type SalaryHoldItem = {
+  id: number;
+  userId: number;
+  kind: string;
+  payAction: string | null;
+  comment: string | null;
+  name?: string;
+  role?: string;
+};
+
+function SalaryHoldSubStep({ kind, year, month0, monthLabel }: {
+  kind: "processing" | "payout";
+  year: number;
+  month0: number;
+  monthLabel: string;
+}) {
+  const titleNoun    = kind === "processing" ? "Salary Processing on hold" : "Salary payout on hold";
+  const importLabel  = kind === "processing" ? "Import Processing on Holds" : "Import Payout on Holds";
+  const showAmount   = kind === "processing";
+
+  const url = `/api/hr/payroll/salary-hold?month=${month0}&year=${year}&kind=${kind}`;
+  const { data } = useSWR<{ items: SalaryHoldItem[] }>(url, fetcher);
+  const items = data?.items ?? [];
+
+  const [search, setSearch] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+
+  const filtered = items.filter((it) =>
+    !search || (it.name || "").toLowerCase().includes(search.toLowerCase()),
+  );
+
+  async function handleRemove(id: number) {
+    if (!confirm("Release this hold?")) return;
+    await fetch(`/api/hr/payroll/salary-hold?id=${id}`, { method: "DELETE" });
+    mutate(url);
+  }
+
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">{titleNoun}</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        {kind === "processing"
+          ? `In case of employees who are absconding or are on uninformed leave, you might want to hold/stop the processing of their salary. Use the "Salary processing on hold" option to stop/hold the processing of salary for selected employees. They will also be excluded from statutory contribution/deduction calculation and will only be considered if you decide to process their salary in the future.`
+          : `In case you wish to process the salary but hold the payout of employees (in cases such as, employee is under notice period, on uninformed leave for a while, etc) use "Salary payout on hold" option. The salary of such employees will be processed, i.e. they will be included for statutory contribution/deduction calculation and only the payout of salary will be put on hold. You can decide to payout this salary anytime in future.`}
+      </p>
+
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 rounded-md border border-[#6f42c1]/40 text-[#6f42c1] text-[12px] font-semibold hover:bg-[#6f42c1]/5">
+          + Add Employee
+        </button>
+        <button
+          onClick={() => alert(`CSV ${importLabel.toLowerCase()} import is coming soon.`)}
+          className="px-3 py-1.5 rounded-md border border-[#6f42c1]/40 text-[#6f42c1] text-[12px] font-semibold hover:bg-[#6f42c1]/5"
+        >
+          {importLabel}
+        </button>
+        <div className="ml-auto relative w-[260px]">
+          <input
+            value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search"
+            className="w-full h-8 pl-8 pr-3 text-[12px] rounded-md border border-slate-200 bg-white focus:outline-none focus:border-[#6f42c1]"
+          />
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[11px]">⌕</span>
+        </div>
+      </div>
+
+      <div className="rounded-md border border-slate-200 overflow-hidden">
+        <table className="w-full text-[12.5px]">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Employee</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Pay Period</th>
+              {showAmount && (
+                <th className="px-4 py-2.5 text-right text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Amount</th>
+              )}
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Pay Action</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Comment</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={showAmount ? 6 : 5} className="text-center text-[12.5px] text-slate-400 py-14">No records found</td>
+              </tr>
+            ) : (
+              filtered.map((it) => (
+                <tr key={it.id} className="border-b border-slate-100 hover:bg-slate-50/60">
+                  <td className="px-4 py-3 text-slate-800">
+                    {it.name ?? `User ${it.userId}`}
+                    <span className="block text-[10.5px] text-slate-400">{it.role ?? "—"}</span>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{monthLabel}</td>
+                  {showAmount && (
+                    <td className="px-4 py-3 text-right tabular-nums text-slate-500">—</td>
+                  )}
+                  <td className="px-4 py-3">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-amber-50 text-amber-700">
+                      {it.payAction || "Hold"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-slate-500 text-[12px]">{it.comment || <span className="text-slate-300">—</span>}</td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => handleRemove(it.id)} className="text-[11.5px] text-rose-500 hover:underline">Release</button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Pagination count={filtered.length} />
+
+      {showAdd && (
+        <AddSalaryHoldModal
+          kind={kind}
+          year={year}
+          month0={month0}
+          monthLabel={monthLabel}
+          existingUserIds={new Set(items.map((it) => it.userId))}
+          onClose={() => setShowAdd(false)}
+          onAdded={() => { mutate(url); setShowAdd(false); }}
+        />
+      )}
+    </>
+  );
+}
+
+function AddSalaryHoldModal({ kind, year, month0, monthLabel, existingUserIds, onClose, onAdded }: {
+  kind: "processing" | "payout";
+  year: number;
+  month0: number;
+  monthLabel: string;
+  existingUserIds: Set<number>;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const noun = kind === "processing" ? "Salary Processing on Hold" : "Salary Payout on Hold";
+  const { data: empData } = useSWR<any>("/api/hr/employees", fetcher);
+  const employees: any[] = Array.isArray(empData) ? empData : (empData as any)?.employees ?? [];
+
+  const [userId, setUserId]       = useState<number | "">("");
+  const [payAction, setPayAction] = useState<string>("Hold");
+  const [comment, setComment]     = useState<string>("");
+  const [saving, setSaving]       = useState(false);
+  const [error, setError]         = useState<string | null>(null);
+
+  async function submit() {
+    setError(null);
+    if (!userId) { setError("Pick an employee"); return; }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/hr/payroll/salary-hold", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month: month0, year, kind, userId, payAction, comment }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Could not add");
+      }
+      onAdded();
+    } catch (e: any) {
+      setError(e?.message || "Could not add");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/60 z-[60]" onClick={onClose} />
+      <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 pointer-events-none">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 pointer-events-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-[14px] font-semibold text-slate-800">{noun} — {monthLabel}</h3>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={16} /></button>
+          </div>
+          {error && (
+            <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11.5px] text-rose-700">{error}</div>
+          )}
+          <div className="space-y-3">
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Employee</label>
+              <select
+                value={userId}
+                onChange={(e) => setUserId(e.target.value ? Number(e.target.value) : "")}
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+              >
+                <option value="">Select…</option>
+                {employees.map((u: any) => {
+                  const already = existingUserIds.has(u.id);
+                  return (
+                    <option key={u.id} value={u.id} disabled={already}>
+                      {u.name} ({u.role}){already ? " — already on hold" : ""}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Pay Action</label>
+              <select
+                value={payAction} onChange={(e) => setPayAction(e.target.value)}
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+              >
+                <option value="Hold">Hold</option>
+                <option value="Skip">Skip this month</option>
+                <option value="Defer">Defer to next cycle</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Comment (optional)</label>
+              <textarea
+                value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+                placeholder={kind === "processing" ? "e.g. Absconding since Apr 25" : "e.g. Under notice period — release after clearance"}
+              />
+            </div>
+          </div>
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <button onClick={onClose} className="px-4 py-2 rounded-md border border-slate-200 text-[12.5px] text-slate-700 hover:bg-slate-50">Cancel</button>
+            <button
+              onClick={submit} disabled={saving}
+              className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499] disabled:opacity-60"
+            >
+              {saving ? "Saving…" : "Add to hold list"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ArrearsSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+  return <TypedAdhocSubStep year={year} month0={month0} monthLabel={monthLabel}
+    type="arrears"
+    title="Arrears"
+    blurb={`Past-dated dues being paid in ${monthLabel}. Engine adds these to gross pay. Source: AdhocLineItem with type=arrears.`} />;
+}
+
+// ─── Step 6 — Override (PT, ESI, TDS, LWF) ──────────────────────────────────
+// 4-step internal wizard. One TaxOverride row per (user, month, year, kind):
+//   1. PT  — Professional Tax (employee-side only; single Override Amount)
+//   2. ESI — Employee State Insurance (both employee + employer overrides)
+//   3. TDS — Income Tax Deducted at Source (employee-side only)
+//   4. LWF — Labour Welfare Fund (both employee + employer overrides)
+
+type Step6SubStep = 1 | 2 | 3 | 4;
+type TaxKind = "PT" | "ESI" | "TDS" | "LWF";
+const STEP6_SUB_STEPS: { n: Step6SubStep; label: string; kind: TaxKind }[] = [
+  { n: 1, label: "PT OVERRIDE",  kind: "PT"  },
+  { n: 2, label: "ESI OVERRIDE", kind: "ESI" },
+  { n: 3, label: "TDS OVERRIDE", kind: "TDS" },
+  { n: 4, label: "LWF OVERRIDE", kind: "LWF" },
+];
+
+function Step6Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
+  year: number;
+  month0: number;
+  monthLabel: string;
+  onClose: () => void;
+  onMarkedComplete?: () => void | Promise<void>;
+}) {
+  const [current, setCurrent] = useState<Step6SubStep>(1);
+
+  function goBack()   { setCurrent((c) => (c > 1 ? ((c - 1) as Step6SubStep) : c)); }
+  function goNext()   { setCurrent((c) => (c < 4 ? ((c + 1) as Step6SubStep) : c)); }
+  async function complete() { try { await onMarkedComplete?.(); } finally { onClose(); } }
+
+  const activeKind = STEP6_SUB_STEPS.find((s) => s.n === current)!.kind;
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/40 z-40" onClick={onClose} />
+      <aside className="fixed top-0 right-0 bottom-0 w-full max-w-5xl bg-white shadow-2xl z-50 flex flex-col">
+        <header className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+          <h3 className="text-[15px] font-semibold text-slate-800">
+            Override (PT, ESI, TDS, LWF): {monthLabel}
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={20} /></button>
+        </header>
+
+        <div className="flex items-center justify-between px-8 py-4 border-b border-slate-100">
+          <div className="flex-1 flex items-center justify-center gap-10">
+            {STEP6_SUB_STEPS.map((s) => {
+              const active = s.n === current;
+              return (
+                <div key={s.n} className="flex items-center gap-2">
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold transition-colors ${
+                      active
+                        ? "bg-[#6f42c1] text-white border-2 border-[#6f42c1]"
+                        : "bg-white text-slate-500 border-2 border-slate-300"
+                    }`}
+                  >
+                    {s.n}
+                  </div>
+                  <span
+                    className={`text-[11px] font-semibold tracking-wide leading-tight ${
+                      active ? "text-[#6f42c1]" : "text-slate-500"
+                    }`}
+                  >
+                    {s.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {current > 1 && (
+              <button onClick={goBack} className="px-4 py-2 rounded-md border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50">Back</button>
+            )}
+            {current < 4 ? (
+              <button onClick={goNext} className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499]">Save &amp; Continue</button>
+            ) : (
+              <>
+                <button onClick={onClose} className="px-4 py-2 rounded-md border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50">Save &amp; Close</button>
+                <button onClick={complete} className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499]">Mark as Complete</button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto bg-slate-50">
+          <div className="flex gap-5 p-5">
+            <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-5">
+              <TaxOverrideSubStep
+                kind={activeKind}
+                year={year}
+                month0={month0}
+                monthLabel={monthLabel}
+              />
+            </div>
+            <aside className="hidden lg:block w-[280px] shrink-0">
+              <HelpResourcesStep6 kind={activeKind} />
+            </aside>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// ─── Shared sub-step for all 4 kinds ────────────────────────────────────────
+// PT & TDS have one override column; ESI & LWF have employee + employer.
+
+type TaxOverrideItem = {
+  id: number;
+  userId: number;
+  kind: string;
+  employeeOverride: string | null;
+  employerOverride: string | null;
+  comment: string | null;
+  name?: string;
+  employeeId?: string | null;
+};
+
+function TaxOverrideSubStep({ kind, year, month0, monthLabel }: {
+  kind: TaxKind;
+  year: number;
+  month0: number;
+  monthLabel: string;
+}) {
+  const url = `/api/hr/payroll/tax-override?month=${month0}&year=${year}&kind=${kind}`;
+  const { data } = useSWR<{ items: TaxOverrideItem[] }>(url, fetcher);
+  const items = data?.items ?? [];
+  const [search, setSearch] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+
+  const filtered = items.filter((it) =>
+    !search ||
+    (it.name || "").toLowerCase().includes(search.toLowerCase()) ||
+    (it.employeeId || "").toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const dualOverride = kind === "ESI" || kind === "LWF";
+
+  const blurbs: Record<TaxKind, string> = {
+    PT:  "All Professional Tax overrides that were added for this month will be shown here. New overrides can be added as well from here",
+    ESI: "All ESI overrides that were added for this month will be shown here. New overrides can be added as well from here",
+    TDS: "The TDS overrides that were added for this month will be shown here. New overrides can be added as well from here",
+    LWF: "All LWF overrides that were added for this month will be shown here. New overrides can be added as well from here",
+  };
+
+  const titles: Record<TaxKind, string> = {
+    PT: "PT Overrides", ESI: "ESI Overrides", TDS: "TDS Overrides", LWF: "LWF Overrides",
+  };
+
+  // Columns vary per kind — kept inline so each kind's exact header
+  // labels match the Keka screenshots.
+  function renderHeader() {
+    if (kind === "PT") {
+      return ["Employee Number", "Employee Name", "Gross Salary", "Regular PT", "PT Override Amount", "Override Month", "Comment", "Action"];
+    }
+    if (kind === "TDS") {
+      return ["Employee Number", "Employee Name", "Gross Salary", "Regular TDS", "TDS Override Amount", "Override Month", "Comment", "Action"];
+    }
+    if (kind === "ESI") {
+      return ["Employee Number", "Employee Name", "Remuneration", "Employee (Regular)", "Employee (Override)", "Employer (Regular)", "Employer (Override)", "Override Month", "Comment", "Action"];
+    }
+    return ["Employee Number", "Employee Name", "Gross Salary", "LWF Employee (Regular)", "Employee (Overridden)", "LWF Employer (Regular)", "Employer (Overridden)", "Override Month", "Comment", "Action"];
+  }
+  const cols = renderHeader();
+
+  async function handleRemove(id: number) {
+    if (!confirm("Remove this override?")) return;
+    await fetch(`/api/hr/payroll/tax-override?id=${id}`, { method: "DELETE" });
+    mutate(url);
+  }
+
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">{titles[kind]}</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        {blurbs[kind]}
+      </p>
+
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <button
+          onClick={() => setShowAdd(true)}
+          className="px-3 py-1.5 rounded-md border border-[#6f42c1]/40 text-[#6f42c1] text-[12px] font-semibold hover:bg-[#6f42c1]/5"
+        >
+          + Add Employee
+        </button>
+        <div className="ml-auto relative w-[260px]">
+          <input
+            value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search"
+            className="w-full h-8 pl-8 pr-3 text-[12px] rounded-md border border-slate-200 bg-white focus:outline-none focus:border-[#6f42c1]"
+          />
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[11px]">⌕</span>
+        </div>
+      </div>
+
+      <div className="rounded-md border border-slate-200 overflow-hidden">
+        <table className="w-full text-[12px]">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              {cols.map((c) => (
+                <th key={c} className="px-3 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={cols.length} className="text-center text-[12.5px] text-slate-400 py-14">No records found</td>
+              </tr>
+            ) : (
+              filtered.map((it) => (
+                <tr key={it.id} className="border-b border-slate-100 hover:bg-slate-50/60">
+                  <td className="px-3 py-3 text-slate-600 tabular-nums">{it.employeeId || "—"}</td>
+                  <td className="px-3 py-3 text-slate-800">{it.name ?? `User ${it.userId}`}</td>
+                  {/* Gross / Remuneration — we don't have the per-employee
+                       gross handy from this query yet. Placeholder for now;
+                       could join SalaryStructure or fetch a Payslip per row
+                       once perf becomes a concern. */}
+                  <td className="px-3 py-3 text-slate-500">—</td>
+                  {/* Regular (computed) value — also a TODO once the engine
+                       exposes per-employee statutory amounts. */}
+                  <td className="px-3 py-3 text-slate-500">—</td>
+                  <td className="px-3 py-3 text-right tabular-nums font-semibold">
+                    {it.employeeOverride ? fmtInr(parseFloat(it.employeeOverride)) : "—"}
+                  </td>
+                  {dualOverride && (
+                    <>
+                      <td className="px-3 py-3 text-slate-500">—</td>
+                      <td className="px-3 py-3 text-right tabular-nums font-semibold">
+                        {it.employerOverride ? fmtInr(parseFloat(it.employerOverride)) : "—"}
+                      </td>
+                    </>
+                  )}
+                  <td className="px-3 py-3 text-slate-600">{monthLabel}</td>
+                  <td className="px-3 py-3 text-slate-500 text-[11.5px]">{it.comment || <span className="text-slate-300">—</span>}</td>
+                  <td className="px-3 py-3">
+                    <button onClick={() => handleRemove(it.id)} className="text-[11.5px] text-rose-500 hover:underline">Remove</button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Pagination count={filtered.length} />
+
+      {showAdd && (
+        <AddTaxOverrideModal
+          kind={kind}
+          year={year}
+          month0={month0}
+          monthLabel={monthLabel}
+          existingUserIds={new Set(items.map((it) => it.userId))}
+          onClose={() => setShowAdd(false)}
+          onAdded={() => { mutate(url); setShowAdd(false); }}
+        />
+      )}
+    </>
+  );
+}
+
+function AddTaxOverrideModal({ kind, year, month0, monthLabel, existingUserIds, onClose, onAdded }: {
+  kind: TaxKind;
+  year: number;
+  month0: number;
+  monthLabel: string;
+  existingUserIds: Set<number>;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const dual = kind === "ESI" || kind === "LWF";
+  const { data: empData } = useSWR<any>("/api/hr/employees", fetcher);
+  const employees: any[] = Array.isArray(empData) ? empData : (empData as any)?.employees ?? [];
+
+  const [userId, setUserId]     = useState<number | "">("");
+  const [empOver, setEmpOver]   = useState<string>("");
+  const [erOver,  setErOver]    = useState<string>("");
+  const [comment, setComment]   = useState<string>("");
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState<string | null>(null);
+
+  async function submit() {
+    setError(null);
+    if (!userId) { setError("Pick an employee"); return; }
+    const employeeOverride = empOver === "" ? null : Number(empOver);
+    const employerOverride = dual && erOver !== "" ? Number(erOver) : null;
+    if (employeeOverride === null && employerOverride === null) {
+      setError("Enter at least one override amount");
+      return;
+    }
+    if (employeeOverride !== null && (!Number.isFinite(employeeOverride) || employeeOverride < 0)) {
+      setError("Employee override must be ≥ 0"); return;
+    }
+    if (employerOverride !== null && (!Number.isFinite(employerOverride) || employerOverride < 0)) {
+      setError("Employer override must be ≥ 0"); return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/hr/payroll/tax-override", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month: month0, year, kind, userId, employeeOverride, employerOverride, comment }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Could not add");
+      }
+      onAdded();
+    } catch (e: any) {
+      setError(e?.message || "Could not add");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const empLabel = dual ? "Employee Override (INR)" : `${kind} Override Amount (INR)`;
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/60 z-[60]" onClick={onClose} />
+      <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 pointer-events-none">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 pointer-events-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-[14px] font-semibold text-slate-800">{kind} Override — {monthLabel}</h3>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={16} /></button>
+          </div>
+          {error && (
+            <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11.5px] text-rose-700">{error}</div>
+          )}
+          <div className="space-y-3">
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Employee</label>
+              <select
+                value={userId}
+                onChange={(e) => setUserId(e.target.value ? Number(e.target.value) : "")}
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+              >
+                <option value="">Select…</option>
+                {employees.map((u: any) => {
+                  const already = existingUserIds.has(u.id);
+                  return (
+                    <option key={u.id} value={u.id} disabled={already}>
+                      {u.name} ({u.role}){already ? ` — already has a ${kind} override this month` : ""}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+            <div className={dual ? "grid grid-cols-2 gap-3" : ""}>
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{empLabel}</label>
+                <input
+                  type="number" min={0} step={1}
+                  value={empOver} onChange={(e) => setEmpOver(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white tabular-nums"
+                  placeholder="e.g. 200"
+                />
+              </div>
+              {dual && (
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Employer Override (INR)</label>
+                  <input
+                    type="number" min={0} step={1}
+                    value={erOver} onChange={(e) => setErOver(e.target.value)}
+                    className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white tabular-nums"
+                    placeholder="e.g. 750"
+                  />
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Comment (optional)</label>
+              <textarea
+                value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+                placeholder={`e.g. ${kind} state-specific override per HR review`}
+              />
+            </div>
+          </div>
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <button onClick={onClose} className="px-4 py-2 rounded-md border border-slate-200 text-[12.5px] text-slate-700 hover:bg-slate-50">Cancel</button>
+            <button
+              onClick={submit} disabled={saving}
+              className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499] disabled:opacity-60"
+            >
+              {saving ? "Saving…" : `Save ${kind} override`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function HelpResourcesStep6({ kind }: { kind: TaxKind }) {
+  const sets: Record<TaxKind, { question: string }[]> = {
+    PT: [
+      { question: "How are PT slabs determined for an employee?" },
+      { question: "What happens when I override PT for an employee?" },
+    ],
+    ESI: [
+      { question: "How is ESI computed for an employee?" },
+      { question: "When should employer-side ESI be overridden?" },
+    ],
+    TDS: [
+      { question: "Why is TDS shown as zero for some employees?" },
+      { question: "Can I roll back a TDS override?" },
+    ],
+    LWF: [
+      { question: "Which states require LWF for our employees?" },
+      { question: "What does overriding LWF employee/employer do downstream?" },
+    ],
+  };
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <h5 className="text-[13px] font-semibold text-slate-800 mb-2">Need help?</h5>
+      <p className="text-[11.5px] text-slate-500 mb-3">If you have questions talk to us, we're here for you.</p>
+      <ul className="space-y-2.5">
+        {sets[kind].map((q) => (
+          <li key={q.question} className="flex items-start gap-2">
+            <a href="#" className="text-[12px] text-slate-700 hover:text-[#6f42c1] hover:underline flex-1">{q.question}</a>
+            <span className="text-slate-400">↗</span>
+          </li>
+        ))}
+      </ul>
+      <a href="#" className="mt-3 inline-block text-[12px] font-semibold text-[#6f42c1] hover:underline">Talk to us →</a>
+    </div>
+  );
+}
+
+// ─── Step 1 — Leave, Attendance & Payable Units ─────────────────────────────
+// 4-sub-step wizard:
+//   1. LEAVE APPLIED  — wired: lists every LeaveApplication overlapping
+//                       the month + per-row approve / reject + bulk
+//   2. NO ATTENDANCE  — placeholder (compute pending)
+//   3. LOP SUMMARY    — placeholder (compute pending — would aggregate
+//                       absent + half-day weekdays minus paid leaves)
+//   4. LOP REVERSAL   — placeholder (no model yet)
+
+type Step1SubStep = 1 | 2 | 3 | 4;
+const STEP1_SUB_STEPS: { n: Step1SubStep; label: string }[] = [
+  { n: 1, label: "LEAVE\nAPPLIED" },
+  { n: 2, label: "NO\nATTENDANCE" },
+  { n: 3, label: "LOP\nSUMMARY" },
+  { n: 4, label: "LOP\nREVERSAL" },
+];
+
+function Step1Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
+  year: number;
+  month0: number;
+  monthLabel: string;
+  onClose: () => void;
+  onMarkedComplete?: () => void | Promise<void>;
+}) {
+  const [current, setCurrent] = useState<Step1SubStep>(1);
+  function goBack()   { setCurrent((c) => (c > 1 ? ((c - 1) as Step1SubStep) : c)); }
+  function goNext()   { setCurrent((c) => (c < 4 ? ((c + 1) as Step1SubStep) : c)); }
+  async function complete() { try { await onMarkedComplete?.(); } finally { onClose(); } }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/40 z-40" onClick={onClose} />
+      <aside className="fixed top-0 right-0 bottom-0 w-full max-w-5xl bg-white shadow-2xl z-50 flex flex-col">
+        <header className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+          <h3 className="text-[15px] font-semibold text-slate-800">
+            Leave, Attendance &amp; Payable Units: {monthLabel}
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={20} /></button>
+        </header>
+
+        <div className="flex items-center justify-between px-8 py-4 border-b border-slate-100">
+          <div className="flex-1 flex items-center justify-center gap-10">
+            {STEP1_SUB_STEPS.map((s) => {
+              const active = s.n === current;
+              return (
+                <div key={s.n} className="flex items-center gap-2">
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold transition-colors ${
+                      active
+                        ? "bg-[#6f42c1] text-white border-2 border-[#6f42c1]"
+                        : "bg-white text-slate-500 border-2 border-slate-300"
+                    }`}
+                  >
+                    {s.n}
+                  </div>
+                  <span
+                    className={`text-[11px] font-semibold tracking-wide whitespace-pre-line leading-tight ${
+                      active ? "text-[#6f42c1]" : "text-slate-500"
+                    }`}
+                  >
+                    {s.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {current > 1 && (
+              <button onClick={goBack} className="px-4 py-2 rounded-md border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50">Back</button>
+            )}
+            {current < 4 ? (
+              <button onClick={goNext} className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499]">Save &amp; Continue</button>
+            ) : (
+              <>
+                <button onClick={onClose} className="px-4 py-2 rounded-md border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50">Save &amp; Close</button>
+                <button onClick={complete} className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499]">Mark as Complete</button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto bg-slate-50">
+          <div className="flex gap-5 p-5">
+            <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-5">
+              {current === 1 && <LeaveAppliedSubStep year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 2 && <NoAttendanceSubStep year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 3 && <LopSummarySubStep    year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 4 && <LopReversalSubStep   year={year} month0={month0} monthLabel={monthLabel} />}
+            </div>
+            <aside className="hidden lg:block w-[280px] shrink-0">
+              <HelpResourcesStep1 step={current} />
+            </aside>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// ─── Step 1 sub-step 1: Leave Applied (wired) ───────────────────────────────
+
+type CycleLeave = {
+  id: number;
+  userId: number;
+  userName?: string;
+  userRole?: string;
+  leaveTypeName?: string;
+  fromDate: string;
+  toDate: string;
+  totalDays: string;
+  status: string;
+  reason: string | null;
+  approverName?: string | null;
+};
+
+function LeaveAppliedSubStep({ year, month0, monthLabel }: {
+  year: number;
+  month0: number;
+  monthLabel: string;
+}) {
+  const url = `/api/hr/payroll/cycle-leaves?month=${month0}&year=${year}`;
+  const { data } = useSWR<{ items: CycleLeave[] }>(url, fetcher);
+  const items = data?.items ?? [];
+
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [search, setSearch] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const filtered = items.filter((it) =>
+    !search ||
+    (it.userName ?? "").toLowerCase().includes(search.toLowerCase()) ||
+    (it.leaveTypeName ?? "").toLowerCase().includes(search.toLowerCase()),
+  );
+
+  function toggleAll() {
+    if (selected.size === filtered.length) setSelected(new Set());
+    else setSelected(new Set(filtered.map((it) => it.id)));
+  }
+  function toggleOne(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Hit the existing /api/hr/leaves/[id] for each selected — sequential
+  // not concurrent so the audit-log entries are ordered.
+  async function bulkAction(action: "approve" | "reject") {
+    if (selected.size === 0) return;
+    if (!confirm(`${action === "approve" ? "Approve" : "Reject"} ${selected.size} leave application(s)?`)) return;
+    setBusy(true); setError(null);
+    try {
+      const ids = Array.from(selected);
+      let okCount = 0;
+      for (const id of ids) {
+        const r = await fetch(`/api/hr/leaves/${id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+        if (r.ok) okCount++;
+      }
+      setSelected(new Set());
+      mutate(url);
+      if (okCount < ids.length) {
+        setError(`${okCount}/${ids.length} processed — others may need direct manager approval.`);
+      }
+    } catch (e: any) {
+      setError(e?.message || "Action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function singleAction(id: number, action: "approve" | "reject") {
+    setBusy(true); setError(null);
+    try {
+      const r = await fetch(`/api/hr/leaves/${id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || "Action failed");
+      mutate(url);
+    } catch (e: any) {
+      setError(e?.message || "Action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function fmtDateLabel(iso: string, totalDays: string, reason: string | null): string {
+    const d = new Date(iso);
+    const base = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    const half = /\[(First Half|Second Half|Half Day)\]/i.exec(reason ?? "");
+    return half ? `${base} (${half[1]}) — ${totalDays} days` : `${base} — ${totalDays} days`;
+  }
+
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Leave Applied</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        All leave (approved or pending) that falls under this payroll cycle month will be displayed here.
+      </p>
+
+      {error && (
+        <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11.5px] text-rose-700">{error}</div>
+      )}
+
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <button
+          onClick={() => bulkAction("approve")}
+          disabled={busy || selected.size === 0}
+          className={`px-3 py-1.5 rounded-md text-[12px] font-semibold ${
+            selected.size > 0
+              ? "bg-[#6f42c1] text-white hover:bg-[#5a3499]"
+              : "bg-slate-100 text-slate-400 cursor-not-allowed"
+          }`}
+        >
+          Approve{selected.size > 0 ? ` (${selected.size})` : ""}
+        </button>
+        <button
+          onClick={() => bulkAction("reject")}
+          disabled={busy || selected.size === 0}
+          className={`px-3 py-1.5 rounded-md text-[12px] font-semibold ${
+            selected.size > 0
+              ? "bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200"
+              : "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
+          }`}
+        >
+          Reject
+        </button>
+        <div className="ml-auto relative w-[260px]">
+          <input
+            value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search"
+            className="w-full h-8 pl-8 pr-3 text-[12px] rounded-md border border-slate-200 bg-white focus:outline-none focus:border-[#6f42c1]"
+          />
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[11px]">⌕</span>
+        </div>
+      </div>
+
+      <div className="rounded-md border border-slate-200 overflow-hidden">
+        <table className="w-full text-[12.5px]">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="w-10 px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={filtered.length > 0 && selected.size === filtered.length}
+                  onChange={toggleAll}
+                  className="rounded border-slate-300"
+                />
+              </th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Employee</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Date</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Total Days</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">LeaveType</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Status</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Approver</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="text-center text-[12.5px] text-slate-400 py-14">No leave applications for {monthLabel}.</td>
+              </tr>
+            ) : (
+              filtered.map((it) => {
+                const isFinal = it.status === "approved" || it.status === "rejected";
+                return (
+                  <tr key={it.id} className="border-b border-slate-100 hover:bg-slate-50/60">
+                    <td className="px-3 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(it.id)}
+                        onChange={() => toggleOne(it.id)}
+                        disabled={isFinal}
+                        className="rounded border-slate-300"
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-slate-800">
+                      <span className="text-[#6f42c1] font-semibold">{it.userName ?? `User ${it.userId}`}</span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {fmtDateLabel(it.fromDate, it.totalDays, it.reason)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600 tabular-nums">{it.totalDays}</td>
+                    <td className="px-4 py-3 text-slate-600">{it.leaveTypeName || "—"}</td>
+                    <td className="px-4 py-3">
+                      <StatusPill status={it.status} />
+                    </td>
+                    <td className="px-4 py-3 text-slate-500">{it.approverName ?? "—"}</td>
+                    <td className="px-4 py-3">
+                      {!isFinal ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => singleAction(it.id, "approve")}
+                            disabled={busy}
+                            title="Approve"
+                            className="w-7 h-7 rounded-full border border-emerald-300 text-emerald-600 hover:bg-emerald-50 flex items-center justify-center"
+                          >
+                            ✓
+                          </button>
+                          <button
+                            onClick={() => singleAction(it.id, "reject")}
+                            disabled={busy}
+                            title="Reject"
+                            className="w-7 h-7 rounded-full border border-rose-300 text-rose-600 hover:bg-rose-50 flex items-center justify-center"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Pagination count={filtered.length} />
+    </>
+  );
+}
+
+function StatusPill({ status }: { status: string }) {
+  const tone =
+    status === "approved"           ? "bg-emerald-50 text-emerald-700" :
+    status === "partially_approved" ? "bg-sky-50 text-sky-700"        :
+    status === "pending"            ? "bg-amber-50 text-amber-700"    :
+    status === "rejected"           ? "bg-rose-50 text-rose-700"      :
+                                      "bg-slate-100 text-slate-600";
+  const label =
+    status === "partially_approved" ? "Partially Approved" :
+    status.charAt(0).toUpperCase() + status.slice(1);
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10.5px] font-semibold ${tone}`}>
+      {label}
+    </span>
+  );
+}
+
+// ─── Step 1 sub-step 2: No Attendance ───────────────────────────────────────
+
+function NoAttendanceSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+  const url = `/api/hr/payroll/attendance-summary?month=${month0}&year=${year}&kind=no_attendance`;
+  const { data } = useSWR<{ items: { userId: number; userName: string; employeeId: string | null }[] }>(url, fetcher);
+  const items = data?.items ?? [];
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">No Attendance</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        Employees with no attendance records this month. They were never clocked in and have no approved leave covering {monthLabel}.
+      </p>
+      <div className="flex items-center justify-end mb-3"><SearchBox /></div>
+      <KekaTable columns={["Employee Number", "Employee Name"]}>
+        {items.length === 0 ? (
+          <EmptyRow colSpan={2} text={`No 'no-attendance' employees for ${monthLabel}.`} />
+        ) : (
+          items.map((r) => (
+            <tr key={r.userId} className="border-t border-slate-100">
+              <td className="px-3 py-2 text-[12.5px] font-mono text-slate-700">{r.employeeId ?? "—"}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-800">{r.userName}</td>
+            </tr>
+          ))
+        )}
+      </KekaTable>
+      <Pagination count={items.length} />
+    </>
+  );
+}
+
+// ─── Step 1 sub-step 3: LOP Summary ─────────────────────────────────────────
+
+function LopSummarySubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+  const url = `/api/hr/payroll/attendance-summary?month=${month0}&year=${year}&kind=lop`;
+  const { data } = useSWR<{ items: { userId: number; userName: string; employeeId: string | null; absentDays: string; halfDays: string; lopDays: string }[] }>(url, fetcher);
+  const items = data?.items ?? [];
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Loss of Pay</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        Per-employee LOP for {monthLabel}: absent days + 0.5 × half-days. The engine subtracts these from paid days when computing the payslip.
+      </p>
+      <div className="flex items-center justify-end mb-3"><SearchBox /></div>
+      <KekaTable columns={["Employee Number", "Employee Name", "Absent", "Half-Days", "Final LOP"]}>
+        {items.length === 0 ? (
+          <EmptyRow colSpan={5} text={`No LOP entries for ${monthLabel}.`} />
+        ) : (
+          items.map((r) => (
+            <tr key={r.userId} className="border-t border-slate-100">
+              <td className="px-3 py-2 text-[12.5px] font-mono text-slate-700">{r.employeeId ?? "—"}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-800">{r.userName}</td>
+              <td className="px-3 py-2 text-[12.5px] text-rose-600 font-semibold">{r.absentDays}</td>
+              <td className="px-3 py-2 text-[12.5px] text-amber-600 font-semibold">{r.halfDays}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-800 font-semibold">{r.lopDays}</td>
+            </tr>
+          ))
+        )}
+      </KekaTable>
+      <Pagination count={items.length} />
+    </>
+  );
+}
+
+// ─── Step 1 sub-step 4: LOP Reversal ────────────────────────────────────────
+
+function LopReversalSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+  const url = `/api/hr/payroll/attendance-summary?month=${month0}&year=${year}&kind=lop_reversal`;
+  const { data } = useSWR<{ items: { id: number; userId: number; userName: string; employeeId: string | null; leaveType: string; fromDate: string; toDate: string; totalDays: string }[] }>(url, fetcher);
+  const items = data?.items ?? [];
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Loss of Pay Reversal</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        Approved paid-leave applications that overlap {monthLabel}. These reverse any LOP that would otherwise be stamped for the same day.
+      </p>
+      <div className="flex items-center justify-end mb-3"><SearchBox /></div>
+      <KekaTable columns={["Employee Number", "Employee Name", "Leave Type", "From", "To", "Days"]}>
+        {items.length === 0 ? (
+          <EmptyRow colSpan={6} text={`No reversals for ${monthLabel}.`} />
+        ) : (
+          items.map((r) => (
+            <tr key={r.id} className="border-t border-slate-100">
+              <td className="px-3 py-2 text-[12.5px] font-mono text-slate-700">{r.employeeId ?? "—"}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-800">{r.userName}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-700">{r.leaveType}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-700">{new Date(r.fromDate).toLocaleDateString()}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-700">{new Date(r.toDate).toLocaleDateString()}</td>
+              <td className="px-3 py-2 text-[12.5px] text-emerald-700 font-semibold">{r.totalDays}</td>
+            </tr>
+          ))
+        )}
+      </KekaTable>
+      <Pagination count={items.length} />
+    </>
+  );
+}
+
+// ─── Step 2 — New Joinees & Exits ───────────────────────────────────────────
+// 3-sub-step wizard:
+//   1. NEW JOINEES           — wired: employees with DOJ in this month,
+//                              with editable Pay Action per row
+//   2. EMPLOYEE IN EXIT PROCESS — placeholder (split into "in exit" + "pending exit")
+//   3. FULL & FINAL SETTLEMENT  — placeholder (F&F backend pending)
+
+type Step2SubStep = 1 | 2 | 3;
+const STEP2_SUB_STEPS: { n: Step2SubStep; label: string }[] = [
+  { n: 1, label: "NEW JOINEES" },
+  { n: 2, label: "EMPLOYEE IN\nEXIT PROCESS" },
+  { n: 3, label: "FULL & FINAL\nSETTLEMENT" },
+];
+
+function Step2Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
+  year: number;
+  month0: number;
+  monthLabel: string;
+  onClose: () => void;
+  onMarkedComplete?: () => void | Promise<void>;
+}) {
+  const [current, setCurrent] = useState<Step2SubStep>(1);
+  function goBack()   { setCurrent((c) => (c > 1 ? ((c - 1) as Step2SubStep) : c)); }
+  function goNext()   { setCurrent((c) => (c < 3 ? ((c + 1) as Step2SubStep) : c)); }
+  async function complete() { try { await onMarkedComplete?.(); } finally { onClose(); } }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/40 z-40" onClick={onClose} />
+      <aside className="fixed top-0 right-0 bottom-0 w-full max-w-5xl bg-white shadow-2xl z-50 flex flex-col">
+        <header className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+          <h3 className="text-[15px] font-semibold text-slate-800">
+            Employee Changes: {monthLabel}
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={20} /></button>
+        </header>
+
+        <div className="flex items-center justify-between px-8 py-4 border-b border-slate-100">
+          <div className="flex-1 flex items-center justify-center gap-10">
+            {STEP2_SUB_STEPS.map((s) => {
+              const active = s.n === current;
+              return (
+                <div key={s.n} className="flex items-center gap-2">
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold transition-colors ${
+                      active
+                        ? "bg-[#6f42c1] text-white border-2 border-[#6f42c1]"
+                        : "bg-white text-slate-500 border-2 border-slate-300"
+                    }`}
+                  >
+                    {s.n}
+                  </div>
+                  <span
+                    className={`text-[11px] font-semibold tracking-wide whitespace-pre-line leading-tight ${
+                      active ? "text-[#6f42c1]" : "text-slate-500"
+                    }`}
+                  >
+                    {s.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {current > 1 && (
+              <button onClick={goBack} className="px-4 py-2 rounded-md border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50">Back</button>
+            )}
+            {current < 3 ? (
+              <button onClick={goNext} className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499]">Save &amp; Continue</button>
+            ) : (
+              <>
+                <button onClick={onClose} className="px-4 py-2 rounded-md border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50">Save &amp; Close</button>
+                <button onClick={complete} className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499]">Mark as Complete</button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto bg-slate-50">
+          <div className="flex gap-5 p-5">
+            <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-5">
+              {current === 1 && <NewJoineesSubStep year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 2 && <ExitProcessSubStep  year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 3 && <FullAndFinalSubStep year={year} month0={month0} monthLabel={monthLabel} />}
+            </div>
+            <aside className="hidden lg:block w-[280px] shrink-0">
+              <HelpResourcesStep2 step={current} />
+            </aside>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// ─── Step 2 sub-step 1: New Joinees (wired) ─────────────────────────────────
+
+type NewJoinee = {
+  userId: number;
+  employeeId: string | null;
+  name: string;
+  joiningDate: string;
+  unitsWorked: number;
+  monthlyAmount: number;
+  payAction: string;
+};
+
+const PAY_ACTIONS = [
+  "Hold salary processing this month",
+  "Process as salary",
+  "Void salary processing",
+  "Hold salary payout this month",
+  "Void Salary payout",
+  "Already Paid",
+  "Hold salary payout partially",
+];
+
+// Map a Keka pay-action to the SalaryHold (kind, payAction) tuple.
+// "Process as salary" / "Already Paid" / "Void *" have no SalaryHold row.
+function payActionToHold(s: string): { kind: "processing" | "payout"; payAction: string } | null {
+  if (s === "Hold salary processing this month") return { kind: "processing", payAction: "Hold" };
+  if (s === "Hold salary payout this month")     return { kind: "payout",     payAction: "Hold" };
+  if (s === "Hold salary payout partially")      return { kind: "payout",     payAction: "Partial" };
+  return null;
+}
+
+function NewJoineesSubStep({ year, month0, monthLabel }: {
+  year: number;
+  month0: number;
+  monthLabel: string;
+}) {
+  const url = `/api/hr/payroll/new-joinees?month=${month0}&year=${year}`;
+  const { data } = useSWR<{ items: NewJoinee[] }>(url, fetcher);
+  const items = data?.items ?? [];
+
+  const [search, setSearch] = useState("");
+  // Local pending overrides until the user actually persists via the
+  // Pay Action onChange handler. Once a SalaryHold round-trips, the
+  // SWR refresh picks the new value up.
+  const [draftActions, setDraftActions] = useState<Record<number, string>>({});
+  const [drafts, setDrafts]   = useState<Record<number, string>>({}); // comments
+
+  const filtered = items.filter((it) =>
+    !search ||
+    it.name.toLowerCase().includes(search.toLowerCase()) ||
+    (it.employeeId ?? "").toLowerCase().includes(search.toLowerCase()),
+  );
+
+  async function changePayAction(j: NewJoinee, next: string) {
+    setDraftActions((prev) => ({ ...prev, [j.userId]: next }));
+    const target = payActionToHold(next);
+    if (target) {
+      // Upsert a SalaryHold row.
+      await fetch("/api/hr/payroll/salary-hold", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: j.userId, month: month0, year, kind: target.kind, payAction: target.payAction,
+        }),
+      });
+    } else {
+      // No hold → ensure any existing hold for this user is removed.
+      // We don't have a bulk-by-user delete; this is best-effort.
+      const r = await fetch(`/api/hr/payroll/salary-hold?month=${month0}&year=${year}&kind=processing`);
+      const j1 = await r.json().catch(() => ({}));
+      const existing = (j1?.items ?? []).find((it: any) => it.userId === j.userId);
+      if (existing) await fetch(`/api/hr/payroll/salary-hold?id=${existing.id}`, { method: "DELETE" });
+      const r2 = await fetch(`/api/hr/payroll/salary-hold?month=${month0}&year=${year}&kind=payout`);
+      const j2 = await r2.json().catch(() => ({}));
+      const existing2 = (j2?.items ?? []).find((it: any) => it.userId === j.userId);
+      if (existing2) await fetch(`/api/hr/payroll/salary-hold?id=${existing2.id}`, { method: "DELETE" });
+    }
+    mutate(url);
+  }
+
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">New Joinees</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        All the employees for whom payroll is enabled and whose date of joining falls under this month will be shown here.
+      </p>
+
+      <div className="flex items-center justify-end mb-3">
+        <div className="relative w-[260px]">
+          <input
+            value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search"
+            className="w-full h-8 pl-8 pr-3 text-[12px] rounded-md border border-slate-200 bg-white focus:outline-none focus:border-[#6f42c1]"
+          />
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[11px]">⌕</span>
+        </div>
+      </div>
+
+      <div className="rounded-md border border-slate-200 overflow-hidden">
+        <table className="w-full text-[12.5px]">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="w-8 px-3 py-2.5"></th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Employee</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Date of Joining</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">No. of Units Worked</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Salary</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Pay Action</th>
+              <th className="px-4 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Comments</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="text-center text-[12.5px] text-slate-400 py-14">
+                  No new joinees in {monthLabel}.
+                </td>
+              </tr>
+            ) : (
+              filtered.map((j) => {
+                const current = draftActions[j.userId] ?? j.payAction;
+                return (
+                  <tr key={j.userId} className="border-b border-slate-100 hover:bg-slate-50/60">
+                    <td className="px-3 py-3 text-slate-400">▸</td>
+                    <td className="px-4 py-3 text-slate-800">
+                      <span className="font-semibold">{j.employeeId || "—"}</span>
+                      <span className="block text-[11.5px] text-slate-500">{j.name}</span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600 tabular-nums">{new Date(j.joiningDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</td>
+                    <td className="px-4 py-3 text-slate-600 tabular-nums">{j.unitsWorked} Days</td>
+                    <td className="px-4 py-3 text-slate-800 tabular-nums font-semibold">{fmtInr(j.monthlyAmount)}</td>
+                    <td className="px-4 py-3">
+                      <select
+                        value={current}
+                        onChange={(e) => changePayAction(j, e.target.value)}
+                        className="w-[200px] px-2 py-1 text-[12px] rounded-md border border-slate-200 bg-white"
+                      >
+                        {PAY_ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          value={drafts[j.userId] ?? ""}
+                          onChange={(e) => setDrafts((p) => ({ ...p, [j.userId]: e.target.value }))}
+                          placeholder=""
+                          className="w-[120px] h-7 px-2 text-[12px] rounded-md border border-slate-200 bg-white"
+                        />
+                        <button title="Comment" className="text-slate-400 hover:text-slate-600">💬</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Pagination count={filtered.length} />
+    </>
+  );
+}
+
+// ─── Step 2 sub-step 2: Employee in Exit Process (placeholder) ──────────────
+
+function ExitProcessSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+  const url = `/api/hr/payroll/exits?month=${month0}&year=${year}`;
+  type ExitRow = {
+    id: number; userId: number; userName: string; employeeId: string | null;
+    designation: string | null; department: string | null;
+    exitType: string; resignationDate: string; lastWorkingDay: string;
+    noticePeriodDays: number; status: string;
+  };
+  const { data } = useSWR<{ thisMonth: ExitRow[]; alreadyExited: ExitRow[] }>(url, fetcher);
+  const thisMonth     = data?.thisMonth     ?? [];
+  const alreadyExited = data?.alreadyExited ?? [];
+
+  function renderRow(r: ExitRow) {
+    return (
+      <tr key={r.id} className="border-t border-slate-100">
+        <td className="px-3 py-2 text-[12.5px] font-mono text-slate-700">{r.employeeId ?? "—"}</td>
+        <td className="px-3 py-2 text-[12.5px] text-slate-800">{r.userName}</td>
+        <td className="px-3 py-2 text-[12.5px] text-slate-600 capitalize">{r.exitType.replace(/_/g, " ")}</td>
+        <td className="px-3 py-2 text-[12.5px] text-slate-700">{new Date(r.resignationDate).toLocaleDateString()}</td>
+        <td className="px-3 py-2 text-[12.5px] text-slate-700">{new Date(r.lastWorkingDay).toLocaleDateString()}</td>
+        <td className="px-3 py-2"><StatusPill status={r.status} /></td>
+      </tr>
+    );
+  }
+
+  return (
+    <>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        Employees whose last working day falls in {monthLabel} appear under 'Employees in Exit Process'.
+        Past exits that still need F&amp;F appear under 'Pending F&F'.
+      </p>
+
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Employees in Exit Process</h4>
+      <KekaTable columns={["Employee Number", "Employee Name", "Exit Type", "Resignation Date", "Last Working Day", "Status"]}>
+        {thisMonth.length === 0
+          ? <EmptyRow colSpan={6} text={`No exits in ${monthLabel}.`} />
+          : thisMonth.map(renderRow)}
+      </KekaTable>
+      <Pagination count={thisMonth.length} />
+
+      <h4 className="mt-6 text-[15px] font-semibold text-slate-800 mb-3">Pending F&amp;F (earlier exits)</h4>
+      <KekaTable columns={["Employee Number", "Employee Name", "Exit Type", "Resignation Date", "Last Working Day", "Status"]}>
+        {alreadyExited.length === 0
+          ? <EmptyRow colSpan={6} text="None pending." />
+          : alreadyExited.map(renderRow)}
+      </KekaTable>
+      <Pagination count={alreadyExited.length} />
+    </>
+  );
+}
+
+// ─── Step 2 sub-step 3: Full & Final Settlement (placeholder) ───────────────
+
+function FullAndFinalSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+  const url = `/api/hr/payroll/exits?month=${month0}&year=${year}`;
+  type ExitRow = {
+    id: number; userId: number; userName: string; employeeId: string | null;
+    exitType: string; lastWorkingDay: string; status: string;
+    finalSettlementDone: boolean; ctc: string | null;
+  };
+  const { data } = useSWR<{ thisMonth: ExitRow[]; alreadyExited: ExitRow[] }>(url, fetcher);
+  const pending = useMemo(() => {
+    const all = [...(data?.thisMonth ?? []), ...(data?.alreadyExited ?? [])];
+    return all.filter((r) => !r.finalSettlementDone);
+  }, [data]);
+  const [settleRow, setSettleRow] = useState<ExitRow | null>(null);
+
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Full &amp; Final Settlement</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        Pending F&amp;F across all exits. Clicking Settle adds an Adhoc payment for {monthLabel} and marks the exit as cleared.
+      </p>
+      <div className="flex items-center justify-end mb-3"><SearchBox /></div>
+      <KekaTable columns={["Employee Number", "Employee Name", "Exit Type", "Last Working Day", "Status", "Action"]}>
+        {pending.length === 0 ? (
+          <EmptyRow colSpan={6} text="No pending F&F." />
+        ) : (
+          pending.map((r) => (
+            <tr key={r.id} className="border-t border-slate-100">
+              <td className="px-3 py-2 text-[12.5px] font-mono text-slate-700">{r.employeeId ?? "—"}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-800">{r.userName}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-600 capitalize">{r.exitType.replace(/_/g, " ")}</td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-700">{new Date(r.lastWorkingDay).toLocaleDateString()}</td>
+              <td className="px-3 py-2"><StatusPill status={r.status} /></td>
+              <td className="px-3 py-2">
+                <button
+                  onClick={() => setSettleRow(r)}
+                  className="px-2.5 py-1 rounded-md border border-[#6f42c1]/40 text-[#6f42c1] text-[11.5px] font-semibold hover:bg-[#6f42c1]/5"
+                >
+                  Settle F&amp;F
+                </button>
+              </td>
+            </tr>
+          ))
+        )}
+      </KekaTable>
+      <Pagination count={pending.length} />
+
+      {settleRow && (
+        <SettleFFModal
+          row={settleRow}
+          year={year}
+          month0={month0}
+          monthLabel={monthLabel}
+          onClose={() => setSettleRow(null)}
+          onSettled={() => { setSettleRow(null); mutate(url); }}
+        />
+      )}
+    </>
+  );
+}
+
+function SettleFFModal({ row, year, month0, monthLabel, onClose, onSettled }: {
+  row: { id: number; userName: string; ctc: string | null };
+  year: number;
+  month0: number;
+  monthLabel: string;
+  onClose: () => void;
+  onSettled: () => void;
+}) {
+  const defaultAmount = row.ctc ? Math.round(parseFloat(row.ctc) / 12).toString() : "";
+  const [amount, setAmount] = useState(defaultAmount);
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(`/api/hr/payroll/exits/${row.id}/settle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month: month0, year, amount: Number(amount), comment }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Settle failed");
+      onSettled();
+    } catch (e: any) {
+      setError(e?.message || "Settle failed");
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/50 z-[60]" onClick={onClose} />
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-2xl z-[70] w-[420px] p-5">
+        <h3 className="text-[15px] font-semibold text-slate-800 mb-1">Settle F&amp;F — {row.userName}</h3>
+        <p className="text-[11.5px] text-slate-500 mb-4">Cycle: {monthLabel}. Settlement is added as an adhoc payment so the engine picks it up.</p>
+        <label className="block text-[11.5px] font-semibold text-slate-600 mb-1">Settlement Amount (₹)</label>
+        <input type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)}
+          className="w-full mb-3 px-3 py-2 border border-slate-300 rounded-md text-[13px]" />
+        <label className="block text-[11.5px] font-semibold text-slate-600 mb-1">Comment</label>
+        <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
+          className="w-full mb-3 px-3 py-2 border border-slate-300 rounded-md text-[13px]" />
+        {error && <p className="mb-3 text-[12px] text-rose-600">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-md border border-slate-300 text-[12.5px] font-semibold text-slate-700">Cancel</button>
+          <button onClick={submit} disabled={busy || !amount}
+            className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold disabled:opacity-50">
+            {busy ? "Settling…" : "Settle F&F"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function HelpResourcesStep2({ step }: { step: Step2SubStep }) {
+  const sets: Record<Step2SubStep, { question: string }[]> = {
+    1: [
+      { question: "How is the new joinee's pro-rated salary computed?" },
+      { question: "What does each Pay Action option do?" },
+    ],
+    2: [
+      { question: "How does notice-period assignment affect this view?" },
+      { question: "What is the difference between 'Exit Process' and 'Pending Exit Requests'?" },
+    ],
+    3: [
+      { question: "How is F&F settled amount computed?" },
+      { question: "Can I finalise F&F partially?" },
+    ],
+  };
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <h5 className="text-[13px] font-semibold text-slate-800 mb-2">Need help?</h5>
+      <p className="text-[11.5px] text-slate-500 mb-3">If you have questions talk to us, we're here for you.</p>
+      <ul className="space-y-2.5">
+        {sets[step].map((q) => (
+          <li key={q.question} className="flex items-start gap-2">
+            <a href="#" className="text-[12px] text-slate-700 hover:text-[#6f42c1] hover:underline flex-1">{q.question}</a>
+            <span className="text-slate-400">↗</span>
+          </li>
+        ))}
+      </ul>
+      <a href="#" className="mt-3 inline-block text-[12px] font-semibold text-[#6f42c1] hover:underline">Talk to us →</a>
+    </div>
+  );
+}
+
+function HelpResourcesStep1({ step }: { step: Step1SubStep }) {
+  const sets: Record<Step1SubStep, { question: string }[]> = {
+    1: [{ question: "How do approved leaves affect payroll?" }],
+    2: [{ question: "What counts as a 'No Attendance' day?" }],
+    3: [
+      { question: "How are LOP's auto populated in payroll?" },
+      { question: "Why am I not seeing certain employees in LOP section?" },
+      { question: "What are arrear LOPs?" },
+    ],
+    4: [
+      { question: "How many months of LOP can be reversed?" },
+      { question: "How does the employee get paid when an LOP is reversed?" },
+      { question: "Why am I not able to add certain employees in LOP reversal?" },
+      { question: "Does LOP reversal get auto populated based on cancelled leaves?" },
+    ],
+  };
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <h5 className="text-[13px] font-semibold text-slate-800 mb-3 flex items-center justify-between">
+        Help Resources
+        <span className="text-slate-400 text-[14px]">▾</span>
+      </h5>
+      <ul className="space-y-2.5">
+        {sets[step].map((q) => (
+          <li key={q.question} className="flex items-start gap-2">
+            <a href="#" className="text-[12px] text-slate-700 hover:text-[#6f42c1] hover:underline flex-1">{q.question}</a>
+            <span className="text-slate-400">↗</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function HelpResourcesStep5({ step }: { step: Step5SubStep }) {
+  const sets: Record<Step5SubStep, { question: string }[]> = {
+    1: [
+      { question: "What happens when employee's salary processing is hold?" },
+      { question: "Salary processing on hold vs Salary payout on hold" },
+      { question: "What happens when I select 'Process as Salary' for any previous on hold?" },
+      { question: "What happens when I select 'Process as Arrears' for any previous on hold?" },
+      { question: "How to convert a salary processing on hold into salary payout on hold?" },
+    ],
+    2: [
+      { question: "What happens when an employee's salary payout is hold?" },
+      { question: "Salary payout on hold vs Salary processing on hold" },
+      { question: "Why am I not seeing an option to release a payout on hold?" },
+      { question: "How to hold salary payout partially?" },
+    ],
+    3: [
+      { question: "How are arrears computed?" },
+      { question: "Can I edit an arrear amount?" },
+    ],
+  };
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <h5 className="text-[13px] font-semibold text-slate-800 mb-3 flex items-center justify-between">
+        Help Resources
+        <span className="text-slate-400 text-[14px]">▾</span>
+      </h5>
+      <ul className="space-y-2.5">
+        {sets[step].map((q) => (
+          <li key={q.question} className="flex items-start gap-2">
+            <a href="#" className="text-[12px] text-slate-700 hover:text-[#6f42c1] hover:underline flex-1">{q.question}</a>
+            <span className="text-slate-400">↗</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

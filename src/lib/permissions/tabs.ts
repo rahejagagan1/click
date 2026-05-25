@@ -41,6 +41,7 @@ export type TabKey =
   // Dashboard access but not specific sections.
   | "hr_admin_attendance"
   | "hr_admin_approvals"
+  | "hr_admin_regularize_balance"
   | "hr_admin_leaves"
   | "hr_admin_holidays"
   | "hr_admin_assets"
@@ -103,6 +104,13 @@ export const TAB_CATALOG: TabDef[] = [
   // open, so toggling these for a non-HR user is a no-op.
   { key: "hr_admin_attendance",    label: "Attendance Dashboard", description: "Today's attendance board",        pathPrefixes: ["/dashboard/hr/admin?tab=attendance-dashboard"], defaultForNewUser: false, group: "HR Dashboard sections" },
   { key: "hr_admin_approvals",     label: "Approvals",            description: "Leave / WFH / regularization approvals",      pathPrefixes: ["/dashboard/hr/admin?tab=approvals"],            defaultForNewUser: false, group: "HR Dashboard sections" },
+  // Developer-only diagnostic view. The hardcoded gate in
+  // src/app/dashboard/hr/admin/page.tsx (checking `user.isDeveloper`)
+  // is the real lock — this catalog entry stays here so the URL-prefix
+  // matcher knows about the route, but the permission default is `false`
+  // and there are no ROLE_TAB_OVERRIDES so the Tab Permissions UI can't
+  // accidentally grant it.
+  { key: "hr_admin_regularize_balance", label: "Regularization Balance", description: "Developer-only: per-employee monthly regularization quota usage", pathPrefixes: ["/dashboard/hr/admin?tab=regularize-balance"], defaultForNewUser: false, group: "HR Dashboard sections" },
   { key: "hr_admin_leaves",        label: "Leave Balances",       description: "Per-employee leave balance editor",            pathPrefixes: ["/dashboard/hr/admin?tab=leaves"],               defaultForNewUser: false, group: "HR Dashboard sections" },
   { key: "hr_admin_holidays",      label: "Holidays & Calendar",  description: "Company holiday list",                         pathPrefixes: ["/dashboard/hr/admin?tab=holidays"],             defaultForNewUser: false, group: "HR Dashboard sections" },
   { key: "hr_admin_assets",        label: "Assets",               description: "Company asset register",                       pathPrefixes: ["/dashboard/hr/admin?tab=assets"],               defaultForNewUser: false, group: "HR Dashboard sections" },
@@ -146,7 +154,8 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     hr_hiring:true, hr_offboard:true,
     reports:true, departments:true, violations:true,
     // All HR Dashboard sub-tabs on by default for full admins.
-    hr_admin_attendance:true, hr_admin_approvals:true, hr_admin_leaves:true,
+    hr_admin_attendance:true, hr_admin_approvals:true,
+    hr_admin_leaves:true,
     hr_admin_holidays:true, hr_admin_assets:true, hr_admin_leave_types:true,
     hr_admin_shifts:true, hr_admin_departments:true, hr_admin_payroll:true,
     // Audit-added pages — admins see everything by default.
@@ -161,7 +170,8 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     hr_my_team:true, hr_admin:true, hr_people:true,
     hr_hiring:true, hr_offboard:true,
     reports:true, departments:true, violations:true,
-    hr_admin_attendance:true, hr_admin_approvals:true, hr_admin_leaves:true,
+    hr_admin_attendance:true, hr_admin_approvals:true,
+    hr_admin_leaves:true,
     hr_admin_holidays:true, hr_admin_assets:true, hr_admin_leave_types:true,
     hr_admin_shifts:true, hr_admin_departments:true, hr_admin_payroll:true,
     hr_engage:true, hr_announcements:true, hr_org:true, hr_expenses:true,
@@ -183,7 +193,8 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     // in src/lib/access.ts) currently allows for HR Manager: attendance,
     // leaves, holidays, assets, departments. Approvals / leave-types /
     // shifts default OFF — admins can flip them on per-user.
-    hr_admin_attendance:true, hr_admin_leaves:true, hr_admin_holidays:true,
+    hr_admin_attendance:true,
+    hr_admin_leaves:true, hr_admin_holidays:true,
     hr_admin_assets:true, hr_admin_departments:true,
     // HR-Manager also gets the new HR feature pages.
     hr_engage:true, hr_announcements:true, hr_org:true, hr_expenses:true,

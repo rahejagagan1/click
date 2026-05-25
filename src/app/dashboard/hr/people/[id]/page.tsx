@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
-import { isHRAdmin as canViewAsHRAdmin } from "@/lib/access";
+import { isHRAdmin as canViewAsHRAdmin, canViewSalary } from "@/lib/access";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
 import EmployeeFinancesPanel from "@/components/hr/EmployeeFinancesPanel";
 import SelectField from "@/components/ui/SelectField";
@@ -169,15 +169,16 @@ export default function EmployeeDetailPage() {
   // special_access / role=admin / hr_manager.
   const isHRAdmin = canViewAsHRAdmin(me);
   const canEdit = isHRAdmin;
-  // Salary tab is visible only to HR admin tier OR the profile owner —
-  // i.e. a user can see their own salary structure, and admins can see /
-  // edit anyone's. Editing is HR-admin-only (canEdit above).
+  // Salary visibility (Finances tab, Compensation section inside Edit
+  // Profile) is narrower than HR-admin: only HR Manager / CEO / developer.
+  // See feedback-salary-visibility memory + canViewSalary in src/lib/access.ts.
+  const canSeeSalary = canViewSalary(me);
   // Edit Profile is HR-admin-only (matches the PUT endpoint's gate).
-  // Profile owners view their own salary on /dashboard/hr/payroll.
+  // The Compensation section inside it is gated separately by canViewSalary.
   const showEditTab = isHRAdmin;
-  // Finances tab: HR-admin only. Salary + bonuses are HR-managed; the
-  // profile owner already sees their own pay slips on /dashboard/hr/payroll.
-  const showFinancesTab = isHRAdmin;
+  // Finances tab: salary tier only — payslips, salary, bonuses are
+  // compensation data, not the broader HR-admin surface.
+  const showFinancesTab = canSeeSalary;
   const visibleTabs = TABS.filter((t) =>
     (t !== "Edit Profile" || showEditTab) &&
     (t !== "Finances"     || showFinancesTab)
@@ -666,7 +667,7 @@ export default function EmployeeDetailPage() {
             )}
 
             {activeTab === "Edit Profile" && showEditTab && (
-              <EditProfilePanel userId={userId} user={user} managers={managers} />
+              <EditProfilePanel userId={userId} user={user} managers={managers} canSeeSalary={canSeeSalary} />
             )}
           </main>
 

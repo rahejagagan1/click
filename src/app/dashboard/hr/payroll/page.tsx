@@ -2,9 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useSession } from "next-auth/react";
 import MyPayPanel from "@/components/hr/my-finances/MyPayPanel";
-import { isHRAdmin } from "@/lib/access";
 
 const MODULE_TABS = [
   { key: "home",         label: "HOME",        href: "/dashboard/hr/home"            },
@@ -31,11 +29,6 @@ export default function PayrollPage() {
     return "my-salary" as const;
   })();
 
-  // HR admins see an extra "RUN PAYROLL" entry in the tab strip pointing
-  // to the Keka-style monthly run page. Non-admins don't see it.
-  const { data: session } = useSession();
-  const showRunPayroll = !!session?.user && isHRAdmin(session.user as any);
-
   return (
     <div className="min-h-screen bg-[#f4f7f8]">
       <div className="flex items-center bg-white border-b border-slate-200 px-4 overflow-x-auto">
@@ -59,17 +52,6 @@ export default function PayrollPage() {
             )}
           </Link>
         ))}
-        {/* HR-admin-only entry into the Keka-style monthly run page.
-            Tinted differently from the employee tabs above so it reads
-            as a separate, admin-tier surface. */}
-        {showRunPayroll && (
-          <Link
-            href="/dashboard/hr/payroll/run"
-            className="ml-auto px-4 py-3 text-[11px] font-bold tracking-widest text-[#6f42c1] hover:text-[#5a3499] transition-colors whitespace-nowrap"
-          >
-            RUN PAYROLL →
-          </Link>
-        )}
       </div>
 
       <div className="mx-auto max-w-6xl space-y-5 p-6">

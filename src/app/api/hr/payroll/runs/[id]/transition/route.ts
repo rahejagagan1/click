@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, isHRAdmin, resolveUserId, serverError } from "@/lib/api-auth";
+import { requireAuth, canViewSalary, resolveUserId, serverError } from "@/lib/api-auth";
 import { writeAuditLog } from "@/lib/audit-log";
 
 // POST /api/hr/payroll/runs/:id/transition { action: "lock" | "mark_paid" | "reopen" }
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
-  if (!isHRAdmin(user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!canViewSalary(user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
     const { id } = await params;
