@@ -478,9 +478,13 @@ export default function LeavesPage() {
         <aside className="col-span-3 border-l border-slate-200 dark:border-white/[0.06] p-5 space-y-3">
           <button
             onClick={() => setShowApply(true)}
-            className="w-full h-11 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13.5px] font-semibold shadow-sm transition-colors inline-flex items-center justify-center gap-2"
+            // `!text-white` (Tailwind important modifier) + inline color
+            // override: some upstream cascade was darkening the button
+            // text on this page, so we pin it.
+            className="w-full h-11 bg-[#008CFF] hover:bg-[#0070cc] !text-white rounded-lg text-[13.5px] font-semibold shadow-sm transition-colors inline-flex items-center justify-center gap-2"
+            style={{ color: "#ffffff" }}
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.4} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
+            <svg className="w-4 h-4" style={{ color: "#ffffff" }} fill="none" stroke="currentColor" strokeWidth={2.4} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
             Request Leave
           </button>
 
@@ -572,14 +576,16 @@ function CompOffModal({ onClose }: { onClose: () => void }) {
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
   // Handoff fields — required by the company format. POC + Work Status
   // apply even to Comp Off so HR has full context on what was worked
-  // and who can vouch for it.
+  // and who can vouch for it. POC supports an N/A toggle for cases
+  // where no specific cover is assigned.
   const [poc, setPoc] = useState<PickerUser[]>([]);
+  const [pocNa, setPocNa] = useState(false);
   const [workStatus, setWorkStatus] = useState("");
 
   const submit = async () => {
     setErr("");
     if (!form.workedDate || !form.reason) return setErr("All fields required");
-    if (poc.length === 0)    return setErr("POC in Absence is required.");
+    if (!pocNa && poc.length === 0) return setErr("POC in Absence is required (or mark as N/A).");
     if (!workStatus.trim())  return setErr("Work Status is required.");
     setSaving(true);
     const res = await fetch("/api/hr/leaves/comp-off", {
@@ -587,7 +593,7 @@ function CompOffModal({ onClose }: { onClose: () => void }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...form,
-        pocUserId:  poc[0].id,
+        pocUserId:  pocNa ? null : (poc[0]?.id ?? null),
         workStatus: workStatus.trim(),
       }),
     });
@@ -630,12 +636,16 @@ function CompOffModal({ onClose }: { onClose: () => void }) {
           </div>
 
           {/* Handoff details — POC + Work Status apply across every
-              leave-style request per the company-standard format. */}
+              leave-style request per the company-standard format.
+              POC supports N/A when no cover is assigned. */}
           <HandoffSection
             poc={poc}
             onPocChange={setPoc}
             workStatus={workStatus}
             onWorkStatusChange={setWorkStatus}
+            allowNa
+            naSelected={pocNa}
+            onNaChange={setPocNa}
           />
 
           <p className="text-[11px] text-slate-400">Credits are valid for 3 months from worked date.</p>
@@ -670,9 +680,11 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
   // approval emails. Sent through as `notifyUserIds` so the leave
   // route layers them onto the L1/L2 approver notification list.
   const [notify, setNotify] = useState<PickerUser[]>([]);
-  // Handoff fields — company-standard format. Both required;
-  // server validates the same so a hand-crafted POST still 400s.
+  // Handoff fields — company-standard format. workStatus required;
+  // POC supports N/A. Server validates the same so a hand-crafted POST
+  // still 400s if workStatus is empty.
   const [poc, setPoc] = useState<PickerUser[]>([]);
+  const [pocNa, setPocNa] = useState(false);
   const [workStatus, setWorkStatus] = useState("");
 
   // Live leave balances so each leave-type option can advertise "X days
@@ -709,7 +721,7 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
   const apply = async () => {
     setError("");
     if (!form.leaveTypeId || !form.fromDate || !form.toDate || !form.reason) return setError("All fields are required");
-    if (poc.length === 0) return setError("POC in Absence is required.");
+    if (!pocNa && poc.length === 0) return setError("POC in Absence is required (or mark as N/A).");
     if (!workStatus.trim())  return setError("Work Status is required.");
     setSaving(true);
     // Half-day pins toDate to fromDate and tags the reason; the api stays the same.
@@ -725,7 +737,7 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
         ...form, toDate, reason,
         leaveTypeId: parseInt(form.leaveTypeId),
         notifyUserIds: notify.map((u) => u.id),
-        pocUserId:  poc[0].id,
+        pocUserId:  pocNa ? null : (poc[0]?.id ?? null),
         workStatus: workStatus.trim(),
       }),
     });
@@ -914,12 +926,16 @@ function RequestLeavePanel({ leaveTypes, onClose }: { leaveTypes: any[]; onClose
           />
         </Section>
 
-        {/* ── Handoff details (POC + Work Status) ────────────────── */}
+        {/* ── Handoff details (POC + Work Status) ──────────────────
+            POC supports N/A when no specific cover is assigned. */}
         <HandoffSection
           poc={poc}
           onPocChange={setPoc}
           workStatus={workStatus}
           onWorkStatusChange={setWorkStatus}
+          allowNa
+          naSelected={pocNa}
+          onNaChange={setPocNa}
         />
 
         {/* ── Notify (chip-style picker → notifyUserIds) ─────────── */}

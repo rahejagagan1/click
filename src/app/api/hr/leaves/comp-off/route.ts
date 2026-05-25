@@ -42,18 +42,20 @@ export async function POST(req: NextRequest) {
     const { workedDate, creditDays, reason } = body;
     if (!workedDate || !reason) return NextResponse.json({ error: "workedDate and reason required" }, { status: 400 });
 
-    // Handoff fields — POC + Work Status required. No past-date gate
-    // here: workedDate is INHERENTLY in the past (you're claiming
-    // credit for past extra work) so the today-floor doesn't apply.
+    // Handoff fields — workStatus required. POC is N/A-able: the form
+    // can mark it N/A and send pocUserId=null. No past-date gate here:
+    // workedDate is INHERENTLY in the past (you're claiming credit for
+    // past extra work) so the today-floor doesn't apply.
     const pocUserId  = Number.isFinite(Number(body.pocUserId))  ? Number(body.pocUserId)  : null;
     const workStatus = typeof body.workStatus === "string" ? body.workStatus.trim() : "";
-    if (!pocUserId)  return NextResponse.json({ error: "POC in Absence is required." }, { status: 400 });
     if (!workStatus) return NextResponse.json({ error: "Work Status is required." }, { status: 400 });
-    const pocUser = await prisma.user.findUnique({
-      where: { id: pocUserId },
-      select: { id: true, name: true, email: true, isActive: true },
-    });
-    if (!pocUser || !pocUser.isActive) {
+    const pocUser = pocUserId
+      ? await prisma.user.findUnique({
+          where: { id: pocUserId },
+          select: { id: true, name: true, email: true, isActive: true },
+        })
+      : null;
+    if (pocUserId && (!pocUser || !pocUser.isActive)) {
       return NextResponse.json({ error: "Selected POC is not an active employee." }, { status: 400 });
     }
 
@@ -106,7 +108,8 @@ export async function POST(req: NextRequest) {
     ]);
 
     // POC heads-up — fire-and-forget so SMTP hiccups don't 500 the save.
-    if (pocUser.email && pocUserId !== myId) {
+    // Skipped when POC is N/A (pocUser null).
+    if (pocUser && pocUser.email && pocUserId !== myId) {
       void sendEmail({
         to: pocUser.email,
         content: pocAssignmentEmail({
