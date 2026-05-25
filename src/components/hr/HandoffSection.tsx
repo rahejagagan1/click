@@ -51,10 +51,11 @@ export default function HandoffSection({
   onNaChange?: (next: boolean) => void;
 }) {
   return (
-    <section>
+    <section className="pt-4 mt-2 border-t border-slate-200 dark:border-white/[0.06]">
       {/* Header line — mirrors the Section helper used by the
           rest of the Request Leave panel so visual rhythm stays
-          consistent. */}
+          consistent. Top border + padding give a clean visual
+          break from the Reason textarea above. */}
       <h3 className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400 mb-3">
         Handoff Details
       </h3>
