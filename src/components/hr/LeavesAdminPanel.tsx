@@ -7,6 +7,8 @@ import { Search, Sparkles, Plus, Minus, X, CalendarPlus, AlertTriangle, Home, Cl
 import { DateField } from "@/components/ui/date-field";
 import SelectField from "@/components/ui/SelectField";
 import PopupPanel from "@/components/ui/PopupPanel";
+import HandoffSection from "@/components/hr/HandoffSection";
+import type { PickerUser } from "@/components/hr/EmployeePicker";
 
 type LeaveTypeRow = { id: number; name: string; code: string; daysPerYear: number; applicable?: boolean };
 type Bal          = { id: number | null; total: number; used: number; pending: number };
@@ -178,6 +180,18 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
   });
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyError, setApplyError] = useState("");
+  // Handoff Details for the HR-on-behalf flow. POC supports an N/A
+  // option (HR may not know who's covering); workStatus is required
+  // but accepts "N/A" if HR doesn't have that context either.
+  // unavailability only renders in WFH mode.
+  const [handoffPoc,            setHandoffPoc]            = useState<PickerUser[]>([]);
+  const [handoffPocNa,          setHandoffPocNa]          = useState(false);
+  const [handoffWorkStatus,     setHandoffWorkStatus]     = useState("");
+  const [handoffUnavailability, setHandoffUnavailability] = useState("");
+  const resetHandoff = () => {
+    setHandoffPoc([]); setHandoffPocNa(false);
+    setHandoffWorkStatus(""); setHandoffUnavailability("");
+  };
   // Day-kind toggle for the apply-on-behalf form (mirrors the regular
   // leave application form). full → standard range; first/second half
   // collapse to one date and tag the reason so attendance reports the
@@ -291,6 +305,13 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
     if (applyMode === "leave" && typeof applyForm.leaveTypeId !== "number") {
       return setApplyError("Pick a leave type.");
     }
+    // Handoff Details — POC is N/A-eligible; workStatus is always
+    // required (HR can type "N/A" if they don't have context).
+    // unavailability is WFH-only and required when shown.
+    const pocId = handoffPocNa ? null : (handoffPoc[0]?.id ?? null);
+    if (!handoffPocNa && !pocId)                              return setApplyError("POC in Absence is required (or mark as N/A).");
+    if (!handoffWorkStatus.trim())                            return setApplyError("Work Status is required.");
+    if (applyMode === "wfh" && !handoffUnavailability.trim()) return setApplyError("Time of Unavailability is required.");
     setApplyBusy(true);
     try {
       let res: Response;
@@ -314,6 +335,8 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
             toDate:          toDateOut,
             reason:          reasonOut,
             useLwpFallback:  applyForm.useLwpFallback,
+            pocUserId:       pocId,
+            workStatus:      handoffWorkStatus.trim(),
           }),
         });
       } else {
@@ -326,10 +349,13 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            targetUserId: applyForm.userId,
-            date:         applyForm.fromDate,
-            toDate:       applyForm.toDate,
-            reason:       applyForm.reason.trim(),
+            targetUserId:   applyForm.userId,
+            date:           applyForm.fromDate,
+            toDate:         applyForm.toDate,
+            reason:         applyForm.reason.trim(),
+            pocUserId:      pocId,
+            workStatus:     handoffWorkStatus.trim(),
+            unavailability: handoffUnavailability.trim(),
           }),
         });
       }
@@ -337,6 +363,7 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
       if (!res.ok) { setApplyError(data?.error || `Failed to apply ${applyMode === "wfh" ? "WFH" : "leave"}.`); return; }
       setApplyOpen(false);
       setApplyForm((f) => ({ ...f, reason: "" }));
+      resetHandoff();
       mutate(url);
     } finally { setApplyBusy(false); }
   };
@@ -897,6 +924,25 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
                     ? "Why is HR granting this WFH?"
                     : "Why is HR applying this leave on behalf?"}
                   className="mt-1 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20"
+                />
+              </div>
+
+              {/* Handoff Details — POC + Work Status (+ Unavailability for
+                  WFH). POC is N/A-eligible here because HR may not know
+                  who's covering. The same picker, validation rules and
+                  email-on-approval flow as the user's own form. */}
+              <div className="pt-2 border-t border-slate-100">
+                <HandoffSection
+                  poc={handoffPoc}
+                  onPocChange={setHandoffPoc}
+                  workStatus={handoffWorkStatus}
+                  onWorkStatusChange={setHandoffWorkStatus}
+                  unavailability={handoffUnavailability}
+                  onUnavailabilityChange={setHandoffUnavailability}
+                  showUnavailability={applyMode === "wfh"}
+                  allowNa
+                  naSelected={handoffPocNa}
+                  onNaChange={setHandoffPocNa}
                 />
               </div>
 
