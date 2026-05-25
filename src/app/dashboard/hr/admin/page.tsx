@@ -133,22 +133,46 @@ export default function HRAdminPage() {
   const approvalsTotal = approvalsSummary?.total ?? 0;
 
   const [showHolidayForm, setShowHolidayForm] = useState(false);
+  // editingHolidayId !== null means the modal is in edit mode (PUT to
+  // /api/hr/admin/holidays with id in the body); null means it's a new
+  // holiday (POST). The form fields are shared either way.
+  const [editingHolidayId, setEditingHolidayId] = useState<number | null>(null);
   const [holidayForm, setHolidayForm] = useState({ name: "", date: "", isOptional: false });
+
+  const openHolidayEdit = (h: any) => {
+    setEditingHolidayId(h.id);
+    setHolidayForm({
+      name: h.name ?? "",
+      // `date` from API is an ISO string; the DateField needs YYYY-MM-DD.
+      date: typeof h.date === "string" ? h.date.slice(0, 10) : new Date(h.date).toISOString().slice(0, 10),
+      isOptional: h.type === "optional",
+    });
+    setShowHolidayForm(true);
+  };
+
+  const closeHolidayForm = () => {
+    setShowHolidayForm(false);
+    setEditingHolidayId(null);
+    setHolidayForm({ name: "", date: "", isOptional: false });
+  };
 
   const saveHoliday = async () => {
     // The DB stores the "Optional holiday" toggle as the `type` column
     // ("public" = mandatory, "optional" = employee can choose). Project
     // the front-end's `isOptional` boolean back into that string before
     // sending so the row actually persists with the right flavour.
+    const payload: any = {
+      name: holidayForm.name,
+      date: holidayForm.date,
+      type: holidayForm.isOptional ? "optional" : "public",
+    };
+    if (editingHolidayId != null) payload.id = editingHolidayId;
     const res = await fetch("/api/hr/admin/holidays", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: holidayForm.name,
-        date: holidayForm.date,
-        type: holidayForm.isOptional ? "optional" : "public",
-      }),
+      method: editingHolidayId != null ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
-    if (res.ok) { setShowHolidayForm(false); setHolidayForm({ name: "", date: "", isOptional: false }); mutate("/api/hr/admin/holidays"); }
+    if (res.ok) { closeHolidayForm(); mutate("/api/hr/admin/holidays"); }
     else alert((await res.json()).error);
   };
 
@@ -738,7 +762,7 @@ export default function HRAdminPage() {
             <>
               <div className="flex items-center justify-between">
                 <h2 className="text-[14px] font-bold text-slate-800 dark:text-white">Company Holidays</h2>
-                <button onClick={() => { setHolidayForm({ name:"", date: new Date().toISOString().slice(0,10), isOptional: false }); setShowHolidayForm(true); }}
+                <button onClick={() => { setEditingHolidayId(null); setHolidayForm({ name:"", date: new Date().toISOString().slice(0,10), isOptional: false }); setShowHolidayForm(true); }}
                   className="flex items-center gap-1.5 h-8 px-4 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded-lg text-[12px] font-semibold">
                   <Plus className="w-3.5 h-3.5" />Add Holiday
                 </button>
@@ -769,10 +793,18 @@ export default function HRAdminPage() {
                           </span>
                         </td>
                         <td className="px-5 py-3 text-right">
-                          <button onClick={() => deleteHoliday(h.id)}
-                            className="h-7 w-7 flex items-center justify-center rounded-lg bg-red-50 dark:bg-red-500/10 text-red-400 hover:bg-red-100 dark:hover:bg-red-500/20 mx-auto">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button onClick={() => openHolidayEdit(h)}
+                              className="h-7 w-7 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-white/5 text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10 hover:text-slate-700"
+                              title="Edit holiday">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => deleteHoliday(h.id)}
+                              className="h-7 w-7 flex items-center justify-center rounded-lg bg-red-50 dark:bg-red-500/10 text-red-400 hover:bg-red-100 dark:hover:bg-red-500/20"
+                              title="Delete holiday">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                       );
@@ -883,8 +915,8 @@ export default function HRAdminPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-[#001529] rounded-xl shadow-2xl p-6 w-[400px]">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-[14px] font-bold text-slate-800 dark:text-white">Add Holiday</h3>
-              <button onClick={() => setShowHolidayForm(false)}><X className="w-4 h-4 text-slate-400" /></button>
+              <h3 className="text-[14px] font-bold text-slate-800 dark:text-white">{editingHolidayId != null ? "Edit Holiday" : "Add Holiday"}</h3>
+              <button onClick={closeHolidayForm}><X className="w-4 h-4 text-slate-400" /></button>
             </div>
             <div className="space-y-3">
               <div>
@@ -904,7 +936,7 @@ export default function HRAdminPage() {
               </label>
             </div>
             <div className="flex gap-3 mt-5">
-              <button onClick={() => setShowHolidayForm(false)}
+              <button onClick={closeHolidayForm}
                 className="flex-1 h-9 border border-slate-200 dark:border-white/10 rounded-lg text-[13px] text-slate-600 dark:text-slate-300">Cancel</button>
               <button onClick={saveHoliday} disabled={!holidayForm.name || !holidayForm.date}
                 className="flex-1 h-9 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded-lg text-[13px] font-semibold disabled:opacity-50">Save</button>
