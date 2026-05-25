@@ -12,6 +12,7 @@ import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestFor
 import SelectField from "@/components/ui/SelectField";
 import { isHRAdmin, canApplyRestrictedLeave } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
+import { desktopBypassHeader } from "@/lib/desktop-bypass";
 import { DateField } from "@/components/ui/date-field";
 
 // ── Form copy per kind ───────────────────────────────────────────────────────
@@ -599,10 +600,19 @@ export default function AttendancePage() {
     return () => clearTimeout(t);
   }, [confirmingClockOut, clockingOut]);
 
+  // Mobile gate w/ two bypasses (mirrors /dashboard/hr/home):
+  //   1. Developers (DEVELOPER_EMAILS env → user.isDeveloper) — stable
+  //      identity-bound bypass.
+  //   2. ?desktop=1 query param — short-term emergency override for
+  //      anyone whose laptop is unavailable. Not a secret; pair with
+  //      a regularization request if used.
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   useEffect(() => {
-    setIsMobileDevice(detectMobileDevice());
-  }, []);
+    const isDev = user?.isDeveloper === true;
+    const bypassParam = typeof window !== "undefined"
+      && new URLSearchParams(window.location.search).get("desktop") === "1";
+    setIsMobileDevice(detectMobileDevice() && !isDev && !bypassParam);
+  }, [user]);
 
   // "Day Complete · 9h reached" toast — set after a successful clock-out
   // whose final totalMinutes ≥ 540. Auto-dismisses after 5 seconds; user
@@ -718,7 +728,7 @@ export default function AttendancePage() {
       }
       const res = await fetch("/api/hr/attendance/clock-in", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...desktopBypassHeader() },
         body: JSON.stringify({ lat: geo.lat, lng: geo.lng, address: geo.address }),
       });
       const d = await res.json();
@@ -732,7 +742,7 @@ export default function AttendancePage() {
     // Geo is captured on clock-IN only — clock-out doesn't ask the
     // browser for a fresh fix. The server still accepts an optional
     // body but no client sends one anymore.
-    const res = await fetch("/api/hr/attendance/clock-out", { method: "POST" });
+    const res = await fetch("/api/hr/attendance/clock-out", { method: "POST", headers: desktopBypassHeader() });
     const d = await res.json();
     if (!res.ok) return alert(d.error);
     mutate(`/api/hr/attendance?${attendanceQs}`);

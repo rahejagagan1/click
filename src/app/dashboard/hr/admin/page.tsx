@@ -5,16 +5,22 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, FileSpreadsheet } from "lucide-react";
+import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote, ClipboardCheck, FileSpreadsheet } from "lucide-react";
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
 import LeavesAdminPanel from "@/components/hr/LeavesAdminPanel";
 import LeavePoliciesPanel from "@/components/hr/LeavePoliciesPanel";
+import PayrollAdminPanel from "@/components/hr/PayrollAdminPanel";
+import RegularizationBalancePanel from "@/components/hr/RegularizationBalancePanel";
+import SalaryStructuresList from "@/components/hr/SalaryStructuresList";
+import { RunPayrollPanel } from "@/app/dashboard/hr/payroll/run/page";
 import { DateField } from "@/components/ui/date-field";
 import {
   isHRAdmin,
   isFullHRAdmin,
+  canViewSalary,
+  isSalaryDeveloper,
   HR_MANAGER_ALLOWED_TABS,
   HR_MANAGER_ALLOWED_RAIL_LINKS,
 } from "@/lib/access";
@@ -31,6 +37,7 @@ type AdminTabDef = {
 const ADMIN_TABS: Array<AdminTabDef & { permKey: string }> = [
   { key: "attendance-dashboard", label: "Attendance Dashboard", icon: LayoutDashboard, permKey: "hr_admin_attendance"     },
   { key: "approvals",            label: "Approvals",            icon: CheckSquare,     permKey: "hr_admin_approvals"      },
+  { key: "regularize-balance",   label: "Regularization Balance", icon: ClipboardCheck, permKey: "hr_admin_regularize_balance" },
   { key: "leaves",               label: "Leave Balances",       icon: Calendar,        permKey: "hr_admin_leaves"         },
   { key: "holidays",             label: "Holidays & Calendar",  icon: CalendarDays,    permKey: "hr_admin_holidays"       },
   { key: "assets",               label: "Assets",               icon: Package,         permKey: "hr_admin_assets"         },
@@ -38,6 +45,8 @@ const ADMIN_TABS: Array<AdminTabDef & { permKey: string }> = [
   { key: "leave-policies",       label: "Leave Policies",       icon: Calendar,        permKey: "hr_admin_leave_policies" },
   { key: "shifts",               label: "Shift Templates",      icon: Clock,           permKey: "hr_admin_shifts"         },
   { key: "departments",          label: "Departments",          icon: Users,           permKey: "hr_admin_departments"    },
+  { key: "payroll",              label: "Payroll",              icon: Banknote,        permKey: "hr_admin_payroll"        },
+  { key: "salary-structures",    label: "Salary Structures",    icon: Banknote,        permKey: "hr_admin_payroll"        },
 ];
 
 const DAYS_LABEL = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -89,7 +98,27 @@ export default function HRAdminPage() {
   const tierTabs = isFullAdmin
     ? ADMIN_TABS
     : ADMIN_TABS.filter((t) => HR_MANAGER_ALLOWED_TABS.has(t.key));
-  const visibleTabs = tierTabs.filter((t) => tabAllowed(t.permKey));
+  // Payroll tab is salary data — narrower gate than the rest of the
+  // admin surface. Only HR Manager / CEO / developer ever see it, no
+  // matter what isFullAdmin or per-user permissions say.
+  const canSeeSalary = canViewSalary(user);
+  // Salary Structures (all-org compensation table) is tighter still —
+  // gagan-only (the salary-trusted developer, see SALARY_DEV_EMAIL). Even
+  // HR Manager / CEO / other developers can't see it from here; if they
+  // need a single employee's structure, the Finances tab on a profile
+  // still serves that case for the salary-viewing tier.
+  const isSalaryDev = isSalaryDeveloper(user);
+  // Regularization Balance is a developer-only diagnostic view — not
+  // even CEO / HR Manager. Hardcoded gate, can't be flipped via Tab
+  // Permissions UI.
+  const isDev = user?.isDeveloper === true;
+  const salaryFiltered = tierTabs.filter((t) => {
+    if (t.key === "payroll")             return canSeeSalary;
+    if (t.key === "salary-structures")   return isSalaryDev;
+    if (t.key === "regularize-balance")  return isDev;
+    return true;
+  });
+  const visibleTabs = salaryFiltered.filter((t) => tabAllowed(t.permKey));
   // Rail links: full admins always see them; hr_manager-tier sees them
   // when both the curated whitelist allows it AND their tab permission
   // is on. Other roles see them only if Tab Permissions explicitly grants.
@@ -446,11 +475,20 @@ export default function HRAdminPage() {
           {/* ── Approvals — full multi-tab panel (Leave / Comp Offs / WFH / …) ── */}
           {tab === "approvals" && <ApprovalsPanel embedded />}
 
+          {/* ── Regularization Balance — per-user monthly quota usage ── */}
+          {tab === "regularize-balance" && <RegularizationBalancePanel />}
+
           {/* ── Leaves — admin can edit / cancel / delete any leave ── */}
           {tab === "leaves" && <LeavesAdminPanel leaveTypes={leaveTypes} />}
 
           {/* ── Assets ── */}
           {tab === "assets" && <AssetsPanel />}
+
+          {/* ── Payroll — runs, generate, lock, mark paid, structures ── */}
+          {tab === "payroll" && canSeeSalary && <RunPayrollPanel embedded />}
+
+          {/* ── Salary Structures — full org salary table (gagan-only) ── */}
+          {tab === "salary-structures" && isSalaryDev && <SalaryStructuresList />}
 
           {/* ── Leave Types ── */}
           {tab === "leave-types" && (

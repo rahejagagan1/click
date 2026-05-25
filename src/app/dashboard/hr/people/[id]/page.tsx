@@ -14,8 +14,9 @@ import {
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
-import { isHRAdmin as canViewAsHRAdmin } from "@/lib/access";
+import { isHRAdmin as canViewAsHRAdmin, canViewSalary } from "@/lib/access";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
+import EmployeeFinancesPanel from "@/components/hr/EmployeeFinancesPanel";
 import SelectField from "@/components/ui/SelectField";
 import HandoffSection from "@/components/hr/HandoffSection";
 import type { PickerUser } from "@/components/hr/EmployeePicker";
@@ -25,7 +26,7 @@ import type { PickerUser } from "@/components/hr/EmployeePicker";
 // previous standalone "Salary" tab and the inline edit pencils on the
 // Profile tab have been retired so there's exactly one canonical edit
 // surface.
-const TABS = ["About", "Profile", "Job", "Attendance", "Documents", "Assets", "Edit Profile"] as const;
+const TABS = ["About", "Profile", "Job", "Attendance", "Documents", "Assets", "Finances", "Edit Profile"] as const;
 type Tab = typeof TABS[number];
 
 const fmtDate = (d: string | Date | null | undefined) =>
@@ -176,16 +177,20 @@ export default function EmployeeDetailPage() {
   // special_access / role=admin / hr_manager.
   const isHRAdmin = canViewAsHRAdmin(me);
   const canEdit = isHRAdmin;
-  // Salary tab is visible only to HR admin tier OR the profile owner —
-  // i.e. a user can see their own salary structure, and admins can see /
-  // edit anyone's. Editing is HR-admin-only (canEdit above).
-  // Edit Profile is HR-admin-only (matches the PUT endpoint's gate).
-  // Profile owners view their own salary on /dashboard/hr/payroll.
-  // Edit Profile tab is now developer-only — HR / CEO / admins see the
+  // Salary visibility (Finances tab, Compensation section inside Edit
+  // Profile) is narrower than HR-admin: only HR Manager / CEO / developer.
+  // See feedback-salary-visibility memory + canViewSalary in src/lib/access.ts.
+  const canSeeSalary = canViewSalary(me);
+  // Edit Profile tab is developer-only — HR / CEO / admins see the
   // PROFILE tab (read-only with every field) instead, since that mirrors
-  // the full Edit Profile surface without the editing capability that
-  // the org has decided to lock down.
+  // the full Edit Profile surface without the editing capability the
+  // org has decided to lock down. Profile owners view their own salary
+  // on /dashboard/hr/payroll.
   const showEditTab = me?.isDeveloper === true;
+  // Finances tab: salary tier only — payslips, salary, bonuses are
+  // compensation data, not the broader HR-admin surface. See
+  // canViewSalary in src/lib/access.ts.
+  const showFinancesTab = canSeeSalary;
   // Attendance is sensitive per-employee data — only the owner of the
   // profile, their direct manager (NOT inline manager, to keep scope
   // tight) and the HR-admin tier should see it. Peers don't see each
@@ -194,7 +199,8 @@ export default function EmployeeDetailPage() {
   const isMyManager = user?.manager?.id != null && me?.dbId != null && user.manager.id === Number(me.dbId);
   const showAttendanceTab = isSelfView || isMyManager || isHRAdmin;
   const visibleTabs = TABS.filter((t) => {
-    if (t === "Edit Profile" && !showEditTab)     return false;
+    if (t === "Edit Profile" && !showEditTab)       return false;
+    if (t === "Finances"     && !showFinancesTab)   return false;
     if (t === "Attendance"   && !showAttendanceTab) return false;
     return true;
   });
@@ -821,27 +827,33 @@ export default function EmployeeDetailPage() {
               </section>
             )}
 
+            {activeTab === "Finances" && showFinancesTab && (
+              <EmployeeFinancesPanel userId={userId} userName={user.name} />
+            )}
+
             {activeTab === "Edit Profile" && showEditTab && (
-              <EditProfilePanel userId={userId} user={user} managers={managers} />
+              <EditProfilePanel userId={userId} user={user} managers={managers} canSeeSalary={canSeeSalary} />
             )}
           </main>
 
-          {/* ── Right rail: Reporting Team — only rendered when at least
-              one person actually reports to this user. Hides the "0
-              direct reports" empty card so the rail collapses for
-              non-managers (e.g. ICs / interns). */}
-          {directReports.length > 0 && (
-            <aside className="lg:sticky lg:top-6 lg:self-start">
-              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="inline-flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wide text-slate-800">
-                    <UsersIcon size={14} className="text-[#008CFF]" />
-                    Reporting Team
-                  </h3>
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-slate-500">
-                    {directReports.length}
-                  </span>
-                </div>
+          {/* ── Right rail: Reporting Team — visible on About tab only,
+              and only when at least one person actually reports to this
+              user. Combines two gates: About-tab-only keeps it off the
+              denser content tabs (Profile / Job / Attendance / Documents
+              / Assets / Finances / Edit Profile); has-reports collapses
+              the empty card for non-managers (ICs / interns). */}
+          {activeTab === "About" && directReports.length > 0 && (
+          <aside className="lg:sticky lg:top-6 lg:self-start">
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="inline-flex items-center gap-2 text-[13px] font-semibold uppercase tracking-wide text-slate-800">
+                  <UsersIcon size={14} className="text-[#008CFF]" />
+                  Reporting Team
+                </h3>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-slate-500">
+                  {directReports.length}
+                </span>
+              </div>
 
                 <div className="relative mb-3">
                   <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -870,7 +882,7 @@ export default function EmployeeDetailPage() {
                   )}
                 </div>
               </div>
-            </aside>
+          </aside>
           )}
         </div>
       </div>

@@ -7,6 +7,7 @@ type ClientUser = {
   orgLevel?: string | null;
   role?: string | null;
   isDeveloper?: boolean | null;
+  email?: string | null;
 } | null | undefined;
 
 /**
@@ -31,6 +32,43 @@ export function isAdmin(user: ClientUser): boolean {
  */
 export function isHRAdmin(user: ClientUser): boolean {
   return isAdmin(user) || user?.orgLevel === "hr_manager";
+}
+
+/**
+ * The one developer who is trusted with salary data. Other developers
+ * (e.g. anyone else in DEVELOPER_EMAILS) pass `isDeveloper` for every
+ * other dev-only surface but NOT for compensation. Must stay in sync
+ * with SALARY_DEV_EMAIL in src/lib/api-auth.ts.
+ */
+export const SALARY_DEV_EMAIL = "rahejagagan1@gmail.com";
+
+/** True when this user is the salary-trusted developer (gagan only). */
+export function isSalaryDeveloper(user: ClientUser): boolean {
+  if (!user) return false;
+  return (
+    user.isDeveloper === true &&
+    typeof user.email === "string" &&
+    user.email.toLowerCase() === SALARY_DEV_EMAIL
+  );
+}
+
+/**
+ * Narrower gate dedicated to salary / payroll visibility on the client.
+ * Mirrors `canViewSalary` in src/lib/api-auth.ts. Per explicit policy
+ * (2026-05-25): only HR Manager, CEO, and the salary-trusted developer
+ * (gagan — see SALARY_DEV_EMAIL) may see salary, payslips, payroll runs,
+ * the Finances tab, the Compensation section in Edit Profile, and the
+ * Payroll tab in HR Admin. `special_access`, `role=admin`, and OTHER
+ * developers are excluded — they still pass `isHRAdmin` / `isDeveloper`
+ * elsewhere but NOT for compensation data.
+ */
+export function canViewSalary(user: ClientUser): boolean {
+  if (!user) return false;
+  return (
+    user.orgLevel === "ceo" ||
+    user.orgLevel === "hr_manager" ||
+    isSalaryDeveloper(user)
+  );
 }
 
 /**
