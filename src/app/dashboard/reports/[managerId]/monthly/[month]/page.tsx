@@ -3,7 +3,8 @@
 import React from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ResizableTh } from "@/components/ui/ResizableTh";
-import { useState, useMemo, useCallback, useEffect, createContext, useContext } from "react";
+import PopupPanel from "@/components/ui/PopupPanel";
+import { useState, useMemo, useCallback, useEffect, useRef, createContext, useContext } from "react";
 import { useSession } from "next-auth/react";
 import useSWR from "swr";
 import type { ManagerReportFormat } from "@/lib/reports/manager-report-format";
@@ -250,7 +251,12 @@ function AddExtraCase({
                 placeholder="Search team cases…"
                 className="w-full bg-white dark:bg-[#1a1a32] border border-amber-300 dark:border-amber-500/30 rounded-md px-2 py-1 text-xs text-slate-800 dark:text-slate-200 placeholder:text-slate-400 placeholder:italic focus:outline-none focus:ring-1 focus:ring-amber-400"
             />
-            <div className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-md border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1a1a32] shadow-lg text-xs">
+            <PopupPanel
+                open={true}
+                triggerRef={containerRef}
+                maxHeight={224}
+                className="rounded-md border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1a1a32] shadow-2xl text-xs overflow-y-auto"
+            >
                 {filtered.length === 0 ? (
                     <div className="px-2.5 py-2 text-slate-400 italic">
                         {eligibleCases.length === 0 ? "No team cases found in this period." : "No matches."}
@@ -284,7 +290,7 @@ function AddExtraCase({
                 >
                     + Custom case (offline)…
                 </button>
-            </div>
+            </PopupPanel>
         </div>
     );
 }
@@ -490,6 +496,21 @@ const mkSBRow = (id: string, person = ""): AndrewSBRow => ({ id, person, thumbna
 
 interface AndrewSCRow { id: string; capsule: string; currentMonthViews: string; lastMonthViews: string; remark: string; autoFilled?: boolean; }
 const mkSCRow = (id: string, capsule = ""): AndrewSCRow => ({ id, capsule, currentMonthViews: "", lastMonthViews: "", remark: "" });
+
+// Section D (monthly UI) / E (weekly UI) — YT Shorts capsule-or-channel
+// monthly-views comparison. Mirrors Section C's shape on purpose so HR
+// got a familiar layout: current month vs previous month with a computed
+// difference column. Editable capsule label, not a fixed channel dropdown.
+interface AndrewSERow {
+    id: string;
+    capsule: string;
+    currentMonthViews: string;
+    lastMonthViews: string;
+    remark: string;
+}
+const mkSERow = (id: string, capsule = ""): AndrewSERow => ({
+    id, capsule, currentMonthViews: "", lastMonthViews: "", remark: "",
+});
 
 const mkNishantRow = (id: string, name = ""): NishantResearcherRow => ({
     id, researcher: name, approvedCasesRTC: "", avgRating: "",
@@ -902,8 +923,17 @@ export default function MonthlyReportPage() {
     const scTableRef = React.useRef<HTMLTableElement>(null);
     const setSCR = (idx: number, f: keyof AndrewSCRow, v: string) => setAndrewSCRows(p => p.map((r,i) => i===idx ? {...r,[f]:v} : r));
 
+    // Section D (monthly UI) — Views and Changes (YT Shorts).
+    // Three blank rows by default to match Section C.
+    const [andrewSERows,  setAndrewSERows]  = useState<AndrewSERow[]>([
+        mkSERow("se-1"), mkSERow("se-2"), mkSERow("se-3"),
+    ]);
+    const [seColWidths,   setSeColWidths]   = useState<Record<number,number>>({});
+    const seTableRef = React.useRef<HTMLTableElement>(null);
+    const setSER = (idx: number, f: keyof AndrewSERow, v: string) => setAndrewSERows(p => p.map((r,i) => i===idx ? {...r,[f]:v} : r));
+
     // Active tab for Andrew monthly
-    const [andrewTab, setAndrewTab] = useState<"A" | "B" | "C">("A");
+    const [andrewTab, setAndrewTab] = useState<"A" | "B" | "C" | "E">("A");
 
     // ── Tanvi Dogra HR Manager monthly state ──
     const [hrHighlights, setHrHighlights] = useState({ top3Achievements: "", top3Risks: "", criticalEscalations: "", supportRequired: "" });
@@ -1042,6 +1072,7 @@ export default function MonthlyReportPage() {
                     if (saved?.andrewBRows?.length)   setAndrewBRows(saved.andrewBRows);
                     if (saved?.andrewSBRows?.length)  setAndrewSBRows(saved.andrewSBRows);
                     if (saved?.andrewSCRows?.length)  setAndrewSCRows(saved.andrewSCRows);
+                    if (saved?.andrewSERows?.length)  setAndrewSERows(saved.andrewSERows);
                     // HR Manager (Tanvi) data
                     if (saved?.hrMonthlyData) {
                         const hr = saved.hrMonthlyData as any;
@@ -1166,6 +1197,7 @@ export default function MonthlyReportPage() {
                     andrewBRows:  isQaReport ? andrewBRows  : undefined,
                     andrewSBRows: isQaReport ? andrewSBRows : undefined,
                     andrewSCRows: isQaReport ? andrewSCRows : undefined,
+                    andrewSERows: isQaReport ? andrewSERows : undefined,
                     hrMonthlyData: isHrReport ? {
                         highlights: hrHighlights,
                         complianceRows: hrComplianceRows,
@@ -1241,6 +1273,9 @@ export default function MonthlyReportPage() {
             setAndrewA1Rows([]);
             setAndrewA2Rows([]);
             setAndrewBRows([mkAB("b-1","Andrew"), mkAB("b-2","Abhishek")]);
+            setAndrewSBRows([mkSBRow("sb-1","Rohini"), mkSBRow("sb-2","Shikha")]);
+            setAndrewSCRows([mkSCRow("sc-1"), mkSCRow("sc-2"), mkSCRow("sc-3")]);
+            setAndrewSERows([mkSERow("se-1"), mkSERow("se-2"), mkSERow("se-3")]);
             setHrHighlights({ top3Achievements: "", top3Risks: "", criticalEscalations: "", supportRequired: "" });
             setHrComplianceRows([{ id: "c-1", employeeName: "", issueType: "", descriptionOfIssue: "", severity: "", actionTakenByHR: "", currentStatus: "" }]);
             setHrNewJoineeRows([{ id: "nj-1", employeeName: "", position: "", daysTakenToClose: "", qualityOfHire: "", issueObserved: "", hrIntervention: "", currentStatus: "" }]);
@@ -1504,6 +1539,69 @@ export default function MonthlyReportPage() {
                             )}
                         </div>
                         )}
+
+                        {/* ── Section D (UI) — Views and Changes (YT Shorts).
+                             Same shape as Section C (Monthly Views Comparison)
+                             so HR sees a familiar table — only the data is
+                             scoped to shorts. Tab key stays "E" internally and
+                             the DB column is `andrewERows`, so weekly +
+                             monthly share the same schema slot. ── */}
+                        {andrewTab === "E" && (
+                        <div>
+                            <div className="mb-3 rounded-t-lg px-4 py-2" style={{background:"linear-gradient(90deg,#7c3aed,#a78bfa)"}}>
+                                <h2 className="text-base font-bold text-white" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Section D: Views and Changes (YT Shorts)</h2>
+                                <p className="text-[11px] text-violet-100 mt-0.5">Compare current month ({monthName} {year}) vs previous month shorts views</p>
+                            </div>
+                            <DragScrollDiv className="overflow-x-auto rounded-b-lg border border-t-0 border-slate-300 shadow-sm">
+                                <table ref={seTableRef as any} className="border-collapse w-full" style={{minWidth:800}}>
+                                    <thead>
+                                        <tr>
+                                            <ATh colIndex={0} widths={seColWidths} setWidths={setSeColWidths} tableRef={seTableRef as any} colCount={5}>Capsule / Channel <span style={{color:"#fca5a5"}}>*</span></ATh>
+                                            <ATh colIndex={1} widths={seColWidths} setWidths={setSeColWidths}>{monthName} {year} Shorts Views <span style={{color:"#fca5a5"}}>*</span></ATh>
+                                            <ATh colIndex={2} widths={seColWidths} setWidths={setSeColWidths}>Previous Month Shorts Views <span style={{color:"#fca5a5"}}>*</span></ATh>
+                                            <ATh colIndex={3} widths={seColWidths} setWidths={setSeColWidths}>Difference (↑ / ↓)</ATh>
+                                            <ATh colIndex={4} widths={seColWidths} setWidths={setSeColWidths}><span style={{color:"#fde68a",fontStyle:"italic",fontSize:"10px",fontWeight:400}}>Remark (optional)</span></ATh>
+                                            <th className="px-2 py-2 bg-[#1e3a5f] border border-[#2a4a6f] w-8"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {andrewSERows.map((row,idx) => {
+                                            const cur = parseFloat(row.currentMonthViews.replace(/,/g,""));
+                                            const prev = parseFloat(row.lastMonthViews.replace(/,/g,""));
+                                            const diff = !isNaN(cur) && !isNaN(prev) ? cur - prev : null;
+                                            return (
+                                                <tr key={row.id} className="hover:bg-violet-50/40">
+                                                    <ATd><AInput value={row.capsule}           onChange={v=>setSER(idx,"capsule",          v)} placeholder="e.g. M7"     disabled={aDisabled} /></ATd>
+                                                    <ATd><AInput value={row.currentMonthViews} onChange={v=>setSER(idx,"currentMonthViews",v)} placeholder="e.g. 50000"  disabled={aDisabled} /></ATd>
+                                                    <ATd><AInput value={row.lastMonthViews}    onChange={v=>setSER(idx,"lastMonthViews",   v)} placeholder="e.g. 45000"  disabled={aDisabled} /></ATd>
+                                                    <ATd>
+                                                        <span className="block px-2 py-2 text-center">
+                                                            {diff !== null
+                                                                ? <span className={`text-[13px] font-semibold ${diff >= 0 ? "text-emerald-600" : "text-red-500"}`}>{diff >= 0 ? "↑" : "↓"} {Math.abs(diff).toLocaleString()}</span>
+                                                                : <span className="text-slate-300 text-[12px] italic">auto</span>}
+                                                        </span>
+                                                    </ATd>
+                                                    <ATd><ATextarea value={row.remark} onChange={v=>setSER(idx,"remark",v)} placeholder="Remark…" disabled={aDisabled} /></ATd>
+                                                    <td className="px-2 py-2 border border-slate-200 bg-white text-center">
+                                                        {andrewSERows.length>1 && !isLocked && (
+                                                            <button onClick={()=>setAndrewSERows(p=>p.filter((_,i)=>i!==idx))} className="text-red-400 hover:text-red-600 transition-colors">
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </DragScrollDiv>
+                            {!isLocked && (
+                                <button onClick={()=>setAndrewSERows(p=>[...p,mkSERow(`se-${Date.now()}`)])} className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-violet-600 hover:text-violet-700">
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>Add row
+                                </button>
+                            )}
+                        </div>
+                        )}
                     </div>
                     {/* Footer — tabs left, actions right */}
                     <div className="shrink-0 flex items-stretch border-t border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-[#22223a]">
@@ -1521,9 +1619,10 @@ export default function MonthlyReportPage() {
                             { key: "A", label: "Section A",  sub: "QA Review" },
                             { key: "B", label: "Section B",  sub: "Rohini & Shikha" },
                             { key: "C", label: "Section C",  sub: "Monthly Views" },
+                            { key: "E", label: "Section D",  sub: "YT Shorts" },
                         ] as const).map(s => {
                             const active = andrewTab === s.key;
-                            const accent = s.key === "A" ? "bg-amber-500" : s.key === "B" ? "bg-sky-500" : "bg-teal-500";
+                            const accent = s.key === "A" ? "bg-amber-500" : s.key === "B" ? "bg-sky-500" : s.key === "C" ? "bg-teal-500" : "bg-violet-500";
                             return (
                                 <button key={s.key} onClick={() => setAndrewTab(s.key)}
                                     className={[

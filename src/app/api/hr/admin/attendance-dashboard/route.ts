@@ -28,7 +28,7 @@ export async function GET() {
       select: {
         id: true, name: true, email: true, role: true, orgLevel: true,
         teamCapsule: true, profilePictureUrl: true,
-        employeeProfile: { select: { department: true, designation: true, employeeId: true, workLocation: true } },
+        employeeProfile: { select: { department: true, designation: true, employeeId: true, workLocation: true, attendanceCaptureScheme: true } },
       },
     });
     // Drop anyone whose Attendance toggle is OFF — they're "off the
@@ -75,13 +75,42 @@ export async function GET() {
       const rec = byUser.get(u.id) ?? null;
       const loc = rec ? parseAttLoc(rec.location) : null;
       const mode = loc?.mode ?? null; // "office" | "remote" | null
-      // On-leave wins over a stray clock-in that day so an approved
-      // half-day still appears in the On Leave list. The Attendance.status
-      // check stays first so an explicit on_leave row is honored
-      // regardless of LeaveApplication state.
+      // Status priority — on_leave > wfh > hybrid/remote (classification) >
+      // office/remote (derived) > absent.
+      //   on_leave    approved leave covering today (or an explicit
+      //               Attendance.status="on_leave" override) wins over
+      //               everything so an approved half-day still shows in
+      //               the On Leave list.
+      //   wfh         the person applied for WFH today AND has actually
+      //               clocked in — their authorised state is WFH, so the
+      //               pill should say "WFH" instead of mode-derived.
+      //               WFH applicants who haven't clocked in stay
+      //               "absent" so HR can still see they haven't started.
+      //   hybrid      workLocation OR captureScheme is hybrid — clocked
+      //               in from anywhere is normal for them. The pill
+      //               reads "Hybrid" so HR doesn't read 6.6km off-site
+      //               as a discrepancy on a worker whose pattern allows
+      //               either location.
+      //   remote      workLocation OR captureScheme is remote — same
+      //               idea: their authorised pattern is to work remote,
+      //               so the pill reads "Remote" as their classification,
+      //               not because the geofence flagged them.
+      //   office/remote (derived) — for people classified as office, we
+      //               derive from clock-in mode + geofence: a clock-in
+      //               km away from the office flips to "Remote" so the
+      //               row stops contradicting its own off-site badge.
+      const profileWl = (u.employeeProfile?.workLocation ?? "").toLowerCase();
+      const profileCs = ((u.employeeProfile as any)?.attendanceCaptureScheme ?? "").toLowerCase();
+      const isClassifiedRemote = profileWl === "remote" || profileCs === "remote";
+      const isClassifiedHybrid = profileWl === "hybrid" || profileCs === "hybrid";
+      const atOfficeStrictFalse = loc?.atOffice === false;
+      const isWfhToday          = wfhTodayIds.has(u.id);
       const status =
         rec?.status === "on_leave" || onLeaveIds.has(u.id) ? "on_leave" :
-        rec?.clockIn ? (mode === "remote" ? "remote" : "office") :
+        rec?.clockIn && isWfhToday ? "wfh" :
+        rec?.clockIn && isClassifiedHybrid ? "hybrid" :
+        rec?.clockIn && isClassifiedRemote ? "remote" :
+        rec?.clockIn ? ((mode === "remote" || atOfficeStrictFalse) ? "remote" : "office") :
         "absent";
       return {
         id:           u.id,
@@ -95,6 +124,11 @@ export async function GET() {
         designation:  u.employeeProfile?.designation ?? null,
         department:   u.employeeProfile?.department  ?? null,
         workLocation: u.employeeProfile?.workLocation ?? null,
+        // Capture scheme is the OPERATIONAL flavour of where this user
+        // is supposed to punch in from. Often "Remote" even when
+        // workLocation is left at the default "office" — we use both
+        // signals when deciding whether to flag an off-site clock-in.
+        attendanceCaptureScheme: (u.employeeProfile as any)?.attendanceCaptureScheme ?? null,
         clockIn:      rec?.clockIn  ?? null,
         clockOut:     rec?.clockOut ?? null,
         totalMinutes: rec?.totalMinutes ?? 0,
@@ -103,20 +137,34 @@ export async function GET() {
         locationMode:    mode,
         locationLat:     loc?.lat   ?? null,
         locationLng:     loc?.lng   ?? null,
-        status, // derived: on_leave | remote | office | absent
-        wfhToday: wfhTodayIds.has(u.id),
+        // Office-geofence result computed at clock-in time and stored
+        // in the location JSON blob. Both fields are nullable —
+        // undefined for older punches that pre-date the geofence
+        // feature, or when OFFICE_LAT/LNG weren't configured.
+        atOffice:             loc?.atOffice ?? null,
+        distanceFromOfficeM:  loc?.distanceFromOfficeM ?? null,
+        status, // derived: on_leave | wfh | hybrid | remote | office | absent
+        wfhToday: isWfhToday,
       };
     });
 
     const counts = {
       total:        rows.length,
-      present:      rows.filter((r) => r.status === "office" || r.status === "remote").length,
+      // "Working today" — anyone who's clocked in regardless of mode.
+      // WFH / Hybrid applicants who clocked in count here too.
+      present:      rows.filter((r) => r.status === "office" || r.status === "remote" || r.status === "hybrid" || r.status === "wfh").length,
       office:       rows.filter((r) => r.status === "office").length,
       remote:       rows.filter((r) => r.status === "remote").length,
-      // WFH = anyone who applied for WFH today (intent). Can overlap with
-      // any other tab (e.g. a WFH applicant who clocked in remote counts
-      // toward both Remote Clock-in and WFH).
+      hybrid:       rows.filter((r) => r.status === "hybrid").length,
+      // Intent count — everyone who applied for WFH today. Used for the
+      // WFH tab badge so the number matches the rows the tab will show
+      // (the tab filter is gated on the wfhToday flag, not status, so
+      // a WFH applicant who hasn't clocked in remains visible).
       wfh:          rows.filter((r) => r.wfhToday).length,
+      // Status count — WFH applicants who actually clocked in. Used by
+      // the donut so the segments add up to total without overlap with
+      // the absent slice.
+      wfhWorking:   rows.filter((r) => r.status === "wfh").length,
       onLeave:      rows.filter((r) => r.status === "on_leave").length,
       notClockedIn: rows.filter((r) => r.status === "absent").length,
       late:         rows.filter((r) => r.rawStatus === "late").length,

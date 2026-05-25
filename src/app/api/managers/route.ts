@@ -1,48 +1,70 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
 import { isDeveloperEmail } from "@/lib/hr/notification-policy";
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+// Two callers, two needs:
+//
+//   GET /api/managers            → manager-tier ONLY (default).
+//     Used by the Manager Reports sidebar where listing every
+//     employee would balloon the menu.
+//
+//   GET /api/managers?all=true   → every active user (excludes self
+//     is the caller's job).
+//     Used by the Reporting Manager dropdown on the employee edit
+//     form, where HR explicitly wants to assign anyone — not just
+//     someone with a manager role — as a person's reporting line.
+export async function GET(req: NextRequest) {
     try {
         const { session, errorResponse } = await requireAuth();
         if (errorResponse) return errorResponse;
         const viewer = session?.user as any;
-        // Developer invisibility: hide developer-account names from
-        // anyone except other developers.
+        const { searchParams } = new URL(req.url);
+        const all = searchParams.get("all") === "true";
+
+        // Developer invisibility. Two layers:
+        //
+        //   1. Default mode (Manager Reports sidebar) — hide devs only
+        //      from non-dev viewers, so dev accounts can still see each
+        //      other in their own UI.
+        //   2. all=true mode (Reporting Manager picker) — ALWAYS hide
+        //      devs, regardless of viewer. Devs aren't anyone's actual
+        //      manager; surfacing their names there pollutes HR's
+        //      dropdown with accounts that shouldn't be picked.
         const viewerIsDev = isDeveloperEmail(viewer?.email ?? null);
         const devEmails = (process.env.DEVELOPER_EMAILS || "")
             .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-        const hideDev = !viewerIsDev && devEmails.length > 0 ? devEmails : [];
+        const hideDev =
+            all ? devEmails :
+            (!viewerIsDev && devEmails.length > 0 ? devEmails : []);
 
-        // True report-OWNERS only — used by the "Manager Reports"
-        // sidebar and the Reporting/Inline-Manager dropdowns.
-        //
-        // Excluded on purpose:
-        //   • orgLevel "ceo" / "special_access" — they VIEW reports
-        //     but don't submit any, so their names must not appear in
-        //     the picker.
-        //   • role "admin" — same reason.
-        //   • orgLevel "hr_manager" — the org-tree dropdown's "HR"
-        //     option maps every HR employee (including Members) to this
-        //     orgLevel, so it would pollute the list with non-managers.
-        //     The real HR Manager (Tanvi) is matched via role=hr_manager
-        //     below instead.
-        // Mirrors src/lib/access.ts:isPickableAsManager.
-        const managers = await prisma.user.findMany({
+        // Mirror of src/lib/access.ts:isPickableAsManager — kept here
+        // as the server-side gate so a tampered client can't sneak in
+        // a non-manager when `all` isn't set. Cast through `any` because
+        // Prisma generates enum-typed `OrgLevel` literals and the typed
+        // client may lag on the dev box (Windows DLL lock blocks regen).
+        const managerWhere: any = {
+            OR: [
+                { orgLevel: { in: ["hod", "manager"] } },
+                { role: { in: [
+                    "manager",
+                    "production_manager",
+                    "researcher_manager",
+                    "hr_manager",
+                ] } },
+            ],
+        };
+
+        const users = await prisma.user.findMany({
             where: {
                 isActive: true,
-                OR: [
-                    { orgLevel: { in: ["hod", "manager"] } },
-                    { role: { in: [
-                        "manager",
-                        "production_manager",
-                        "researcher_manager",
-                        "hr_manager",
-                    ] } },
-                ],
+                // The default flavour filters to manager-tier roles.
+                // When `?all=true` we drop the role/orgLevel gate so
+                // every active user is returned — used by the Edit
+                // Profile form's Reporting Manager dropdown.
+                ...(all ? {} : managerWhere),
                 ...(hideDev.length > 0 ? { NOT: { email: { in: hideDev } } } : {}),
             },
             orderBy: { name: "asc" },
@@ -54,7 +76,7 @@ export async function GET() {
             },
         });
 
-        return NextResponse.json(managers);
+        return NextResponse.json(users);
     } catch (error) {
         return serverError(error, "route");
     }

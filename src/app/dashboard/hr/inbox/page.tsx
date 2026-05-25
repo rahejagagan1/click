@@ -98,8 +98,32 @@ const CATEGORIES: Cat[] = [
   { key: "compOff",         label: "Comp-Off",                  Icon: Gift,         color: "text-pink-500",   bucket: "compOff",         prefix: "co" },
 ];
 
-// Build the right-panel detail rows for each category.
-function detailFor(cat: Cat, item: any) {
+// Returns the {from, to} of the range the user originally submitted.
+// Range submissions create one WFH/OnDuty row per working day; they
+// share the same userId, reason, and createdAt timestamp (transaction-
+// wide `now()`). We group on (userId, reason, createdAt within 30s)
+// to recover the span so the detail panel can show From / To instead
+// of just the current row's date.
+function siblingRange(item: any, siblings: any[]): { from: Date; to: Date } {
+  const own = new Date(item.date);
+  if (!Array.isArray(siblings) || siblings.length <= 1) return { from: own, to: own };
+  const seedTs = new Date(item.createdAt).getTime();
+  const reason = (item.reason || "").trim();
+  const group = siblings.filter((s) => {
+    if (s.userId !== item.userId) return false;
+    if ((s.reason || "").trim() !== reason) return false;
+    const dt = Math.abs(new Date(s.createdAt).getTime() - seedTs);
+    return dt <= 30_000;
+  });
+  if (group.length === 0) return { from: own, to: own };
+  const dates = group.map((g) => new Date(g.date).getTime()).sort((a, b) => a - b);
+  return { from: new Date(dates[0]), to: new Date(dates[dates.length - 1]) };
+}
+
+// Build the right-panel detail rows for each category. `siblings` is
+// the rest of the items in the same bucket — used to reconstruct
+// from/to for per-day rows that were created from a range submission.
+function detailFor(cat: Cat, item: any, siblings: any[]) {
   switch (cat.key) {
     case "leaves":
       return [
@@ -123,18 +147,33 @@ function detailFor(cat: Cat, item: any) {
         ...(item.requestedOut ? [["Requested Out", new Date(item.requestedOut).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})] as [string, string] ] : []),
         ["Submitted", fmtDate(item.createdAt)],
       ];
-    case "wfh":
+    case "wfh": {
+      // Prefer the leader's pre-computed range when the items list is
+      // collapsed (take_action view); fall back to a sibling scan for
+      // anywhere we render raw per-day rows.
+      const from = item._rangeFrom ? new Date(item._rangeFrom) : siblingRange(item, siblings).from;
+      const to   = item._rangeTo   ? new Date(item._rangeTo)   : siblingRange(item, siblings).to;
+      const days = item._groupSize ?? 1;
       return [
-        ["Date",      fmtDate(item.date)],
+        ["From",      fmtDate(from.toISOString())],
+        ["To",        fmtDate(to.toISOString())],
+        ...(days > 1 ? [["Total Days", `${days} day${days === 1 ? "" : "s"}`] as [string, string]] : []),
         ["Submitted", fmtDate(item.createdAt)],
       ];
-    case "onDuty":
+    }
+    case "onDuty": {
+      const from = item._rangeFrom ? new Date(item._rangeFrom) : siblingRange(item, siblings).from;
+      const to   = item._rangeTo   ? new Date(item._rangeTo)   : siblingRange(item, siblings).to;
+      const days = item._groupSize ?? 1;
       return [
-        ["Date",       fmtDate(item.date)],
+        ["From",      fmtDate(from.toISOString())],
+        ["To",        fmtDate(to.toISOString())],
+        ...(days > 1 ? [["Total Days", `${days} day${days === 1 ? "" : "s"}`] as [string, string]] : []),
         ...(item.fromTime ? [["From Time", item.fromTime] as [string, string]] : []),
         ...(item.toTime   ? [["To Time",   item.toTime]   as [string, string]] : []),
         ...(item.location ? [["Location",  item.location] as [string, string]] : []),
       ];
+    }
     case "compOff":
       return [
         ["Worked Date", fmtDate(item.workedDate)],
@@ -179,10 +218,24 @@ export default function InboxPage() {
   const { data, isLoading } = useSWR(endpoint, fetcher);
 
   // Counts for sidebar badges — only meaningful for take_action + archive.
+  // WFH / OD counts are de-duplicated by range group so a 7-day range
+  // counts as one item, matching what the user sees in the list.
   const counts = useMemo(() => {
     if (!data || topTab === "notifications") return {} as Record<CatKey, number>;
     return Object.fromEntries(
-      CATEGORIES.map(c => [c.key, (data[c.bucket] ?? []).length])
+      CATEGORIES.map((c) => {
+        const arr = (data[c.bucket] ?? []) as any[];
+        if (c.key !== "wfh" && c.key !== "onDuty") return [c.key, arr.length];
+        const seen = new Set<string>();
+        for (const it of arr) {
+          seen.add([
+            it.userId,
+            (it.reason || "").trim(),
+            Math.floor(new Date(it.createdAt).getTime() / 1000),
+          ].join("|"));
+        }
+        return [c.key, seen.size];
+      })
     ) as Record<CatKey, number>;
   }, [data, topTab]);
 
@@ -192,6 +245,13 @@ export default function InboxPage() {
   }, [data, topTab]);
 
   // Items visible in the middle column for the current category.
+  // For WFH / OnDuty we collapse per-day rows that came from the same
+  // range submission (same userId + same reason + createdAt within
+  // 30s) into a single "group leader" item. The leader carries
+  // `_groupIds` — the full list of underlying row ids — so an approve
+  // / reject on the leader cascades to every day in the range. Other
+  // categories (leaves, comp-off, regularizations, expenses) already
+  // carry from/to natively, so they pass through unchanged.
   const items: any[] = useMemo(() => {
     if (!data || topTab === "notifications") return [];
     const cat = CATEGORIES.find(c => c.key === catKey);
@@ -204,6 +264,34 @@ export default function InboxPage() {
         (it.reason    || "").toLowerCase().includes(q) ||
         (it.title     || "").toLowerCase().includes(q)
       );
+    }
+    if (cat.key === "wfh" || cat.key === "onDuty") {
+      // Bucket by (userId | trimmed reason | createdAt-second). Pick
+      // the earliest-date row as the leader so the list reads in
+      // calendar order; attach `_groupIds` + `_groupSize` so the UI
+      // can show "11 May – 19 May (7 days)" and act on all rows in
+      // one go.
+      const buckets = new Map<string, any[]>();
+      for (const it of list) {
+        const key = [
+          it.userId,
+          (it.reason || "").trim(),
+          Math.floor(new Date(it.createdAt).getTime() / 1000),
+        ].join("|");
+        if (!buckets.has(key)) buckets.set(key, []);
+        buckets.get(key)!.push(it);
+      }
+      list = Array.from(buckets.values()).map((group) => {
+        const sorted = [...group].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        const leader = sorted[0];
+        return {
+          ...leader,
+          _groupIds:  sorted.map((g) => g.id),
+          _groupSize: sorted.length,
+          _rangeFrom: new Date(sorted[0].date),
+          _rangeTo:   new Date(sorted[sorted.length - 1].date),
+        };
+      });
     }
     list = [...list].sort((a, b) => {
       const ta = new Date(a.createdAt ?? a.appliedAt ?? a.updatedAt).getTime();
@@ -223,13 +311,22 @@ export default function InboxPage() {
   const activeCat = CATEGORIES.find(c => c.key === catKey)!;
 
   // ── Approve / Reject ──────────────────────────────────────────────────
+  // For grouped WFH / OnDuty leaders we fire one PUT per underlying
+  // day row in parallel so the entire range is decided in one click.
+  // For everything else there's no `_groupIds` and we hit the single
+  // id like before.
   const act = async (action: "approve" | "reject") => {
     if (!selected) return;
-    const { url, body } = approvalUrlFor(activeCat, selected, action);
+    const ids: number[] = Array.isArray(selected._groupIds) && selected._groupIds.length > 0
+      ? selected._groupIds
+      : [selected.id];
     const key = `${activeCat.prefix}${selected.id}`;
     setApproving(p => ({ ...p, [key]: true }));
     try {
-      await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      await Promise.all(ids.map((id) => {
+        const { url, body } = approvalUrlFor(activeCat, { ...selected, id }, action);
+        return fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      }));
       // Bust every related cache so the user sees the change everywhere.
       mutate((k: string) => typeof k === "string" && (
         k.includes("/api/hr/leaves") || k.includes("/api/hr/expenses") ||
@@ -420,7 +517,7 @@ export default function InboxPage() {
                 </div>
 
                 <div className="mt-6 grid grid-cols-2 gap-x-8 gap-y-4">
-                  {detailFor(activeCat, selected)?.map(([k, v]) => (
+                  {detailFor(activeCat, selected, items)?.map(([k, v]) => (
                     <div key={k}>
                       <p className={`text-[10px] font-bold tracking-widest ${C.t3} uppercase`}>{k}</p>
                       <p className={`text-[13px] ${C.t1} mt-1`}>{v}</p>
@@ -464,12 +561,30 @@ export default function InboxPage() {
 // List preview text — one-liner under the employee name in the middle column.
 // ─────────────────────────────────────────────────────────────────────────────
 function previewFor(cat: Cat, it: any): string {
+  // For collapsed WFH / OD groups the leader carries `_rangeFrom` /
+  // `_rangeTo` / `_groupSize` — show "11 May → 19 May · 7 days" so the
+  // user knows it's a range, not a single-day request.
+  const rangeLabel = (): string => {
+    if (!it._rangeFrom || !it._rangeTo) return fmtDate(it.date);
+    const from = new Date(it._rangeFrom);
+    const to   = new Date(it._rangeTo);
+    if (from.toDateString() === to.toDateString()) return fmtDate(it.date);
+    return `${fmtDate(from.toISOString())} → ${fmtDate(to.toISOString())}`;
+  };
   switch (cat.key) {
     case "leaves":          return `${it.leaveType?.name || "Leave"} · ${fmtDate(it.fromDate)}${it.fromDate !== it.toDate ? ` → ${fmtDate(it.toDate)}` : ""}`;
     case "expenses":        return `${it.title || "Expense"} · ₹${Number(it.amount || 0).toLocaleString("en-IN")}`;
     case "regularizations": return `${fmtDate(it.date)}${it.reason ? ` · ${it.reason}` : ""}`;
-    case "wfh":             return `${fmtDate(it.date)}${it.reason ? ` · ${it.reason}` : ""}`;
-    case "onDuty":          return `${fmtDate(it.date)}${it.location ? ` · ${it.location}` : ""}`;
+    case "wfh": {
+      const span = rangeLabel();
+      const days = it._groupSize > 1 ? ` · ${it._groupSize} days` : "";
+      return `${span}${days}${it.reason ? ` · ${it.reason}` : ""}`;
+    }
+    case "onDuty": {
+      const span = rangeLabel();
+      const days = it._groupSize > 1 ? ` · ${it._groupSize} days` : "";
+      return `${span}${days}${it.location ? ` · ${it.location}` : ""}`;
+    }
     case "compOff":         return `Worked ${fmtDate(it.workedDate)} · ${parseFloat(it.creditDays).toFixed(1)} day`;
   }
 }

@@ -118,6 +118,7 @@ export default function ManagerReportPage() {
                         <img
                             src={manager.profilePictureUrl}
                             alt={manager.name}
+                            referrerPolicy="no-referrer"
                             className="w-10 h-10 rounded-full object-cover ring-2 ring-violet-500/30"
                         />
                     ) : (

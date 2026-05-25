@@ -135,7 +135,7 @@ export default function MyTeamPage() {
               {onLeaveToday.map((l: any) => (
                 <div key={l.id} className="inline-flex items-center gap-2 pl-1.5 pr-3 py-1 rounded-full bg-violet-500/10 text-violet-700 dark:text-violet-300 text-[11.5px]">
                   {l.profilePictureUrl ? (
-                    <img src={l.profilePictureUrl} alt={l.name} className="w-5 h-5 rounded-full object-cover" />
+                    <img src={l.profilePictureUrl} alt={l.name} referrerPolicy="no-referrer" className="w-5 h-5 rounded-full object-cover" />
                   ) : (
                     <span className="w-5 h-5 rounded-full bg-violet-500/20 flex items-center justify-center text-[9px] font-bold">
                       {l.name?.split(" ").map((p: string) => p[0]).join("").slice(0,2).toUpperCase() || "?"}
@@ -198,7 +198,7 @@ function MemberCard({ m, period, dayKeys }: { m: any; period: Period; dayKeys: s
         {/* Avatar */}
         <div className="relative shrink-0">
           {m.profilePictureUrl ? (
-            <img src={m.profilePictureUrl} alt={m.name}
+            <img src={m.profilePictureUrl} alt={m.name} referrerPolicy="no-referrer"
               className="w-12 h-12 rounded-full object-cover ring-2 ring-white dark:ring-[#101c2e]"/>
           ) : (
             <div className="w-12 h-12 rounded-full bg-[#008CFF]/20 flex items-center justify-center text-[#008CFF] font-bold text-[15px] ring-2 ring-white dark:ring-[#101c2e]">

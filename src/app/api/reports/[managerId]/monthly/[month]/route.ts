@@ -195,6 +195,7 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
                 andrewBRows:  (report as any).andrewBRows,
                 andrewSBRows: (report as any).andrewCRows,  // thumbnails → andrewCRows in DB
                 andrewSCRows: (report as any).andrewDRows,  // capsule views → andrewDRows in DB
+                andrewSERows: (report as any).andrewERows,  // Section E shorts → andrewERows in DB
                 // HR Manager (Tanvi Dogra) monthly report — dedicated column
                 hrMonthlyData: (report as any).hrMonthlyData,
             },
@@ -389,6 +390,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
             andrewBRows:  fields.andrewBRows  ?? null,
             andrewCRows:  fields.andrewSBRows ?? null,  // thumbnails
             andrewDRows:  fields.andrewSCRows ?? null,  // capsule views
+            andrewERows:  fields.andrewSERows ?? null,  // Section D (UI) / YT shorts
             // HR Manager (Tanvi Dogra) — dedicated column
             hrMonthlyData: fields.hrMonthlyData ?? null,
             isLocked:            shouldLock,
@@ -397,8 +399,8 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
 
         const report = await prisma.monthlyReport.upsert({
             where:  { managerId_month_year: { managerId, month, year } },
-            create: { managerId, month, year, ...payload },
-            update: payload,
+            create: { managerId, month, year, ...payload } as any,
+            update: payload as any,
         });
 
         // Freeze the team roster onto the report when it transitions to
