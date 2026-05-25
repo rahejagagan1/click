@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, isHRAdmin, resolveUserId, serverError } from "@/lib/api-auth";
+import { requireAuth, canViewSalary, resolveUserId, serverError } from "@/lib/api-auth";
 import { decryptPII } from "@/lib/pii-crypto";
 
 // Columns that are encrypted at rest. Decrypt on the way out so the
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
   // always pinned to themselves regardless of query.
   const { searchParams } = new URL(req.url);
   const requested = searchParams.get("userId");
-  const myId = (isHRAdmin(self) && requested && /^\d+$/.test(requested))
+  const myId = (canViewSalary(self) && requested && /^\d+$/.test(requested))
     ? parseInt(requested, 10)
     : meId;
 

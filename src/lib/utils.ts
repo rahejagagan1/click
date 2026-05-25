@@ -59,24 +59,51 @@ export function deriveShortName(name: string): string {
 }
 
 /**
- * Calculate TAT in business days with half-day precision.
+ * Returns elapsed weekday hours between start and done, excluding
+ * Saturdays and Sundays in IST (Asia/Kolkata).
  *
- * Rules:
- *  - Weekends (Sat/Sun) are skipped entirely.
- *  - Each full working day from start → day-before-done = 1 day.
- *  - On the done day: hour < 12 → +0 (morning); hour >= 12 → +0.5 (afternoon).
- *  - Same-day sub-hour completions: raw hours are returned as a decimal (e.g. 0.1).
+ * Implementation: walks the time range in IST-calendar-day chunks. For
+ * each chunk, if the IST weekday is Mon–Fri (1–5), the chunk's hours
+ * count; Sat/Sun chunks contribute 0. The IST anchor matters because
+ * "is it the weekend?" is a wall-clock question — UTC Sunday 23:00 is
+ * already Monday 04:30 IST and should count as a weekday.
  *
- * Examples:
- *   Mon 9am → Fri 2pm  = 4.5d
- *   Mon 9am → Mon 2pm  = 0.5d
- *   Mon 9am → Fri 9am  = 4.0d
- *   Mon 9am → Mon 9am  = 0.0d  (same moment)
+ * Public holidays are NOT skipped — only Sat/Sun. Add holiday lookup if
+ * the business decides bank holidays shouldn't count either.
+ *
+ * Name kept for backwards-compat with all the existing callers; the
+ * return value is hours (matches `formatTatDays`'s input).
  */
-/** Returns total elapsed hours between start and done (calendar time). */
 export function calcBusinessDaysTat(start: Date, done: Date): number {
     if (done <= start) return 0;
-    return (done.getTime() - start.getTime()) / (1000 * 60 * 60);
+
+    const MS_PER_HOUR    = 1000 * 60 * 60;
+    const IST_OFFSET_MS  = 330 * 60 * 1000; // UTC+5:30
+
+    let total  = 0;
+    let cursor = start.getTime();
+    const end  = done.getTime();
+
+    while (cursor < end) {
+        // Project `cursor` into IST so getUTCDay() gives the IST weekday.
+        const istWallClock = new Date(cursor + IST_OFFSET_MS);
+        const istDow = istWallClock.getUTCDay(); // 0=Sun, 6=Sat
+
+        // Start of next IST midnight, expressed as a UTC ms.
+        const startOfNextIstDay =
+            Date.UTC(
+                istWallClock.getUTCFullYear(),
+                istWallClock.getUTCMonth(),
+                istWallClock.getUTCDate() + 1,
+            ) - IST_OFFSET_MS;
+
+        const chunkEnd = Math.min(end, startOfNextIstDay);
+        if (istDow !== 0 && istDow !== 6) {
+            total += (chunkEnd - cursor) / MS_PER_HOUR;
+        }
+        cursor = chunkEnd;
+    }
+    return total;
 }
 
 /**
