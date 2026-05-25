@@ -1,28 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, serverError } from "@/lib/api-auth";
+import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 import { writeAuditLog } from "@/lib/audit-log";
 
 export const dynamic = "force-dynamic";
-
-// Mirrors src/lib/access.ts:isHRAdmin so the server gate matches the
-// client. CEO / developer / special_access / role=admin / hr_manager
-// can read any user's structure and write structures.
-function isHRAdmin(u: any): boolean {
-  return (
-    u?.orgLevel === "ceo" ||
-    u?.isDeveloper === true ||
-    u?.orgLevel === "special_access" ||
-    u?.role === "admin" ||
-    u?.orgLevel === "hr_manager"
-  );
-}
 
 export async function GET(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
-  const admin = isHRAdmin(user);
+  const admin = canViewSalary(user);
 
   const { searchParams } = new URL(req.url);
   // Admins can target any userId; everyone else only their own. If a
@@ -56,7 +43,7 @@ export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
-  if (!isHRAdmin(user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!canViewSalary(user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
     const body = await req.json();

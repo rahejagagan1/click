@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth , serverError } from "@/lib/api-auth";
+import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { sendEmail } from "@/lib/email/sender";
@@ -398,7 +398,13 @@ export async function POST(request: NextRequest) {
             //   regular → { salaryType:"regular", annualCtc, payGroup, ... }
             // We compute breakup components here so they match what the
             // wizard previewed on screen.
-            if (compensation && typeof compensation === "object") {
+            //
+            // Salary policy: only canViewSalary callers (HR Manager, CEO,
+            // developer) may write SalaryStructure. Other HR-admin users
+            // can still create the rest of the user record — they just
+            // skip the compensation block silently. The UI hides the
+            // Compensation step for them, so this is belt-and-braces.
+            if (compensation && typeof compensation === "object" && canViewSalary(session!.user)) {
                 const effectiveFrom = compensation.effectiveFrom
                     ? new Date(compensation.effectiveFrom)
                     : new Date();
