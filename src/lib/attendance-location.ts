@@ -3,6 +3,16 @@ export type AttLoc = {
   lat?: number;
   lng?: number;
   address?: string;
+  /**
+   * Office-geofence result computed at clock-in time. Stored on the
+   * punch so HR can audit "was this person actually at the office?"
+   * without re-running the calculation. Both fields are optional —
+   * undefined when the geofence isn't configured (no OFFICE_LAT/LNG
+   * env vars) or when coordinates weren't supplied.
+   */
+  atOffice?: boolean;
+  /** Distance in meters from the configured office. Whole numbers. */
+  distanceFromOfficeM?: number;
 };
 
 export function stringifyAttLoc(loc: AttLoc): string {
@@ -11,6 +21,10 @@ export function stringifyAttLoc(loc: AttLoc): string {
   if (typeof loc.lat === "number" && isFinite(loc.lat)) out.lat = loc.lat;
   if (typeof loc.lng === "number" && isFinite(loc.lng)) out.lng = loc.lng;
   if (loc.address) out.address = loc.address;
+  if (typeof loc.atOffice === "boolean") out.atOffice = loc.atOffice;
+  if (typeof loc.distanceFromOfficeM === "number" && isFinite(loc.distanceFromOfficeM)) {
+    out.distanceFromOfficeM = loc.distanceFromOfficeM;
+  }
   return JSON.stringify(out);
 }
 
@@ -25,6 +39,8 @@ export function parseAttLoc(raw?: string | null): AttLoc {
         lat: typeof j.lat === "number" ? j.lat : undefined,
         lng: typeof j.lng === "number" ? j.lng : undefined,
         address: typeof j.address === "string" ? j.address : undefined,
+        atOffice: typeof j.atOffice === "boolean" ? j.atOffice : undefined,
+        distanceFromOfficeM: typeof j.distanceFromOfficeM === "number" ? j.distanceFromOfficeM : undefined,
       };
     } catch {
       return { mode: null };
