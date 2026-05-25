@@ -171,11 +171,14 @@ export default function LeaveRequestForm({
   const [dayKind, setDayKind] = useState<"full" | "first_half" | "second_half">("full");
   const isHalfLeave = kind === "leave" && dayKind !== "full";
 
-  // Handoff fields — apply to every kind EXCEPT regularize. POC + Work
-  // Status are required for those forms; WFH additionally requires
-  // Time of Unavailability.
+  // Handoff fields — apply to every kind EXCEPT regularize. Work Status
+  // is required for those forms; WFH additionally requires Time of
+  // Unavailability. POC has an opt-in N/A toggle: users / HR can mark
+  // it N/A when there's no specific cover assigned. When N/A is ticked,
+  // pocUserId submits as null.
   const handoffApplies = kind !== "regularize";
   const [poc, setPoc] = useState<PickerUser[]>([]);
+  const [pocNa, setPocNa] = useState(false);
   const [workStatus, setWorkStatus] = useState("");
   const [unavailability, setUnavailability] = useState("");
 
@@ -206,8 +209,10 @@ export default function LeaveRequestForm({
     if (!note.trim()) return setErr("Reason is required.");
     if (kind === "leave" && !leaveTypeId) return setErr("Please choose a leave type");
     // Handoff validation — required for Leave / WFH / On Duty / Half Day.
-    if (handoffApplies && poc.length === 0)   return setErr("POC in Absence is required.");
-    if (handoffApplies && !workStatus.trim()) return setErr("Work Status is required.");
+    // POC can be N/A (pocNa toggle) — when ticked it satisfies the rule
+    // and the payload sends pocUserId=null.
+    if (handoffApplies && !pocNa && poc.length === 0)   return setErr("POC in Absence is required (or mark as N/A).");
+    if (handoffApplies && !workStatus.trim())           return setErr("Work Status is required.");
     if (kind === "wfh" && !unavailability.trim()) return setErr("Time of Unavailability is required (type 'Available all day' if not applicable).");
 
     setSaving(true);
@@ -216,7 +221,7 @@ export default function LeaveRequestForm({
     // below. Lets the server attribute the POC + work status without
     // changing the per-kind URL routing.
     const handoff = handoffApplies ? {
-      pocUserId:  poc[0].id,
+      pocUserId:  pocNa ? null : (poc[0]?.id ?? null),
       workStatus: workStatus.trim(),
     } : {};
 
@@ -453,7 +458,9 @@ export default function LeaveRequestForm({
           </div>
 
           {/* Handoff details — POC + Work Status (+ Unavailability for WFH).
-              Skipped for the regularize flow, where it doesn't apply. */}
+              Skipped for the regularize flow, where it doesn't apply.
+              POC is N/A-eligible — when ticked, the picker hides and
+              submit sends pocUserId=null. */}
           {handoffApplies && (
             <HandoffSection
               poc={poc}
@@ -463,6 +470,9 @@ export default function LeaveRequestForm({
               showUnavailability={kind === "wfh"}
               unavailability={unavailability}
               onUnavailabilityChange={setUnavailability}
+              allowNa
+              naSelected={pocNa}
+              onNaChange={setPocNa}
             />
           )}
 
