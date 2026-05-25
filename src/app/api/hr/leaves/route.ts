@@ -103,14 +103,13 @@ export async function POST(req: NextRequest) {
     const pastErr = checkPastDateAllowed(fromDate, self);
     if (pastErr) return NextResponse.json({ error: pastErr }, { status: 400 });
 
-    // Handoff fields — required by the company leave format. POC must
-    // be a real active user; workStatus must be a non-empty string.
-    // Exception: HR filing on behalf can mark POC as N/A (null) when
-    // the cover hasn't been assigned yet — workStatus is still required
-    // but HR can type "N/A" if they don't have that context either.
+    // Handoff fields — workStatus is always required. POC is N/A-able:
+    // the form has a "Mark as N/A" toggle for cases where no specific
+    // cover is assigned, and sends pocUserId=null. When a POC is named,
+    // it has to be a real active user — picking someone offboarded is
+    // a sign of stale UI state, so we reject those.
     const pocUserId  = Number.isFinite(Number(body.pocUserId))  ? Number(body.pocUserId)  : null;
     const workStatus = typeof body.workStatus === "string" ? body.workStatus.trim() : "";
-    if (!pocUserId && !onBehalf) return NextResponse.json({ error: "POC in Absence is required." }, { status: 400 });
     if (!workStatus) return NextResponse.json({ error: "Work Status is required." }, { status: 400 });
     const pocUser = pocUserId
       ? await prisma.user.findUnique({
