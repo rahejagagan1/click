@@ -29,13 +29,18 @@ type Row = {
   // atOffice=true and a "Off-site" warning when atOffice=false.
   atOffice:            boolean | null;
   distanceFromOfficeM: number | null;
-  status: "office" | "remote" | "on_leave" | "absent";
+  status: "office" | "remote" | "hybrid" | "wfh" | "on_leave" | "absent";
   wfhToday: boolean;
 };
 
 type Counts = {
   total: number; present: number; office: number; remote: number;
-  wfh: number; onLeave: number; notClockedIn: number; late: number;
+  hybrid: number;
+  // wfh        = wfhToday intent count (for the WFH tab badge)
+  // wfhWorking = status-based count (WFH applicants who clocked in) —
+  //              used by the donut so segments don't overlap with absent
+  wfh: number; wfhWorking: number;
+  onLeave: number; notClockedIn: number; late: number;
 };
 
 const fmtTime = (iso: string | null) =>
@@ -64,6 +69,8 @@ function StatusDonut({ c }: { c: Counts }) {
   const segs = [
     { label: "In Office",      n: c.office,       color: "#10b981" },
     { label: "Remote",         n: c.remote,       color: "#008CFF" },
+    { label: "Hybrid",         n: c.hybrid,       color: "#14b8a6" },
+    { label: "WFH",            n: c.wfhWorking,   color: "#f59e0b" },
     { label: "On Leave",       n: c.onLeave,      color: "#8b5cf6" },
     { label: "Not Clocked In", n: c.notClockedIn, color: "#cbd5e1" },
   ];
@@ -437,6 +444,8 @@ function StatusPill({ s, rawStatus }: { s: Row["status"]; rawStatus: string }) {
   const map: Record<Row["status"], { bg: string; text: string; label: string; dot: string }> = {
     office:   { bg: "bg-emerald-50",  text: "text-emerald-700",  label: "In Office",    dot: "#10b981" },
     remote:   { bg: "bg-[#008CFF]/10", text: "text-[#008CFF]",   label: "Remote",       dot: "#008CFF" },
+    hybrid:   { bg: "bg-teal-50",     text: "text-teal-700",     label: "Hybrid",       dot: "#14b8a6" },
+    wfh:      { bg: "bg-amber-50",    text: "text-amber-700",    label: "WFH",          dot: "#f59e0b" },
     on_leave: { bg: "bg-violet-50",   text: "text-violet-700",   label: "On Leave",     dot: "#8b5cf6" },
     absent:   { bg: "bg-slate-100",   text: "text-slate-600",    label: "Not Clocked In", dot: "#94a3b8" },
   };
@@ -465,7 +474,7 @@ export default function AttendanceDashboardPanel() {
     { refreshInterval: 60_000 }
   );
 
-  const [tab, setTab] = useState<"all" | "office" | "remote" | "wfh" | "on_leave" | "absent">("all");
+  const [tab, setTab] = useState<"all" | "office" | "remote" | "hybrid" | "wfh" | "on_leave" | "absent">("all");
   const [search, setSearch] = useState("");
   const [fDept, setFDept] = useState<Set<string>>(new Set());
 
@@ -484,7 +493,7 @@ export default function AttendanceDashboardPanel() {
   const monthRows = monthData?.rows ?? [];
 
   const rows: Row[] = data?.rows ?? [];
-  const counts: Counts = data?.counts ?? { total: 0, present: 0, office: 0, remote: 0, wfh: 0, onLeave: 0, notClockedIn: 0, late: 0 };
+  const counts: Counts = data?.counts ?? { total: 0, present: 0, office: 0, remote: 0, hybrid: 0, wfh: 0, wfhWorking: 0, onLeave: 0, notClockedIn: 0, late: 0 };
 
   const deptOpts = useMemo(() => {
     const dSet = new Set<string>();
@@ -542,6 +551,7 @@ export default function AttendanceDashboardPanel() {
     { key: "all",      label: "All",              n: counts.total        },
     { key: "office",   label: "In Office",        n: counts.office       },
     { key: "remote",   label: "Remote Clock-in",  n: counts.remote       },
+    { key: "hybrid",   label: "Hybrid",           n: counts.hybrid       },
     { key: "wfh",      label: "WFH",              n: counts.wfh          },
     { key: "on_leave", label: "On Leave",         n: counts.onLeave      },
     { key: "absent",   label: "Not Clocked In",   n: counts.notClockedIn },
