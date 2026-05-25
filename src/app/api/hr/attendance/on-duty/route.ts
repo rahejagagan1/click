@@ -55,18 +55,19 @@ export async function POST(req: NextRequest) {
     const pastErr = checkPastDateAllowed(date, selfUser);
     if (pastErr) return NextResponse.json({ error: pastErr }, { status: 400 });
 
-    // Handoff fields — POC + Work Status required (no Time of
-    // Unavailability since OD means the employee IS working, just
+    // Handoff fields — workStatus required. POC is N/A-able (no Time
+    // of Unavailability since OD means the employee IS working, just
     // off-site).
     const pocUserId  = Number.isFinite(Number(body.pocUserId))  ? Number(body.pocUserId)  : null;
     const workStatus = typeof body.workStatus === "string" ? body.workStatus.trim() : "";
-    if (!pocUserId)  return NextResponse.json({ error: "POC in Absence is required." }, { status: 400 });
     if (!workStatus) return NextResponse.json({ error: "Work Status is required." }, { status: 400 });
-    const pocUser = await prisma.user.findUnique({
-      where: { id: pocUserId },
-      select: { id: true, name: true, email: true, isActive: true },
-    });
-    if (!pocUser || !pocUser.isActive) {
+    const pocUser = pocUserId
+      ? await prisma.user.findUnique({
+          where: { id: pocUserId },
+          select: { id: true, name: true, email: true, isActive: true },
+        })
+      : null;
+    if (pocUserId && (!pocUser || !pocUser.isActive)) {
       return NextResponse.json({ error: "Selected POC is not an active employee." }, { status: 400 });
     }
 
@@ -167,7 +168,7 @@ export async function POST(req: NextRequest) {
     ]);
 
     // POC heads-up — fire-and-forget so SMTP hiccups don't 500 the save.
-    if (pocUser.email && pocUserId !== subjectUserId) {
+    if (pocUser && pocUser.email && pocUserId !== subjectUserId) {
       void sendEmail({
         to: pocUser.email,
         content: pocAssignmentEmail({
