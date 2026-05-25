@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { notifyApprovers, notifyUsers } from "@/lib/notifications";
+import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
+import { sendEmail } from "@/lib/email/sender";
+import { pocAssignmentEmail } from "@/lib/email/templates";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +49,27 @@ export async function POST(req: NextRequest) {
     if (!date || !purpose) return NextResponse.json({ error: "date and purpose required" }, { status: 400 });
     const extras = Array.isArray(notifyUserIds) ? notifyUserIds.filter((x: any) => Number.isInteger(x)) : [];
 
+    // Past-date gate: same rule as Leave/WFH. CEO / role=hr_manager /
+    // isDeveloper can back-date, everyone else can't.
+    const selfUser = session!.user as any;
+    const pastErr = checkPastDateAllowed(date, selfUser);
+    if (pastErr) return NextResponse.json({ error: pastErr }, { status: 400 });
+
+    // Handoff fields — POC + Work Status required (no Time of
+    // Unavailability since OD means the employee IS working, just
+    // off-site).
+    const pocUserId  = Number.isFinite(Number(body.pocUserId))  ? Number(body.pocUserId)  : null;
+    const workStatus = typeof body.workStatus === "string" ? body.workStatus.trim() : "";
+    if (!pocUserId)  return NextResponse.json({ error: "POC in Absence is required." }, { status: 400 });
+    if (!workStatus) return NextResponse.json({ error: "Work Status is required." }, { status: 400 });
+    const pocUser = await prisma.user.findUnique({
+      where: { id: pocUserId },
+      select: { id: true, name: true, email: true, isActive: true },
+    });
+    if (!pocUser || !pocUser.isActive) {
+      return NextResponse.json({ error: "Selected POC is not an active employee." }, { status: 400 });
+    }
+
     // HR-on-behalf: when targetUserId is set and the caller is HR-admin,
     // the on-duty is created for that user instead of the caller.
     const callerUser = session!.user as any;
@@ -81,14 +105,18 @@ export async function POST(req: NextRequest) {
     }
     const created = await prisma.$transaction(
       targetDays.map((d) => prisma.onDutyRequest.create({
-        data: {
+        // pocUserId / workStatus may be unknown to the typed client
+        // until `prisma generate` reruns. Runtime is fine — migration
+        // added both columns. `as any` keeps TypeScript happy.
+        data: ({
           userId:   subjectUserId,
           date:     d,
           fromTime: fromTime ? new Date(`${d.toISOString().slice(0,10)}T${fromTime}:00`) : null,
           toTime:   toTime   ? new Date(`${d.toISOString().slice(0,10)}T${toTime}:00`)   : null,
           purpose,
           location,
-        },
+          pocUserId, workStatus,
+        } as any),
       })),
     );
     const rec = created[0];
@@ -137,6 +165,23 @@ export async function POST(req: NextRequest) {
         emailData: odEmailBase,
       }),
     ]);
+
+    // POC heads-up — fire-and-forget so SMTP hiccups don't 500 the save.
+    if (pocUser.email && pocUserId !== subjectUserId) {
+      void sendEmail({
+        to: pocUser.email,
+        content: pocAssignmentEmail({
+          pocName:       pocUser.name || "there",
+          applicantName: requester?.name || "An employee",
+          requestType:   "On Duty",
+          dateLabel,
+          daysLabel:     `${created.length} day${created.length === 1 ? "" : "s"}`,
+          workStatus,
+          reason:        String(purpose || "").trim() || undefined,
+        }),
+      });
+    }
+
     return NextResponse.json(rec, { status: 201 });
   } catch (e) { return serverError(e, "POST /api/hr/attendance/on-duty"); }
 }
