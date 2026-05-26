@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const {
       userId, ctc, basic, hra,
+      dearnessAllowance, conveyanceAllowance, medicalAllowance,
       specialAllowance, pfEmployee, pfEmployer, esiEmployee, esiEmployer,
       tds, professionalTax, effectiveFrom,
       // Extended fields from the onboarding compensation step:
@@ -63,7 +64,10 @@ export async function POST(req: NextRequest) {
 
     const data = {
       ctc, basic, hra: hra ?? 0,
-      specialAllowance: specialAllowance ?? 0,
+      dearnessAllowance:   dearnessAllowance   ?? 0,
+      conveyanceAllowance: conveyanceAllowance ?? 0,
+      medicalAllowance:    medicalAllowance    ?? 0,
+      specialAllowance:    specialAllowance    ?? 0,
       pfEmployee: pfEmployee ?? 0, pfEmployer: pfEmployer ?? 0,
       esiEmployee: esiEmployee ?? 0, esiEmployer: esiEmployer ?? 0,
       tds: tds ?? 0, professionalTax: professionalTax ?? 0,
