@@ -138,10 +138,18 @@ export async function POST(req: NextRequest) {
       const paidDays   = Math.max(0, daysInMonth - lopDays);
       const lopFactor  = paidDays / daysInMonth;
 
+      // All CTC components are stored as ANNUAL — divide by 12 for the
+      // monthly gross. PF (Emp) is included in CTC under the company's
+      // split formula (it's a CTC component that flows back out as a
+      // statutory deduction below), so it's part of the gross too.
       const basic     = parseFloat(s.basic.toString());
       const hra       = parseFloat(s.hra.toString());
+      const da        = parseFloat(s.dearnessAllowance.toString());
+      const conv      = parseFloat(s.conveyanceAllowance.toString());
+      const medical   = parseFloat(s.medicalAllowance.toString());
       const special   = parseFloat(s.specialAllowance.toString());
-      const monthlyEarnings = (basic + hra + special) / 12;
+      const pfAnnual  = parseFloat(s.pfEmployee.toString());
+      const monthlyEarnings = (basic + hra + da + conv + medical + special + pfAnnual) / 12;
 
       const bonus     = bonusByUser.get(s.userId) || 0;
       const adhocPay  = adhocPayByUser.get(s.userId) || 0;
@@ -149,8 +157,10 @@ export async function POST(req: NextRequest) {
       const gross     = monthlyEarnings * lopFactor + bonus + adhocPay;
 
       // Computed statutory amounts, then per-(user,kind) override replaces.
-      const pfBase    = parseFloat(s.pfEmployee.toString()) * lopFactor;
-      const esiCalc   = parseFloat(s.esiEmployee.toString()) * lopFactor;
+      // pfEmployee / esiEmployee are stored ANNUAL (matching other CTC
+      // components), so /12 to get the per-month amount before LOP scaling.
+      const pfBase    = (pfAnnual / 12) * lopFactor;
+      const esiCalc   = (parseFloat(s.esiEmployee.toString()) / 12) * lopFactor;
       const ptCalc    = lopDays > 5 ? 0 : parseFloat(s.professionalTax.toString());
       const tdsCalc   = parseFloat(s.tds.toString()) / 12;
 
