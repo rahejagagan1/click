@@ -29,8 +29,12 @@ export async function GET() {
         employeeProfile: { select: { department: true, designation: true, employeeId: true } },
         salaryStructure: {
           select: {
-            id: true, ctc: true, basic: true, hra: true, specialAllowance: true,
-            pfEmployee: true, tds: true, professionalTax: true,
+            id: true, ctc: true, basic: true, hra: true,
+            dearnessAllowance: true, conveyanceAllowance: true, medicalAllowance: true,
+            specialAllowance: true,
+            pfEligible: true, pfEmployee: true, pfEmployer: true,
+            esiEmployee: true, esiEmployer: true,
+            tds: true, professionalTax: true,
             salaryType: true, effectiveFrom: true,
           },
         },
@@ -41,9 +45,10 @@ export async function GET() {
     // also turns Decimal columns into plain JS numbers (Prisma serialises
     // Decimal to a string by default, which is awkward for arithmetic in
     // the UI).
+    const num = (v: unknown) => (v == null ? 0 : parseFloat(v.toString()));
     const rows = users.map(u => {
       const s = u.salaryStructure;
-      const ctc = s ? parseFloat(s.ctc.toString()) : 0;
+      const ctc = s ? num(s.ctc) : 0;
       return {
         userId:        u.id,
         name:          u.name,
@@ -56,6 +61,25 @@ export async function GET() {
         annualCtc:     ctc,
         monthlyGross:  ctc / 12,
         effectiveFrom: s?.effectiveFrom ?? null,
+        // Per-component MONTHLY amounts. The DB stores basic/hra/specialAllowance/
+        // pfEmployee/pfEmployer/esiEmployee/esiEmployer/tds as ANNUAL figures
+        // (see src/app/api/hr/payroll/generate/route.ts:144 — payslip divides
+        // these by 12). professionalTax is already a flat per-month amount.
+        // We divide by 12 here so the Breakdown column lines up with the
+        // "Monthly Gross" column on the same row.
+        basic:               s ? num(s.basic)               / 12 : 0,
+        hra:                 s ? num(s.hra)                 / 12 : 0,
+        dearnessAllowance:   s ? num(s.dearnessAllowance)   / 12 : 0,
+        conveyanceAllowance: s ? num(s.conveyanceAllowance) / 12 : 0,
+        medicalAllowance:    s ? num(s.medicalAllowance)    / 12 : 0,
+        specialAllowance:    s ? num(s.specialAllowance)    / 12 : 0,
+        pfEligible:      s ? !!s.pfEligible : false,
+        pfEmployee:      s ? num(s.pfEmployee)       / 12 : 0,
+        pfEmployer:      s ? num(s.pfEmployer)       / 12 : 0,
+        esiEmployee:     s ? num(s.esiEmployee)      / 12 : 0,
+        esiEmployer:     s ? num(s.esiEmployer)      / 12 : 0,
+        tds:             s ? num(s.tds)              / 12 : 0,
+        professionalTax: s ? num(s.professionalTax)       : 0,
       };
     });
 
