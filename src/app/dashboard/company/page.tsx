@@ -130,37 +130,6 @@ export default function CompanyDashboardPage() {
                 </div>
             </div>
 
-            {/* Capsule Comparison */}
-            <div className="rounded-2xl bg-[#12122a] border border-white/5 overflow-hidden">
-                <div className="px-5 py-4 border-b border-white/5">
-                    <h3 className="text-sm font-medium text-white">Capsule Comparison</h3>
-                </div>
-                <table className="w-full text-sm">
-                    <thead>
-                        <tr className="border-b border-white/5">
-                            <th className="text-left px-5 py-3 text-[11px] uppercase tracking-wider text-slate-500 font-medium">Capsule</th>
-                            <th className="text-right px-3 py-3 text-[11px] uppercase tracking-wider text-slate-500 font-medium">Total</th>
-                            <th className="text-right px-3 py-3 text-[11px] uppercase tracking-wider text-slate-500 font-medium">Completed</th>
-                            <th className="text-right px-5 py-3 text-[11px] uppercase tracking-wider text-slate-500 font-medium">Rate</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {(data?.capsuleStats || []).map((cap: any) => (
-                            <tr key={cap.id} className="border-b border-white/[0.02] hover:bg-white/[0.02]">
-                                <td className="px-5 py-3 text-white font-medium">{cap.name}</td>
-                                <td className="px-3 py-3 text-right text-slate-300">{cap.totalCases}</td>
-                                <td className="px-3 py-3 text-right text-emerald-400">{cap.completedCases}</td>
-                                <td className="px-5 py-3 text-right text-white font-mono text-xs">
-                                    {cap.totalCases > 0
-                                        ? `${Math.round((cap.completedCases / cap.totalCases) * 100)}%`
-                                        : "—"}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-
             {/* Leaderboards */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <Leaderboard title="Top Writers" entries={data?.leaderboard?.topWriters || []} />
