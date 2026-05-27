@@ -7,10 +7,10 @@ import { fetcher } from "@/lib/swr";
 import SelectField from "@/components/ui/SelectField";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
+import { parseAttLoc } from "@/lib/attendance-location";
 import { isHRAdmin, canApplyRestrictedLeave } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
-import { desktopBypassHeader } from "@/lib/desktop-bypass";
+import { useClockActions } from "@/lib/hr/use-clock-actions";
 import { PageShell } from "@/components/layout";
 import { DateField } from "@/components/ui/date-field";
 import {
@@ -1975,20 +1975,13 @@ export default function HRHomePage() {
   // button will trigger the browser's native ask.
   type LocPerm = "granted" | "denied" | "prompt" | "unsupported" | "checking";
   const [locPerm, setLocPerm] = useState<LocPerm>("checking");
-  // Shows a "Getting location…" label on the clock-in button so users know
-  // the browser is busy asking the OS for coordinates (first-time GPS/Wi-Fi
-  // lookup on Windows can take 10–15s).
-  const [clockingIn, setClockingIn] = useState(false);
+  // `clockingIn` lives in the useClockActions hook (declared later).
   // Two-step clock-out confirmation — mirrors the Attendance page. First
   // click splits the single Clock-Out into a red Confirm + dark Cancel
   // pair so a stray click doesn't end the day. Auto-cancels after 6s.
   const [confirmingClockOut, setConfirmingClockOut] = useState(false);
-  const [clockingOut, setClockingOut] = useState(false);
-  useEffect(() => {
-    if (!confirmingClockOut || clockingOut) return;
-    const t = setTimeout(() => setConfirmingClockOut(false), 6000);
-    return () => clearTimeout(t);
-  }, [confirmingClockOut, clockingOut]);
+  // `clockingOut` is owned by the useClockActions hook now (real
+  // in-flight tracking, retry-capable). Pulled into scope below.
 
   // Mobile clock-in is policy-blocked by default (attendance is meant
   // to be captured from the workstation). Two escape hatches:
@@ -2106,36 +2099,21 @@ export default function HRHomePage() {
   const { data: posts = [] } = useSWR(postsUrl, fetcher);
   const { data: announcements = [] } = useSWR("/api/hr/announcements", fetcher);
 
-  const clockIn = async () => {
-    // Location is mandatory. Always attempt a fresh geolocation read — the
-    // cached `locPerm` state can lag (Chrome doesn't always fire `onchange`
-    // when permission is toggled from the address-bar popup), so the real
-    // source of truth is whether coordinates come back.
-    setClockingIn(true);
-    try {
-      const geo = await captureClockInGeo();
-      if (!geo.ok) {
-        alert(`Can't clock in — ${geo.message}`);
-        return;
-      }
-      const res = await fetch("/api/hr/attendance/clock-in", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...desktopBypassHeader() },
-        body: JSON.stringify({ lat: geo.lat, lng: geo.lng, address: geo.address }),
-      });
-      const d = await res.json();
-      if (!res.ok) { alert(d.error); return; }
-      mutate(`/api/hr/attendance?month=${monthKey}`);
-    } finally {
-      setClockingIn(false);
-    }
-  };
-  const clockOut = async () => {
-    const res = await fetch("/api/hr/attendance/clock-out", { method: "POST", headers: desktopBypassHeader() });
-    const d = await res.json();
-    if (!res.ok) return alert(d.error);
-    mutate(`/api/hr/attendance?month=${monthKey}`);
-  };
+  // Clock-in / clock-out actions are owned by a shared hook. See
+  // src/lib/hr/use-clock-actions.ts for the full rationale — short
+  // version: handles re-entry guards, network-error surfacing, and
+  // one automatic retry on transient failures, all of which were
+  // silently dropped in the previous inline handlers (hence the
+  // "click 3-4 times before it works" reports).
+  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError } = useClockActions({
+    mutateKeys: [`/api/hr/attendance?month=${monthKey}`],
+  });
+  // Auto-collapse the Confirm/Cancel pair after 6s of idle.
+  useEffect(() => {
+    if (!confirmingClockOut || clockingOut) return;
+    const t = setTimeout(() => setConfirmingClockOut(false), 6000);
+    return () => clearTimeout(t);
+  }, [confirmingClockOut, clockingOut]);
   // On Leave Today — anyone whose attendance record is `on_leave` today, OR
   // who has an applied leave (pending / partially_approved / approved) that
   // covers today. Approval isn't required to appear here — the moment a
@@ -2365,6 +2343,12 @@ export default function HRHomePage() {
                     //    Colors + labels match the attendance page: always
                     //    green regardless of office/remote mode.
                     <div className="flex flex-col items-center gap-1">
+                      {clockError && (
+                        <div className="flex items-start gap-1 max-w-[340px] px-2 py-1 rounded bg-rose-500/20 border border-rose-500/40 text-rose-100 text-[10px] leading-tight">
+                          <span className="flex-1">{clockError.message}</span>
+                          <button onClick={clearClockError} className="shrink-0 text-rose-200 hover:text-white" aria-label="Dismiss">✕</button>
+                        </div>
+                      )}
                       <button
                         onClick={mobileBlocked ? undefined : clockIn}
                         disabled={clockingIn || mobileBlocked}
@@ -2394,10 +2378,9 @@ export default function HRHomePage() {
                       <div className="flex items-center gap-1">
                         <button
                           onClick={async () => {
-                            if (clockingOut) return;
-                            setClockingOut(true);
-                            try { await clockOut(); }
-                            finally { setClockingOut(false); setConfirmingClockOut(false); }
+                            // Hook owns the in-flight guard.
+                            await clockOut();
+                            setConfirmingClockOut(false);
                           }}
                           disabled={clockingOut || mobileBlocked}
                           className="h-[24px] whitespace-nowrap rounded-[3px] px-3 bg-red-600 text-white text-[11px] font-semibold transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -2450,6 +2433,12 @@ export default function HRHomePage() {
                     //    Clock-In so users on break can resume. Same green
                     //    gradient as the first clock-in.
                     <div className="flex flex-col items-center gap-1">
+                      {clockError && (
+                        <div className="flex items-start gap-1 max-w-[340px] px-2 py-1 rounded bg-rose-500/20 border border-rose-500/40 text-rose-100 text-[10px] leading-tight">
+                          <span className="flex-1">{clockError.message}</span>
+                          <button onClick={clearClockError} className="shrink-0 text-rose-200 hover:text-white" aria-label="Dismiss">✕</button>
+                        </div>
+                      )}
                       <button
                         onClick={mobileBlocked ? undefined : clockIn}
                         disabled={clockingIn || mobileBlocked}
