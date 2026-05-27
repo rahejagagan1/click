@@ -286,17 +286,13 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
   const identityHook = useSaveSection(userId);
 
   // ── Section: Bank Details ─────────────────────────────────────────
-  // bankAccountNumber / bankIfsc are encrypted at rest (PII), so the
-  // GET returns ciphertext — keep them write-only (blank by default,
-  // only sent on save when HR types a value), same pattern as
-  // PAN / Aadhaar above. Account Holder Name / Bank Name / Branch are
-  // plaintext, safe to pre-fill.
+  // All fields stored as plaintext — pre-fill directly from the profile.
   const [bank, setBank] = useState({
     accountHolderName: p.accountHolderName ?? "",
     bankName:          p.bankName ?? "",
     bankBranch:        p.bankBranch ?? "",
-    bankAccountNumber: "",
-    bankIfsc:          "",
+    bankAccountNumber: p.bankAccountNumber ?? "",
+    bankIfsc:          p.bankIfsc ?? "",
   });
   const bankHook = useSaveSection(userId);
 
@@ -377,13 +373,13 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
       uanNumber:   p.uanNumber ?? "",
       biometricId: p.biometricId ?? "",
     }));
-    setBank((s) => ({
-      ...s,
+    setBank({
       accountHolderName: p.accountHolderName ?? "",
       bankName:          p.bankName ?? "",
       bankBranch:        p.bankBranch ?? "",
-      // bankAccountNumber / bankIfsc stay blank — write-only.
-    }));
+      bankAccountNumber: p.bankAccountNumber ?? "",
+      bankIfsc:          p.bankIfsc ?? "",
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.id, p.id]);
 
@@ -1141,22 +1137,15 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
         error={bankHook.error}
         savedAt={bankHook.savedAt}
         onSave={() => {
-          // Account number + IFSC are write-only (encrypted at rest) —
-          // only send them when HR has typed a value, so saving the
-          // section doesn't accidentally clear the existing values.
-          const patch: Record<string, unknown> = {
+          bankHook.save({
             accountHolderName: bank.accountHolderName.trim() || null,
             bankName:          bank.bankName.trim()          || null,
             bankBranch:        bank.bankBranch.trim()        || null,
-          };
-          if (bank.bankAccountNumber.trim()) patch.bankAccountNumber = bank.bankAccountNumber.trim();
-          if (bank.bankIfsc.trim())          patch.bankIfsc          = bank.bankIfsc.trim().toUpperCase();
-          bankHook.save(patch);
+            bankAccountNumber: bank.bankAccountNumber.trim() || null,
+            bankIfsc:          bank.bankIfsc.trim().toUpperCase() || null,
+          });
         }}
       >
-        <p className="rounded-md bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800">
-          Account Number and IFSC are write-only — enter a new value to update; leave blank to keep the existing one. Holder Name, Bank Name, and Branch are pre-loaded and editable directly.
-        </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <label className={cls.label}>Account Holder Name</label>
@@ -1180,13 +1169,13 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
             <label className={cls.label}>Account Number</label>
             <input className={`${cls.field} font-mono`} value={bank.bankAccountNumber}
               onChange={(e) => setBank({ ...bank, bankAccountNumber: e.target.value })}
-              placeholder="Leave blank to keep existing" />
+              placeholder="e.g. 12345678901234" />
           </div>
           <div>
             <label className={cls.label}>IFSC Code</label>
             <input className={`${cls.field} font-mono uppercase`} value={bank.bankIfsc}
               onChange={(e) => setBank({ ...bank, bankIfsc: e.target.value })}
-              placeholder="Leave blank to keep existing" />
+              placeholder="e.g. HDFC0001234" />
           </div>
         </div>
       </Section>
