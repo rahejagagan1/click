@@ -155,10 +155,13 @@ html:not(.dark) [class*="bg-gray-6"].text-white,
 html:not(.dark) [class*="bg-gray-7"].text-white,
 html:not(.dark) [class*="bg-gray-8"].text-white,
 html:not(.dark) [class*="bg-gray-9"].text-white,
-/* Arbitrary-hex Tailwind backgrounds — bg-[#008CFF], bg-[#0070cc] etc. */
-html:not(.dark) [class*="bg-[#"].text-white,
-/* And the same elements when the white text lives in a child node. */
-html:not(.dark) [class*="bg-[#"] .text-white {
+/* Arbitrary-hex Tailwind backgrounds — bg-[#008CFF], bg-[#0070cc] etc.
+   IMPORTANT: only matches when bg-[#...] and text-white sit on the SAME
+   element. The descendant version (`bg-[#…] .text-white`) used to be
+   here but it was catastrophically broad — the LayoutShell wrapper has
+   `bg-[#f4f7fb]` (the light page background), so every `.text-white`
+   descendant on every page was forced white → invisible page titles. */
+html:not(.dark) [class*="bg-[#"].text-white {
   color: #ffffff !important;
 }
 html:not(.dark) th.text-white {
@@ -176,15 +179,15 @@ html:not(.dark) [class*="bg-black/"].text-white {
   color: #111827 !important;
 }
 
-/* Count-chip badges with their own brand-coloured background must
-   keep white text even when nested inside a ghost-button (`bg-white/…`)
-   parent — the ghost-button rule above is too broad and was darkening
-   the small "42" / "99+" pills on company-tab buttons (NB Media / YT
-   Labs / All) across the HR dashboard. This rule comes last so it
-   wins the cascade for chips like `bg-[#008CFF] text-white` or
-   `bg-white/20 text-white` inside a tab button. */
-html:not(.dark) [class*="bg-[#"].text-white,
-html:not(.dark) [class*="bg-white/"].text-white {
+/* Count-chip badges (e.g. the "42" / "99+" pills on company-tab
+   buttons) — when the chip uses `bg-white/20` over an active blue
+   button, the ghost-button rule above forces dark text. Restore
+   white text just for that specific count-chip shape: a small
+   inline-flex pill with bg-white/ AND text-white AND a rounded-full
+   class. The extra attribute selector keeps the override surgical
+   so generic ghost-buttons (which legitimately need dark text in
+   light mode) aren't affected. */
+html:not(.dark) [class*="bg-white/"][class*="rounded-full"][class*="text-white"][class*="inline-flex"] {
   color: #ffffff !important;
 }
 
