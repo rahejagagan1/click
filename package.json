@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3005",
-    "build": "prisma generate && next build",
+    "build": "prisma migrate deploy && prisma generate && next build",
     "start": "prisma migrate deploy && next start -p 3005",
     "db:setup": "prisma migrate deploy && prisma generate",
     "setup": "npm ci && prisma migrate deploy && prisma generate",

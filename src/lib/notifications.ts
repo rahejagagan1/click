@@ -1,6 +1,6 @@
 import prisma from "@/lib/prisma";
 import { sendEmail, emailsForUserIds } from "@/lib/email/sender";
-import { isEmailEnabled } from "@/lib/email/toggles";
+import { isEmailEnabled, devEmailRecipientsClause } from "@/lib/email/toggles";
 import {
   leaveRequestEmail, wfhRequestEmail, onDutyRequestEmail,
   regularizationRequestEmail, compOffRequestEmail, decisionEmail,
@@ -259,26 +259,24 @@ async function dispatchEmails(
  * self-approvers don't ping their own inbox.
  */
 export async function approverIdsForUser(actorId: number): Promise<number[]> {
-  // Developers aren't a DB flag — they're resolved at session time from the
-  // DEVELOPER_EMAILS env var. Match those emails here so devs get the same
-  // approver notifications as CEOs / HR managers.
-  const devEmails = (process.env.DEVELOPER_EMAILS || "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-
+  // Approver chain: the actor's direct manager + every active CEO /
+  // Special Access / HR Manager. Developer accounts (DEVELOPER_EMAILS
+  // env) are conditionally included: the "Notify developers" toggle in
+  // Admin → Emails Automation controls whether they're copied on the
+  // fan-out. Default ON for backwards compatibility.
+  const devClause = await devEmailRecipientsClause();
   const [actor, admins] = await Promise.all([
     prisma.user.findUnique({ where: { id: actorId }, select: { managerId: true } }),
     prisma.user.findMany({
       where: {
         isActive: true,
         OR: [
-          // CEO + Special Access + HR Manager (role) + Developers.
+          // CEO + Special Access + HR Manager (role).
           // EXCLUDES role=admin alone and orgLevel="hr_manager"-only
           // members (HR-team folks like Vanshika are role=member).
           { orgLevel: { in: ["ceo", "special_access"] } },
           { role: "hr_manager" },
-          ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+          ...devClause,
         ],
       },
       select: { id: true },
