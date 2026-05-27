@@ -1580,8 +1580,20 @@ model SalaryStructure {
   structureType String?
   pfEligible    Boolean  @default(false)
   ctc           Decimal  @db.Decimal(12, 2)
+  /// Earnings components. All stored as ANNUAL figures (payslip divides by 12).
+  /// Split rule for regular employees:
+  ///   Basic = 50% of CTC
+  ///   HRA   = 20% of CTC
+  ///   DA    = 10% of CTC
+  ///   Conv  =  7.5% of CTC
+  ///   Medical = fixed ₹15,000/year (₹1,250/month)
+  ///   PF Employee = fixed ₹21,600/year (₹1,800/month) when pfEligible
+  ///   Special Allowance = whatever balances to CTC
   basic         Decimal  @db.Decimal(12, 2)
   hra           Decimal  @db.Decimal(12, 2)
+  dearnessAllowance   Decimal @default(0) @db.Decimal(12, 2)
+  conveyanceAllowance Decimal @default(0) @db.Decimal(12, 2)
+  medicalAllowance    Decimal @default(0) @db.Decimal(12, 2)
   specialAllowance Decimal @default(0) @db.Decimal(12, 2)
   pfEmployee    Decimal  @default(0) @db.Decimal(12, 2)
   pfEmployer    Decimal  @default(0) @db.Decimal(12, 2)
