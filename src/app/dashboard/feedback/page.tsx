@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import PopupPanel from "@/components/ui/PopupPanel";
 
 const CATEGORIES = [
@@ -48,24 +48,6 @@ export default function FeedbackPage() {
     const [error, setError] = useState<string | null>(null);
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        if (!dropdownOpen) return;
-        const onPointerDown = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-                setDropdownOpen(false);
-            }
-        };
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape") setDropdownOpen(false);
-        };
-        document.addEventListener("mousedown", onPointerDown);
-        document.addEventListener("keydown", onKey);
-        return () => {
-            document.removeEventListener("mousedown", onPointerDown);
-            document.removeEventListener("keydown", onKey);
-        };
-    }, [dropdownOpen]);
 
     const selectedCategory = CATEGORIES.find((c) => c.value === category);
 

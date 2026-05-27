@@ -5,6 +5,7 @@ import { notifyUsers } from "@/lib/notifications";
 import { writeAuditLog } from "@/lib/audit-log";
 import { countWorkingDays } from "@/lib/hr/working-days";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
+import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
 
 function fmtRange(from: Date, to: Date, days: number) {
   return `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} (${days} day${days === 1 ? "" : "s"})`;
@@ -138,6 +139,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (action !== "approve" && action !== "reject") {
       return NextResponse.json({ error: "Invalid action" }, { status: 400 });
     }
+
+    // Cross-brand approval guard — a YT Labs HR manager cannot
+    // approve/reject an NB Media employee's leave (and vice versa).
+    // Founders (orgLevel=ceo / isDeveloper) bypass this.
+    const crossBrand = await assertSameBrandOrSuperAdmin(session, application.userId);
+    if (crossBrand) return crossBrand;
 
     // ── REJECT ─────────────────────────────────────────────────────────────
     // Either the direct manager or a final approver can reject. Race-safe.

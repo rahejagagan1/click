@@ -48,6 +48,9 @@ export async function GET(req: NextRequest) {
         select: {
           id: true, name: true, email: true,
           profilePictureUrl: true, role: true, orgLevel: true,
+          // Multi-brand: needed by the HR-admin Regularization Balance
+          // panel so it can split rows into NB Media vs YT Labs tabs.
+          employeeProfile: { select: { businessUnit: true } },
         },
         orderBy: { name: "asc" },
       }),
@@ -75,6 +78,7 @@ export async function GET(req: NextRequest) {
         profilePictureUrl: u.profilePictureUrl,
         role: u.role,
         orgLevel: u.orgLevel,
+        businessUnit: (u as any).employeeProfile?.businessUnit ?? null,
         used,
         limit: unlimited ? null : REGULARIZATION_MONTHLY_QUOTA,
         remaining: unlimited ? null : Math.max(0, REGULARIZATION_MONTHLY_QUOTA - used),

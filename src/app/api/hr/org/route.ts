@@ -26,7 +26,12 @@ export async function GET() {
         id: true, name: true, email: true, role: true, orgLevel: true,
         managerId: true, profilePictureUrl: true, teamCapsule: true,
         employeeProfile: {
-          select: { department: true, designation: true, employmentType: true, joiningDate: true },
+          select: {
+            department: true, designation: true, employmentType: true, joiningDate: true,
+            // Multi-brand: needed so the OrgTreeView can split NB Media
+            // vs YT Labs into separate scoped trees.
+            businessUnit: true,
+          },
         },
       },
       orderBy: { name: "asc" },

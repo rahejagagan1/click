@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
+import { useSession } from "next-auth/react";
 import { fetcher } from "@/lib/swr";
 import { Search, Sparkles, Plus, Minus, X, CalendarPlus, AlertTriangle, Home, Clock } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
@@ -15,6 +16,7 @@ type Bal          = { id: number | null; total: number; used: number; pending: n
 type EmpRow       = {
   id: number; name: string; email: string;
   profilePictureUrl: string | null;
+  businessUnit: string | null;
   balances: Record<number, Bal>;
 };
 
@@ -35,14 +37,51 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
   const leaveTypes = data?.leaveTypes ?? [];
   const employees  = data?.employees ?? [];
 
+  // ── Company scope tabs ──────────────────────────────────────────────
+  // Same pattern as ApprovalsPanel: auto-default to viewer's brand
+  // (founders / super-admins land on "all"). Splits the balance grid
+  // into NB Media vs YT Labs so each HR manager works on their brand.
+  type CompanyTab = "NB Media" | "YT Labs" | "all";
+  const { data: session } = useSession();
+  const me = session?.user as any;
+  const [companyTab, setCompanyTab] = useState<CompanyTab>("all");
+  const [companyTabTouched, setCompanyTabTouched] = useState(false);
+  const { data: viewerProfile } = useSWR<any>(
+    me ? "/api/hr/profile" : null,
+    fetcher,
+    { revalidateOnFocus: false },
+  );
+  useEffect(() => {
+    if (companyTabTouched) return;
+    const isSuperAdmin = me?.orgLevel === "ceo" || me?.isDeveloper;
+    if (isSuperAdmin) { setCompanyTab("all"); return; }
+    const bu = viewerProfile?.employeeProfile?.businessUnit;
+    if (bu === "YT Labs") setCompanyTab("YT Labs");
+    else if (bu === "NB Media" || bu == null) setCompanyTab("NB Media");
+  }, [viewerProfile, me, companyTabTouched]);
+
+  const companyCounts = useMemo(() => {
+    let nb = 0, yt = 0;
+    employees.forEach((e) => {
+      const bu = e.businessUnit || "NB Media";
+      if (bu === "YT Labs") yt++;
+      else nb++;
+    });
+    return { nb, yt, all: employees.length };
+  }, [employees]);
+
   const filtered = useMemo(() => {
-    if (!query.trim()) return employees;
+    let rows = employees;
+    if (companyTab !== "all") {
+      rows = rows.filter((e) => (e.businessUnit || "NB Media") === companyTab);
+    }
+    if (!query.trim()) return rows;
     const q = query.trim().toLowerCase();
-    return employees.filter((e) =>
+    return rows.filter((e) =>
       (e.name || "").toLowerCase().includes(q) ||
       (e.email || "").toLowerCase().includes(q)
     );
-  }, [employees, query]);
+  }, [employees, query, companyTab]);
 
   // ── Edit modal ────────────────────────────────────────────────
   const [editing, setEditing] = useState<{ emp: EmpRow; type: LeaveTypeRow; bal: Bal } | null>(null);
@@ -345,14 +384,24 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
         // server-side; days that already have an active WFH are quietly
         // skipped too. Goes through normal approval (no forceGrant) —
         // routed to the target user's manager's L1 queue.
+        //
+        // Half-day WFH tags the reason with [First Half] / [Second Half]
+        // (same convention as leave) and collapses the range to a
+        // single date — half-day WFH only makes sense for one day.
+        const wfhReasonText = applyForm.reason.trim();
+        const wfhReasonOut =
+          applyDayKind === "first_half"  ? `[First Half] ${wfhReasonText}`  :
+          applyDayKind === "second_half" ? `[Second Half] ${wfhReasonText}` :
+                                            wfhReasonText;
+        const wfhToDateOut = isApplyHalf ? applyForm.fromDate : applyForm.toDate;
         res = await fetch("/api/hr/attendance/wfh", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             targetUserId:   applyForm.userId,
             date:           applyForm.fromDate,
-            toDate:         applyForm.toDate,
-            reason:         applyForm.reason.trim(),
+            toDate:         wfhToDateOut,
+            reason:         wfhReasonOut,
             pocUserId:      pocId,
             workStatus:     handoffWorkStatus.trim(),
             unavailability: handoffUnavailability.trim(),
@@ -435,6 +484,37 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
               <Sparkles size={14} />
               {bulkBusy ? "Applying…" : "Apply policy defaults"}
             </button>
+          </div>
+        </div>
+        {/* Company scope tabs — section label matches the Approvals
+            panel so the two pages feel like the same family. */}
+        <div className="px-5 pb-4 border-t border-slate-100 pt-3">
+          <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 mb-2">Brand scope</div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+          {([
+            { key: "NB Media", count: companyCounts.nb  },
+            { key: "YT Labs",  count: companyCounts.yt  },
+            { key: "all",      count: companyCounts.all },
+          ] as const).map(({ key, count }) => {
+            const active = companyTab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => { setCompanyTab(key as CompanyTab); setCompanyTabTouched(true); }}
+                className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
+                  active
+                    ? "bg-[#008CFF] text-white shadow-sm"
+                    : "bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10"
+                }`}
+              >
+                <span>{key === "all" ? "All" : key}</span>
+                <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
+                  active ? "bg-white/20 text-white" : "bg-[#008CFF] text-white"
+                }`}>{count}</span>
+              </button>
+            );
+          })}
           </div>
         </div>
       </header>
@@ -844,11 +924,13 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
               </div>
               )}
 
-              {/* Full / Half day pill — leave mode only. Picking a half
-                  day pins toDate to fromDate and prepends the reason with
-                  the [First Half] / [Second Half] / [Half Day] marker
-                  that the API uses to count as 0.5 days. */}
-              {applyMode === "leave" && (
+              {/* Full / Half day pill — applies to both leave and WFH
+                  grants. Picking a half day pins toDate to fromDate and
+                  prepends the reason with the [First Half] / [Second
+                  Half] marker. For leave the API uses the marker to
+                  count as 0.5 days; for WFH the marker shows up on
+                  approval + attendance display so HR knows which half. */}
+              {(applyMode === "leave" || applyMode === "wfh") && (
                 <div>
                   <label className="block text-[10.5px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Day type</label>
                   <div className="flex flex-wrap gap-1.5">
