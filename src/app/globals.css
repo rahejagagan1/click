@@ -536,12 +536,25 @@ html:not(.dark) .glass {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Skeleton shimmer — sweeps a soft white gradient left-to-right
+   across the muted grey base block. Powers <Skeleton> from
+   src/components/ui/Skeleton.tsx. 1.4s feels alive without being
+   distracting on long loads. */
+@keyframes skeletonShimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%);  }
+}
+
 .animate-slide-in {
   animation: slideIn 0.25s ease-out;
 }
 
 .animate-fade-in {
   animation: fadeIn 0.2s ease-out;
+}
+
+.animate-skeleton-shimmer {
+  animation: skeletonShimmer 1.4s ease-in-out infinite;
 }
 
 /* Top-anchored toast: slides down from above + fades in. Paired with
