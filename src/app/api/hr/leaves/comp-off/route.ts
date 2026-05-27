@@ -5,6 +5,7 @@ import { notifyApprovers, notifyUsers } from "@/lib/notifications";
 import { sendEmail } from "@/lib/email/sender";
 import { pocAssignmentEmail } from "@/lib/email/templates";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
+import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -160,6 +161,13 @@ export async function PUT(req: NextRequest) {
     }
     if (record.status === "partially_approved" && !isAdmin) {
       return NextResponse.json({ error: "Forbidden — only HR / CEO / Developer can give final approval." }, { status: 403 });
+    }
+
+    // Cross-brand approval guard — single-brand HR can't action the
+    // other brand's comp-off request. Founder bypasses.
+    if (record.user?.id != null) {
+      const crossBrand = await assertSameBrandOrSuperAdmin(session, record.user.id);
+      if (crossBrand) return crossBrand;
     }
 
     // Shared payload used by every notification path below.
