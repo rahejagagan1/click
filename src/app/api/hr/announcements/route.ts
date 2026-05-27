@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
             content: announcementEmail({
               title: (ann as any).title || "New announcement",
               body:  (ann as any).body  || "",
-              authorName: ann.postedBy?.name || "NB Media HR",
+              authorName: ann.postedBy?.name || "HR",
             }),
           });
         } catch (e) { console.error("[email] announcement broadcast failed:", e); }

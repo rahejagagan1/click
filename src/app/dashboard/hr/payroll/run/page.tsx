@@ -122,6 +122,12 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
   // For step-action feedback
   const [busyStep, setBusyStep] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  // Entity switcher — controls which company label is shown above the
+  // month strip. Payroll data filtering by entity is a follow-up; for
+  // now this is a label state so HR sees they're contextually viewing
+  // one brand vs the other.
+  const [payrollEntity, setPayrollEntity] = useState<"NB Media" | "YT Labs">("NB Media");
+  const [entityOpen, setEntityOpen] = useState(false);
 
   const isAdmin = !!user && canViewSalary(user);
 
@@ -337,9 +343,28 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
       )}
 
       <div className={embedded ? "space-y-5" : "mx-auto max-w-7xl space-y-5 p-6"}>
-        <div className="flex items-center gap-2">
-          <h1 className="text-[20px] font-bold text-slate-800">NB Media</h1>
-          <button className="text-slate-400 hover:text-slate-600" aria-label="Switch entity">▾</button>
+        <div className="relative flex items-center gap-2">
+          <h1 className="text-[20px] font-bold text-slate-800">{payrollEntity}</h1>
+          <button
+            type="button"
+            className="text-slate-400 hover:text-slate-600"
+            aria-label="Switch entity"
+            onClick={() => setEntityOpen(o => !o)}
+          >▾</button>
+          {entityOpen && (
+            <div className="absolute top-full left-0 mt-1 z-20 min-w-[200px] rounded-lg border border-slate-200 bg-white shadow-lg py-1">
+              {(["NB Media", "YT Labs"] as const).map(opt => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => { setPayrollEntity(opt); setEntityOpen(false); }}
+                  className={`block w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 ${
+                    payrollEntity === opt ? "font-semibold text-slate-900" : "text-slate-700"
+                  }`}
+                >{opt}</button>
+              ))}
+            </div>
+          )}
         </div>
 
         <MonthStrip cells={cells} selectedKey={selected?.key ?? null} onSelect={setSelectedKey} />

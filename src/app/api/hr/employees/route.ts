@@ -15,6 +15,9 @@ export async function GET(req: NextRequest) {
     const department = searchParams.get("department") || "";
     const employmentType = searchParams.get("employmentType") || "";
     const isActive = searchParams.get("isActive");
+    // Multi-brand: callers can scope a list to "NB Media" or "YT Labs"
+    // by passing ?businessUnit=… ; omitted = all brands.
+    const businessUnit = searchParams.get("businessUnit") || "";
 
     // Developer invisibility: hide DEVELOPER_EMAILS rows from non-dev viewers.
     const viewer = session!.user as any;
@@ -34,6 +37,7 @@ export async function GET(req: NextRequest) {
           } : {},
           department ? { employeeProfile: { department: { contains: department, mode: "insensitive" } } } : {},
           employmentType ? { employeeProfile: { employmentType } } : {},
+          businessUnit ? { employeeProfile: { businessUnit } } : {},
           isActive !== null && isActive !== undefined ? { isActive: isActive === "true" } : {},
           hideDevs ? { NOT: { email: { in: devEmails } } } : {},
         ],
