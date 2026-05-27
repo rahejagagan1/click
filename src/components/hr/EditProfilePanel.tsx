@@ -266,14 +266,12 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
     fetcher,
   );
 
-  // ── Section: Identity (sensitive — empty by default; HR re-enters) ─
-  // PAN / Aadhaar / Aadhaar Enrollment stay empty on load (HR re-enters
-  // to update); PF / UAN / Biometric pre-fill from the DB since they're
-  // less sensitive and HR usually wants to confirm rather than re-type.
+  // ── Section: Identity Documents ─────────────────────────────────────
+  // All fields stored as plaintext — pre-fill directly from the profile.
   const [identity, setIdentity] = useState({
-    panNumber:         "",
-    aadhaarNumber:     "",
-    aadhaarEnrollment: "",
+    panNumber:         p.panNumber ?? "",
+    aadhaarNumber:     p.aadhaarNumber ?? "",
+    aadhaarEnrollment: p.aadhaarEnrollment ?? "",
     pfNumber:          p.pfNumber ?? "",
     uanNumber:         p.uanNumber ?? "",
     biometricId:       p.biometricId ?? "",
@@ -362,12 +360,14 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
       attendanceCaptureScheme: p.attendanceCaptureScheme ?? "On-Site",
       costCenter:              p.costCenter || "NB Media",
     });
-    setIdentity((s) => ({
-      ...s,
-      pfNumber:    p.pfNumber ?? "",
-      uanNumber:   p.uanNumber ?? "",
-      biometricId: p.biometricId ?? "",
-    }));
+    setIdentity({
+      panNumber:         p.panNumber ?? "",
+      aadhaarNumber:     p.aadhaarNumber ?? "",
+      aadhaarEnrollment: p.aadhaarEnrollment ?? "",
+      pfNumber:          p.pfNumber ?? "",
+      uanNumber:         p.uanNumber ?? "",
+      biometricId:       p.biometricId ?? "",
+    });
     setBank({
       accountHolderName: p.accountHolderName ?? "",
       bankName:          p.bankName ?? "",
@@ -1045,39 +1045,30 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
         error={identityHook.error}
         savedAt={identityHook.savedAt}
         onSave={() => {
-          // PF / UAN / Biometric are pre-loaded into state, so they're
-          // safe to send blank (a blank means "clear this value"). PAN /
-          // Aadhaar / Aadhaar Enrollment are sensitive write-only —
-          // only sent when HR has typed a value, so saving the section
-          // doesn't accidentally clear an existing PAN/Aadhaar.
-          const patch: Record<string, unknown> = {
-            pfNumber:    identity.pfNumber.trim()    || null,
-            uanNumber:   identity.uanNumber.trim()   || null,
-            biometricId: identity.biometricId.trim() || null,
-          };
-          if (identity.panNumber.trim())         patch.panNumber         = identity.panNumber.trim();
-          if (identity.aadhaarNumber.trim())     patch.aadhaarNumber     = identity.aadhaarNumber.trim();
-          if (identity.aadhaarEnrollment.trim()) patch.aadhaarEnrollment = identity.aadhaarEnrollment.trim();
-          identityHook.save(patch);
+          identityHook.save({
+            panNumber:         identity.panNumber.trim().toUpperCase() || null,
+            aadhaarNumber:     identity.aadhaarNumber.trim()           || null,
+            aadhaarEnrollment: identity.aadhaarEnrollment.trim()       || null,
+            pfNumber:          identity.pfNumber.trim()                || null,
+            uanNumber:         identity.uanNumber.trim()               || null,
+            biometricId:       identity.biometricId.trim()             || null,
+          });
         }}
       >
-        <p className="rounded-md bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800">
-          PAN and Aadhaar are write-only — enter a new value to update; leave blank to keep the existing one. PF / UAN / Biometric are pre-loaded and editable directly.
-        </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className={cls.label}>PAN Number</label>
-            <input className={cls.field} value={identity.panNumber} placeholder="Leave blank to keep existing"
+            <input className={`${cls.field} uppercase`} value={identity.panNumber} placeholder="e.g. ABCDE1234F"
               onChange={(e) => setIdentity({ ...identity, panNumber: e.target.value })} />
           </div>
           <div>
             <label className={cls.label}>Aadhaar Number</label>
-            <input className={cls.field} value={identity.aadhaarNumber} placeholder="Leave blank to keep existing"
+            <input className={cls.field} value={identity.aadhaarNumber} placeholder="12-digit Aadhaar"
               onChange={(e) => setIdentity({ ...identity, aadhaarNumber: e.target.value })} />
           </div>
           <div>
             <label className={cls.label}>Aadhaar Enrollment</label>
-            <input className={cls.field} value={identity.aadhaarEnrollment} placeholder="Leave blank to keep existing"
+            <input className={cls.field} value={identity.aadhaarEnrollment} placeholder="EID from acknowledgement slip"
               onChange={(e) => setIdentity({ ...identity, aadhaarEnrollment: e.target.value })} />
           </div>
           <div>
