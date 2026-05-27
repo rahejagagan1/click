@@ -48,18 +48,30 @@ function formatDate(iso?: string | null): string {
 
 function downloadPayslip(p: any, structure: any) {
   const fmt = (n: any) => new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(parseFloat(n || 0));
-  const isIntern      = structure?.salaryType === "intern";
-  const monthlyBasic  = structure ? fmt(parseFloat(structure.basic) / 12) : "—";
-  const monthlyHra    = structure ? fmt(parseFloat(structure.hra) / 12) : "—";
-  const specialAllow  = structure
-    ? fmt(parseFloat(p.grossEarnings) - parseFloat(structure.basic) / 12 - parseFloat(structure.hra) / 12)
-    : "—";
+  const isIntern = structure?.salaryType === "intern";
 
-  const earningsRowsHtml = isIntern
-    ? `<tr><td>Monthly Stipend</td><td class="amount">₹${fmt(p.grossEarnings)}</td></tr>`
-    : `<tr><td>Basic Salary</td><td class="amount">₹${monthlyBasic}</td></tr>
-       <tr><td>House Rent Allowance (HRA)</td><td class="amount">₹${monthlyHra}</td></tr>
-       <tr><td>Special Allowance</td><td class="amount">₹${specialAllow}</td></tr>`;
+  let earningsRowsHtml = "";
+  if (isIntern || !structure) {
+    earningsRowsHtml = `<tr><td>Monthly Stipend</td><td class="amount">₹${fmt(p.grossEarnings)}</td></tr>`;
+  } else {
+    const basic   = parseFloat(structure.basic               || 0) / 12;
+    const hra     = parseFloat(structure.hra                 || 0) / 12;
+    const da      = parseFloat(structure.dearnessAllowance   || 0) / 12;
+    const conv    = parseFloat(structure.conveyanceAllowance || 0) / 12;
+    const medical = parseFloat(structure.medicalAllowance    || 0) / 12;
+    const fixed   = basic + hra + da + conv + medical;
+    const special = Math.max(0, parseFloat(p.grossEarnings || 0) - fixed);
+    const rows: [string, number][] = [];
+    if (basic)   rows.push(["Basic Salary",              basic]);
+    if (hra)     rows.push(["House Rent Allowance (HRA)", hra]);
+    if (da)      rows.push(["Dearness Allowance",        da]);
+    if (conv)    rows.push(["Conveyance Allowance",      conv]);
+    if (medical) rows.push(["Medical Allowance",         medical]);
+    if (special) rows.push(["Special Allowance",         special]);
+    earningsRowsHtml = rows
+      .map(([label, value]) => `<tr><td>${label}</td><td class="amount">₹${fmt(value)}</td></tr>`)
+      .join("\n       ");
+  }
 
   const html = `<!DOCTYPE html>
 <html><head><title>Payslip - ${MONTHS_FULL[p.month]} ${p.year}</title>
@@ -160,20 +172,31 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
     const isIntern = myStructure.salaryType === "intern";
     const basic   = parseFloat(myStructure.basic || 0);
     const hra     = parseFloat(myStructure.hra || 0);
+    const da      = parseFloat(myStructure.dearnessAllowance   || 0);
+    const conv    = parseFloat(myStructure.conveyanceAllowance || 0);
+    const medical = parseFloat(myStructure.medicalAllowance    || 0);
     const special = parseFloat(myStructure.specialAllowance || 0);
     const rows: { label: string; annual: number }[] = [];
     if (isIntern) {
-      // annualCtc is the authoritative annual figure for interns
-      // (stipend × 12 — saved correctly). The `basic` field stored
-      // monthly-only on some historical intern saves, so we deliberately
-      // ignore it here and derive everything off annualCtc to avoid the
-      // "INR 2,916.67 / month" display bug that resulted from treating
-      // monthly basic as annual.
-      if (annualCtc > 0) rows.push({ label: "Monthly Stipend", annual: annualCtc });
+      // Interns are paid a flat stipend; the DB only stores the annual
+      // CTC. The breakup modal displays a synthetic Basic / HRA / Special
+      // split (50 / 20 / 30) so the surface matches the regular-employee
+      // layout — the actual stipend payment is unaffected.
+      if (annualCtc > 0) {
+        const basicAnnual = Math.round(annualCtc * 0.50);
+        const hraAnnual   = Math.round(annualCtc * 0.20);
+        const specialAnnual = annualCtc - basicAnnual - hraAnnual;
+        rows.push({ label: "Basic Salary",         annual: basicAnnual   });
+        rows.push({ label: "House Rent Allowance", annual: hraAnnual     });
+        rows.push({ label: "Special Allowance",    annual: specialAnnual });
+      }
       return rows;
     }
     if (basic)   rows.push({ label: "Basic Salary",         annual: basic   });
     if (hra)     rows.push({ label: "House Rent Allowance", annual: hra     });
+    if (da)      rows.push({ label: "Dearness Allowance",   annual: da      });
+    if (conv)    rows.push({ label: "Conveyance Allowance", annual: conv    });
+    if (medical) rows.push({ label: "Medical Allowance",    annual: medical });
     if (special) rows.push({ label: "Special Allowance",    annual: special });
     if (rows.length === 0 && annualCtc > 0) {
       rows.push({ label: "Monthly Stipend", annual: annualCtc });
@@ -752,12 +775,22 @@ function renderEarnings(p: any, structure: any): { label: string; value: string 
     if (bonus) rows.push({ label: "Bonus", value: fmtInr(bonus) });
     return rows;
   }
-  const basic   = parseFloat(structure.basic   || 0) / 12;
-  const hra     = parseFloat(structure.hra     || 0) / 12;
-  const special = Math.max(0, baseEarnings - basic - hra);
+  const basic   = parseFloat(structure.basic               || 0) / 12;
+  const hra     = parseFloat(structure.hra                 || 0) / 12;
+  const da      = parseFloat(structure.dearnessAllowance   || 0) / 12;
+  const conv    = parseFloat(structure.conveyanceAllowance || 0) / 12;
+  const medical = parseFloat(structure.medicalAllowance    || 0) / 12;
+  // Special soaks up whatever's left after the fixed components — keeps
+  // the row total equal to baseEarnings even when the DB row is missing
+  // a component (older saves had only basic/hra/special populated).
+  const fixed   = basic + hra + da + conv + medical;
+  const special = Math.max(0, baseEarnings - fixed);
   const rows: { label: string; value: string }[] = [];
-  if (basic)   rows.push({ label: "Basic Salary",         value: fmtInr(basic) });
-  if (hra)     rows.push({ label: "House Rent Allowance", value: fmtInr(hra)   });
+  if (basic)   rows.push({ label: "Basic Salary",         value: fmtInr(basic)   });
+  if (hra)     rows.push({ label: "House Rent Allowance", value: fmtInr(hra)     });
+  if (da)      rows.push({ label: "Dearness Allowance",   value: fmtInr(da)      });
+  if (conv)    rows.push({ label: "Conveyance Allowance", value: fmtInr(conv)    });
+  if (medical) rows.push({ label: "Medical Allowance",    value: fmtInr(medical) });
   if (special) rows.push({ label: "Special Allowance",    value: fmtInr(special) });
   if (rows.length === 0) rows.push({ label: "Monthly Stipend", value: fmtInr(baseEarnings) });
   if (bonus)   rows.push({ label: "Bonus",                value: fmtInr(bonus) });
