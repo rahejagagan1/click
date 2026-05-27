@@ -4,6 +4,7 @@ import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { notifyUsers } from "@/lib/notifications";
 import { writeAuditLog } from "@/lib/audit-log";
 import { countWorkingDays } from "@/lib/hr/working-days";
+import { devEmailRecipientsClause } from "@/lib/email/toggles";
 
 function fmtRange(from: Date, to: Date, days: number) {
   return `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} (${days} day${days === 1 ? "" : "s"})`;
@@ -265,18 +266,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       });
       if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
 
-      // Final approvers: CEO + Special Access + HR Manager (role) + Devs.
+      // Final approvers: CEO + Special Access + HR Manager (role).
       // Drops orgLevel="hr_manager"-only members (e.g. HR-team folks
-      // whose role is "member") and role="admin" alone.
-      const devEmailsLeaveId = (process.env.DEVELOPER_EMAILS || "")
-        .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+      // whose role is "member") and role="admin" alone. Developer
+      // accounts gated by the "Notify developers" toggle.
       const finalApprovers = await prisma.user.findMany({
         where: {
           isActive: true,
           OR: [
             { orgLevel: { in: ["ceo", "special_access"] } },
             { role: "hr_manager" },
-            ...(devEmailsLeaveId.length > 0 ? [{ email: { in: devEmailsLeaveId } }] : []),
+            ...(await devEmailRecipientsClause()),
           ],
         },
         select: { id: true },

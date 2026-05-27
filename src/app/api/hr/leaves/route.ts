@@ -7,6 +7,7 @@ import { countWorkingDays } from "@/lib/hr/working-days";
 import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
 import { sendEmail } from "@/lib/email/sender";
 import { pocAssignmentEmail } from "@/lib/email/templates";
+import { devEmailRecipientsClause } from "@/lib/email/toggles";
 
 // GET /api/hr/leaves — list leave applications
 export async function GET(req: NextRequest) {
@@ -108,7 +109,9 @@ export async function POST(req: NextRequest) {
     // cover is assigned, and sends pocUserId=null. When a POC is named,
     // it has to be a real active user — picking someone offboarded is
     // a sign of stale UI state, so we reject those.
-    const pocUserId  = Number.isFinite(Number(body.pocUserId))  ? Number(body.pocUserId)  : null;
+    // Coerce defensively: Number(null) === 0 and Number.isFinite(0) === true,
+    // so a missing/N/A POC would otherwise become userId 0 and fail the FK.
+    const pocUserId  = Number.isInteger(Number(body.pocUserId)) && Number(body.pocUserId) > 0 ? Number(body.pocUserId) : null;
     const workStatus = typeof body.workStatus === "string" ? body.workStatus.trim() : "";
     if (!workStatus) return NextResponse.json({ error: "Work Status is required." }, { status: 400 });
     const pocUser = pocUserId
@@ -246,23 +249,23 @@ export async function POST(req: NextRequest) {
     });
 
     // Initial notification recipients: the applicant's direct manager (L1
-    // approver), every CEO / HR manager / developer (L2 final approvers),
-    // and anyone the applicant tagged in the "Notify" picker. HR/CEO are
-    // included up-front so they see every new leave immediately rather
-    // than only after the manager forwards via L1 approval.
+    // approver), every CEO / HR manager (L2 final approvers), and anyone
+    // the applicant tagged in the "Notify" picker. HR/CEO are included
+    // up-front so they see every new leave immediately rather than only
+    // after the manager forwards via L1 approval. Developer accounts are
+    // conditional on the "Notify developers" toggle in Admin → Emails
+    // Automation — default ON.
     const requesterName = application.user?.name || "An employee";
     const managerId = application.user?.managerId ?? null;
-    const devEmails = (process.env.DEVELOPER_EMAILS || "")
-      .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
     const finalApprovers = await prisma.user.findMany({
       where: {
         isActive: true,
         OR: [
-          // CEO + Special Access + HR Manager (role) + Developers.
+          // CEO + Special Access + HR Manager (role).
           // Excludes role=admin alone + orgLevel="hr_manager"-only members.
           { orgLevel: { in: ["ceo", "special_access"] } },
           { role: "hr_manager" },
-          ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+          ...(await devEmailRecipientsClause()),
         ],
       },
       select: { id: true },
