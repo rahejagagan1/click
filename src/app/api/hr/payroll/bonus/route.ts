@@ -2,11 +2,36 @@
 // the affected employee + admins can read.
 
 import { NextRequest, NextResponse } from "next/server";
+import { extname } from "node:path";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, canViewSalary, serverError } from "@/lib/api-auth";
 import { writeAuditLog } from "@/lib/audit-log";
 
 export const dynamic = "force-dynamic";
+// Node runtime needed for Buffer / multipart file reads (Edge can't).
+export const runtime  = "nodejs";
+
+// Optional bonus attachment limits — mirrors the violations upload
+// pattern. 10 MB ceiling, doc/image whitelist (offer letter scans,
+// performance memos, signed approval PDFs).
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const ALLOWED_ATTACHMENT_EXTS = new Set([
+  ".pdf", ".doc", ".docx", ".rtf", ".odt",
+  ".txt", ".md", ".png", ".jpg", ".jpeg", ".webp",
+]);
+const ATTACHMENT_MIME_BY_EXT: Record<string, string> = {
+  ".pdf":  "application/pdf",
+  ".doc":  "application/msword",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".rtf":  "application/rtf",
+  ".odt":  "application/vnd.oasis.opendocument.text",
+  ".txt":  "text/plain",
+  ".md":   "text/markdown",
+  ".png":  "image/png",
+  ".jpg":  "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+};
 
 type BonusRow = {
   id: number;
@@ -18,6 +43,7 @@ type BonusRow = {
   paymentStatus: string;
   createdAt: Date;
   createdBy: number | null;
+  attachmentName: string | null;
 };
 
 export async function GET(req: NextRequest) {
@@ -50,6 +76,7 @@ export async function GET(req: NextRequest) {
       const items = await prisma.$queryRawUnsafe<(BonusRow & { name: string; role: string })[]>(
         `SELECT b.id, b."userId", b.amount, b.reason, b."effectiveDate",
                 b."bonusType", b."paymentStatus", b."createdAt", b."createdBy",
+                b."attachmentName",
                 u.name, u.role::text AS role
            FROM "EmployeeBonus" b
            JOIN "User" u ON u.id = b."userId"
@@ -77,7 +104,8 @@ export async function GET(req: NextRequest) {
     const items = await prisma.$queryRawUnsafe<BonusRow[]>(
       `SELECT id, "userId", amount, reason, "effectiveDate",
               "bonusType", "paymentStatus",
-              "createdAt", "createdBy"
+              "createdAt", "createdBy",
+              "attachmentName"
          FROM "EmployeeBonus"
         WHERE "userId" = $1
         ORDER BY "effectiveDate" DESC, id DESC`,
@@ -96,14 +124,45 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   try {
-    const body = await req.json();
-    const userId        = parseInt(String(body?.userId ?? ""));
-    const amount        = Number(body?.amount);
-    const reason        = (body?.reason ? String(body.reason).slice(0, 500) : null) || null;
-    const effectiveRaw  = String(body?.effectiveDate ?? "");
-    const bonusType     = (body?.bonusType ? String(body.bonusType).slice(0, 80) : null) || null;
-    const paymentStatusRaw = String(body?.paymentStatus ?? "due_future");
-    const paymentStatus = ["due_future", "paid_past"].includes(paymentStatusRaw) ? paymentStatusRaw : "due_future";
+    // Accepts either application/json (legacy callers) or
+    // multipart/form-data (the Add Bonus modal when an attachment is
+    // picked). Multipart is the only way to ship the optional file
+    // bytes; JSON callers keep working unchanged.
+    let userId         = 0;
+    let amount         = NaN;
+    let reason: string | null = null;
+    let effectiveRaw   = "";
+    let bonusType: string | null = null;
+    let paymentStatus  = "due_future";
+    let attachmentFile: File | null = null;
+
+    const ctype = req.headers.get("content-type") || "";
+    if (ctype.includes("multipart/form-data")) {
+      const form = await req.formData();
+      const get = (k: string) => {
+        const v = form.get(k);
+        return typeof v === "string" ? v : null;
+      };
+      userId        = parseInt(String(get("userId") ?? ""));
+      amount        = Number(get("amount"));
+      reason        = (() => { const v = get("reason"); return v ? v.slice(0, 500) : null; })();
+      effectiveRaw  = String(get("effectiveDate") ?? "");
+      bonusType     = (() => { const v = get("bonusType"); return v ? v.slice(0, 80) : null; })();
+      const psRaw   = String(get("paymentStatus") ?? "due_future");
+      paymentStatus = ["due_future", "paid_past"].includes(psRaw) ? psRaw : "due_future";
+      const file = form.get("attachment");
+      if (file instanceof File && file.size > 0) attachmentFile = file;
+    } else {
+      const body = await req.json();
+      userId        = parseInt(String(body?.userId ?? ""));
+      amount        = Number(body?.amount);
+      reason        = (body?.reason ? String(body.reason).slice(0, 500) : null) || null;
+      effectiveRaw  = String(body?.effectiveDate ?? "");
+      bonusType     = (body?.bonusType ? String(body.bonusType).slice(0, 80) : null) || null;
+      const psRaw   = String(body?.paymentStatus ?? "due_future");
+      paymentStatus = ["due_future", "paid_past"].includes(psRaw) ? psRaw : "due_future";
+    }
+
     if (!Number.isFinite(userId) || userId <= 0) {
       return NextResponse.json({ error: "userId required" }, { status: 400 });
     }
@@ -114,13 +173,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "effectiveDate must be YYYY-MM-DD" }, { status: 400 });
     }
 
+    // Validate the optional attachment before we touch the DB so a
+    // bad file doesn't leave an orphan bonus row behind.
+    let attachmentBlob: Buffer | null = null;
+    let attachmentName: string | null = null;
+    let attachmentMime: string | null = null;
+    if (attachmentFile) {
+      if (attachmentFile.size > MAX_ATTACHMENT_BYTES) {
+        return NextResponse.json(
+          { error: `Attachment "${attachmentFile.name}" must be 10 MB or smaller` },
+          { status: 400 },
+        );
+      }
+      const ext = extname(attachmentFile.name).toLowerCase();
+      if (!ALLOWED_ATTACHMENT_EXTS.has(ext)) {
+        return NextResponse.json(
+          { error: `Attachment "${attachmentFile.name}" must be a PDF, Word, RTF, ODT, TXT, or image` },
+          { status: 400 },
+        );
+      }
+      attachmentBlob = Buffer.from(await attachmentFile.arrayBuffer());
+      attachmentName = attachmentFile.name.slice(0, 200);
+      attachmentMime = attachmentFile.type && attachmentFile.type !== "application/octet-stream"
+        ? attachmentFile.type
+        : ATTACHMENT_MIME_BY_EXT[ext] ?? "application/octet-stream";
+    }
+
     const createdBy = await resolveUserId(session);
     const rows = await prisma.$queryRawUnsafe<{ id: number }[]>(
       `INSERT INTO "EmployeeBonus"
-              ("userId", amount, reason, "effectiveDate", "bonusType", "paymentStatus", "createdBy")
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+              ("userId", amount, reason, "effectiveDate", "bonusType", "paymentStatus", "createdBy",
+               "attachmentName", "attachmentMime", "attachmentBlob")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id`,
       userId, amount, reason, new Date(effectiveRaw), bonusType, paymentStatus, createdBy,
+      attachmentName, attachmentMime, attachmentBlob,
     );
 
     await writeAuditLog({
@@ -130,7 +217,10 @@ export async function POST(req: NextRequest) {
       action: "payroll.bonus.add",
       entityType: "EmployeeBonus",
       entityId: rows[0]?.id ?? null,
-      after: { userId, amount, reason, effectiveDate: effectiveRaw, bonusType, paymentStatus },
+      after: {
+        userId, amount, reason, effectiveDate: effectiveRaw, bonusType, paymentStatus,
+        attachmentName,
+      },
     });
 
     return NextResponse.json({ ok: true, id: rows[0]?.id }, { status: 201 });

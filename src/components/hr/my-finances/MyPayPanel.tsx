@@ -10,7 +10,7 @@ import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import SelectField from "@/components/ui/SelectField";
 import {
-  Download, FileText, X, TrendingUp, ChevronRight, ChevronDown, Lightbulb,
+  Download, FileText, X, TrendingUp, ChevronRight, ChevronDown, Lightbulb, Paperclip,
 } from "lucide-react";
 
 type Props = { userId?: number; initialSub?: SubTab };
@@ -22,6 +22,7 @@ type BonusRow = {
   effectiveDate: string;
   bonusType: string | null;
   paymentStatus: string;
+  attachmentName: string | null;
 };
 
 const MONTHS_FULL = [
@@ -723,6 +724,15 @@ function BonusDetailRow({ bonus }: { bonus: BonusRow }) {
         <p className="mt-3 text-[12px] text-slate-600">
           <span className="font-semibold text-slate-800">Note:</span> {bonus.reason}
         </p>
+      )}
+      {bonus.attachmentName && (
+        <a
+          href={`/api/hr/payroll/bonus/${bonus.id}/file`}
+          className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-medium text-[#3b82f6] hover:text-[#2563eb] hover:underline"
+        >
+          <Paperclip size={12} />
+          {bonus.attachmentName}
+        </a>
       )}
     </div>
   );
