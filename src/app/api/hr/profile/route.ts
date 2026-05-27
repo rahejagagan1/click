@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
-import { encryptPII } from "@/lib/pii-crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +48,7 @@ export async function PUT(req: NextRequest) {
       dateOfBirth, gender, bloodGroup, maritalStatus,
       emergencyPhone,
       address, city, state, profilePictureUrl,
-      // Sensitive fields — encrypted at rest before insert.
+      // Bank + identity fields — stored as plaintext.
       bankName, bankAccountNumber, bankIfsc, bankBranch, accountHolderName,
       panNumber, parentName, aadhaarNumber, aadhaarEnrollment,
       // ABOUT-tab bios — recently added columns, written via raw SQL
@@ -111,8 +110,7 @@ export async function PUT(req: NextRequest) {
       }
     }
 
-    // Build the EmployeeProfile patch. Encrypt PII columns just before
-    // writing so the DB never sees plaintext for these fields.
+    // Build the EmployeeProfile patch. All columns store as plaintext.
     //
     // workPhone / personalEmail / maritalStatus are the most-recently
     // added columns; the typed Prisma client may not know them yet if
@@ -125,11 +123,11 @@ export async function PUT(req: NextRequest) {
       emergencyPhone, address, city, state,
       bankName, bankBranch, accountHolderName, parentName,
     };
-    if (bankAccountNumber !== undefined) profileData.bankAccountNumber = encryptPII(bankAccountNumber);
-    if (bankIfsc           !== undefined) profileData.bankIfsc           = encryptPII(bankIfsc);
-    if (panNumber          !== undefined) profileData.panNumber          = encryptPII(panNumber);
-    if (aadhaarNumber      !== undefined) profileData.aadhaarNumber      = encryptPII(aadhaarNumber);
-    if (aadhaarEnrollment  !== undefined) profileData.aadhaarEnrollment  = encryptPII(aadhaarEnrollment);
+    if (bankAccountNumber !== undefined) profileData.bankAccountNumber = bankAccountNumber ? String(bankAccountNumber).trim()              || null : null;
+    if (bankIfsc          !== undefined) profileData.bankIfsc          = bankIfsc          ? String(bankIfsc).trim().toUpperCase()         || null : null;
+    if (panNumber         !== undefined) profileData.panNumber         = panNumber         ? String(panNumber).trim().toUpperCase()        || null : null;
+    if (aadhaarNumber     !== undefined) profileData.aadhaarNumber     = aadhaarNumber     ? String(aadhaarNumber).trim()                  || null : null;
+    if (aadhaarEnrollment !== undefined) profileData.aadhaarEnrollment = aadhaarEnrollment ? String(aadhaarEnrollment).trim()              || null : null;
 
     // Only patch User.name when displayName is a non-empty string —
     // sending undefined would clear it via Prisma.
