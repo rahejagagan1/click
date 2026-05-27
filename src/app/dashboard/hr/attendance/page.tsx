@@ -1471,14 +1471,22 @@ export default function AttendancePage() {
                     // Has a pending request for this date? Any type (regularize, WFH,
                     // On-Duty, or Leave that covers this date) flips the row to
                     // "Pending approval" and disables re-submission of the same kind.
+                    // BOTH "pending" (L1 not yet acted) AND "partially_approved"
+                    // (manager approved, awaiting HR's final L2) count as
+                    // pending from the employee's perspective — the request is
+                    // still being processed, so MISSED / LATE chips must stay
+                    // hidden. (Earlier bug: the boolean only checked "pending",
+                    // so the row reverted to MISSED the moment a manager
+                    // approved L1.)
+                    const isOpen = (s: string) => s === "pending" || s === "partially_approved";
                     const hasPendingReg = Array.isArray(regsData) && regsData.some(
-                      (r: any) => r.status === "pending" && String(r.date).slice(0, 10) === dateIso
+                      (r: any) => isOpen(r.status) && String(r.date).slice(0, 10) === dateIso
                     );
                     const hasPendingWfh = Array.isArray(wfhData) && wfhData.some(
-                      (r: any) => r.status === "pending" && String(r.date).slice(0, 10) === dateIso
+                      (r: any) => isOpen(r.status) && String(r.date).slice(0, 10) === dateIso
                     );
                     const hasPendingOd  = Array.isArray(odData) && odData.some(
-                      (r: any) => r.status === "pending" && String(r.date).slice(0, 10) === dateIso
+                      (r: any) => isOpen(r.status) && String(r.date).slice(0, 10) === dateIso
                     );
                     const hasPendingLeave = myLeaves.some((l: any) => {
                       if (l.status !== "pending" && l.status !== "partially_approved") return false;
@@ -1617,13 +1625,21 @@ export default function AttendancePage() {
                             {onLeave && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400 font-bold">LEAVE</span>
                             )}
-                            {missedClockOut && !hasPendingAny && (
+                            {/* MISSED — hidden as soon as the employee has
+                                either a PENDING or an APPROVED regularization
+                                for this day. Once HR is in the loop (or has
+                                already corrected the row), the warning chip
+                                is noise. */}
+                            {missedClockOut && !hasPendingAny && !approvedRegRow && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold uppercase tracking-wider">Missed</span>
                             )}
-                            {/* "LATE" — first clock-in past 10:00 AM IST.
-                                Shown alongside Today/Pending so the row
-                                states are non-exclusive. */}
-                            {isLateFirstIn && hasClock && !hasPendingAny && (
+                            {/* LATE — first clock-in past 10:00 AM IST.
+                                Hidden when a regularization is pending OR
+                                approved for the day, since the regularized
+                                clock-in time supersedes the original late
+                                punch and HR has already taken / is taking
+                                action. */}
+                            {isLateFirstIn && hasClock && !hasPendingAny && !approvedRegRow && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-bold uppercase tracking-wider">Late</span>
                             )}
                             {/* "ON BREAK" — currently between sessions on
@@ -1661,9 +1677,13 @@ export default function AttendancePage() {
                                       ? "On-Duty Pending Approval"
                                       : `Pending ${pendingKind}`}
                             </span>
-                          ) : missedClockOut ? (
+                          ) : missedClockOut && !approvedRegRow ? (
                             <span className="text-[12px] font-medium text-amber-600 dark:text-amber-400">
                               Missed clock-out — regularize to log hours
+                            </span>
+                          ) : approvedRegRow && (missedClockOut || !rec.clockIn) ? (
+                            <span className="text-[12px] font-medium text-emerald-600 dark:text-emerald-400">
+                              Regularized{regWindow(approvedRegRow) ? ` · ${regWindow(approvedRegRow)}` : ""}
                             </span>
                           ) : hasClock ? (
                             // Centered to align under the centred
@@ -1764,6 +1784,13 @@ export default function AttendancePage() {
                                 : pendingKind === "On-Duty"        ? "On-Duty Pending"
                                 : "Pending";
                               c = { label: which, Icon: Clock3, tone: "text-[#008CFF]" };
+                            } else if (approvedRegRow) {
+                              // Approved regularization wins over MISSED /
+                              // partial-swipe states — the underlying
+                              // Attendance row may still look incomplete,
+                              // but HR has signed off and the day counts
+                              // as a successful regularized day.
+                              c = { label: `Regularized${regWindow(approvedRegRow) ? ` · ${regWindow(approvedRegRow)}` : ""}`, Icon: CheckCircle2, tone: "text-emerald-500" };
                             } else if (missedClockOut) {
                               c = { label: "Missed clock-out", Icon: AlertCircle, tone: "text-amber-500" };
                             } else if (rec.clockOut && !rec.clockIn && !isTodayRow && !rec.isRegularized) {
