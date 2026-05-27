@@ -7,13 +7,13 @@ import { useSession } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Home, Briefcase, ShieldCheck, Info, User, Users, Clock3, Plus, X, MapPin, MoreVertical, Coffee, AlertCircle, CheckCircle2, XCircle, Calendar, CalendarDays, ArrowDownLeft, ArrowUpRight } from "lucide-react";
-import { parseAttLoc, captureClockInGeo } from "@/lib/attendance-location";
+import { parseAttLoc } from "@/lib/attendance-location";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
 import SelectField from "@/components/ui/SelectField";
 import { isHRAdmin, canApplyRestrictedLeave } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
-import { desktopBypassHeader } from "@/lib/desktop-bypass";
 import { DateField } from "@/components/ui/date-field";
+import { useClockActions } from "@/lib/hr/use-clock-actions";
 
 // ── Form copy per kind ───────────────────────────────────────────────────────
 const FORM_TITLE: Record<LeaveRequestKind, string> = {
@@ -578,27 +578,15 @@ export default function AttendancePage() {
   // button will trigger the browser's native ask.
   type LocPerm = "granted" | "denied" | "prompt" | "unsupported" | "checking";
   const [locPerm, setLocPerm] = useState<LocPerm>("checking");
-  // Shows a "Getting location…" label on the clock-in button so users know
-  // the browser is busy asking the OS for coordinates (first-time GPS/Wi-Fi
-  // lookup on Windows can take 10–15s).
-  const [clockingIn, setClockingIn] = useState(false);
   // Two-step Clock-Out confirmation (Keka pattern). First click flips
   // this to true and the button splits into a Clock-out / Cancel pair
   // so a stray click doesn't end the day. Auto-cancels after 6s if the
   // user walks away. Mirrors the home Quick-Access tile's behaviour.
   const [confirmingClockOut, setConfirmingClockOut] = useState(false);
-  // True while the async clockOut() call is in flight. Keeps the
-  // Confirm/Cancel pair visible until the API resolves (otherwise
-  // the synchronous state reset reverts the button to "Web Clock-
-  // Out" before todayRec.clockOut updates → looks like nothing
-  // happened) and disables the Confirm button to prevent a
-  // double-click double-POST.
-  const [clockingOut, setClockingOut] = useState(false);
-  useEffect(() => {
-    if (!confirmingClockOut || clockingOut) return;
-    const t = setTimeout(() => setConfirmingClockOut(false), 6000);
-    return () => clearTimeout(t);
-  }, [confirmingClockOut, clockingOut]);
+  // `clockingOut` lives in the useClockActions hook below — it tracks
+  // the actual fetch in-flight, not just the visual confirm state.
+  // The auto-collapse useEffect needs the hook's `clockingOut` value,
+  // so it's defined further down (after the hook).
 
   // Mobile gate w/ two bypasses (mirrors /dashboard/hr/home):
   //   1. Developers (DEVELOPER_EMAILS env → user.isDeveloper) — stable
@@ -714,44 +702,32 @@ export default function AttendancePage() {
         .map((t: any) => ({ id: t.id, name: t.name }))
     : [];
 
-  const clockIn  = async () => {
-    // Location is mandatory. Always attempt a fresh geolocation read — the
-    // cached `locPerm` state can lag (Chrome doesn't always fire `onchange`
-    // when permission is toggled from the address-bar popup), so the real
-    // source of truth is whether coordinates come back.
-    setClockingIn(true);
-    try {
-      const geo = await captureClockInGeo();
-      if (!geo.ok) {
-        alert(`Can't clock in — ${geo.message}`);
-        return;
+  // Clock-in / clock-out actions are owned by a shared hook so the
+  // home page and this page behave identically. The hook handles:
+  //   • re-entry guards (synchronous useRef — survives React's
+  //     batched re-renders so a double-click can't fire two POSTs)
+  //   • try/catch around fetch + json parse so transient network
+  //     failures surface as a visible banner instead of a silent
+  //     spinner reset (the old behaviour that made users click 3-4
+  //     times before anything happened)
+  //   • one automatic retry on 5xx / network failure
+  //   • per-page SWR refresh after success
+  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError } = useClockActions({
+    mutateKeys: [`/api/hr/attendance?${attendanceQs}`],
+    onClockOutSuccess: (rec) => {
+      if (typeof rec?.totalMinutes === "number" && rec.totalMinutes >= 540) {
+        setDayCompleteToast(true);
       }
-      const res = await fetch("/api/hr/attendance/clock-in", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...desktopBypassHeader() },
-        body: JSON.stringify({ lat: geo.lat, lng: geo.lng, address: geo.address }),
-      });
-      const d = await res.json();
-      if (!res.ok) { alert(d.error); return; }
-      mutate(`/api/hr/attendance?${attendanceQs}`);
-    } finally {
-      setClockingIn(false);
-    }
-  };
-  const clockOut = async () => {
-    // Geo is captured on clock-IN only — clock-out doesn't ask the
-    // browser for a fresh fix. The server still accepts an optional
-    // body but no client sends one anymore.
-    const res = await fetch("/api/hr/attendance/clock-out", { method: "POST", headers: desktopBypassHeader() });
-    const d = await res.json();
-    if (!res.ok) return alert(d.error);
-    mutate(`/api/hr/attendance?${attendanceQs}`);
-    // The API returns the updated Attendance row; flash a "Day Complete"
-    // toast when the day's total crosses the 9h shift target.
-    if (typeof d?.totalMinutes === "number" && d.totalMinutes >= 540) {
-      setDayCompleteToast(true);
-    }
-  };
+    },
+  });
+  // Auto-collapse the Confirm/Cancel pair after 6s of idle (matches the
+  // home page). Lives here so it has both `confirmingClockOut` from
+  // local state and `clockingOut` from the hook in scope.
+  useEffect(() => {
+    if (!confirmingClockOut || clockingOut) return;
+    const t = setTimeout(() => setConfirmingClockOut(false), 6000);
+    return () => clearTimeout(t);
+  }, [confirmingClockOut, clockingOut]);
 
   const todayRec  = myData?.todayRecord;
   const summary   = myData?.summary || {};
@@ -1204,6 +1180,18 @@ export default function AttendancePage() {
                   "preserve white text" rule. Don't remove. */}
               {!todayRec?.clockIn ? (
                 <div className="flex flex-col gap-1 w-fit">
+                  {/* Sticky error banner — replaces the old `alert()`
+                      which users dismissed without reading. Stays put
+                      until the user clicks ✕ or retries successfully. */}
+                  {clockError && (
+                    <div className="flex items-start gap-1.5 max-w-[420px] px-2.5 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-700 dark:text-rose-300 text-[11.5px] leading-tight">
+                      <AlertCircle size={13} className="shrink-0 mt-px" />
+                      <span className="flex-1">{clockError.message}</span>
+                      <button onClick={clearClockError} className="shrink-0 text-rose-500 hover:text-rose-700" aria-label="Dismiss">
+                        <X size={11} />
+                      </button>
+                    </div>
+                  )}
                   <button onClick={mobileBlocked ? undefined : clockIn}
                     disabled={clockingIn || mobileBlocked}
                     style={{
@@ -1232,14 +1220,10 @@ export default function AttendancePage() {
                   <div className="flex items-center gap-1.5 w-fit">
                     <button
                       onClick={async () => {
-                        if (clockingOut) return;
-                        setClockingOut(true);
-                        try {
-                          await clockOut();
-                        } finally {
-                          setClockingOut(false);
-                          setConfirmingClockOut(false);
-                        }
+                        // The hook owns the in-flight guard. After it
+                        // resolves we collapse the Confirm/Cancel pair.
+                        await clockOut();
+                        setConfirmingClockOut(false);
                       }}
                       disabled={clockingOut}
                       style={{
@@ -1287,6 +1271,18 @@ export default function AttendancePage() {
                 )
               ) : (
                 <div className="flex flex-col gap-1.5 w-fit">
+                  {/* Sticky error banner — see comment on the matching
+                      banner above. Shown next to whichever clock-in
+                      variant the day is in. */}
+                  {clockError && (
+                    <div className="flex items-start gap-1.5 max-w-[420px] px-2.5 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-700 dark:text-rose-300 text-[11.5px] leading-tight">
+                      <AlertCircle size={13} className="shrink-0 mt-px" />
+                      <span className="flex-1">{clockError.message}</span>
+                      <button onClick={clearClockError} className="shrink-0 text-rose-500 hover:text-rose-700" aria-label="Dismiss">
+                        <X size={11} />
+                      </button>
+                    </div>
+                  )}
                   <button onClick={mobileBlocked ? undefined : clockIn} disabled={clockingIn || mobileBlocked}
                     style={{
                       background: "linear-gradient(180deg, #22c55e 0%, #15803d 100%)",
