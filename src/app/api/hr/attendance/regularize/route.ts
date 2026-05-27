@@ -8,6 +8,7 @@ import { writeAuditLog } from "@/lib/audit-log";
 import { istTimeOnDate, istMonthRange, istTodayDateOnly, istDateOnlyFrom } from "@/lib/ist-date";
 import { isRegularizationWindowEnforced } from "@/app/api/hr/policy/regularization-window/route";
 import { isRegularizationUnlimited } from "@/app/api/hr/policy/regularization-unlimited/route";
+import { devEmailRecipientsClause } from "@/lib/email/toggles";
 
 // Schema covers both self-apply and admin-grant flavours of regularize POST.
 const RegularizePost = z.object({
@@ -262,17 +263,16 @@ export async function POST(req: NextRequest) {
 
     // L1 → L2 flow: notify the requester's direct manager first (they
     // approve at stage 1) PLUS HR finalisers as a heads-up. Admin-grants
-    // skip L1 and go straight to admins for ratification.
-    const devEmails = (process.env.DEVELOPER_EMAILS || "")
-      .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+    // skip L1 and go straight to admins for ratification. Developer
+    // accounts gated by the "Notify developers" toggle.
     const admins = await prisma.user.findMany({
       where: {
         isActive: true,
         OR: [
-          // CEO + Special Access + HR Manager (role) + Developers.
+          // CEO + Special Access + HR Manager (role).
           { orgLevel: { in: ["ceo", "special_access"] } },
           { role: "hr_manager" },
-          ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+          ...(await devEmailRecipientsClause()),
         ],
       },
       select: { id: true },
@@ -434,17 +434,16 @@ export async function PUT(req: NextRequest) {
         action: "regularize.approve_l1", entityType: "AttendanceRegularization", entityId: id,
         before: { status: "pending" }, after: { status: "partially_approved", approvalNote },
       });
-      // Notify HR finalisers + the requester.
-      const devEmailsL1 = (process.env.DEVELOPER_EMAILS || "")
-        .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+      // Notify HR finalisers + the requester. Developer accounts gated
+      // by the "Notify developers" toggle in Admin → Emails.
       const finalApprovers = await prisma.user.findMany({
         where: {
           isActive: true,
           OR: [
-            // CEO + Special Access + HR Manager (role) + Developers.
+            // CEO + Special Access + HR Manager (role).
             { orgLevel: { in: ["ceo", "special_access"] } },
             { role: "hr_manager" },
-            ...(devEmailsL1.length > 0 ? [{ email: { in: devEmailsL1 } }] : []),
+            ...(await devEmailRecipientsClause()),
           ],
         },
         select: { id: true },

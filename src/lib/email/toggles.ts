@@ -27,13 +27,17 @@ export type EmailKey =
   | "job_application"
   // Cron-job-driven
   | "violation_reminders"
-  | "missed_attendance";
+  | "missed_attendance"
+  // Recipient-list controls (don't gate a specific email kind — they
+  // gate whether a class of recipient is added to ANY admin-broadcast
+  // recipient lookup).
+  | "dev_emails";
 
 export const EMAIL_TOGGLE_CATALOG: Array<{
   key: EmailKey;
   label: string;
   description: string;
-  group: "Requests" | "Reports & Feedback" | "Recruiting" | "Cron jobs";
+  group: "Requests" | "Reports & Feedback" | "Recruiting" | "Cron jobs" | "Recipients";
 }> = [
   { key: "regularization",      group: "Requests",            label: "Regularization",        description: "Attendance regularization requests + approval decisions." },
   { key: "wfh",                 group: "Requests",            label: "WFH",                   description: "Work-from-home requests + approval decisions." },
@@ -45,6 +49,7 @@ export const EMAIL_TOGGLE_CATALOG: Array<{
   { key: "job_application",     group: "Recruiting",          label: "Job applications",      description: "Inbound job-application notifications to HR + CEO." },
   { key: "violation_reminders", group: "Cron jobs",           label: "Violation reminders",   description: "Daily reminder for violations in-progress for 15+ days." },
   { key: "missed_attendance",   group: "Cron jobs",           label: "Missed attendance",     description: "Daily nudge to employees who didn't clock in." },
+  { key: "dev_emails",          group: "Recipients",          label: "Notify developers",     description: "When ON, accounts listed in DEVELOPER_EMAILS env get copied on every admin-broadcast email (leave / WFH / on-duty / comp-off / regularize / feedback / job applications / reports / cron jobs). When OFF, developer accounts are silently dropped from every recipient list while still appearing in the system as users." },
 ];
 
 const SYNC_KEY = "email_toggles";
@@ -89,4 +94,31 @@ export async function saveEmailToggles(toggles: Partial<EmailToggles>): Promise<
 export async function isEmailEnabled(kind: EmailKey): Promise<boolean> {
   const all = await getEmailToggles();
   return all[kind] !== false;
+}
+
+/**
+ * Recipient-list helper — call inside any prisma.user.findMany({ where: { OR: [...] } })
+ * that wants to include developer accounts as email recipients. Returns:
+ *   • [{ email: { in: [...] } }]   when the `dev_emails` toggle is ON
+ *   • []                            when the toggle is OFF (devs silently dropped)
+ *   • []                            when DEVELOPER_EMAILS env is empty (nothing to add)
+ *
+ * Usage:
+ *   const stakeholders = await prisma.user.findMany({
+ *     where: {
+ *       isActive: true,
+ *       OR: [
+ *         { orgLevel: { in: ["ceo", "special_access"] } },
+ *         { role: "hr_manager" },
+ *         ...(await devEmailRecipientsClause()),
+ *       ],
+ *     },
+ *   });
+ */
+export async function devEmailRecipientsClause(): Promise<Array<{ email: { in: string[] } }>> {
+  if (!(await isEmailEnabled("dev_emails"))) return [];
+  const devEmails = (process.env.DEVELOPER_EMAILS || "")
+    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  if (devEmails.length === 0) return [];
+  return [{ email: { in: devEmails } }];
 }
