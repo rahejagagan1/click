@@ -23,6 +23,11 @@ import CustomSelect from "@/components/ui/CustomSelect";
 import SelectField from "@/components/ui/SelectField";
 import { DateField } from "@/components/ui/date-field";
 import { DEPARTMENTS } from "@/lib/departments";
+import {
+  brandFromBusinessUnit,
+  jobTitleSource,
+  departmentSource,
+} from "@/lib/company-taxonomy";
 
 type Manager = { id: number; name: string };
 
@@ -735,22 +740,36 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
           teamCapsule:        job.teamCapsule.trim() || null,
         })}
       >
+        {/* Brand context is derived live from the Business Unit value so
+            switching it (e.g. moving an employee from NB Media to YT
+            Labs) instantly re-scopes the Department / Job Title lists. */}
+        {(() => null)()}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className={cls.label}>Designation</label>
-            <input className={cls.field} value={job.designation}
-              onChange={(e) => setJob({ ...job, designation: e.target.value })} />
+            <CustomSelect
+              listKey={jobTitleSource(brandFromBusinessUnit(job.businessUnit, job.legalEntity)).listKey}
+              defaults={jobTitleSource(brandFromBusinessUnit(job.businessUnit, job.legalEntity)).defaults}
+              value={job.designation}
+              onChange={(v) => setJob({ ...job, designation: v })}
+              placeholder="Select designation"
+            />
           </div>
           <div>
             <label className={cls.label}>Secondary Job Title</label>
-            <input className={cls.field} value={job.secondaryJobTitle}
-              onChange={(e) => setJob({ ...job, secondaryJobTitle: e.target.value })} placeholder="Optional" />
+            <CustomSelect
+              listKey={jobTitleSource(brandFromBusinessUnit(job.businessUnit, job.legalEntity)).listKey}
+              defaults={jobTitleSource(brandFromBusinessUnit(job.businessUnit, job.legalEntity)).defaults}
+              value={job.secondaryJobTitle}
+              onChange={(v) => setJob({ ...job, secondaryJobTitle: v })}
+              placeholder="Optional"
+            />
           </div>
           <div>
             <label className={cls.label}>Department</label>
             <CustomSelect
-              listKey="department"
-              defaults={DEPARTMENTS}
+              listKey={departmentSource(brandFromBusinessUnit(job.businessUnit, job.legalEntity)).listKey}
+              defaults={departmentSource(brandFromBusinessUnit(job.businessUnit, job.legalEntity)).defaults}
               value={job.department}
               onChange={(v) => setJob({ ...job, department: v })}
               placeholder="Select a department"
@@ -760,7 +779,7 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
             <label className={cls.label}>Business Unit</label>
             <CustomSelect
               listKey="businessUnit"
-              defaults={["NB Media"]}
+              defaults={["NB Media", "YT Labs"]}
               value={job.businessUnit}
               onChange={(v) => setJob({ ...job, businessUnit: v })}
               placeholder="Select business unit"
@@ -770,7 +789,7 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
             <label className={cls.label}>Legal Entity</label>
             <CustomSelect
               listKey="legalEntity"
-              defaults={["NB Media Productions"]}
+              defaults={["NB Media Productions", "YT Labs"]}
               value={job.legalEntity}
               onChange={(v) => setJob({ ...job, legalEntity: v })}
               placeholder="Select legal entity"
@@ -934,9 +953,11 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
           timeTrackingPolicy:      work.timeTrackingPolicy.trim() || null,
           penalizationPolicy:      work.penalizationPolicy.trim() || null,
           attendanceCaptureScheme: work.attendanceCaptureScheme.trim() || null,
-          // Cost Centre is locked org-wide to "NB Media" — never let
-          // a stale local-state value blank it out on save.
-          costCenter:              "NB Media",
+          // Cost Centre is per-employee since we run two brands
+          // (NB Media + YT Labs). Save whatever HR selected, defaulting
+          // to "NB Media" only when blank so we never write an empty
+          // string back to the DB.
+          costCenter:              work.costCenter.trim() || "NB Media",
         })}
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -1009,11 +1030,17 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
           </div>
           <div>
             <label className={cls.label}>Cost Center</label>
-            {/* Locked org-wide value. Every employee belongs to the
-                "NB Media" cost centre — HR does not edit this per-row.
-                Kept as a read-only field (rather than hidden) so HR can
-                see at a glance which centre the employee rolls up to. */}
-            <input className={cls.field} value="NB Media" disabled readOnly />
+            {/* Editable per-employee since we run two brands. Defaults
+                offered are the canonical NB Media + YT Labs values; HR
+                can extend via "+ Add custom" if a future cost centre
+                shows up. */}
+            <CustomSelect
+              listKey="costCenter"
+              defaults={["NB Media", "YT Labs"]}
+              value={work.costCenter}
+              onChange={(v) => setWork({ ...work, costCenter: v })}
+              placeholder="Select cost center"
+            />
           </div>
         </div>
       </Section>

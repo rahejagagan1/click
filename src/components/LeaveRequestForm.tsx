@@ -165,7 +165,13 @@ export default function LeaveRequestForm({
   const [notify, setNotify]     = useState<{ id: number; name: string; email?: string; profilePictureUrl?: string | null }[]>([]);
   const [saving, setSaving]     = useState(false);
   const [err, setErr]           = useState("");
-  const [isHalfDayWfh, setIsHalfDayWfh] = useState(false);
+  const [isHalfDayShift, setIsHalfDayShift] = useState(false);
+  // First-half / second-half follow-up when a WFH is marked as
+  // half-day. Mirrors the leave form's first_half / second_half toggle
+  // so HR can see which half of the day the employee is working from
+  // home. Default to "first" so the form has a valid selection the
+  // moment the half-day checkbox is ticked.
+  const [halfKind, setHalfKind] = useState<"first" | "second">("first");
   // Full vs half day, with which half — only meaningful on the leave form. The
   // half-day form (`kind=half_day`) keeps its own legacy flow and ignores this.
   const [dayKind, setDayKind] = useState<"full" | "first_half" | "second_half">("full");
@@ -231,14 +237,29 @@ export default function LeaveRequestForm({
 
     if (kind === "wfh") {
       url = "/api/hr/attendance/wfh";
-      // Half-day WFH is encoded as a reason prefix so we don't need a schema
-      // migration. Approval + attendance display both detect "[Half Day]".
-      const reason = isHalfDayWfh ? `[Half Day] ${note}` : note;
+      // Half-day WFH is encoded as a reason prefix so we don't need a
+      // schema migration. Approval + attendance display detect the
+      // marker. We tag the specific half ([First Half] / [Second Half])
+      // so HR knows WHICH half the employee is working from home — the
+      // bare "[Half Day]" tag stays as a fallback for older clients.
+      const reason = isHalfDayShift
+        ? (halfKind === "first"  ? `[First Half] ${note}`  :
+           halfKind === "second" ? `[Second Half] ${note}` :
+                                      `[Half Day] ${note}`)
+        : note;
       payload = { date: fromDate, reason, notifyUserIds, ...handoff, unavailability: unavailability.trim() };
       refreshKeys = ["/api/hr/attendance/wfh"];
     } else if (kind === "on_duty") {
       url = "/api/hr/attendance/on-duty";
-      payload = { date: fromDate, purpose: note, notifyUserIds, ...handoff };
+      // Half-day OD encodes the half via the purpose prefix — same
+      // convention as WFH / leaves. Approval / attendance display
+      // detect "[First Half]" / "[Second Half]".
+      const purpose = isHalfDayShift
+        ? (halfKind === "first"  ? `[First Half] ${note}`  :
+           halfKind === "second" ? `[Second Half] ${note}` :
+                                   `[Half Day] ${note}`)
+        : note;
+      payload = { date: fromDate, purpose, notifyUserIds, ...handoff };
       refreshKeys = ["/api/hr/attendance/on-duty"];
     } else if (kind === "regularize") {
       // No handoff for regularize — it's the "I missed a clock-in" flow,
@@ -249,13 +270,20 @@ export default function LeaveRequestForm({
     } else if (kind === "half_day") {
       // Half-day = one-day leave of a half-day leave type if configured, else
       // fall back to a regularization so a request still reaches approvers.
+      // Tag the specific half so HR knows whether it's the morning or
+      // afternoon. Approval + attendance display detect "[First Half]"
+      // / "[Second Half]" markers the same way they do for leave rows.
+      const halfReason =
+        halfKind === "first"  ? `[First Half] ${note}` :
+        halfKind === "second" ? `[Second Half] ${note}` :
+                                 `[Half Day] ${note}`;
       if (leaveTypeId) {
         url = "/api/hr/leaves";
-        payload = { leaveTypeId, fromDate, toDate: fromDate, reason: `[Half Day] ${note}`, notifyUserIds, ...handoff };
+        payload = { leaveTypeId, fromDate, toDate: fromDate, reason: halfReason, notifyUserIds, ...handoff };
         refreshKeys = ["/api/hr/leaves", "/api/hr/leaves/balance"];
       } else {
         url = "/api/hr/attendance/regularize";
-        payload = { date: fromDate, reason: `[Half Day] ${note}`, notifyUserIds };
+        payload = { date: fromDate, reason: halfReason, notifyUserIds };
         refreshKeys = ["/api/hr/attendance/regularize"];
       }
     } else if (kind === "leave") {
@@ -433,17 +461,87 @@ export default function LeaveRequestForm({
             />
           )}
 
-          {/* Half-day WFH — only for kind=wfh. Tags the reason so approval + attendance render it as a half-day. */}
-          {kind === "wfh" && (
-            <label className="flex items-center gap-2 text-[12.5px] text-slate-700 dark:text-slate-200 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={isHalfDayWfh}
-                onChange={(e) => setIsHalfDayWfh(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 accent-[#008CFF]"
-              />
-              This is a half-day WFH (morning / afternoon only)
-            </label>
+          {/* Half-day toggle — applies to WFH and OD requests. Tags
+              the reason / purpose so approval + attendance render it
+              as a half-day. When the checkbox is on, HR also needs to
+              pick which half (mirrors the leave form's first_half /
+              second_half toggle). */}
+          {(kind === "wfh" || kind === "on_duty") && (
+            <div className="space-y-2.5">
+              <label className="flex items-center gap-2 text-[12.5px] text-slate-700 dark:text-slate-200 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={isHalfDayShift}
+                  onChange={(e) => setIsHalfDayShift(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 accent-[#008CFF]"
+                />
+                {kind === "wfh"
+                  ? "This is a half-day WFH (morning / afternoon only)"
+                  : "This is a half-day OD (morning / afternoon only)"}
+              </label>
+              {isHalfDayShift && (
+                <div className="grid grid-cols-2 gap-1.5 pl-6">
+                  <button
+                    type="button"
+                    onClick={() => setHalfKind("first")}
+                    className={`h-8 rounded-md border text-[11.5px] font-medium transition-colors ${
+                      halfKind === "first"
+                        ? "border-[#008CFF] bg-[#008CFF]/[0.08] text-[#008CFF] dark:border-[#4a9cff] dark:text-[#4a9cff]"
+                        : "border-slate-200 dark:border-white/[0.08] text-slate-500 dark:text-slate-400 hover:border-[#008CFF]/40"
+                    }`}
+                  >
+                    First Half (morning)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHalfKind("second")}
+                    className={`h-8 rounded-md border text-[11.5px] font-medium transition-colors ${
+                      halfKind === "second"
+                        ? "border-[#008CFF] bg-[#008CFF]/[0.08] text-[#008CFF] dark:border-[#4a9cff] dark:text-[#4a9cff]"
+                        : "border-slate-200 dark:border-white/[0.08] text-slate-500 dark:text-slate-400 hover:border-[#008CFF]/40"
+                    }`}
+                  >
+                    Second Half (afternoon)
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Half-day request kind — needs the same First/Second toggle as
+              WFH so HR knows which half of the day the employee is taking
+              off. The half_day form is inherently half — no checkbox
+              gating needed. */}
+          {kind === "half_day" && (
+            <div>
+              <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                Which half? <span className="text-rose-500">*</span>
+              </label>
+              <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setHalfKind("first")}
+                  className={`h-9 rounded-md border text-[12px] font-medium transition-colors ${
+                    halfKind === "first"
+                      ? "border-[#008CFF] bg-[#008CFF]/[0.08] text-[#008CFF] dark:border-[#4a9cff] dark:text-[#4a9cff]"
+                      : "border-slate-200 dark:border-white/[0.08] text-slate-500 dark:text-slate-400 hover:border-[#008CFF]/40"
+                  }`}
+                >
+                  First Half (morning)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHalfKind("second")}
+                  className={`h-9 rounded-md border text-[12px] font-medium transition-colors ${
+                    halfKind === "second"
+                      ? "border-[#008CFF] bg-[#008CFF]/[0.08] text-[#008CFF] dark:border-[#4a9cff] dark:text-[#4a9cff]"
+                      : "border-slate-200 dark:border-white/[0.08] text-slate-500 dark:text-slate-400 hover:border-[#008CFF]/40"
+                  }`}
+                >
+                  Second Half (afternoon)
+                </button>
+              </div>
+            </div>
           )}
 
           {/* Reason — required. Submit blocks an empty value. */}

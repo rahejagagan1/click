@@ -176,6 +176,18 @@ html:not(.dark) [class*="bg-black/"].text-white {
   color: #111827 !important;
 }
 
+/* Count-chip badges with their own brand-coloured background must
+   keep white text even when nested inside a ghost-button (`bg-white/…`)
+   parent — the ghost-button rule above is too broad and was darkening
+   the small "42" / "99+" pills on company-tab buttons (NB Media / YT
+   Labs / All) across the HR dashboard. This rule comes last so it
+   wins the cascade for chips like `bg-[#008CFF] text-white` or
+   `bg-white/20 text-white` inside a tab button. */
+html:not(.dark) [class*="bg-[#"].text-white,
+html:not(.dark) [class*="bg-white/"].text-white {
+  color: #ffffff !important;
+}
+
 /* ── Slate text → readable dark grays ── */
 html:not(.dark) .text-slate-200 { color: #374151 !important; }
 html:not(.dark) .text-slate-300 { color: #374151 !important; }
