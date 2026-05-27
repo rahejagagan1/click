@@ -158,6 +158,13 @@ export default function OrgTreeView() {
   const [costCenter, setCostCenter] = useState<Set<string>>(new Set());
   const [legal,      setLegal]      = useState<Set<string>>(new Set());
   const [role,       setRole]       = useState<Set<string>>(new Set());
+  // Company tab — pre-scopes the entire tree to one brand. "All" shows
+  // both NB Media and YT Labs employees in one combined tree.
+  // Employees with a blank businessUnit are bucketed as "NB Media"
+  // (parent brand fallback). Default tab is NB Media since it's the
+  // existing org; YT Labs employees only appear once HR onboards them.
+  type CompanyTab = "NB Media" | "YT Labs" | "all";
+  const [companyTab, setCompanyTab] = useState<CompanyTab>("NB Media");
 
   // Pan (drag-to-move). No zoom, just a friendly cursor that tracks drag.
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -188,8 +195,39 @@ export default function OrgTreeView() {
     };
   }, [onMouseMove, onMouseUp]);
 
-  const flat: any[] = data?.flat || [];
-  const tree: any[] = data?.tree || [];
+  const rawFlat: any[] = data?.flat || [];
+  const rawTree: any[] = data?.tree || [];
+
+  // Company-scope first: filter the flat list (and re-build a tree from
+  // it) so all downstream filters / option lists operate inside the
+  // chosen brand. Empty businessUnit → "NB Media" (parent-brand
+  // fallback); keeps legacy rows visible by default.
+  const flat = useMemo(() => {
+    if (companyTab === "all") return rawFlat;
+    return rawFlat.filter((u: any) => {
+      const bu = u.employeeProfile?.businessUnit || "NB Media";
+      return bu === companyTab;
+    });
+  }, [rawFlat, companyTab]);
+
+  // Re-derive the tree from the company-scoped flat list. Same group-by
+  // -manager logic as /api/hr/org, but applied client-side so the YT
+  // Labs view doesn't show NB Media managers as orphan roots.
+  const tree = useMemo(() => {
+    if (companyTab === "all") return rawTree;
+    const ids = new Set(flat.map((u: any) => u.id));
+    const map = new Map<number, any>();
+    flat.forEach((u: any) => map.set(u.id, { ...u, children: [] }));
+    const roots: any[] = [];
+    flat.forEach((u: any) => {
+      if (u.managerId && ids.has(u.managerId) && map.has(u.managerId)) {
+        map.get(u.managerId).children.push(map.get(u.id));
+      } else {
+        roots.push(map.get(u.id));
+      }
+    });
+    return roots;
+  }, [flat, rawTree, companyTab]);
 
   // Build filter option sets (static taxonomy ∪ discovered data values).
   const { buOpts, deptOpts, locOpts, centerOpts, legalOpts, roleOpts } = useMemo(() => {
@@ -284,6 +322,34 @@ export default function OrgTreeView() {
             className="pl-9 pr-4 h-9 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-[13px] text-slate-700 dark:text-slate-300 placeholder-slate-400 w-60 focus:outline-none focus:border-[#008CFF] transition-colors"
           />
         </div>
+      </div>
+
+      {/* Company tab strip — splits the tree into NB Media / YT Labs
+          before any other filter applies. "All" merges both. */}
+      <div className="flex items-center gap-1.5 mb-3">
+        {(["NB Media", "YT Labs", "all"] as const).map((opt) => {
+          const active = companyTab === opt;
+          const count = opt === "all"
+            ? rawFlat.length
+            : rawFlat.filter((u: any) => (u.employeeProfile?.businessUnit || "NB Media") === opt).length;
+          return (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => setCompanyTab(opt)}
+              className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
+                active
+                  ? "bg-[#008CFF] text-white shadow-sm"
+                  : "bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10"
+              }`}
+            >
+              <span>{opt === "all" ? "All" : opt}</span>
+              <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
+                active ? "bg-white/20 text-white" : "bg-[#008CFF] text-white"
+              }`}>{count}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Filter row */}

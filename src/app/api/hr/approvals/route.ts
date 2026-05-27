@@ -56,7 +56,10 @@ export async function GET(req: NextRequest) {
       : { user: { managerId: myId! } };
 
     const selectUser = { id: true, name: true, email: true, profilePictureUrl: true, teamCapsule: true, role: true };
-    const selectProfile = { department: true, designation: true, workLocation: true, employeeId: true };
+    // `businessUnit` is needed by the UI so HR can split the approvals
+    // list into NB Media vs YT Labs tabs (each manager sees their brand
+    // by default; the founder sees both via the "All" tab).
+    const selectProfile = { department: true, designation: true, workLocation: true, employeeId: true, businessUnit: true };
 
     const includeUser = {
       user: { select: { ...selectUser, employeeProfile: { select: selectProfile } } },
