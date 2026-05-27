@@ -7,6 +7,11 @@ import { User as UserIcon, Briefcase, Settings as SettingsIcon, IndianRupee, Che
 import { DatePicker } from "@/components/ui/date-picker";
 import { JOB_TITLES } from "@/lib/job-titles";
 import { DEPARTMENTS } from "@/lib/departments";
+import {
+  brandFromNumberSeries,
+  jobTitleSource,
+  departmentSource,
+} from "@/lib/company-taxonomy";
 import CustomSelect from "@/components/ui/CustomSelect";
 import SelectField from "@/components/ui/SelectField";
 import PopupPanel from "@/components/ui/PopupPanel";
@@ -151,7 +156,7 @@ type Form = {
 const EMPTY: Form = {
   workCountry: "India", firstName: "", middleName: "", lastName: "",
   displayName: "", gender: "male", dateOfBirth: "", nationality: "India",
-  numberSeries: "NB Media series", employeeNumber: "", workEmail: "",
+  numberSeries: "NB Media Series", employeeNumber: "", workEmail: "",
   mobileCountry: "+91", mobileNumber: "",
   workPhone: "", homePhone: "", personalEmail: "",
   maritalStatus: "", bloodGroup: "", physicallyHandicapped: "No",
@@ -341,9 +346,21 @@ export default function OnboardEmployeePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leavePolicies]);
   const activeSeries = (Array.isArray(numberSeries) ? numberSeries : []).find((s: any) => s.isActive) ?? (Array.isArray(numberSeries) ? numberSeries[0] : null);
-  const nextEmployeeId = activeSeries
-    ? `${activeSeries.prefix}${activeSeries.nextNumber}`
-    : "";
+  // Resolve the prefix / next-number from the dropdown selection.
+  // YT Labs is a sibling brand and uses a separate "YTL" prefix; until
+  // the EmployeeNumberSeries table is seeded with a YTL row, we
+  // optimistically start the preview at YTL1 so HR sees the right
+  // shape. The backend allocation needs the DB row to persist properly.
+  const seriesByName = (Array.isArray(numberSeries) ? numberSeries : []).find(
+    (s: any) => s?.name === form.numberSeries,
+  );
+  const selectedPrefix =
+    seriesByName?.prefix
+    ?? (form.numberSeries === "YT Labs Series" ? "YTL" : activeSeries?.prefix ?? "HRM");
+  const selectedNextNumber =
+    seriesByName?.nextNumber
+    ?? (form.numberSeries === "YT Labs Series" ? 1 : activeSeries?.nextNumber ?? 1);
+  const nextEmployeeId = `${selectedPrefix}${selectedNextNumber}`;
   // HRM No. ↔ Attendance No. convention: they should be identical
   // (e.g. HRM47 / HRM47), matching how the Keka export ships every
   // row with both columns set to the same value. We mirror the FULL
@@ -361,6 +378,26 @@ export default function OnboardEmployeePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullEmployeeId, attendanceTouched]);
+
+  // Company cascade: when HR picks a Number Series, snap the linked
+  // org-detail fields (Legal Entity / Business Unit / Cost Center) to
+  // that company's preset. Fires only when the series itself changes,
+  // so manual tweaks the user makes afterwards stick.
+  useEffect(() => {
+    // Case-insensitive match so the cascade works whether the dropdown
+    // value comes from the DB ("NB Media Series" / "YT Labs Series") or
+    // legacy hardcoded strings.
+    const series = form.numberSeries.trim().toLowerCase();
+    const preset =
+      series === "yt labs series"
+        ? { legalEntity: "YT Labs", businessUnit: "YT Labs", costCenter: "YT Labs" }
+        : series === "nb media series"
+        ? { legalEntity: "NB Media Productions", businessUnit: "NB Media", costCenter: "NB Media" }
+        : null;
+    if (!preset) return;
+    setForm(f => ({ ...f, ...preset }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.numberSeries]);
 
   useEffect(() => {
     const q = form.workEmail.trim().toLowerCase();
@@ -522,6 +559,11 @@ export default function OnboardEmployeePage() {
           designation: form.jobTitle || undefined,
           department:  form.department || undefined,
           businessUnit: form.businessUnit || "NB Media",
+          legalEntity:  form.legalEntity || undefined,
+          // Pass the resolved EmployeeNumberSeries FK so the backend
+          // bumps the right counter (HRM vs YTL). Falls back server-side
+          // to the lowest active series when undefined.
+          numberSeriesId: seriesByName?.id ?? undefined,
           employmentType:
             form.workerType === "Intern"     ? "intern"
             : form.timeType === "Part Time"  ? "parttime"
@@ -811,7 +853,15 @@ export default function OnboardEmployeePage() {
                   value={form.nationality} onChange={v => set("nationality", v)} />
               </Field>
               <Field label="Number Series">
-                <Select v={form.numberSeries} set={v => set("numberSeries", v)} opts={["NB Media series"]} />
+                <Select
+                  v={form.numberSeries}
+                  set={v => set("numberSeries", v)}
+                  opts={
+                    (Array.isArray(numberSeries) && numberSeries.length > 0)
+                      ? numberSeries.filter((s: any) => s?.isActive !== false).map((s: any) => s.name)
+                      : ["NB Media Series", "YT Labs Series"]
+                  }
+                />
               </Field>
               <Field
                 label="Employee Number"
@@ -837,7 +887,28 @@ export default function OnboardEmployeePage() {
                     type="email"
                     v={form.workEmail}
                     set={(v) => { set("workEmail", v); setShowSuggestions(true); }}
-                    placeholder="Type a name or email…"
+                    placeholder={
+                      form.numberSeries === "YT Labs Series"
+                        ? "e.g. name@ytlpro.com"
+                        : "e.g. name@nbmediaproductions.com"
+                    }
+                    onBlur={() => {
+                      // Auto-append the company domain when HR types
+                      // just a local-part (no @). Skip if the field is
+                      // empty, already has an @, or contains characters
+                      // that aren't valid local-part chars (e.g. spaces
+                      // — they're probably searching by name, not
+                      // typing an email). The autocomplete suggestions
+                      // use onMouseDown+preventDefault, so picking a
+                      // suggestion doesn't trigger this blur.
+                      const trimmed = form.workEmail.trim();
+                      if (!trimmed || trimmed.includes("@")) return;
+                      if (!/^[a-zA-Z0-9._-]+$/.test(trimmed)) return;
+                      const domain = form.numberSeries === "YT Labs Series"
+                        ? "ytlpro.com"
+                        : "nbmediaproductions.com";
+                      set("workEmail", `${trimmed.toLowerCase()}@${domain}`);
+                    }}
                   />
                   <PopupPanel
                     open={showSuggestions && suggestions.length > 0}
@@ -925,12 +996,12 @@ export default function OnboardEmployeePage() {
                 <DatePicker value={form.joiningDate} onChange={v => set("joiningDate", v)} futureYears={2} />
               </Field>
               <Field label="Job Title" required>
-                {/* CustomSelect: keeps the canonical JOB_TITLES list as
-                    non-deletable defaults, plus surfaces "+ Add custom"
-                    so HR can extend the list without a code deploy. */}
+                {/* Company-scoped: YT Labs picks from JOB_TITLES_YT_LABS,
+                    NB Media from JOB_TITLES. The listKey also swaps so
+                    custom additions don't bleed between brands. */}
                 <CustomSelect
-                  listKey="jobTitle"
-                  defaults={JOB_TITLES}
+                  listKey={jobTitleSource(brandFromNumberSeries(form.numberSeries)).listKey}
+                  defaults={jobTitleSource(brandFromNumberSeries(form.numberSeries)).defaults}
                   value={form.jobTitle}
                   onChange={v => set("jobTitle", v)}
                   placeholder="Select job title"
@@ -941,7 +1012,10 @@ export default function OnboardEmployeePage() {
                 <Select
                   v={form.secondaryJobTitle}
                   set={v => set("secondaryJobTitle", v)}
-                  opts={[{ value: "", label: "— None —" }, ...JOB_TITLES]}
+                  opts={[
+                    { value: "", label: "— None —" },
+                    ...jobTitleSource(brandFromNumberSeries(form.numberSeries)).defaults,
+                  ]}
                 />
               </Field>
               <Field label="Time Type" required>
@@ -953,20 +1027,20 @@ export default function OnboardEmployeePage() {
             <SectionTitle>Organisational Details</SectionTitle>
             <Grid>
               <Field label="Legal Entity" required>
-                <Input v={form.legalEntity} set={v => set("legalEntity", v)} />
+                <CustomSelect listKey="legalEntity" defaults={["NB Media Productions", "YT Labs"]}
+                  value={form.legalEntity} onChange={v => set("legalEntity", v)} required />
               </Field>
               <Field label="Business Unit">
-                <CustomSelect listKey="businessUnit" defaults={["NB Media"]}
+                <CustomSelect listKey="businessUnit" defaults={["NB Media", "YT Labs"]}
                   value={form.businessUnit} onChange={v => set("businessUnit", v)} />
               </Field>
               <Field label="Department" required>
-                {/* CustomSelect: defaults are the seven core departments
-                    (non-deletable); HR can append more via "+ Add
-                    custom". Persisted in OptionList so they show up for
-                    everyone, not just one browser. */}
+                {/* Company-scoped: YT Labs picks from DEPARTMENTS_YT_LABS,
+                    NB Media from DEPARTMENTS. The listKey also swaps so
+                    custom additions stay scoped per brand. */}
                 <CustomSelect
-                  listKey="department"
-                  defaults={DEPARTMENTS}
+                  listKey={departmentSource(brandFromNumberSeries(form.numberSeries)).listKey}
+                  defaults={departmentSource(brandFromNumberSeries(form.numberSeries)).defaults}
                   value={form.department}
                   onChange={v => set("department", v)}
                   placeholder="Select a department"
@@ -1118,8 +1192,9 @@ export default function OnboardEmployeePage() {
               <Field label="Attendance Capture Scheme">
                 <Select v={form.attendanceCaptureScheme} set={v => set("attendanceCaptureScheme", v)} opts={["On-Site", "Remote", "Hybrid"]} />
               </Field>
-              <Field label="Cost Center" hint="Locked org-wide to NB Media">
-                <Input v="NB Media" set={() => { /* locked */ }} disabled />
+              <Field label="Cost Center">
+                <CustomSelect listKey="costCenter" defaults={["NB Media", "YT Labs"]}
+                  value={form.costCenter} onChange={v => set("costCenter", v)} />
               </Field>
             </Grid>
           </StepCard>
@@ -1397,14 +1472,15 @@ function Field({ label, required, hint, children }: { label: string; required?: 
     </div>
   );
 }
-function Input({ v, set, type = "text", placeholder, disabled }: {
+function Input({ v, set, type = "text", placeholder, disabled, onBlur }: {
   v: string;
   set: (value: string) => void;
   type?: string;
   placeholder?: string;
   disabled?: boolean;
+  onBlur?: () => void;
 }) {
-  return <input type={type} value={v} disabled={disabled} onChange={e => set(e.target.value)} placeholder={placeholder} className={`${C.input} disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed`} />;
+  return <input type={type} value={v} disabled={disabled} onChange={e => set(e.target.value)} onBlur={onBlur} placeholder={placeholder} className={`${C.input} disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed`} />;
 }
 
 function Select({ v, set, opts }: { v: string; set: (v: string) => void; opts: (string | { value: string; label: string })[] }) {
