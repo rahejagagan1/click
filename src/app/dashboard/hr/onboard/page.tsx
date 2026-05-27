@@ -1182,15 +1182,43 @@ export default function OnboardEmployeePage() {
                 />
               </Field>
               <Field label="Time Tracking Policy">
-                <CustomSelect listKey="timeTrackingPolicy" defaults={["On-Site Capture", "Remote Capture", "Hybrid"]}
-                  value={form.timeTrackingPolicy} onChange={v => set("timeTrackingPolicy", v)} />
+                <CustomSelect listKey="timeTrackingPolicy" defaults={["On-Site Capture", "Remote Capture", "Hybrid Capture", "None"]}
+                  value={form.timeTrackingPolicy}
+                  onChange={v => {
+                    // Smart cascade — keep Time Tracking Policy in
+                    // sync with Capture Scheme + auto-clear
+                    // Penalisation when tracking is set to None.
+                    setForm(f => {
+                      const next = { ...f, timeTrackingPolicy: v };
+                      if (v === "On-Site Capture") next.attendanceCaptureScheme = "On-Site";
+                      else if (v === "Remote Capture") next.attendanceCaptureScheme = "Remote";
+                      else if (v === "Hybrid Capture") next.attendanceCaptureScheme = "Hybrid";
+                      else if (v === "None") {
+                        next.attendanceCaptureScheme = "";
+                        next.penalizationPolicy = "None";
+                      }
+                      return next;
+                    });
+                  }} />
               </Field>
               <Field label="Penalization Policy">
-                <CustomSelect listKey="penalizationPolicy" defaults={["Default", "Strict", "Lenient"]}
+                <CustomSelect listKey="penalizationPolicy" defaults={["Default", "Strict", "Lenient", "None"]}
                   value={form.penalizationPolicy} onChange={v => set("penalizationPolicy", v)} />
               </Field>
               <Field label="Attendance Capture Scheme">
-                <Select v={form.attendanceCaptureScheme} set={v => set("attendanceCaptureScheme", v)} opts={["On-Site", "Remote", "Hybrid"]} />
+                <Select v={form.attendanceCaptureScheme}
+                  set={v => {
+                    // Reverse leg of the cascade — keep Time Tracking
+                    // Policy aligned with the capture scheme.
+                    setForm(f => {
+                      const next = { ...f, attendanceCaptureScheme: v };
+                      if (v === "On-Site") next.timeTrackingPolicy = "On-Site Capture";
+                      else if (v === "Remote") next.timeTrackingPolicy = "Remote Capture";
+                      else if (v === "Hybrid") next.timeTrackingPolicy = "Hybrid Capture";
+                      return next;
+                    });
+                  }}
+                  opts={["On-Site", "Remote", "Hybrid"]} />
               </Field>
               <Field label="Cost Center">
                 <CustomSelect listKey="costCenter" defaults={["NB Media", "YT Labs"]}
