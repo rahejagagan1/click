@@ -13,7 +13,7 @@ import prisma from "@/lib/prisma";
 import { sendEmail } from "@/lib/email/sender";
 import { violationInProgressReminderEmail } from "@/lib/email/templates";
 import { isDryRun } from "@/lib/email/transport";
-import { isEmailEnabled } from "@/lib/email/toggles";
+import { isEmailEnabled, devEmailRecipientsClause } from "@/lib/email/toggles";
 
 const REMINDER_INTERVAL_DAYS = 15;
 
@@ -62,9 +62,9 @@ export async function sendViolationInProgressReminders(): Promise<number> {
     if (due.length === 0) return 0;
 
     // Recipient list — same set we use for feedback inbox / job
-    // applications: CEO / dev / special_access / admin / hr_manager.
-    const devEmails = (process.env.DEVELOPER_EMAILS || "")
-        .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+    // applications: CEO / special_access / admin / hr_manager.
+    // Developer accounts are conditional on the "Notify developers"
+    // toggle in Admin → Emails Automation.
     const recipients = await prisma.user.findMany({
         where: {
             isActive: true,
@@ -72,7 +72,7 @@ export async function sendViolationInProgressReminders(): Promise<number> {
                 { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
                 { role: "admin" },
                 { role: "hr_manager" },
-                ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+                ...(await devEmailRecipientsClause()),
             ],
         },
         select: { name: true, email: true },

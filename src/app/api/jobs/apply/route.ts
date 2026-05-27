@@ -15,6 +15,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { resolve, extname } from "node:path";
 import prisma from "@/lib/prisma";
 import { notifyUsers } from "@/lib/notifications";
+import { devEmailRecipientsClause } from "@/lib/email/toggles";
 
 export const dynamic = "force-dynamic";
 // File uploads need the Node runtime (Edge can't do fs).
@@ -159,17 +160,16 @@ export async function POST(req: NextRequest) {
 
     // ── Notify hiring stakeholders ──
     // Same recipient set as feedback / report locks: CEO, HR managers,
-    // admins, special_access, plus developer emails from env.
+    // admins, special_access. Developer accounts gated by the
+    // "Notify developers" toggle in Admin → Emails Automation.
     try {
-      const devEmails = (process.env.DEVELOPER_EMAILS || "")
-        .split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
       const recipients = await prisma.user.findMany({
         where: {
           isActive: true,
           OR: [
             { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
             { role: "admin" },
-            ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+            ...(await devEmailRecipientsClause()),
           ],
         },
         select: { id: true },
