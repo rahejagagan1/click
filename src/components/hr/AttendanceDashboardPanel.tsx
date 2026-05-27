@@ -13,6 +13,7 @@ type Row = {
   profilePictureUrl: string | null;
   teamCapsule: string | null;
   employeeId: string | null; designation: string | null; department: string | null;
+  businessUnit: string | null;
   // Two related-but-distinct policy fields. workLocation is the
   // org's classification (office / remote / hybrid); attendanceCaptureScheme
   // is the operational mode their punches are tracked under
@@ -478,6 +479,28 @@ export default function AttendanceDashboardPanel() {
   const [search, setSearch] = useState("");
   const [fDept, setFDept] = useState<Set<string>>(new Set());
 
+  // ── Company scope tabs ──────────────────────────────────────────────
+  // Same pattern as ApprovalsPanel / RegularizationBalancePanel: auto-
+  // default to the viewer's brand (founder lands on "all"). Every
+  // downstream calculation (counts donut, stat cards, status sub-tabs,
+  // table rows) scopes to the selected brand.
+  type CompanyTab = "NB Media" | "YT Labs" | "all";
+  const [companyTab, setCompanyTab] = useState<CompanyTab>("all");
+  const [companyTabTouched, setCompanyTabTouched] = useState(false);
+  const { data: viewerProfile } = useSWR<any>(
+    me ? "/api/hr/profile" : null,
+    fetcher,
+    { revalidateOnFocus: false },
+  );
+  useEffect(() => {
+    if (companyTabTouched) return;
+    const isSuperAdmin = me?.orgLevel === "ceo" || me?.isDeveloper;
+    if (isSuperAdmin) { setCompanyTab("all"); return; }
+    const bu = viewerProfile?.employeeProfile?.businessUnit;
+    if (bu === "YT Labs") setCompanyTab("YT Labs");
+    else if (bu === "NB Media" || bu == null) setCompanyTab("NB Media");
+  }, [viewerProfile, me, companyTabTouched]);
+
   // Shared month state (drives both the Monthly Report card and the month-mode table)
   const now = new Date();
   const [selYear,  setSelYear]  = useState(now.getFullYear());
@@ -492,8 +515,52 @@ export default function AttendanceDashboardPanel() {
   );
   const monthRows = monthData?.rows ?? [];
 
-  const rows: Row[] = data?.rows ?? [];
-  const counts: Counts = data?.counts ?? { total: 0, present: 0, office: 0, remote: 0, hybrid: 0, wfh: 0, wfhWorking: 0, onLeave: 0, notClockedIn: 0, late: 0 };
+  const rawRows: Row[] = data?.rows ?? [];
+  const apiCounts: Counts = data?.counts ?? { total: 0, present: 0, office: 0, remote: 0, hybrid: 0, wfh: 0, wfhWorking: 0, onLeave: 0, notClockedIn: 0, late: 0 };
+
+  // Scope every downstream calculation to the selected brand. Empty
+  // businessUnit → bucketed as "NB Media" (parent-brand default).
+  const rows: Row[] = useMemo(() => {
+    if (companyTab === "all") return rawRows;
+    return rawRows.filter((r) => (r.businessUnit || "NB Media") === companyTab);
+  }, [rawRows, companyTab]);
+
+  // Per-brand counts on the tab chips (computed from rawRows so the
+  // chips reflect totals regardless of which tab is currently active).
+  const brandCounts = useMemo(() => {
+    let nb = 0, yt = 0;
+    rawRows.forEach((r) => {
+      const bu = r.businessUnit || "NB Media";
+      if (bu === "YT Labs") yt++;
+      else nb++;
+    });
+    return { nb, yt, all: rawRows.length };
+  }, [rawRows]);
+
+  // Recompute the stat-card / donut counts when scoped to a single
+  // brand — otherwise "Total Employees" + "On Leave" + "Not Clocked In"
+  // would still reflect the merged total while the table below shows
+  // only one brand. When tab is "all" we keep the API-supplied counts
+  // verbatim (they include attendance-policy filtering the client
+  // can't easily replicate).
+  const counts: Counts = useMemo(() => {
+    if (companyTab === "all") return apiCounts;
+    let total = 0, office = 0, remote = 0, hybrid = 0, wfh = 0, wfhWorking = 0, onLeave = 0, notClockedIn = 0;
+    rows.forEach((r) => {
+      total++;
+      if (r.wfhToday) wfh++;
+      switch (r.status) {
+        case "office":   office++;   break;
+        case "remote":   remote++;   break;
+        case "hybrid":   hybrid++;   break;
+        case "wfh":      wfhWorking++; break;
+        case "on_leave": onLeave++;  break;
+        case "absent":   notClockedIn++; break;
+      }
+    });
+    const present = office + remote + hybrid + wfhWorking;
+    return { total, present, office, remote, hybrid, wfh, wfhWorking, onLeave, notClockedIn, late: apiCounts.late };
+  }, [rows, apiCounts, companyTab]);
 
   const deptOpts = useMemo(() => {
     const dSet = new Set<string>();
@@ -559,12 +626,51 @@ export default function AttendanceDashboardPanel() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between">
-        <div>
+      {/* ── Page header card ───────────────────────────────────────
+          Wraps the title + subtitle and the company-scope tab strip
+          into a single bordered surface, matching the polish of the
+          Approvals / Regularization Balance / Leave Balances panels. */}
+      <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-[18px] font-bold text-slate-800">Attendance Dashboard</h1>
-          <p className="text-[12px] text-slate-500">
-            Live snapshot for {data?.date ? new Date(data.date).toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }) : "today"} · refreshes every minute
+          <p className="mt-0.5 text-[12px] text-slate-500">
+            Live snapshot for {data?.date ? new Date(data.date).toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }) : "today"}
+            <span className="mx-1.5 text-slate-300">·</span>
+            Refreshes every minute
+            {companyTab !== "all" && (
+              <>
+                <span className="mx-1.5 text-slate-300">·</span>
+                Scope: <span className="font-semibold text-slate-700">{companyTab}</span>
+              </>
+            )}
           </p>
+        </div>
+        {/* Company scope tabs — auto-default to viewer's brand. */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {([
+            { key: "NB Media", count: brandCounts.nb  },
+            { key: "YT Labs",  count: brandCounts.yt  },
+            { key: "all",      count: brandCounts.all },
+          ] as const).map(({ key, count }) => {
+            const active = companyTab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => { setCompanyTab(key as CompanyTab); setCompanyTabTouched(true); }}
+                className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
+                  active
+                    ? "bg-[#008CFF] text-white shadow-sm"
+                    : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <span>{key === "all" ? "All" : key}</span>
+                <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
+                  active ? "bg-white/20 text-white" : "bg-[#008CFF] text-white"
+                }`}>{count}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -585,50 +691,66 @@ export default function AttendanceDashboardPanel() {
         />
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl">
-        {/* View toggle + month nav */}
-        <div className="flex items-center justify-between gap-3 flex-wrap px-3 py-3 border-b border-slate-200">
-          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
-            <button type="button" onClick={() => setTableView("today")}
-              className={`h-8 px-3 text-[12px] font-semibold transition-colors ${
-                tableView === "today" ? "bg-[#008CFF] text-white" : "bg-white text-slate-600 hover:bg-slate-50"
-              }`}>
-              Today
-            </button>
-            <button type="button" onClick={() => setTableView("month")}
-              className={`h-8 px-3 text-[12px] font-semibold transition-colors border-l border-slate-200 ${
-                tableView === "month" ? "bg-[#008CFF] text-white border-[#008CFF]" : "bg-white text-slate-600 hover:bg-slate-50"
-              }`}>
-              Month view
-            </button>
+      <div className="bg-white border border-slate-200 rounded-xl shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
+        {/* View toggle + month nav — segmented control for a cleaner
+            split between Today vs Month view. */}
+        <div className="flex items-center justify-between gap-3 flex-wrap px-5 py-4 border-b border-slate-100">
+          <div className="inline-flex rounded-lg bg-slate-100 p-1">
+            {([
+              { key: "today", label: "Today" },
+              { key: "month", label: "Month view" },
+            ] as const).map((opt) => {
+              const active = tableView === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setTableView(opt.key)}
+                  className={`h-8 px-3.5 rounded-md text-[12px] font-semibold transition-all ${
+                    active
+                      ? "bg-white text-[#008CFF] shadow-sm"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
           </div>
           {tableView === "month" && (
             <MonthNav year={selYear} month={selMonth} onChange={(y, m) => { setSelYear(y); setSelMonth(m); }} />
           )}
         </div>
 
-        {/* Status tabs — today only */}
+        {/* Status pill tabs — today only. Modern chip styling instead
+            of underlined tabs so the count chips stand out and the
+            active state reads instantly. */}
         {tableView === "today" && (
-          <div className="flex items-center px-2 border-b border-slate-200 overflow-x-auto">
+          <div className="flex items-center gap-1.5 px-5 py-3 border-b border-slate-100 overflow-x-auto flex-wrap">
             {TABS.map((t) => {
               const active = tab === t.key;
               return (
                 <button
                   key={t.key}
                   onClick={() => setTab(t.key)}
-                  className={`relative px-4 py-3 text-[12.5px] font-semibold whitespace-nowrap border-b-2 transition-colors ${
-                    active ? "border-[#008CFF] text-[#008CFF]" : "border-transparent text-slate-500 hover:text-slate-800"
+                  className={`px-3 h-8 rounded-lg text-[12px] font-semibold whitespace-nowrap transition-colors inline-flex items-center gap-2 ${
+                    active
+                      ? "bg-[#008CFF] text-white shadow-sm"
+                      : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
                   }`}
                 >
-                  {t.label}
-                  <span className={`ml-1.5 text-[10.5px] tabular-nums ${active ? "text-[#008CFF]" : "text-slate-400"}`}>{t.n}</span>
+                  <span>{t.label}</span>
+                  <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
+                    active ? "bg-white/20 text-white" : "bg-[#008CFF] text-white"
+                  }`}>{t.n}</span>
                 </button>
               );
             })}
           </div>
         )}
 
-        <div className="flex items-center gap-2 flex-wrap px-3 py-3 border-b border-slate-200">
+        {/* Filter row — department + search, with consistent padding. */}
+        <div className="flex items-center gap-2 flex-wrap px-5 py-3 border-b border-slate-100">
           <FilterDropdown label="Department" options={deptOpts} selected={fDept} onChange={setFDept} width={260} />
           {anyFilter ? (
             <button
@@ -645,7 +767,7 @@ export default function AttendanceDashboardPanel() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search name, email, employee #…"
-              className="w-full h-9 pl-9 pr-3 rounded-lg border border-slate-200 bg-white text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#008CFF]"
+              className="w-full h-9 pl-9 pr-3 rounded-lg border border-slate-200 bg-white text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#008CFF] focus:ring-2 focus:ring-[#008CFF]/15 transition-shadow"
             />
           </div>
         </div>
