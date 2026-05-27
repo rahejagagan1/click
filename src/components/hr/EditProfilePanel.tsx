@@ -16,7 +16,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import {
   AlertCircle, CheckCircle2, Save, User, Phone, MapPin, Briefcase,
-  ShieldCheck, Wallet,
+  ShieldCheck, Wallet, Landmark,
 } from "lucide-react";
 import SalaryStructurePanel from "@/components/hr/SalaryStructurePanel";
 import CustomSelect from "@/components/ui/CustomSelect";
@@ -280,6 +280,21 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
   });
   const identityHook = useSaveSection(userId);
 
+  // ── Section: Bank Details ─────────────────────────────────────────
+  // bankAccountNumber / bankIfsc are encrypted at rest (PII), so the
+  // GET returns ciphertext — keep them write-only (blank by default,
+  // only sent on save when HR types a value), same pattern as
+  // PAN / Aadhaar above. Account Holder Name / Bank Name / Branch are
+  // plaintext, safe to pre-fill.
+  const [bank, setBank] = useState({
+    accountHolderName: p.accountHolderName ?? "",
+    bankName:          p.bankName ?? "",
+    bankBranch:        p.bankBranch ?? "",
+    bankAccountNumber: "",
+    bankIfsc:          "",
+  });
+  const bankHook = useSaveSection(userId);
+
   // Re-sync local state when the SWR record id changes (i.e. after a
   // refresh) so HR sees the canonical values, not stale local edits.
   useEffect(() => {
@@ -356,6 +371,13 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
       pfNumber:    p.pfNumber ?? "",
       uanNumber:   p.uanNumber ?? "",
       biometricId: p.biometricId ?? "",
+    }));
+    setBank((s) => ({
+      ...s,
+      accountHolderName: p.accountHolderName ?? "",
+      bankName:          p.bankName ?? "",
+      bankBranch:        p.bankBranch ?? "",
+      // bankAccountNumber / bankIfsc stay blank — write-only.
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.id, p.id]);
@@ -1079,6 +1101,65 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
             <input className={cls.field} value={identity.biometricId}
               onChange={(e) => setIdentity({ ...identity, biometricId: e.target.value })}
               placeholder="As assigned by office system" />
+          </div>
+        </div>
+      </Section>
+
+      {/* ── Bank Details ── */}
+      <Section
+        title="Bank Details"
+        icon={Landmark}
+        accent="#0891b2"
+        saving={bankHook.saving}
+        error={bankHook.error}
+        savedAt={bankHook.savedAt}
+        onSave={() => {
+          // Account number + IFSC are write-only (encrypted at rest) —
+          // only send them when HR has typed a value, so saving the
+          // section doesn't accidentally clear the existing values.
+          const patch: Record<string, unknown> = {
+            accountHolderName: bank.accountHolderName.trim() || null,
+            bankName:          bank.bankName.trim()          || null,
+            bankBranch:        bank.bankBranch.trim()        || null,
+          };
+          if (bank.bankAccountNumber.trim()) patch.bankAccountNumber = bank.bankAccountNumber.trim();
+          if (bank.bankIfsc.trim())          patch.bankIfsc          = bank.bankIfsc.trim().toUpperCase();
+          bankHook.save(patch);
+        }}
+      >
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800">
+          Account Number and IFSC are write-only — enter a new value to update; leave blank to keep the existing one. Holder Name, Bank Name, and Branch are pre-loaded and editable directly.
+        </p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <label className={cls.label}>Account Holder Name</label>
+            <input className={cls.field} value={bank.accountHolderName}
+              onChange={(e) => setBank({ ...bank, accountHolderName: e.target.value })}
+              placeholder="As printed on the passbook / cheque" />
+          </div>
+          <div>
+            <label className={cls.label}>Bank Name</label>
+            <input className={cls.field} value={bank.bankName}
+              onChange={(e) => setBank({ ...bank, bankName: e.target.value })}
+              placeholder="e.g. HDFC Bank" />
+          </div>
+          <div>
+            <label className={cls.label}>Branch</label>
+            <input className={cls.field} value={bank.bankBranch}
+              onChange={(e) => setBank({ ...bank, bankBranch: e.target.value })}
+              placeholder="e.g. Mohali Phase 7" />
+          </div>
+          <div>
+            <label className={cls.label}>Account Number</label>
+            <input className={`${cls.field} font-mono`} value={bank.bankAccountNumber}
+              onChange={(e) => setBank({ ...bank, bankAccountNumber: e.target.value })}
+              placeholder="Leave blank to keep existing" />
+          </div>
+          <div>
+            <label className={cls.label}>IFSC Code</label>
+            <input className={`${cls.field} font-mono uppercase`} value={bank.bankIfsc}
+              onChange={(e) => setBank({ ...bank, bankIfsc: e.target.value })}
+              placeholder="Leave blank to keep existing" />
           </div>
         </div>
       </Section>
