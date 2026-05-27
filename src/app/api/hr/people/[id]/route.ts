@@ -164,8 +164,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       address, city, state, profilePictureUrl,
       // Sensitive — encrypted at rest before save.
       panNumber, parentName, aadhaarNumber, aadhaarEnrollment,
-      // Bank details — bankAccountNumber / bankIfsc are encrypted at rest
-      // (PII); bankName / bankBranch / accountHolderName are plaintext.
+      // Bank details — stored as plaintext (no column-level encryption).
       bankName, bankAccountNumber, bankIfsc, bankBranch, accountHolderName,
       // Job + work details (Edit Profile → Job & Work section).
       designation, department, businessUnit, employmentType, workLocation, joiningDate,
@@ -343,12 +342,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (panNumber         !== undefined) profileData.panNumber         = encryptPII(panNumber);
     if (aadhaarNumber     !== undefined) profileData.aadhaarNumber     = encryptPII(aadhaarNumber);
     if (aadhaarEnrollment !== undefined) profileData.aadhaarEnrollment = encryptPII(aadhaarEnrollment);
-    // Bank details — encrypt the account number + IFSC, leave the rest plaintext.
-    if (bankName          !== undefined) profileData.bankName          = bankName          ? String(bankName).trim()          || null : null;
-    if (bankBranch        !== undefined) profileData.bankBranch        = bankBranch        ? String(bankBranch).trim()        || null : null;
-    if (accountHolderName !== undefined) profileData.accountHolderName = accountHolderName ? String(accountHolderName).trim() || null : null;
-    if (bankAccountNumber !== undefined) profileData.bankAccountNumber = encryptPII(bankAccountNumber);
-    if (bankIfsc          !== undefined) profileData.bankIfsc          = encryptPII(bankIfsc);
+    // Bank details — plaintext. IFSC is upper-cased for consistency.
+    if (bankName          !== undefined) profileData.bankName          = bankName          ? String(bankName).trim()                       || null : null;
+    if (bankBranch        !== undefined) profileData.bankBranch        = bankBranch        ? String(bankBranch).trim()                     || null : null;
+    if (accountHolderName !== undefined) profileData.accountHolderName = accountHolderName ? String(accountHolderName).trim()              || null : null;
+    if (bankAccountNumber !== undefined) profileData.bankAccountNumber = bankAccountNumber ? String(bankAccountNumber).trim()              || null : null;
+    if (bankIfsc          !== undefined) profileData.bankIfsc          = bankIfsc          ? String(bankIfsc).trim().toUpperCase()         || null : null;
 
     const userPatch: Record<string, unknown> = {};
     if (profilePictureUrl) userPatch.profilePictureUrl = profilePictureUrl;
