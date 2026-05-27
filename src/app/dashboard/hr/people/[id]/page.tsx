@@ -181,12 +181,12 @@ export default function EmployeeDetailPage() {
   // Profile) is narrower than HR-admin: only HR Manager / CEO / developer.
   // See feedback-salary-visibility memory + canViewSalary in src/lib/access.ts.
   const canSeeSalary = canViewSalary(me);
-  // Edit Profile tab is developer-only — HR / CEO / admins see the
-  // PROFILE tab (read-only with every field) instead, since that mirrors
-  // the full Edit Profile surface without the editing capability the
-  // org has decided to lock down. Profile owners view their own salary
-  // on /dashboard/hr/payroll.
-  const showEditTab = me?.isDeveloper === true;
+  // Edit Profile tab is for developers AND the HR Manager — CEO / other
+  // admins still see the PROFILE tab (read-only with every field)
+  // instead, since that mirrors the full Edit Profile surface without
+  // the editing capability the org has decided to lock down. Profile
+  // owners view their own salary on /dashboard/hr/payroll.
+  const showEditTab = me?.isDeveloper === true || me?.orgLevel === "hr_manager";
   // Finances tab: salary tier only — payslips, salary, bonuses are
   // compensation data, not the broader HR-admin surface. See
   // canViewSalary in src/lib/access.ts.
