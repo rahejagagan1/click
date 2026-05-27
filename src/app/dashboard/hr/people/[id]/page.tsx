@@ -188,10 +188,11 @@ export default function EmployeeDetailPage() {
   const canSeeSalary = canViewSalary(me);
   // Edit Profile tab is available to the full HR-admin tier — HR
   // Managers / CEO / developer / special_access / role=admin can all
-  // open it. (Previously developer-only; broadened so HR Managers can
-  // self-serve profile edits instead of routing every change through
-  // engineering.) The PUT endpoint at /api/hr/people/[id] enforces the
-  // same gate, so this is a pure UI surfacing change.
+  // open it. (Broadened from developer-only so HR Managers can self-
+  // serve profile edits instead of routing every change through
+  // engineering. Resolves a parallel commit on origin/main that only
+  // included developer + hr_manager — `isHRAdmin` covers both and is
+  // the same gate the PUT endpoint enforces.)
   const showEditTab = isHRAdmin;
   // Finances tab: salary tier only — payslips, salary, bonuses are
   // compensation data, not the broader HR-admin surface. See
