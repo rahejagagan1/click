@@ -7,10 +7,11 @@
 // Pass `userId` to scope the API call to that employee; admins only
 // (the API enforces). Omit the prop to view the logged-in user's data.
 
+import { useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import { fetcher } from "@/lib/swr";
-import { Paperclip, Eye } from "lucide-react";
+import { Paperclip, Eye, EyeOff } from "lucide-react";
 
 type Props = { userId?: number };
 
@@ -87,6 +88,11 @@ export default function MyFinancesSummaryPanel({ userId }: Props) {
   const docCount      = data?.docCount ?? {};
   const latestPayslip = data?.latestPayslip ?? null;
 
+  // Account Number + IFSC are masked by default — eye toggle reveals them.
+  // Lives in client state so the toggle is per-session and never persists.
+  const [showAccount, setShowAccount] = useState(false);
+  const [showIfsc, setShowIfsc] = useState(false);
+
   const fullName =
     profile?.firstName || profile?.lastName
       ? [profile.firstName, profile.middleName, profile.lastName].filter(Boolean).join(" ")
@@ -149,14 +155,46 @@ export default function MyFinancesSummaryPanel({ userId }: Props) {
             <div>
               <Label>Account number</Label>
               <Value>
-                <span className="font-mono tracking-wider">{maskMiddle(profile?.bankAccountNumber)}</span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="font-mono tracking-wider">
+                    {profile?.bankAccountNumber
+                      ? (showAccount ? profile.bankAccountNumber : maskMiddle(profile.bankAccountNumber))
+                      : "Not provided"}
+                  </span>
+                  {profile?.bankAccountNumber ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowAccount((v) => !v)}
+                      aria-label={showAccount ? "Hide account number" : "Show account number"}
+                      title={showAccount ? "Hide" : "Show"}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    >
+                      {showAccount ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </button>
+                  ) : null}
+                </span>
               </Value>
             </div>
             <div>
               <Label>IFSC code</Label>
               <Value>
-                <span className="font-mono tracking-wider">
-                  {profile?.bankIfsc ? maskMiddle(profile.bankIfsc, 4) : "Not provided"}
+                <span className="inline-flex items-center gap-2">
+                  <span className="font-mono tracking-wider">
+                    {profile?.bankIfsc
+                      ? (showIfsc ? profile.bankIfsc : maskMiddle(profile.bankIfsc, 4))
+                      : "Not provided"}
+                  </span>
+                  {profile?.bankIfsc ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowIfsc((v) => !v)}
+                      aria-label={showIfsc ? "Hide IFSC code" : "Show IFSC code"}
+                      title={showIfsc ? "Hide" : "Show"}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    >
+                      {showIfsc ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </button>
+                  ) : null}
                 </span>
               </Value>
             </div>
