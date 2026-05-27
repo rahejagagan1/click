@@ -90,7 +90,10 @@ jobs:
         run: npx prisma generate
 
       - name: Build (Next.js)
-        run: npm run build
+        # `build:ci` is the CI-friendly variant — skips
+        # `prisma migrate deploy` so CI doesn't need a real Postgres.
+        # `npm run build` (the prod-deploy variant) still runs migrate.
+        run: npm run build:ci
         env:
           # CI doesn't run a real DB — the build step only needs valid env
           # *shape*, not real connectivity.
