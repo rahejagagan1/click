@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
-import { encryptPII } from "@/lib/pii-crypto";
 import { istTodayDateOnly } from "@/lib/ist-date";
 
 // Editing other employees' profiles is reserved for HR ops + admins.
@@ -162,7 +161,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       dateOfBirth, gender, bloodGroup, maritalStatus,
       emergencyPhone,
       address, city, state, profilePictureUrl,
-      // Sensitive — encrypted at rest before save.
+      // Identity documents — stored as plaintext.
       panNumber, parentName, aadhaarNumber, aadhaarEnrollment,
       // Bank details — stored as plaintext (no column-level encryption).
       bankName, bankAccountNumber, bankIfsc, bankBranch, accountHolderName,
@@ -339,9 +338,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
                                                                           : Math.max(0, parseInt(String(noticePeriodDays), 10) || 0);
     if (workCountry       !== undefined) profileData.workCountry       = workCountry || "India";
     if (nationality       !== undefined) profileData.nationality       = nationality || "India";
-    if (panNumber         !== undefined) profileData.panNumber         = encryptPII(panNumber);
-    if (aadhaarNumber     !== undefined) profileData.aadhaarNumber     = encryptPII(aadhaarNumber);
-    if (aadhaarEnrollment !== undefined) profileData.aadhaarEnrollment = encryptPII(aadhaarEnrollment);
+    if (panNumber         !== undefined) profileData.panNumber         = panNumber         ? String(panNumber).trim().toUpperCase() || null : null;
+    if (aadhaarNumber     !== undefined) profileData.aadhaarNumber     = aadhaarNumber     ? String(aadhaarNumber).trim()           || null : null;
+    if (aadhaarEnrollment !== undefined) profileData.aadhaarEnrollment = aadhaarEnrollment ? String(aadhaarEnrollment).trim()       || null : null;
     // Bank details — plaintext. IFSC is upper-cased for consistency.
     if (bankName          !== undefined) profileData.bankName          = bankName          ? String(bankName).trim()                       || null : null;
     if (bankBranch        !== undefined) profileData.bankBranch        = bankBranch        ? String(bankBranch).trim()                     || null : null;
