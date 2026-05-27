@@ -94,6 +94,38 @@ function apiToForm(s: ApiStructure | null): FormState {
   };
 }
 
+// Fixed-amount components used by the regular-employee split.
+// All annual figures so they match how the rest of the payroll engine
+// stores numbers (payslip divides by 12 at generation time).
+const MEDICAL_ALLOWANCE_ANNUAL  = 15000;   // ₹15,000 / yr = ₹1,250 / month
+const PF_EMPLOYEE_ANNUAL_FIXED  = 21600;   // ₹21,600 / yr = ₹1,800 / month (12% × ₹15k cap)
+const PF_EMPLOYER_ANNUAL_FIXED  = 21600;   // matched employer contribution (not part of CTC)
+
+// Compute the per-component annual amounts for a regular employee given
+// the entered annual CTC and the pfEligible flag. Returns `special < 0`
+// when the CTC is too low to cover the fixed portions — onSave checks
+// this and refuses to submit (per the "block / show error" UX choice).
+//
+// Split rule:
+//   Basic   = 50%  of CTC
+//   HRA     = 20%  of CTC
+//   DA      = 10%  of CTC
+//   Conv    =  7.5% of CTC
+//   Medical = fixed ₹15,000 / year
+//   PF (Emp) = fixed ₹21,600 / year when pfEligible
+//   Special = CTC − (sum of the above)
+function regularSplit(annualCtc: number, pfEligible: boolean) {
+  const basic   = Math.round(annualCtc * 0.50);
+  const hra     = Math.round(annualCtc * 0.20);
+  const da      = Math.round(annualCtc * 0.10);
+  const conv    = Math.round(annualCtc * 0.075);
+  const medical = MEDICAL_ALLOWANCE_ANNUAL;
+  const pfEmp   = pfEligible ? PF_EMPLOYEE_ANNUAL_FIXED : 0;
+  const pfEmpr  = pfEligible ? PF_EMPLOYER_ANNUAL_FIXED : 0;
+  const special = annualCtc - (basic + hra + da + conv + medical + pfEmp);
+  return { basic, hra, da, conv, medical, pfEmp, pfEmpr, special };
+}
+
 // Form state → POST body for /api/hr/payroll/salary-structure. Mirrors
 // the field mapping the onboarding submit handler does.
 function formToApi(f: FormState, userId: number) {
@@ -123,13 +155,9 @@ function formToApi(f: FormState, userId: number) {
       effectiveFrom: f.effectiveFrom,
     };
   }
-  // Regular employee.
+  // Regular employee — per the company's CTC split formula.
   const annual = parseFloat(f.annualSalary || "0") || 0;
-  // Standard 50/50 basic-vs-rest split as a starting point (HR can refine
-  // through the dedicated payroll page if they want a finer breakup).
-  const basic   = Math.round(annual * 0.5);
-  const hra     = Math.round(basic * 0.5);
-  const special = Math.max(0, annual - basic - hra);
+  const s = regularSplit(annual, !!f.pfEligible);
   return {
     userId,
     salaryType:    "regular",
@@ -139,9 +167,14 @@ function formToApi(f: FormState, userId: number) {
     structureType: f.structureType || null,
     pfEligible:    !!f.pfEligible,
     ctc:           annual,
-    basic, hra,
-    specialAllowance: special,
-    pfEmployee: 0, pfEmployer: 0,
+    basic:               s.basic,
+    hra:                 s.hra,
+    dearnessAllowance:   s.da,
+    conveyanceAllowance: s.conv,
+    medicalAllowance:    s.medical,
+    specialAllowance:    s.special,
+    pfEmployee:  s.pfEmp,
+    pfEmployer:  s.pfEmpr,
     esiEmployee: 0, esiEmployer: 0,
     tds: 0, professionalTax: 0,
     effectiveFrom: f.effectiveFrom,
@@ -202,6 +235,26 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
     if (form.salaryType === "Regular Employee" && !form.annualSalary) {
       setError("Enter the annual salary.");
       return;
+    }
+    // Block-and-warn: when the CTC is too low for the fixed portions
+    // (Medical ₹15k/yr + optional PF ₹21.6k/yr) the formula's Special
+    // Allowance would go negative. Show the exact minimum so HR knows
+    // what to bump to.
+    if (form.salaryType === "Regular Employee") {
+      const annual = parseFloat(form.annualSalary || "0") || 0;
+      const split  = regularSplit(annual, !!form.pfEligible);
+      if (split.special < 0) {
+        const minAnnual = form.pfEligible
+          ? Math.ceil((MEDICAL_ALLOWANCE_ANNUAL + PF_EMPLOYEE_ANNUAL_FIXED) / 0.125)
+          : Math.ceil(MEDICAL_ALLOWANCE_ANNUAL / 0.125);
+        const minMonthly = Math.ceil(minAnnual / 12);
+        setError(
+          `CTC is too low for the salary formula. ` +
+          `With PF ${form.pfEligible ? "ON" : "OFF"} the minimum annual CTC is ` +
+          `₹${minAnnual.toLocaleString("en-IN")} (≈ ₹${minMonthly.toLocaleString("en-IN")} / month).`
+        );
+        return;
+      }
     }
     if (!form.effectiveFrom) {
       setError("Pick an effective-from date.");
