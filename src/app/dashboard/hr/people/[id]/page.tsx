@@ -8,6 +8,11 @@ import { useParams, useRouter } from "next/navigation";
 import { getUserRoleLabel } from "@/lib/user-role-options";
 import { parseAttLoc, type AttLoc } from "@/lib/attendance-location";
 import {
+  brandFromBusinessUnit,
+  jobTitleSource,
+  departmentSource,
+} from "@/lib/company-taxonomy";
+import {
   Mail, Phone, MapPin, Briefcase, Calendar, Building2, IdCard, FileText, Laptop,
   Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
   MoreVertical, UserMinus, TreePine, Coffee,
@@ -181,12 +186,14 @@ export default function EmployeeDetailPage() {
   // Profile) is narrower than HR-admin: only HR Manager / CEO / developer.
   // See feedback-salary-visibility memory + canViewSalary in src/lib/access.ts.
   const canSeeSalary = canViewSalary(me);
-  // Edit Profile tab is for developers AND the HR Manager — CEO / other
-  // admins still see the PROFILE tab (read-only with every field)
-  // instead, since that mirrors the full Edit Profile surface without
-  // the editing capability the org has decided to lock down. Profile
-  // owners view their own salary on /dashboard/hr/payroll.
-  const showEditTab = me?.isDeveloper === true || me?.orgLevel === "hr_manager";
+  // Edit Profile tab is available to the full HR-admin tier — HR
+  // Managers / CEO / developer / special_access / role=admin can all
+  // open it. (Broadened from developer-only so HR Managers can self-
+  // serve profile edits instead of routing every change through
+  // engineering. Resolves a parallel commit on origin/main that only
+  // included developer + hr_manager — `isHRAdmin` covers both and is
+  // the same gate the PUT endpoint enforces.)
+  const showEditTab = isHRAdmin;
   // Finances tab: salary tier only — payslips, salary, bonuses are
   // compensation data, not the broader HR-admin surface. See
   // canViewSalary in src/lib/access.ts.
@@ -1056,8 +1063,11 @@ export default function EmployeeDetailPage() {
             fields={[
               { key: "employeeId",        label: "HRM No." },
               { key: "joiningDate",       label: p.employmentType === "intern" ? "Internship Start Date" : "Date of Joining", type: "date" },
-              { key: "designation",       label: "Job Title — Primary" },
-              { key: "secondaryJobTitle", label: "Job Title — Secondary" },
+              // Company-scoped: pick from the brand the employee belongs
+              // to. Brand derived from EmployeeProfile.businessUnit (with
+              // legalEntity as a fallback signal).
+              { key: "designation",       label: "Job Title — Primary",  type: "select", options: jobTitleSource(brandFromBusinessUnit(p.businessUnit, p.legalEntity)).defaults },
+              { key: "secondaryJobTitle", label: "Job Title — Secondary", type: "select", options: jobTitleSource(brandFromBusinessUnit(p.businessUnit, p.legalEntity)).defaults },
               { key: "employmentType",    label: "Employment Type", type: "select", options: [
                 { value: "fulltime", label: "Regular Employee" },
                 { value: "intern",   label: "Intern" },
@@ -1072,6 +1082,7 @@ export default function EmployeeDetailPage() {
           <SectionEditModal
             userId={userId}
             title="Employee Time"
+            hint="Some fields are smart-linked — picking a Time Tracking Policy auto-syncs the Capture Scheme (and disables Penalisation when set to None), and Weekly Off Policy adjusts the Leave Plan to match the schedule."
             onClose={close}
             values={{
               weeklyOff:               p.weeklyOff ?? "",
@@ -1091,6 +1102,36 @@ export default function EmployeeDetailPage() {
               { key: "penalizationPolicy",      label: "Attendance Penalisation Policy",  type: "select", options: ["Default", "Strict", "Lenient", "None"] },
               { key: "attendanceCaptureScheme", label: "Attendance Capture Scheme",       type: "select", options: ["On-Site", "Remote", "Hybrid"] },
             ]}
+            onFieldChange={(key, value) => {
+              // ── Time Tracking Policy ↔ Attendance Capture Scheme ──
+              // Two stored fields describing the same operational mode.
+              // Keep them aligned automatically so HR can't accidentally
+              // save "Remote Capture" with capture scheme still
+              // "On-Site". When the tracking policy is turned OFF, also
+              // disable penalisation (you can't penalise tardiness on a
+              // role you aren't tracking time for).
+              if (key === "timeTrackingPolicy") {
+                if (value === "On-Site Capture") return { attendanceCaptureScheme: "On-Site" };
+                if (value === "Remote Capture")  return { attendanceCaptureScheme: "Remote"  };
+                if (value === "Hybrid Capture")  return { attendanceCaptureScheme: "Hybrid"  };
+                if (value === "None")            return { attendanceCaptureScheme: "", penalizationPolicy: "None" };
+              }
+              if (key === "attendanceCaptureScheme") {
+                if (value === "On-Site") return { timeTrackingPolicy: "On-Site Capture" };
+                if (value === "Remote")  return { timeTrackingPolicy: "Remote Capture"  };
+                if (value === "Hybrid")  return { timeTrackingPolicy: "Hybrid Capture"  };
+              }
+              // ── Weekly Off Policy → Leave Plan ──
+              // 6-day-week schedules (Sunday Only) typically belong to
+              // interns who use the Intern Leave Plan; 5-day schedules
+              // map to the regular full-time plan. "Custom" is left
+              // alone — HR will pick the matching plan manually for
+              // bespoke arrangements.
+              if (key === "weeklyOff") {
+                if (value === "Sunday Only")                                       return { leavePlan: "Intern Leave Plan" };
+                if (value === "Standard Weekly Off" || value === "Saturday + Sunday") return { leavePlan: "Regular Leave Plan" };
+              }
+            }}
           />
         );
         if (editSection === "other") return (
@@ -1147,11 +1188,13 @@ export default function EmployeeDetailPage() {
               inlineManagerId: user.inlineManager?.id != null ? String(user.inlineManager.id) : "",
             }}
             fields={[
-              { key: "businessUnit", label: "Business Unit", type: "select", options: ["NB Media"] },
-              { key: "department",   label: "Department",    type: "select", options: ["AI", "Editing", "Human Resource", "Management", "Packaging Team", "Quality Assurance", "Research", "Social Media", "Writing"] },
+              { key: "businessUnit", label: "Business Unit", type: "select", options: ["NB Media", "YT Labs"] },
+              // Company-scoped department list: YT Labs employees see
+              // YT_-prefixed departments; NB Media sees the standard set.
+              { key: "department",   label: "Department",    type: "select", options: departmentSource(brandFromBusinessUnit(p.businessUnit, p.legalEntity)).defaults },
               { key: "jobLocation",  label: "Location",      type: "select", options: ["Mohali", "Delhi", "Mumbai", "Remote"] },
-              { key: "costCenter",   label: "Cost Center",   placeholder: "NB Media" },
-              { key: "legalEntity",  label: "Legal Entity",  type: "select", options: ["NB Media Productions"] },
+              { key: "costCenter",   label: "Cost Center",   type: "select", options: ["NB Media", "YT Labs"] },
+              { key: "legalEntity",  label: "Legal Entity",  type: "select", options: ["NB Media Productions", "YT Labs"] },
               // Manager dropdowns — populated from /api/managers?all=true
               // which lists every active non-developer employee. Empty
               // string in the option list = "— No manager —" so HR can
@@ -1258,7 +1301,7 @@ type SectionField = {
   fullWidth?: boolean;
 };
 function SectionEditModal({
-  title, hint, fields, values, userId, onClose,
+  title, hint, fields, values, userId, onClose, onFieldChange,
 }: {
   title: string;
   hint?: string;
@@ -1266,11 +1309,28 @@ function SectionEditModal({
   values: Record<string, string>;
   userId: number;
   onClose: (saved: boolean) => void;
+  /**
+   * Optional cross-field cascade hook. Fires every time a field
+   * changes, BEFORE state commits. Return a partial object whose
+   * key/value pairs will be merged into the form alongside the primary
+   * change — lets the caller keep linked fields in sync (e.g.
+   * Attendance Time Tracking Policy ↔ Attendance Capture Scheme).
+   * Returning undefined / null is a no-op.
+   */
+  onFieldChange?: (
+    key: string,
+    value: string,
+    next: Record<string, string>,
+  ) => Record<string, string> | void;
 }) {
   const [form, setForm] = useState<Record<string, string>>(values);
   const [saving, setSaving] = useState(false);
   const [err, setErr]       = useState("");
-  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k: string, v: string) => setForm((f) => {
+    const next = { ...f, [k]: v };
+    const cascade = onFieldChange?.(k, v, next);
+    return cascade ? { ...next, ...cascade } : next;
+  });
 
   const save = async () => {
     setSaving(true); setErr("");
@@ -2132,6 +2192,12 @@ function EmployeeTimePanel({
   const [leaveForm,   setLeaveForm]     = useState<{ leaveTypeId: number | ""; fromDate: string; toDate: string; reason: string }>({
     leaveTypeId: "", fromDate: "", toDate: "", reason: "",
   });
+  // Shared full / first_half / second_half toggle for both the
+  // HR-on-behalf Leave and WFH tabs. Picking a half-day collapses the
+  // range to a single date and prepends the reason with the marker the
+  // backend uses to count as 0.5 days.
+  const [grantDayKind, setGrantDayKind] = useState<"full" | "first_half" | "second_half">("full");
+  const isGrantHalf = grantDayKind !== "full";
 
   // Handoff Details — POC + Work Status (+ Unavailability for WFH). Same
   // contract the company's standard leave/WFH form enforces; both APIs
@@ -2246,14 +2312,23 @@ function EmployeeTimePanel({
       // No forceGrant — route through normal approval (same flow as
       // apply-on-behalf on the HR dashboard). The target user's manager
       // sees the request in their L1 queue.
+      // Half-day WFH tags the reason with [First Half] / [Second Half]
+      // (same convention as leave) and collapses the range to a single
+      // date — half-day WFH only makes sense for one day.
+      const wfhReasonText = wfhForm.reason.trim();
+      const wfhReasonOut =
+        grantDayKind === "first_half"  ? `[First Half] ${wfhReasonText}`  :
+        grantDayKind === "second_half" ? `[Second Half] ${wfhReasonText}` :
+                                          wfhReasonText;
+      const wfhEffectiveTo = isGrantHalf ? wfhForm.date : effectiveTo;
       const res = await fetch("/api/hr/attendance/wfh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           targetUserId:   userId,
           date:           wfhForm.date,
-          toDate:         effectiveTo,
-          reason:         wfhForm.reason.trim(),
+          toDate:         wfhEffectiveTo,
+          reason:         wfhReasonOut,
           pocUserId:      pocId,
           workStatus:     handoffWorkStatus.trim(),
           unavailability: handoffUnavailability.trim(),
@@ -2311,6 +2386,14 @@ function EmployeeTimePanel({
     if (!handoffWorkStatus.trim()) { alert("Work Status is required."); return; }
     setSubmitting(true);
     try {
+      // Half-day leave: tag the reason and collapse the range so the
+      // API's 0.5-day accounting kicks in.
+      const leaveReasonText = leaveForm.reason.trim();
+      const leaveReasonOut =
+        grantDayKind === "first_half"  ? `[First Half] ${leaveReasonText}`  :
+        grantDayKind === "second_half" ? `[Second Half] ${leaveReasonText}` :
+                                          leaveReasonText;
+      const leaveToDateOut = isGrantHalf ? leaveForm.fromDate : leaveForm.toDate;
       const res = await fetch("/api/hr/leaves", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2319,8 +2402,8 @@ function EmployeeTimePanel({
           useLwpFallback:  true,  // HR-on-behalf auto-falls back to LWP if balance missing
           leaveTypeId:     Number(leaveForm.leaveTypeId),
           fromDate:        leaveForm.fromDate,
-          toDate:          leaveForm.toDate,
-          reason:          leaveForm.reason.trim(),
+          toDate:          leaveToDateOut,
+          reason:          leaveReasonOut,
           pocUserId:       pocId,
           workStatus:      handoffWorkStatus.trim(),
         }),
@@ -3311,6 +3394,40 @@ function EmployeeTimePanel({
                     </p>
                   )}
                 </div>
+                {/* Full / Half day pill — same convention as the user's
+                    own leave form. Half-day pins toDate to fromDate. */}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Day type</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { k: "full",        label: "Full Day"    },
+                      { k: "first_half",  label: "First Half"  },
+                      { k: "second_half", label: "Second Half" },
+                    ].map((opt) => {
+                      const active = grantDayKind === opt.k;
+                      return (
+                        <button
+                          key={opt.k}
+                          type="button"
+                          onClick={() => {
+                            const next = opt.k as typeof grantDayKind;
+                            setGrantDayKind(next);
+                            if (next !== "full") {
+                              setLeaveForm((f) => ({ ...f, toDate: f.fromDate }));
+                            }
+                          }}
+                          className={`h-8 px-3.5 rounded-full border text-[11.5px] font-semibold transition-colors ${
+                            active
+                              ? "bg-[#008CFF] text-white border-[#008CFF] shadow-sm"
+                              : "bg-white text-slate-600 border-slate-200 hover:border-[#008CFF]/40 hover:text-[#008CFF]"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">From</label>
@@ -3356,6 +3473,40 @@ function EmployeeTimePanel({
               </div>
             ) : (
               <div className="space-y-3 px-5 py-4">
+                {/* Full / Half day pill — same as the Leave tab. Picking
+                    a half-day collapses the WFH to a single date. */}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Day type</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { k: "full",        label: "Full Day"    },
+                      { k: "first_half",  label: "First Half"  },
+                      { k: "second_half", label: "Second Half" },
+                    ].map((opt) => {
+                      const active = grantDayKind === opt.k;
+                      return (
+                        <button
+                          key={opt.k}
+                          type="button"
+                          onClick={() => {
+                            const next = opt.k as typeof grantDayKind;
+                            setGrantDayKind(next);
+                            if (next !== "full") {
+                              setWfhForm((f) => ({ ...f, toDate: f.date }));
+                            }
+                          }}
+                          className={`h-8 px-3.5 rounded-full border text-[11.5px] font-semibold transition-colors ${
+                            active
+                              ? "bg-[#008CFF] text-white border-[#008CFF] shadow-sm"
+                              : "bg-white text-slate-600 border-slate-200 hover:border-[#008CFF]/40 hover:text-[#008CFF]"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">From</label>

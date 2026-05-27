@@ -63,7 +63,7 @@ export default function LoginPage() {
                                 Sign in with Google
                             </button>
                             <p className="text-center text-[11px] mt-5 text-slate-400">
-                                Restricted to @nbmediaproductions.com accounts
+                                Restricted to @nbmediaproductions.com and @ytlpro.com accounts
                             </p>
                         </>
                     )}
