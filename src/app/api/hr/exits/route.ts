@@ -12,6 +12,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth } from "@/lib/api-auth";
 import { sendEmail } from "@/lib/email/sender";
 import { employeeFarewellEmail, exitNotificationEmail } from "@/lib/email/templates";
+import { devEmailRecipientsClause } from "@/lib/email/toggles";
 
 export const dynamic = "force-dynamic";
 
@@ -132,15 +133,15 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const devEmails = (process.env.DEVELOPER_EMAILS || "")
-        .split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
       const stakeholders = await prisma.user.findMany({
         where: {
           isActive: true,
           OR: [
             { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
             { role: "admin" },
-            ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+            // Developer accounts gated by the "Notify developers"
+            // toggle in Admin → Emails Automation.
+            ...(await devEmailRecipientsClause()),
             ...(target.managerId ? [{ id: target.managerId }] : []),
           ],
         },
