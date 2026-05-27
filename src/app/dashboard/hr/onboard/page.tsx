@@ -347,16 +347,16 @@ export default function OnboardEmployeePage() {
   }, [leavePolicies]);
   const activeSeries = (Array.isArray(numberSeries) ? numberSeries : []).find((s: any) => s.isActive) ?? (Array.isArray(numberSeries) ? numberSeries[0] : null);
   // Resolve the prefix / next-number from the dropdown selection.
-  // YT Labs is a sibling brand and uses a separate "YTL" prefix; until
-  // the EmployeeNumberSeries table is seeded with a YTL row, we
-  // optimistically start the preview at YTL1 so HR sees the right
+  // YT Labs is a sibling brand and uses a separate "YL" prefix; until
+  // the EmployeeNumberSeries table is seeded with a YL row, we
+  // optimistically start the preview at YL1 so HR sees the right
   // shape. The backend allocation needs the DB row to persist properly.
   const seriesByName = (Array.isArray(numberSeries) ? numberSeries : []).find(
     (s: any) => s?.name === form.numberSeries,
   );
   const selectedPrefix =
     seriesByName?.prefix
-    ?? (form.numberSeries === "YT Labs Series" ? "YTL" : activeSeries?.prefix ?? "HRM");
+    ?? (form.numberSeries === "YT Labs Series" ? "YL" : activeSeries?.prefix ?? "HRM");
   const selectedNextNumber =
     seriesByName?.nextNumber
     ?? (form.numberSeries === "YT Labs Series" ? 1 : activeSeries?.nextNumber ?? 1);
@@ -561,7 +561,7 @@ export default function OnboardEmployeePage() {
           businessUnit: form.businessUnit || "NB Media",
           legalEntity:  form.legalEntity || undefined,
           // Pass the resolved EmployeeNumberSeries FK so the backend
-          // bumps the right counter (HRM vs YTL). Falls back server-side
+          // bumps the right counter (HRM vs YL). Falls back server-side
           // to the lowest active series when undefined.
           numberSeriesId: seriesByName?.id ?? undefined,
           employmentType:
