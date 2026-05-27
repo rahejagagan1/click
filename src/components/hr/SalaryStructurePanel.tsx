@@ -13,7 +13,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import {
   CheckCircle2, AlertCircle, IndianRupee, Save, Wallet, Info, Lock, Calendar,
-  MoreVertical, Plus, X,
+  MoreVertical, Plus, X, Paperclip,
 } from "lucide-react";
 import CustomSelect from "@/components/ui/CustomSelect";
 import SelectField from "@/components/ui/SelectField";
@@ -577,6 +577,7 @@ function AddBonusModal({ userId, onClose }: { userId: number; onClose: () => voi
   const [paymentStatus, setPaymentStatus] = useState<"due_future" | "paid_past">("due_future");
   const [date, setDate]                   = useState("");
   const [note, setNote]                   = useState("");
+  const [attachment, setAttachment]       = useState<File | null>(null);
   const [saving, setSaving]               = useState(false);
   const [error, setError]                 = useState("");
 
@@ -589,20 +590,42 @@ function AddBonusModal({ userId, onClose }: { userId: number; onClose: () => voi
     if (!bonusType.trim())                   { setError("Pick or create a bonus type.");        return; }
     if (!Number.isFinite(amt) || amt <= 0)   { setError("Enter a positive amount.");            return; }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date))   { setError(`Pick the ${dateLabel.toLowerCase()} date.`); return; }
+    // Match the server's 10 MB ceiling so we fail fast without burning
+    // an upload round-trip on a too-big file.
+    if (attachment && attachment.size > 10 * 1024 * 1024) {
+      setError("Attachment must be 10 MB or smaller.");
+      return;
+    }
     setSaving(true);
     try {
-      const res = await fetch("/api/hr/payroll/bonus", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId,
-          amount: amt,
-          reason: note.trim() || null,
-          effectiveDate: date,
-          bonusType: bonusType.trim(),
-          paymentStatus,
-        }),
-      });
+      // Multipart when a file is attached so the bytes can ride along
+      // with the rest of the fields; JSON otherwise (cheaper to parse,
+      // and still what every legacy caller of this endpoint sends).
+      let res: Response;
+      if (attachment) {
+        const fd = new FormData();
+        fd.append("userId", String(userId));
+        fd.append("amount", String(amt));
+        if (note.trim()) fd.append("reason", note.trim());
+        fd.append("effectiveDate", date);
+        fd.append("bonusType", bonusType.trim());
+        fd.append("paymentStatus", paymentStatus);
+        fd.append("attachment", attachment);
+        res = await fetch("/api/hr/payroll/bonus", { method: "POST", body: fd });
+      } else {
+        res = await fetch("/api/hr/payroll/bonus", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            amount: amt,
+            reason: note.trim() || null,
+            effectiveDate: date,
+            bonusType: bonusType.trim(),
+            paymentStatus,
+          }),
+        });
+      }
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Save failed");
       onClose();
@@ -722,6 +745,46 @@ function AddBonusModal({ userId, onClose }: { userId: number; onClose: () => voi
               rows={3} value={note} onChange={(e) => setNote(e.target.value)}
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 placeholder-slate-400 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 resize-none"
             />
+          </div>
+
+          {/* ── Attachment (optional) ── PDF / Word / image, ≤ 10 MB.
+              Stored as BYTEA on EmployeeBonus so the file survives
+              Docker redeploys (same model as ViolationActionFile). */}
+          <div>
+            <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">
+              Attachment <span className="font-normal text-slate-400">(optional)</span>
+            </label>
+            {attachment ? (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
+                <div className="flex min-w-0 items-center gap-2 text-[12.5px] text-slate-700">
+                  <Paperclip size={13} className="shrink-0 text-slate-500" />
+                  <span className="truncate">{attachment.name}</span>
+                  <span className="shrink-0 text-slate-400">
+                    ({(attachment.size / 1024).toFixed(0)} KB)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAttachment(null)}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                  aria-label="Remove attachment"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ) : (
+              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50/40 px-3 py-3 text-[12.5px] text-slate-600 hover:border-[#3b82f6] hover:bg-[#3b82f6]/5">
+                <Paperclip size={13} className="text-slate-500" />
+                <span>Choose file</span>
+                <span className="text-slate-400">— PDF, Word, or image (≤ 10 MB)</span>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.rtf,.odt,.txt,.md,.png,.jpg,.jpeg,.webp"
+                  onChange={(e) => setAttachment(e.target.files?.[0] ?? null)}
+                />
+              </label>
+            )}
           </div>
 
           {error && (
