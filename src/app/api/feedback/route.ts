@@ -9,6 +9,7 @@ import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
 import { parseBody } from "@/lib/validate";
 import { serializeBigInt } from "@/lib/utils";
 import { notifyUsers } from "@/lib/notifications";
+import { devEmailRecipientsClause } from "@/lib/email/toggles";
 
 export const dynamic = "force-dynamic";
 
@@ -94,15 +95,15 @@ export async function POST(request: NextRequest) {
         // prefixed with `category:` so the email template can pluck it
         // out without an extra column.
         try {
-            const devEmails = (process.env.DEVELOPER_EMAILS || "")
-                .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+            // CEO / HR / Special Access / admin. Developer accounts gated
+            // by the "Notify developers" toggle in Admin → Emails.
             const recipients = await prisma.user.findMany({
                 where: {
                     isActive: true,
                     OR: [
                         { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
                         { role: "admin" },
-                        ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+                        ...(await devEmailRecipientsClause()),
                     ],
                 },
                 select: { id: true },

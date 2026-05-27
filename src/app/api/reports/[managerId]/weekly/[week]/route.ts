@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
 import { notifyUsers } from "@/lib/notifications";
 import { writeSnapshot as writeReportTeamSnapshot } from "@/lib/reports/team-snapshot";
+import { devEmailRecipientsClause } from "@/lib/email/toggles";
 
 export const dynamic = "force-dynamic";
 
@@ -153,22 +154,19 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
         // autosave.
         if (shouldLock) {
             try {
-                const [manager, devEmails, recipients] = await Promise.all([
+                const devClause = await devEmailRecipientsClause();
+                const [manager, recipients] = await Promise.all([
                     prisma.user.findUnique({ where: { id: managerId }, select: { name: true } }),
-                    Promise.resolve(
-                        (process.env.DEVELOPER_EMAILS || "")
-                            .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean),
-                    ),
                     prisma.user.findMany({
                         where: {
                             isActive: true,
                             OR: [
-                                // CEO + Special Access + HR Manager (role) + Developers.
+                                // CEO + Special Access + HR Manager (role).
                                 // Drops orgLevel="hr_manager"-only members and role=admin alone.
+                                // Developer accounts gated by the "Notify developers" toggle.
                                 { orgLevel: { in: ["ceo", "special_access"] } },
                                 { role: "hr_manager" },
-                                { email: { in: (process.env.DEVELOPER_EMAILS || "")
-                                    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean) } },
+                                ...devClause,
                             ],
                         },
                         select: { id: true },
@@ -191,8 +189,6 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
                     ].join("\n"),
                     linkUrl:  link,
                 });
-                // Suppress unused-var lint for devEmails — kept for clarity.
-                void devEmails;
             } catch (e) {
                 console.warn("[reports/weekly] notify failed:", e);
             }

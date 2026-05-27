@@ -17,9 +17,21 @@ const ClockInBody = z.object({
   address: z.string().trim().max(240).optional(),
 });
 
+// Single-line, greppable deny logger. Use `pm2 logs 11 | grep "\[clock-in\] deny"`
+// to triage "I can't clock in" reports without re-deploying with extra debug.
+function logDeny(req: NextRequest, userId: number | null, reason: string, extra?: Record<string, unknown>) {
+  const ip = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "?";
+  const ua = (req.headers.get("user-agent") || "").slice(0, 120);
+  const extraStr = extra ? " " + Object.entries(extra).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" ") : "";
+  console.warn(`[clock-in] deny uid=${userId ?? "?"} reason=${reason} ip=${ip} ua="${ua}"${extraStr}`);
+}
+
 export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
-  if (errorResponse) return errorResponse;
+  if (errorResponse) {
+    logDeny(req, null, "no_session");
+    return errorResponse;
+  }
 
   try {
     const user = session!.user as any;
@@ -28,7 +40,10 @@ export async function POST(req: NextRequest) {
       const dbUser = await prisma.user.findUnique({ where: { email: user.email }, select: { id: true } });
       userId = dbUser?.id!;
     }
-    if (!userId) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (!userId) {
+      logDeny(req, null, "user_not_found", { email: user?.email });
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
 
     // Mobile guard. Default policy: clock-in is desktop / laptop only —
     // we don't want people clocking in from their phone in the car.
@@ -50,6 +65,7 @@ export async function POST(req: NextRequest) {
         select: { id: true },
       });
       if (!odForToday) {
+        logDeny(req, userId, "desktop_only");
         return NextResponse.json(
           { error: "Clock-in is only available on Laptop & Desktop. Mobile clock-in is unlocked on dates with an On-Duty request (pending or approved).", code: "desktop_only" },
           { status: 403 },
@@ -62,6 +78,7 @@ export async function POST(req: NextRequest) {
     // any user with the toggle off is blocked from punching in/out at all,
     // and the dashboards skip them.
     if (!(await isAttendanceEnabled(userId))) {
+      logDeny(req, userId, "attendance_disabled");
       return NextResponse.json(
         { error: "Attendance tracking is disabled for your account. Contact HR if this is wrong." },
         { status: 403 },
@@ -74,6 +91,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.ok) {
       // Treat any validation failure here as missing/invalid location — that's
       // the only thing the client sends, and the frontend prompts geolocation.
+      logDeny(req, userId, "location_required");
       return NextResponse.json(
         {
           error: "Location is required to clock in. Please allow location access in your browser and try again.",
@@ -182,6 +200,7 @@ export async function POST(req: NextRequest) {
     });
 
     if (result.conflict) {
+      logDeny(req, userId, "already_clocked_in", { attId: result.record.id });
       return NextResponse.json({ error: "Already clocked in" }, { status: 409 });
     }
     return NextResponse.json(result.record);

@@ -7,6 +7,7 @@ import { stringifyAttLoc } from "@/lib/attendance-location";
 import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
 import { sendEmail } from "@/lib/email/sender";
 import { pocAssignmentEmail } from "@/lib/email/templates";
+import { devEmailRecipientsClause } from "@/lib/email/toggles";
 
 export const dynamic = "force-dynamic";
 
@@ -90,7 +91,9 @@ export async function POST(req: NextRequest) {
     // has a "Mark as N/A" toggle for cases where no specific cover is
     // assigned, which sends pocUserId=null. When a POC is named, it
     // must be a real active user.
-    const pocUserId      = Number.isFinite(Number(body.pocUserId)) ? Number(body.pocUserId) : null;
+    // Coerce defensively: Number(null) === 0 and Number.isFinite(0) === true,
+    // so a missing/N/A POC would otherwise become userId 0 and fail the FK.
+    const pocUserId      = Number.isInteger(Number(body.pocUserId)) && Number(body.pocUserId) > 0 ? Number(body.pocUserId) : null;
     const workStatus     = typeof body.workStatus     === "string" ? body.workStatus.trim()     : "";
     const unavailability = typeof body.unavailability === "string" ? body.unavailability.trim() : "";
     if (!workStatus)             return NextResponse.json({ error: "Work Status is required." }, { status: 400 });
@@ -361,16 +364,15 @@ export async function PUT(req: NextRequest) {
       });
       if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
 
-      const devEmails = (process.env.DEVELOPER_EMAILS || "")
-        .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-      // CEO + Special Access + HR Manager (role) + Developers.
+      // CEO + Special Access + HR Manager (role). Developer accounts
+      // gated by the "Notify developers" toggle in Admin → Emails.
       const finalApprovers = await prisma.user.findMany({
         where: {
           isActive: true,
           OR: [
             { orgLevel: { in: ["ceo", "special_access"] } },
             { role: "hr_manager" },
-            ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+            ...(await devEmailRecipientsClause()),
           ],
         },
         select: { id: true },

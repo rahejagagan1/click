@@ -1,14 +1,15 @@
 "use client";
 
 // Admin → Emails Automation. One on/off switch per outbound email kind.
-// Flipping a toggle hits PATCH /api/admin/email-toggles and the change
-// is honored on the next email dispatch — no restart.
+// Each flip auto-saves (PATCH /api/admin/email-toggles) the moment the
+// switch moves — same UX as the Regularization Policy card. The change
+// is honored on the next email dispatch, no restart.
 //
 // Catalog comes from the server so this UI auto-updates when new kinds
 // get added to src/lib/email/toggles.ts.
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, XCircle, Save, Mail } from "lucide-react";
+import { CheckCircle2, XCircle, Mail } from "lucide-react";
 
 type CatalogItem = {
     key: string;
@@ -21,9 +22,13 @@ type Toggles = Record<string, boolean>;
 export default function EmailsAutomationPanel() {
     const [catalog,  setCatalog]  = useState<CatalogItem[]>([]);
     const [toggles,  setToggles]  = useState<Toggles>({});
-    const [draft,    setDraft]    = useState<Toggles>({});
     const [loading,  setLoading]  = useState(true);
-    const [saving,   setSaving]   = useState(false);
+    // Per-row save state — keyed by toggle.key. While a key is in this
+    // set, its switch shows "Saving…" and is disabled to avoid stacking
+    // requests on the same row.
+    const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set());
+    // Bulk-mode save state — used by "All on" / "All off" buttons.
+    const [bulkSaving, setBulkSaving] = useState(false);
     const [banner,   setBanner]   = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
     useEffect(() => {
@@ -36,43 +41,91 @@ export default function EmailsAutomationPanel() {
                 if (d?.error) { setBanner({ type: "err", text: d.error }); return; }
                 setCatalog(d.catalog ?? []);
                 setToggles(d.toggles ?? {});
-                setDraft(d.toggles ?? {});
             })
             .catch(() => { if (!cancelled) setBanner({ type: "err", text: "Failed to load toggles" }); })
             .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
     }, []);
 
-    const dirty = Object.keys(draft).some((k) => draft[k] !== toggles[k]);
-    const flip  = (key: string) => setDraft((d) => ({ ...d, [key]: !d[key] }));
-    const allOn  = () => setDraft(Object.fromEntries(catalog.map((c) => [c.key, true])));
-    const allOff = () => setDraft(Object.fromEntries(catalog.map((c) => [c.key, false])));
-    const reset  = () => setDraft(toggles);
-
-    const save = async () => {
-        setSaving(true);
+    // Auto-save on flip: optimistically apply the new value, fire the
+    // PATCH, revert on failure. Banner toasts success briefly so the
+    // user knows it landed; errors stick until the next interaction.
+    const flipAndSave = async (key: string) => {
+        if (savingKeys.has(key) || bulkSaving) return;
+        const before = !!toggles[key];
+        const next   = !before;
+        // Optimistic update.
+        setToggles((t) => ({ ...t, [key]: next }));
+        setSavingKeys((s) => {
+            const n = new Set(s);
+            n.add(key);
+            return n;
+        });
         setBanner(null);
         try {
             const res = await fetch("/api/admin/email-toggles", {
                 method:  "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body:    JSON.stringify(draft),
+                body:    JSON.stringify({ [key]: next }),
             });
-            const d = await res.json();
+            const d = await res.json().catch(() => ({}));
             if (!res.ok) {
+                // Revert and surface the error.
+                setToggles((t) => ({ ...t, [key]: before }));
                 setBanner({ type: "err", text: d?.error || "Save failed" });
                 return;
             }
-            setToggles(d.toggles);
-            setDraft(d.toggles);
-            setBanner({ type: "ok", text: "Saved. Changes apply on the next email dispatch." });
-            setTimeout(() => setBanner(null), 4000);
+            // Trust the server response as the new truth.
+            if (d?.toggles && typeof d.toggles === "object") setToggles(d.toggles);
+            setBanner({ type: "ok", text: `${labelFor(key) ?? key} ${next ? "enabled" : "disabled"}.` });
+            setTimeout(() => setBanner(null), 2500);
         } catch {
+            setToggles((t) => ({ ...t, [key]: before }));
             setBanner({ type: "err", text: "Save failed" });
         } finally {
-            setSaving(false);
+            setSavingKeys((s) => {
+                const n = new Set(s);
+                n.delete(key);
+                return n;
+            });
         }
     };
+
+    // Bulk apply — sets every catalog key to `value` in one PATCH. Used
+    // by "All on" / "All off". Optimistic + revert on error, same as
+    // single-flip.
+    const bulkApply = async (value: boolean) => {
+        if (bulkSaving) return;
+        const before = { ...toggles };
+        const next: Toggles = {};
+        for (const c of catalog) next[c.key] = value;
+        setToggles(next);
+        setBulkSaving(true);
+        setBanner(null);
+        try {
+            const res = await fetch("/api/admin/email-toggles", {
+                method:  "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body:    JSON.stringify(next),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                setToggles(before);
+                setBanner({ type: "err", text: d?.error || "Save failed" });
+                return;
+            }
+            if (d?.toggles && typeof d.toggles === "object") setToggles(d.toggles);
+            setBanner({ type: "ok", text: value ? "All emails turned on." : "All emails turned off." });
+            setTimeout(() => setBanner(null), 2500);
+        } catch {
+            setToggles(before);
+            setBanner({ type: "err", text: "Save failed" });
+        } finally {
+            setBulkSaving(false);
+        }
+    };
+
+    const labelFor = (key: string) => catalog.find((c) => c.key === key)?.label;
 
     // Group catalog items by their `group` field for visual sectioning.
     const grouped: Record<string, CatalogItem[]> = {};
@@ -80,8 +133,15 @@ export default function EmailsAutomationPanel() {
         if (!grouped[c.group]) grouped[c.group] = [];
         grouped[c.group].push(c);
     }
-    const groupOrder = ["Requests", "Reports & Feedback", "Recruiting", "Cron jobs"];
-    const enabledCount = Object.values(draft).filter(Boolean).length;
+    // Group order — Recipients first (it's a meta-control that gates
+    // recipient classes across every email kind, so it deserves the top
+    // slot), then the per-kind groups in their original order.
+    const KNOWN_ORDER = ["Recipients", "Requests", "Reports & Feedback", "Recruiting", "Cron jobs"];
+    const groupOrder = [
+        ...KNOWN_ORDER.filter((g) => grouped[g]),
+        ...Object.keys(grouped).filter((g) => !KNOWN_ORDER.includes(g)),
+    ];
+    const enabledCount = Object.values(toggles).filter(Boolean).length;
     const totalCount   = catalog.length;
 
     if (loading) {
@@ -106,7 +166,8 @@ export default function EmailsAutomationPanel() {
                         <div className="min-w-0">
                             <h2 className="text-[15px] font-semibold text-slate-800">Emails Automation</h2>
                             <p className="mt-1 text-[12.5px] text-slate-500">
-                                Turn outbound emails on / off per type. In-app notifications keep flowing — only the email channel is gated.
+                                Turn outbound emails on / off per type. Changes save automatically the moment you flip a switch.
+                                In-app notifications keep flowing — only the email channel is gated.
                             </p>
                         </div>
                     </div>
@@ -116,11 +177,20 @@ export default function EmailsAutomationPanel() {
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                    <button onClick={allOn}  className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-[12px] font-semibold text-slate-600 hover:border-emerald-300 hover:text-emerald-600">All on</button>
-                    <button onClick={allOff} className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-[12px] font-semibold text-slate-600 hover:border-rose-300    hover:text-rose-600">All off</button>
-                    {dirty && (
-                        <button onClick={reset} className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-[12px] font-semibold text-slate-600 hover:border-slate-300">Discard changes</button>
-                    )}
+                    <button
+                        onClick={() => bulkApply(true)}
+                        disabled={bulkSaving}
+                        className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-[12px] font-semibold text-slate-600 hover:border-emerald-300 hover:text-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {bulkSaving ? "Saving…" : "All on"}
+                    </button>
+                    <button
+                        onClick={() => bulkApply(false)}
+                        disabled={bulkSaving}
+                        className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-[12px] font-semibold text-slate-600 hover:border-rose-300 hover:text-rose-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {bulkSaving ? "Saving…" : "All off"}
+                    </button>
                 </div>
             </div>
 
@@ -144,7 +214,8 @@ export default function EmailsAutomationPanel() {
                     </div>
                     <div className="divide-y divide-slate-100">
                         {grouped[g].map((t) => {
-                            const on = !!draft[t.key];
+                            const on    = !!toggles[t.key];
+                            const busy  = savingKeys.has(t.key) || bulkSaving;
                             return (
                                 <div key={t.key} className="flex items-start justify-between gap-4 px-5 py-3.5">
                                     <div className="min-w-0">
@@ -152,31 +223,34 @@ export default function EmailsAutomationPanel() {
                                         <p className="mt-0.5 text-[11.5px] text-slate-500 leading-relaxed">{t.description}</p>
                                         <code className="mt-1 inline-block text-[10px] text-slate-400 bg-slate-50 px-1.5 rounded">{t.key}</code>
                                     </div>
-                                    <button
-                                        type="button"
-                                        role="switch"
-                                        aria-checked={on}
-                                        onClick={() => flip(t.key)}
-                                        className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors ${on ? "bg-emerald-500" : "bg-slate-300"}`}
-                                    >
-                                        <span className={`absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow transition-transform ${on ? "translate-x-[23px]" : "translate-x-[3px]"}`} />
-                                    </button>
+                                    <div className="shrink-0 flex flex-col items-end gap-1">
+                                        <button
+                                            type="button"
+                                            role="switch"
+                                            aria-checked={on}
+                                            aria-label={`${on ? "Disable" : "Enable"} ${t.label}`}
+                                            onClick={() => flipAndSave(t.key)}
+                                            disabled={busy}
+                                            className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-60 disabled:cursor-wait ${on ? "bg-emerald-500" : "bg-slate-300"}`}
+                                        >
+                                            <span className={`absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow transition-transform ${on ? "translate-x-[23px]" : "translate-x-[3px]"}`} />
+                                        </button>
+                                        <span className={`text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                                            busy
+                                                ? "text-slate-400"
+                                                : on
+                                                ? "text-emerald-600"
+                                                : "text-slate-400"
+                                        }`}>
+                                            {busy ? "Saving…" : on ? "On" : "Off"}
+                                        </span>
+                                    </div>
                                 </div>
                             );
                         })}
                     </div>
                 </div>
             ))}
-
-            <div className="sticky bottom-3 flex justify-end">
-                <button
-                    onClick={save}
-                    disabled={saving || !dirty}
-                    className="inline-flex items-center gap-1.5 h-10 px-5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[13px] font-semibold shadow-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                    <Save size={14} /> {saving ? "Saving…" : dirty ? "Save changes" : "Saved"}
-                </button>
-            </div>
         </div>
     );
 }

@@ -72,24 +72,17 @@ export async function GET(request: NextRequest) {
         if (severity) where.severity = severity;
         if (category) where.category = category;
 
-        const [violations, summary] = await Promise.all([
-            // Explicit `select` listing only the pre-BYTEA-migration
-            // columns + relations. Two reasons:
-            //   1. Keeps the multi-MB `actionTakenFileBlob` out of the
-            //      list payload — fetching it per-row would tank page
-            //      load. The blob is only read by the dedicated
-            //      download route.
-            //   2. Works whether or not the BYTEA migration has been
-            //      applied on the target DB. `omit` would silently
-            //      ask for the new column in the SELECT and 500 on
-            //      Postgres if the column doesn't exist yet (deploy /
-            //      migrate skew). With an explicit select listing only
-            //      old columns, the endpoint is forward-compatible.
-            //      Once `prisma migrate deploy` is reliably running on
-            //      every release, we can add `actionTakenFileMime`
-            //      back here.
-            // Cast to any because the cached typed client may lag a
-            // fresh schema during local dev (rebuild on next restart).
+        const [violationsRaw, summary] = await Promise.all([
+            // Explicit `select` — keeps the multi-MB BYTEA blobs out of
+            // the list payload. Each Violation's attached files are
+            // exposed as a metadata-only `actionFiles` list (id + name
+            // + mime), so the UI can list them without downloading any
+            // bytes. The dedicated `/api/violations/[id]/file?fileId=N`
+            // route streams the actual blob.
+            //
+            // The cast-to-any wraps both the typed-client lag from the
+            // recent schema additions and the safety of skipping the
+            // blob columns on the SELECT for list-mode.
             (prisma.violation as any).findMany({
                 where,
                 select: {
@@ -104,6 +97,12 @@ export async function GET(request: NextRequest) {
                     actionTaken: true,
                     actionTakenFileUrl: true,
                     actionTakenFileName: true,
+                    actionTakenFileMime: true,
+                    // Detect the legacy single-file fallback case
+                    // (legacy blob populated AND no ViolationActionFile
+                    // rows yet). The blob bytes themselves stay out of
+                    // the list payload — we only need to know whether
+                    // the legacy blob is present.
                     notes: true,
                     violationDate: true,
                     responsiblePersonId: true,
@@ -113,6 +112,10 @@ export async function GET(request: NextRequest) {
                     user: { select: { id: true, name: true, role: true, profilePictureUrl: true, teamCapsule: true } },
                     reporter: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
                     responsiblePerson: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
+                    actionFiles: {
+                        select: { id: true, fileName: true, fileMime: true, uploadedAt: true },
+                        orderBy: { uploadedAt: "asc" },
+                    },
                 },
                 orderBy: { createdAt: "desc" },
             }),
@@ -125,6 +128,28 @@ export async function GET(request: NextRequest) {
                 prisma.violation.count({ where: { severity: { in: ["high", "critical"] } } }),
             ]),
         ]);
+
+        // Backward-compat shim: rows with a legacy single-file but no
+        // ViolationActionFile entries yet expose a synthetic file in
+        // the same shape so the UI doesn't need to know about legacy.
+        // The synthetic id is the special string "legacy" — the file
+        // route recognises it and falls back to the legacy columns.
+        const violations = (violationsRaw as any[]).map((v) => {
+            const hasMulti = Array.isArray(v.actionFiles) && v.actionFiles.length > 0;
+            if (hasMulti) return v;
+            if (v.actionTakenFileName) {
+                return {
+                    ...v,
+                    actionFiles: [{
+                        id: "legacy",
+                        fileName: v.actionTakenFileName,
+                        fileMime: v.actionTakenFileMime ?? null,
+                        uploadedAt: v.createdAt,
+                    }],
+                };
+            }
+            return v;
+        });
 
         return NextResponse.json({
             violations,
@@ -141,17 +166,36 @@ export async function GET(request: NextRequest) {
     }
 }
 
+// Validate + materialize a File from the form into a tuple of
+// (blob, fileName, fileMime). Returns null when the slot is empty.
+// Used for both the POST create path and the PATCH add-more path.
+async function readUploadedFile(file: File): Promise<{ blob: Buffer; fileName: string; fileMime: string } | { error: string }> {
+    if (file.size > MAX_FILE_BYTES) {
+        return { error: `File "${file.name}" must be 10 MB or smaller` };
+    }
+    const ext = extname(file.name).toLowerCase();
+    if (!ALLOWED_EXTS.has(ext)) {
+        return { error: `File "${file.name}" must be a PDF, Word, RTF, ODT, TXT, or image` };
+    }
+    return {
+        blob: Buffer.from(await file.arrayBuffer()),
+        fileName: file.name,
+        fileMime: file.type && file.type !== "application/octet-stream"
+            ? file.type
+            : MIME_BY_EXT[ext] ?? "application/octet-stream",
+    };
+}
+
 // POST: Create a new violation.
 //
 // Accepts EITHER application/json (legacy callers) or
-// multipart/form-data (the violations form, which can attach a file).
-// The form-data path pulls an optional PDF/doc out of the
-// `actionTakenFile` field and stores the bytes directly in Postgres
-// (`actionTakenFileBlob`). We deliberately do NOT write to the
-// filesystem — atomic deploys + Docker rebuilds wipe `public/uploads/`
-// on every release, which 404'd every prior attachment. Postgres
-// BYTEA gives us redeploy-proof storage with the existing backup
-// story for free.
+// multipart/form-data (the violations form). The form-data path now
+// pulls *multiple* files out of the `actionTakenFile` field — HR can
+// attach several PDFs / docs per violation. Each file lands as its own
+// row in `ViolationActionFile`; the legacy single-file columns on
+// `Violation` are no longer written. Bytes live in BYTEA so they
+// survive redeploys (the old `/public/uploads/` path got wiped on
+// every Docker rebuild).
 export async function POST(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
@@ -166,9 +210,9 @@ export async function POST(request: NextRequest) {
         // tests, edits) keep working — only the form upload path
         // carries a file payload.
         let body: any = {};
-        let actionTakenFileBlob: Buffer | null = null;
-        let actionTakenFileName: string | null = null;
-        let actionTakenFileMime: string | null = null;
+        // Collected ViolationActionFile rows to insert after the parent
+        // Violation row is created. Stays empty for JSON callers.
+        const filesToInsert: Array<{ blob: Buffer; fileName: string; fileMime: string }> = [];
 
         if (ctype.includes("multipart/form-data")) {
             const form = await request.formData();
@@ -188,25 +232,20 @@ export async function POST(request: NextRequest) {
                 reportedById:         get("reportedById") ? Number(get("reportedById")) : null,
             };
 
-            const file = form.get("actionTakenFile");
-            if (file instanceof File && file.size > 0) {
-                if (file.size > MAX_FILE_BYTES) {
-                    return NextResponse.json({ error: "File must be 10 MB or smaller" }, { status: 400 });
+            // Multiple files arrive under the same field name —
+            // `getAll` returns each one. Both the legacy "actionTakenFile"
+            // (now repeatable) and the newer "actionTakenFiles" key are
+            // accepted so older clients keep working.
+            const uploads: File[] = [
+                ...form.getAll("actionTakenFile"),
+                ...form.getAll("actionTakenFiles"),
+            ].filter((f): f is File => f instanceof File && f.size > 0);
+            for (const file of uploads) {
+                const ready = await readUploadedFile(file);
+                if ("error" in ready) {
+                    return NextResponse.json({ error: ready.error }, { status: 400 });
                 }
-                const ext = extname(file.name).toLowerCase();
-                if (!ALLOWED_EXTS.has(ext)) {
-                    return NextResponse.json({ error: "File must be a PDF, Word, RTF, ODT, TXT, or image" }, { status: 400 });
-                }
-                actionTakenFileBlob = Buffer.from(await file.arrayBuffer());
-                actionTakenFileName = file.name;
-                // Trust the browser's Content-Type when present; fall
-                // back to an extension-based guess so the download
-                // route can stamp Content-Type correctly even for
-                // files uploaded by clients that omit `type` (some
-                // mobile browsers do this with .pdf).
-                actionTakenFileMime = file.type && file.type !== "application/octet-stream"
-                    ? file.type
-                    : MIME_BY_EXT[ext] ?? "application/octet-stream";
+                filesToInsert.push(ready);
             }
         } else {
             body = await request.json();
@@ -231,14 +270,10 @@ export async function POST(request: NextRequest) {
             if (candidate) reportedBy = candidate.id;
         }
 
-        // `data: any` so TypeScript doesn't fight the new attachment
-        // columns until the next clean `prisma generate` runs (the
-        // typed client may lag; same workaround used in the PATCH
-        // handler for lastReminderAt). New uploads go to the BYTEA
-        // column — `actionTakenFileUrl` stays null going forward and
-        // remains in the schema only so old rows continue to render
-        // until the back-fill script runs (or for one transition
-        // release, whichever comes first).
+        // `data: any` so TypeScript doesn't fight schema additions until
+        // the next clean `prisma generate` runs. New uploads go to the
+        // side `ViolationActionFile` table (handled below); the legacy
+        // single-file columns on Violation stay null on new rows.
         const data: any = {
             userId: body.userId,
             reportedBy,
@@ -248,9 +283,6 @@ export async function POST(request: NextRequest) {
             status: body.status || "open",
             category: body.category || null,
             actionTaken: body.actionTaken || null,
-            actionTakenFileBlob,
-            actionTakenFileName,
-            actionTakenFileMime,
             notes: body.notes || null,
             violationDate: body.violationDate ? new Date(body.violationDate) : null,
             responsiblePersonId: body.responsiblePersonId || null,
@@ -264,6 +296,25 @@ export async function POST(request: NextRequest) {
                 responsiblePerson: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
             },
         });
+
+        // Persist each uploaded file as its own ViolationActionFile row,
+        // sequentially. Using `createMany` would be tidier but the
+        // typed client may lag the new model; raw SQL via $executeRawUnsafe
+        // works regardless of the generated client's state.
+        if (filesToInsert.length > 0) {
+            for (const f of filesToInsert) {
+                await prisma.$executeRawUnsafe(
+                    `INSERT INTO "ViolationActionFile"
+                       ("violationId", "fileName", "fileMime", "fileBlob", "uploadedById")
+                     VALUES ($1, $2, $3, $4, $5)`,
+                    violation.id,
+                    f.fileName,
+                    f.fileMime,
+                    f.blob,
+                    user.dbId ?? null,
+                );
+            }
+        }
 
         // Notify the affected employee. Fire-and-forget so a transient
         // SMTP failure doesn't block the create from returning.
@@ -294,12 +345,17 @@ export async function POST(request: NextRequest) {
 // PATCH: Update violation status/action.
 //
 // Accepts EITHER application/json (status flips, simple text edits)
-// or multipart/form-data (the edit panel, when HR re-uploads or
-// removes the action document). The form-data path mirrors POST: a
-// fresh file goes straight into the `actionTakenFileBlob` BYTEA
-// column with mime + filename; an explicit `clearActionTakenFile=1`
-// flag nulls the trio out (used for "Remove" without replacement).
-// Edits that don't touch the attachment stay on the JSON path so we
+// or multipart/form-data (the edit panel, where HR adds new action
+// documents and / or removes existing ones). The form-data path
+// supports:
+//   • `actionTakenFile` (repeatable) — each entry is a new file to
+//     append to the violation's attachments (ViolationActionFile rows).
+//   • `removeFileIds` (repeatable) — each entry is the integer id of
+//     an existing ViolationActionFile row to delete.
+//   • Legacy `clearActionTakenFile=1` — kept for the single-file
+//     transition; nulls the legacy columns on Violation. (Only matters
+//     until the migration backfill clears them everywhere.)
+// Edits that don't touch attachments stay on the JSON path so we
 // don't pay the multipart parsing cost on every status change.
 export async function PATCH(request: NextRequest) {
     try {
@@ -315,10 +371,13 @@ export async function PATCH(request: NextRequest) {
         let severity:            string | undefined;
         let notes:               string | undefined;
         let responsiblePersonId: number | null | undefined;
-        let newFileBlob:         Buffer | null = null;
-        let newFileName:         string | null = null;
-        let newFileMime:         string | null = null;
-        let clearFile = false;
+        // New attachments to append to the existing list.
+        const filesToInsert: Array<{ blob: Buffer; fileName: string; fileMime: string }> = [];
+        // Per-file removals — id numbers from ViolationActionFile, plus
+        // the special "legacy" sentinel meaning "clear the legacy
+        // single-file columns on Violation".
+        const fileIdsToRemove: number[] = [];
+        let clearLegacyFile = false;
 
         if (ctype.includes("multipart/form-data")) {
             const form = await request.formData();
@@ -333,26 +392,30 @@ export async function PATCH(request: NextRequest) {
             notes               = get("notes")      ?? undefined;
             const rp            = get("responsiblePersonId");
             responsiblePersonId = rp === null ? undefined : (rp ? Number(rp) : null);
-            clearFile           = get("clearActionTakenFile") === "1";
+            clearLegacyFile     = get("clearActionTakenFile") === "1";
 
-            const file = form.get("actionTakenFile");
-            if (file instanceof File && file.size > 0) {
-                if (file.size > MAX_FILE_BYTES) {
-                    return NextResponse.json({ error: "File must be 10 MB or smaller" }, { status: 400 });
+            // Per-file remove ids (repeatable). Special "legacy" string
+            // flips the legacy-file clear flag — the UI sends this when
+            // HR removes a row that's still using the pre-migration
+            // single-file slot.
+            for (const v of form.getAll("removeFileIds")) {
+                if (typeof v !== "string") continue;
+                if (v === "legacy") clearLegacyFile = true;
+                else if (Number.isFinite(Number(v))) fileIdsToRemove.push(Number(v));
+            }
+
+            // New uploads (repeatable). Both old "actionTakenFile" and
+            // the more explicit "actionTakenFiles" key are honoured.
+            const uploads: File[] = [
+                ...form.getAll("actionTakenFile"),
+                ...form.getAll("actionTakenFiles"),
+            ].filter((f): f is File => f instanceof File && f.size > 0);
+            for (const file of uploads) {
+                const ready = await readUploadedFile(file);
+                if ("error" in ready) {
+                    return NextResponse.json({ error: ready.error }, { status: 400 });
                 }
-                const ext = extname(file.name).toLowerCase();
-                if (!ALLOWED_EXTS.has(ext)) {
-                    return NextResponse.json({ error: "File must be a PDF, Word, RTF, ODT, TXT, or image" }, { status: 400 });
-                }
-                newFileBlob = Buffer.from(await file.arrayBuffer());
-                newFileName = file.name;
-                newFileMime = file.type && file.type !== "application/octet-stream"
-                    ? file.type
-                    : MIME_BY_EXT[ext] ?? "application/octet-stream";
-                // A fresh upload always wins over a stale clear flag —
-                // the UI also resets clearEditFile when a file is
-                // picked, but we re-enforce it here for safety.
-                clearFile = false;
+                filesToInsert.push(ready);
             }
         } else {
             const body = await request.json();
@@ -379,16 +442,9 @@ export async function PATCH(request: NextRequest) {
         if (severity) data.severity = severity;
         if (responsiblePersonId !== undefined) data.responsiblePersonId = responsiblePersonId || null;
         if (status === "closed") data.resolvedAt = new Date();
-        // Attachment branches: a fresh upload writes all three
-        // columns AND clears the legacy URL fallback so the row
-        // doesn't try to render two attachments. An explicit clear
-        // nulls everything out.
-        if (newFileBlob) {
-            data.actionTakenFileBlob = newFileBlob;
-            data.actionTakenFileName = newFileName;
-            data.actionTakenFileMime = newFileMime;
-            data.actionTakenFileUrl  = null;
-        } else if (clearFile) {
+        // Legacy single-file clear path — only fires when the UI
+        // explicitly asks to drop the pre-migration inline attachment.
+        if (clearLegacyFile) {
             data.actionTakenFileBlob = null;
             data.actionTakenFileName = null;
             data.actionTakenFileMime = null;
@@ -397,6 +453,35 @@ export async function PATCH(request: NextRequest) {
         // (lastReminderAt reset is handled via raw SQL after the typed
         //  update below — the typed client may not know about the new
         //  column on a stale `prisma generate` cache.)
+
+        // Per-file deletes from ViolationActionFile. Scoped by
+        // violationId so a stale UI can't poke siblings of other rows.
+        if (fileIdsToRemove.length > 0) {
+            await prisma.$executeRawUnsafe(
+                `DELETE FROM "ViolationActionFile"
+                  WHERE "violationId" = $1
+                    AND id = ANY($2::int[])`,
+                id,
+                fileIdsToRemove,
+            );
+        }
+
+        // Inserts for newly-added files — same raw-SQL path as POST.
+        if (filesToInsert.length > 0) {
+            const uploaderId = (session?.user as any)?.dbId ?? null;
+            for (const f of filesToInsert) {
+                await prisma.$executeRawUnsafe(
+                    `INSERT INTO "ViolationActionFile"
+                       ("violationId", "fileName", "fileMime", "fileBlob", "uploadedById")
+                     VALUES ($1, $2, $3, $4, $5)`,
+                    id,
+                    f.fileName,
+                    f.fileMime,
+                    f.blob,
+                    uploaderId,
+                );
+            }
+        }
 
         const violation = await prisma.violation.update({
             where: { id },

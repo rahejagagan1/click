@@ -95,6 +95,7 @@ model User {
   violations             Violation[]        @relation("ViolationUser")
   violationsReported     Violation[]        @relation("ViolationReporter")
   violationsResponsible  Violation[]        @relation("ViolationResponsible")
+  violationFilesUploaded ViolationActionFile[] @relation("ViolationFileUploader")
   teamRatingsGiven       TeamManagerRating[] @relation("TeamMemberRater")
   teamRatingsReceived    TeamManagerRating[] @relation("ManagerRated")
   dashboardFeedbacks     UserFeedback[]
@@ -884,14 +885,11 @@ model Violation {
   status        ViolationStatus    @default(open)
   category            String?            // violation type: "attendance", "misconduct", "policy_breach", etc.
   actionTaken         String?            @db.Text
-  /// Optional PDF / doc uploaded by the reporter as evidence of the
-  /// action taken. The bytes live in `actionTakenFileBlob` (BYTEA)
-  /// so they survive redeploys — the legacy `actionTakenFileUrl`
-  /// pointed at /public/uploads/, which got wiped on every deploy.
-  /// `actionTakenFileName` preserves the original filename for the
-  /// Content-Disposition header on download. `actionTakenFileMime`
-  /// drives Content-Type. The legacy URL column is kept (nullable)
-  /// for one transition release; new uploads write only the blob.
+  /// Legacy single-file columns. HR moved to multi-file uploads —
+  /// every new attachment lands in `ViolationActionFile` (see relation
+  /// `actionFiles` below). These four columns are kept nullable for
+  /// one transition release so unmigrated rows still display their
+  /// single-file uploads; new writes go to the side table.
   actionTakenFileUrl  String?
   actionTakenFileName String?
   actionTakenFileBlob Bytes?
@@ -910,12 +908,35 @@ model Violation {
   user                User               @relation("ViolationUser", fields: [userId], references: [id])
   reporter            User               @relation("ViolationReporter", fields: [reportedBy], references: [id])
   responsiblePerson   User?              @relation("ViolationResponsible", fields: [responsiblePersonId], references: [id])
+  /// Multi-file Action-Taken attachments. The legacy single-file
+  /// fields above are kept nullable for one transition release so
+  /// unmigrated rows still display; every new upload lands here.
+  actionFiles         ViolationActionFile[]
 
   @@index([userId])
   @@index([reportedBy])
   @@index([status])
   @@index([severity])
   @@index([createdAt])
+}
+
+/// One uploaded Action-Taken document for a Violation. Bytes live in
+/// `fileBlob` (BYTEA) so they survive redeploys. Each row is keyed by
+/// its own integer id so the UI can remove an individual file and the
+/// download endpoint can stream a specific attachment by `?fileId=N`.
+model ViolationActionFile {
+  id            Int        @id @default(autoincrement())
+  violationId   Int
+  fileName      String
+  fileMime      String?
+  fileBlob      Bytes
+  uploadedAt    DateTime   @default(now())
+  uploadedById  Int?
+
+  violation     Violation  @relation(fields: [violationId], references: [id], onDelete: Cascade)
+  uploadedBy    User?      @relation("ViolationFileUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([violationId])
 }
 
 // ═══════════════════════════════════════════════════════

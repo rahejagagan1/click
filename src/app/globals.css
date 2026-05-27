@@ -129,7 +129,12 @@ html:not(.dark) .text-white {
   color: #111827 !important;
 }
 
-/* Preserve white text on colored backgrounds (buttons, badges) */
+/* Preserve white text on colored backgrounds (buttons, badges, active
+   tabs). We list both the Tailwind palette names AND arbitrary-hex
+   backgrounds (Tailwind v3 `bg-[#xxxxxx]` syntax) — the brand blue
+   `bg-[#008CFF]` and friends used to be missed by the palette-only
+   selectors, which made every selected tab / primary button / badge
+   render with dark text in light mode. */
 html:not(.dark) [class*="bg-emerald-"].text-white,
 html:not(.dark) [class*="bg-green-"].text-white,
 html:not(.dark) [class*="bg-violet-"].text-white,
@@ -149,7 +154,11 @@ html:not(.dark) [class*="bg-slate-9"].text-white,
 html:not(.dark) [class*="bg-gray-6"].text-white,
 html:not(.dark) [class*="bg-gray-7"].text-white,
 html:not(.dark) [class*="bg-gray-8"].text-white,
-html:not(.dark) [class*="bg-gray-9"].text-white {
+html:not(.dark) [class*="bg-gray-9"].text-white,
+/* Arbitrary-hex Tailwind backgrounds — bg-[#008CFF], bg-[#0070cc] etc. */
+html:not(.dark) [class*="bg-[#"].text-white,
+/* And the same elements when the white text lives in a child node. */
+html:not(.dark) [class*="bg-[#"] .text-white {
   color: #ffffff !important;
 }
 html:not(.dark) th.text-white {
