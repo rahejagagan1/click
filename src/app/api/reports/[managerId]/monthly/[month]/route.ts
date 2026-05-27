@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
 import { notifyUsers } from "@/lib/notifications";
+import { devEmailRecipientsClause } from "@/lib/email/toggles";
 import { getQualifiedCasesForRole } from "@/lib/ratings/data-resolver";
 import { getManagerReportFormat } from "@/lib/reports/manager-report-format";
 import { getMonthlyReportWindow } from "@/lib/reports/monthly-window";
@@ -416,25 +417,25 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
             }
         }
 
-        // Notify CEO / HR / admins / developers / special-access only
-        // when the report is LOCKED. Same pattern as the weekly route.
+        // Notify CEO / HR / special-access only when the report is LOCKED.
+        // Same pattern as the weekly route. Developer accounts gated by
+        // the "Notify developers" toggle in Admin → Emails Automation.
         if (shouldLock) {
             try {
-                const devEmails = (process.env.DEVELOPER_EMAILS || "")
-                    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+                const devClause = await devEmailRecipientsClause();
                 const [manager, recipients] = await Promise.all([
                     prisma.user.findUnique({ where: { id: managerId }, select: { name: true } }),
                     prisma.user.findMany({
                         where: {
                             isActive: true,
                             OR: [
-                                // CEO + Special Access + HR Manager (role) + Developers.
+                                // CEO + Special Access + HR Manager (role).
                                 // Drops orgLevel="hr_manager"-only members (HR-team
                                 // folks like Vanshika are role=member) and role="admin"
                                 // alone (covered via orgLevel=ceo / special_access).
                                 { orgLevel: { in: ["ceo", "special_access"] } },
                                 { role: "hr_manager" },
-                                ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+                                ...devClause,
                             ],
                         },
                         select: { id: true },

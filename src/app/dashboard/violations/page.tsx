@@ -16,6 +16,18 @@ interface ViolationUser {
     managerId?: number | null;
 }
 
+// One uploaded Action-Taken document on a violation. The legacy
+// pre-migration row (still backed by the inline single-file columns on
+// Violation) is represented with id="legacy" — same shape, different
+// download path on the server. Newly-added attachments live in
+// ViolationActionFile and use numeric ids.
+interface ViolationActionFile {
+    id: number | "legacy";
+    fileName: string;
+    fileMime: string | null;
+    uploadedAt: string;
+}
+
 interface Violation {
     id: number;
     userId: number;
@@ -25,8 +37,11 @@ interface Violation {
     status: "open" | "in_progress" | "closed";
     category: string | null;
     actionTaken: string | null;
+    // Legacy single-file columns — only populated for pre-migration
+    // rows. New rows expose attachments via `actionFiles`.
     actionTakenFileUrl: string | null;
     actionTakenFileName: string | null;
+    actionFiles: ViolationActionFile[];
     notes: string | null;
     violationDate: string | null;
     responsiblePersonId: number | null;
@@ -113,7 +128,10 @@ export default function ViolationsPage() {
         responsiblePersonId: 0,
         reportedById: 0,
     });
-    const [actionTakenFile, setActionTakenFile] = useState<File | null>(null);
+    // Multi-file picker for the create form. Each File in the array
+    // becomes its own ViolationActionFile row on POST. Action Document
+    // is mandatory — handleCreate checks length > 0 below.
+    const [actionTakenFiles, setActionTakenFiles] = useState<File[]>([]);
 
     const selectedEmployee = users.find(u => u.id === newViolation.userId);
 
@@ -186,15 +204,14 @@ export default function ViolationsPage() {
 
     const handleCreate = async () => {
         if (!newViolation.userId) return;
-        if (!actionTakenFile) return;            // Action Document is now mandatory
-        if (!newViolation.notes.trim()) return;  // Description is mandatory
+        if (actionTakenFiles.length === 0) return; // At least one Action Document required
+        if (!newViolation.notes.trim()) return;    // Description is mandatory
         setSaving(true);
         try {
             // Switch to multipart/form-data so we can attach the
-            // optional Action-Taken file alongside the form fields.
-            // The route accepts both JSON (legacy callers) and form-
-            // data, branching on Content-Type, so this is a one-sided
-            // change.
+            // Action-Taken files alongside the form fields. Each file
+            // is appended under the same key so the API's `getAll`
+            // sees every entry.
             const fd = new FormData();
             const category = newViolation.category === "other"
                 ? (newViolation.customCategory || "other")
@@ -208,7 +225,7 @@ export default function ViolationsPage() {
             fd.set("violationDate",       newViolation.violationDate);
             fd.set("responsiblePersonId", String(newViolation.responsiblePersonId || ""));
             fd.set("reportedById",        String(newViolation.reportedById || ""));
-            if (actionTakenFile) fd.set("actionTakenFile", actionTakenFile);
+            for (const f of actionTakenFiles) fd.append("actionTakenFile", f);
 
             const res = await fetch("/api/violations", {
                 method: "POST",
@@ -234,20 +251,29 @@ export default function ViolationsPage() {
                     ? Number(sessionUser?.dbId) || 0
                     : 0,
             });
-            setActionTakenFile(null);
+            setActionTakenFiles([]);
             fetchData();
         } catch { }
         setSaving(false);
     };
 
-    // Edit-mode attachment state. `editFile` is a freshly-picked
-    // upload that should replace whatever is on the row; `clearEditFile`
-    // is true when HR deliberately clicked "Remove" to drop the
-    // existing attachment without putting one back. Either action
-    // forces the save path onto multipart/form-data so the bytes (or
-    // the explicit clear flag) reach the API.
-    const [editFile, setEditFile] = useState<File | null>(null);
-    const [clearEditFile, setClearEditFile] = useState(false);
+    // Edit-mode attachment state. Multi-file: HR can mark any
+    // existing file for removal AND queue any number of new files to
+    // upload. Both buckets are flushed in a single PATCH on save.
+    //   • `existingFiles`     — file metadata snapshot from the row.
+    //                           Each entry's id is either the
+    //                           ViolationActionFile primary key, or
+    //                           the string "legacy" for pre-migration
+    //                           single-file rows.
+    //   • `removedFileIds`    — ids the user clicked Remove on. Sent
+    //                           as repeated `removeFileIds` form
+    //                           entries on save.
+    //   • `newFiles`          — File objects picked via the input.
+    //                           Sent as repeated `actionTakenFile`
+    //                           form entries on save.
+    const [existingFiles, setExistingFiles] = useState<ViolationActionFile[]>([]);
+    const [removedFileIds, setRemovedFileIds] = useState<Array<number | "legacy">>([]);
+    const [newFiles, setNewFiles] = useState<File[]>([]);
 
     const startEditing = (v: Violation) => {
         setEditingId(v.id);
@@ -257,29 +283,27 @@ export default function ViolationsPage() {
             actionTaken: v.actionTaken || "",
             notes: v.notes || "",
             responsiblePersonId: v.responsiblePerson?.id || 0,
-            // Capture the existing filename so the upload UI can show
-            // "Currently attached: E-1.pdf" without needing a separate
-            // re-fetch when entering edit mode.
-            existingFileName: v.actionTakenFileName || null,
         });
-        setEditFile(null);
-        setClearEditFile(false);
+        setExistingFiles(v.actionFiles ?? []);
+        setRemovedFileIds([]);
+        setNewFiles([]);
     };
 
     const cancelEditing = () => {
         setEditingId(null);
         setEditData({});
-        setEditFile(null);
-        setClearEditFile(false);
+        setExistingFiles([]);
+        setRemovedFileIds([]);
+        setNewFiles([]);
     };
 
     const saveEdit = async (id: number) => {
         setSaving(true);
         try {
-            // Branch on whether the file picker was touched. The JSON
+            // Branch on whether attachments were touched. The JSON
             // path is the lighter of the two and stays the default for
-            // edits that don't change the attachment (most of them).
-            const hasFileChange = !!editFile || clearEditFile;
+            // edits that don't change attachments (most of them).
+            const hasFileChange = newFiles.length > 0 || removedFileIds.length > 0;
             let res: Response;
             if (hasFileChange) {
                 const fd = new FormData();
@@ -289,8 +313,8 @@ export default function ViolationsPage() {
                 fd.set("actionTaken",         editData.actionTaken ?? "");
                 fd.set("notes",               editData.notes ?? "");
                 fd.set("responsiblePersonId", String(editData.responsiblePersonId || ""));
-                if (editFile) fd.set("actionTakenFile", editFile);
-                if (clearEditFile && !editFile) fd.set("clearActionTakenFile", "1");
+                for (const f of newFiles) fd.append("actionTakenFile", f);
+                for (const rid of removedFileIds) fd.append("removeFileIds", String(rid));
                 res = await fetch("/api/violations", { method: "PATCH", body: fd });
             } else {
                 res = await fetch("/api/violations", {
@@ -305,8 +329,9 @@ export default function ViolationsPage() {
             } else {
                 setEditingId(null);
                 setEditData({});
-                setEditFile(null);
-                setClearEditFile(false);
+                setExistingFiles([]);
+                setRemovedFileIds([]);
+                setNewFiles([]);
                 fetchData();
             }
         } catch { }
@@ -665,71 +690,111 @@ export default function ViolationsPage() {
                                         rows={2} placeholder="Additional notes..."
                                         className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30 resize-none" />
                                 </div>
-                                {/* Action Document — re-upload / replace.
-                                    Three states packed into one block:
-                                      1. existing file present, no edit  → "Currently attached: foo.pdf" + Replace + Remove
-                                      2. new file picked                 → green chip with new filename + Undo
-                                      3. cleared (Remove pressed)        → "Will remove on save" + Undo
-                                    Re-uploading a file overrides the
-                                    Remove flag automatically. */}
+                                {/* Action Documents — multi-file. HR can:
+                                      1. See every existing attachment with a Remove
+                                         button (a removed entry shows as struck-
+                                         through with an Undo so the action stays
+                                         reversible until Save).
+                                      2. Queue any number of new files. Each picked
+                                         file appears as a green chip with its own
+                                         Undo. Picking is additive — picking once
+                                         then picking again appends; it doesn't
+                                         replace.
+                                    Both buckets are flushed in a single PATCH on
+                                    save (multi-value `actionTakenFile` +
+                                    `removeFileIds` entries). */}
                                 <div>
-                                    <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Action Document</label>
-                                    {editFile ? (
-                                        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/5">
-                                            <svg className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                            <span className="text-[12.5px] font-medium text-emerald-700 dark:text-emerald-300 truncate">{editFile.name}</span>
-                                            <span className="text-[11px] text-emerald-600/70 dark:text-emerald-400/70 ml-auto">New (will replace on save)</span>
-                                            <button type="button" onClick={() => setEditFile(null)}
-                                                className="text-[11px] font-semibold text-rose-500 hover:underline shrink-0">
-                                                Undo
-                                            </button>
-                                        </div>
-                                    ) : clearEditFile ? (
-                                        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-rose-200 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-500/5">
-                                            <svg className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                            </svg>
-                                            <span className="text-[12.5px] font-medium text-rose-700 dark:text-rose-300">Will remove attachment on save</span>
-                                            <button type="button" onClick={() => setClearEditFile(false)}
-                                                className="ml-auto text-[11px] font-semibold text-slate-600 dark:text-slate-400 hover:underline">
-                                                Undo
-                                            </button>
-                                        </div>
-                                    ) : editData.existingFileName ? (
-                                        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03]">
-                                            <span className="text-[12.5px] text-slate-700 dark:text-slate-300 truncate">📎 {editData.existingFileName}</span>
-                                            <span className="ml-auto flex items-center gap-3">
-                                                <label className="text-[11px] font-semibold text-violet-600 dark:text-violet-400 hover:underline cursor-pointer">
-                                                    Replace
-                                                    <input
-                                                        type="file"
-                                                        accept=".pdf,.doc,.docx,.rtf,.odt,.txt,.md,.png,.jpg,.jpeg,.webp"
-                                                        onChange={e => { setEditFile(e.target.files?.[0] ?? null); setClearEditFile(false); }}
-                                                        className="hidden"
-                                                    />
-                                                </label>
-                                                <button type="button" onClick={() => setClearEditFile(true)}
-                                                    className="text-[11px] font-semibold text-rose-500 hover:underline">
-                                                    Remove
+                                    <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Action Documents</label>
+                                    <div className="space-y-1.5">
+                                        {existingFiles.map((f) => {
+                                            const marked = removedFileIds.includes(f.id);
+                                            return (
+                                                <div
+                                                    key={String(f.id)}
+                                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${marked
+                                                        ? "border-rose-200 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-500/5"
+                                                        : "border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03]"}`}
+                                                >
+                                                    <span className={`text-[12.5px] truncate ${marked ? "line-through text-rose-700 dark:text-rose-300" : "text-slate-700 dark:text-slate-300"}`}>
+                                                        📎 {f.fileName}
+                                                    </span>
+                                                    <span className="ml-auto flex items-center gap-3">
+                                                        {!marked && (
+                                                            <a
+                                                                href={f.id === "legacy"
+                                                                    ? `/api/violations/${editingId}/file`
+                                                                    : `/api/violations/${editingId}/file?fileId=${f.id}`}
+                                                                target="_blank" rel="noreferrer"
+                                                                className="text-[11px] font-semibold text-violet-600 dark:text-violet-400 hover:underline"
+                                                            >
+                                                                Download
+                                                            </a>
+                                                        )}
+                                                        {marked ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setRemovedFileIds((p) => p.filter((x) => x !== f.id))}
+                                                                className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 hover:underline"
+                                                            >
+                                                                Undo
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setRemovedFileIds((p) => [...p, f.id])}
+                                                                className="text-[11px] font-semibold text-rose-500 hover:underline"
+                                                            >
+                                                                Remove
+                                                            </button>
+                                                        )}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+
+                                        {newFiles.map((f, idx) => (
+                                            <div key={`new-${idx}-${f.name}`} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/5">
+                                                <svg className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                </svg>
+                                                <span className="text-[12.5px] font-medium text-emerald-700 dark:text-emerald-300 truncate">{f.name}</span>
+                                                <span className="text-[11px] text-emerald-600/70 dark:text-emerald-400/70 ml-auto">New (will upload on save)</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setNewFiles((p) => p.filter((_, i) => i !== idx))}
+                                                    className="text-[11px] font-semibold text-rose-500 hover:underline shrink-0"
+                                                >
+                                                    Undo
                                                 </button>
-                                            </span>
-                                        </div>
-                                    ) : (
+                                            </div>
+                                        ))}
+
                                         <label className="flex items-center justify-center gap-1.5 w-full px-3 py-2.5 rounded-lg border-2 border-dashed border-slate-300 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03] hover:border-violet-400/60 hover:bg-violet-50/40 dark:hover:bg-white/[0.05] cursor-pointer transition-colors">
                                             <input
                                                 type="file"
+                                                multiple
                                                 accept=".pdf,.doc,.docx,.rtf,.odt,.txt,.md,.png,.jpg,.jpeg,.webp"
-                                                onChange={e => { setEditFile(e.target.files?.[0] ?? null); setClearEditFile(false); }}
+                                                onChange={(e) => {
+                                                    const picked = Array.from(e.target.files ?? []);
+                                                    if (picked.length === 0) return;
+                                                    setNewFiles((p) => [...p, ...picked]);
+                                                    // Reset the input so the same file
+                                                    // can be picked again if user removes
+                                                    // it from the queue and changes mind.
+                                                    e.target.value = "";
+                                                }}
                                                 className="hidden"
                                             />
                                             <svg className="h-4 w-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.9 5 5 0 019.9-1A5.5 5.5 0 0118 16M12 12v8m0 0l-3-3m3 3l3-3" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                                             </svg>
-                                            <span className="text-[12.5px] text-slate-500 dark:text-slate-400">Click to upload PDF / image (≤10 MB)</span>
+                                            <span className="text-[12.5px] text-slate-500 dark:text-slate-400">
+                                                {existingFiles.length + newFiles.length === 0
+                                                    ? "Click to upload PDFs / images (≤10 MB each, multiple allowed)"
+                                                    : "Add more files…"}
+                                            </span>
                                         </label>
-                                    )}
+                                    </div>
                                 </div>
                                 <div className="flex justify-end gap-2">
                                     <button onClick={cancelEditing}
@@ -801,35 +866,55 @@ export default function ViolationsPage() {
                                         )}
                                     </div>
                                     <div>
+                                        {/* Read-only display: every attached file
+                                            renders as its own download link. The
+                                            API folds the pre-migration legacy
+                                            single-file row into the `actionFiles`
+                                            array with id="legacy" — the link
+                                            picks the right URL accordingly. */}
                                         {v.actionTaken && (
                                             <div className="mb-3">
                                                 <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Action Taken</p>
                                                 <p className="text-sm text-slate-700 dark:text-slate-300">{v.actionTaken}</p>
-                                                {(v.actionTakenFileName || v.actionTakenFileUrl) && (
-                                                    <a
-                                                        href={`/api/violations/${v.id}/file`}
-                                                        className="mt-1.5 inline-flex items-center gap-1.5 text-[12px] font-medium text-violet-600 dark:text-violet-400 hover:underline"
-                                                    >
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                                                        </svg>
-                                                        {v.actionTakenFileName || "Attachment"}
-                                                    </a>
+                                                {Array.isArray(v.actionFiles) && v.actionFiles.length > 0 && (
+                                                    <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+                                                        {v.actionFiles.map((f) => (
+                                                            <a
+                                                                key={String(f.id)}
+                                                                href={f.id === "legacy"
+                                                                    ? `/api/violations/${v.id}/file`
+                                                                    : `/api/violations/${v.id}/file?fileId=${f.id}`}
+                                                                className="inline-flex items-center gap-1.5 text-[12px] font-medium text-violet-600 dark:text-violet-400 hover:underline"
+                                                            >
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                                                </svg>
+                                                                {f.fileName}
+                                                            </a>
+                                                        ))}
+                                                    </div>
                                                 )}
                                             </div>
                                         )}
-                                        {!v.actionTaken && (v.actionTakenFileName || v.actionTakenFileUrl) && (
+                                        {!v.actionTaken && Array.isArray(v.actionFiles) && v.actionFiles.length > 0 && (
                                             <div className="mb-3">
                                                 <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Action Taken</p>
-                                                <a
-                                                    href={`/api/violations/${v.id}/file`}
-                                                    className="inline-flex items-center gap-1.5 text-[13px] font-medium text-violet-600 dark:text-violet-400 hover:underline"
-                                                >
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                                                    </svg>
-                                                    {v.actionTakenFileName || "Attachment"}
-                                                </a>
+                                                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                                    {v.actionFiles.map((f) => (
+                                                        <a
+                                                            key={String(f.id)}
+                                                            href={f.id === "legacy"
+                                                                ? `/api/violations/${v.id}/file`
+                                                                : `/api/violations/${v.id}/file?fileId=${f.id}`}
+                                                            className="inline-flex items-center gap-1.5 text-[13px] font-medium text-violet-600 dark:text-violet-400 hover:underline"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                                            </svg>
+                                                            {f.fileName}
+                                                        </a>
+                                                    ))}
+                                                </div>
                                             </div>
                                         )}
                                         {v.notes && (
@@ -1024,37 +1109,46 @@ export default function ViolationsPage() {
                         </div>
                         <div>
                             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">
-                                Action Document <span className="text-rose-500">*</span>
+                                Action Documents <span className="text-rose-500">*</span>
                             </label>
-                            <label className="flex flex-col items-center justify-center gap-1.5 w-full h-[88px] px-3 rounded-lg border-2 border-dashed border-slate-300 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03] hover:border-violet-400/60 hover:bg-violet-50/40 dark:hover:bg-white/[0.05] cursor-pointer transition-colors">
-                                <input
-                                    type="file"
-                                    accept=".pdf,.doc,.docx,.rtf,.odt,.txt,.md,.png,.jpg,.jpeg,.webp"
-                                    onChange={e => setActionTakenFile(e.target.files?.[0] ?? null)}
-                                    className="hidden"
-                                />
-                                {actionTakenFile ? (
-                                    <>
-                                        <span className="text-[12.5px] font-medium text-slate-700 dark:text-slate-200 truncate max-w-full">📎 {actionTakenFile.name}</span>
-                                        <span
-                                            role="button"
-                                            tabIndex={0}
-                                            onClick={(e) => { e.preventDefault(); setActionTakenFile(null); }}
-                                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActionTakenFile(null); } }}
-                                            className="text-[11px] text-rose-500 hover:underline cursor-pointer"
+                            <div className="space-y-1.5">
+                                {actionTakenFiles.map((f, idx) => (
+                                    <div key={`pick-${idx}-${f.name}`} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03]">
+                                        <span className="text-[12.5px] text-slate-700 dark:text-slate-200 truncate">📎 {f.name}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setActionTakenFiles((p) => p.filter((_, i) => i !== idx))}
+                                            className="ml-auto text-[11px] font-semibold text-rose-500 hover:underline"
                                         >
                                             Remove
-                                        </span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <svg className="h-5 w-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.9 5 5 0 019.9-1A5.5 5.5 0 0118 16M12 12v8m0 0l-3-3m3 3l3-3" />
-                                        </svg>
-                                        <span className="text-[12px] text-slate-500 dark:text-slate-400">Click to upload PDF / image (≤10 MB)</span>
-                                    </>
-                                )}
-                            </label>
+                                        </button>
+                                    </div>
+                                ))}
+                                <label className="flex flex-col items-center justify-center gap-1.5 w-full h-[72px] px-3 rounded-lg border-2 border-dashed border-slate-300 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03] hover:border-violet-400/60 hover:bg-violet-50/40 dark:hover:bg-white/[0.05] cursor-pointer transition-colors">
+                                    <input
+                                        type="file"
+                                        multiple
+                                        accept=".pdf,.doc,.docx,.rtf,.odt,.txt,.md,.png,.jpg,.jpeg,.webp"
+                                        onChange={(e) => {
+                                            const picked = Array.from(e.target.files ?? []);
+                                            if (picked.length === 0) return;
+                                            setActionTakenFiles((p) => [...p, ...picked]);
+                                            // Reset the input so picking the same file
+                                            // again after a Remove works.
+                                            e.target.value = "";
+                                        }}
+                                        className="hidden"
+                                    />
+                                    <svg className="h-5 w-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                    </svg>
+                                    <span className="text-[12px] text-slate-500 dark:text-slate-400">
+                                        {actionTakenFiles.length === 0
+                                            ? "Click to upload PDFs / images (≤10 MB each, multiple allowed)"
+                                            : "Add more files…"}
+                                    </span>
+                                </label>
+                            </div>
                         </div>
                     </div>
 
@@ -1076,7 +1170,7 @@ export default function ViolationsPage() {
                         className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors">
                         Cancel
                     </button>
-                    <button onClick={handleCreate} disabled={saving || !newViolation.userId || !actionTakenFile || !newViolation.notes.trim()}
+                    <button onClick={handleCreate} disabled={saving || !newViolation.userId || actionTakenFiles.length === 0 || !newViolation.notes.trim()}
                         className="px-4 py-2 text-sm font-semibold text-white bg-rose-500 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm">
                         {saving ? "Saving..." : "Submit Violation"}
                     </button>

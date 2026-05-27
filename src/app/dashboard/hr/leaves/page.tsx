@@ -478,13 +478,9 @@ export default function LeavesPage() {
         <aside className="col-span-3 border-l border-slate-200 dark:border-white/[0.06] p-5 space-y-3">
           <button
             onClick={() => setShowApply(true)}
-            // `!text-white` (Tailwind important modifier) + inline color
-            // override: some upstream cascade was darkening the button
-            // text on this page, so we pin it.
-            className="w-full h-11 bg-[#008CFF] hover:bg-[#0070cc] !text-white rounded-lg text-[13.5px] font-semibold shadow-sm transition-colors inline-flex items-center justify-center gap-2"
-            style={{ color: "#ffffff" }}
+            className="w-full h-11 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13.5px] font-semibold shadow-sm transition-colors inline-flex items-center justify-center gap-2"
           >
-            <svg className="w-4 h-4" style={{ color: "#ffffff" }} fill="none" stroke="currentColor" strokeWidth={2.4} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.4} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
             Request Leave
           </button>
 

@@ -3,7 +3,7 @@ import { sendEmail } from "@/lib/email/sender";
 import { attendanceReminderEmail, hrLateSummaryEmail } from "@/lib/email/templates";
 import { istTodayDateOnly, istTimeOnDate } from "@/lib/ist-date";
 import { getPoliciesByUser } from "@/lib/hr/notification-policy";
-import { isEmailEnabled } from "@/lib/email/toggles";
+import { isEmailEnabled, devEmailRecipientsClause } from "@/lib/email/toggles";
 
 /**
  * Comma-separated env var of emails who should never receive attendance
@@ -202,18 +202,18 @@ export async function sendHrLateClockInSummary(): Promise<number> {
   absent.sort((a, b) => a.name.localeCompare(b.name));
   late.sort((a, b) => (a.clockIn!.getTime() - b.clockIn!.getTime()));
 
-  // Recipients: CEO + Special Access + HR Manager (role) + Developers.
+  // Recipients: CEO + Special Access + HR Manager (role).
   // EXCLUDED: role=admin alone, orgLevel="hr_manager" alone (HR-team
   // members are role=member; they shouldn't get admin pings).
-  const devEmails = (process.env.DEVELOPER_EMAILS || "")
-    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  // Developer accounts are conditional on the "Notify developers"
+  // toggle in Admin → Emails Automation.
   const recipients = await prisma.user.findMany({
     where: {
       isActive: true,
       OR: [
         { orgLevel: { in: ["ceo", "special_access"] } },
         { role:     "hr_manager" },
-        ...(devEmails.length > 0 ? [{ email: { in: devEmails } }] : []),
+        ...(await devEmailRecipientsClause()),
       ],
     },
     select: { email: true, name: true },
