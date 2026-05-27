@@ -9,6 +9,7 @@ import { istTimeOnDate, istMonthRange, istTodayDateOnly, istDateOnlyFrom } from 
 import { isRegularizationWindowEnforced } from "@/app/api/hr/policy/regularization-window/route";
 import { isRegularizationUnlimited } from "@/app/api/hr/policy/regularization-unlimited/route";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
+import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
 
 // Schema covers both self-apply and admin-grant flavours of regularize POST.
 const RegularizePost = z.object({
@@ -355,6 +356,13 @@ export async function PUT(req: NextRequest) {
     // Status guard: must be open.
     if (reg.status !== "pending" && reg.status !== "partially_approved") {
       return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
+    }
+
+    // Cross-brand approval guard — YT Labs HR cannot action an NB Media
+    // employee's regularization (and vice versa). Founder bypasses.
+    if (reg.user?.id != null) {
+      const crossBrand = await assertSameBrandOrSuperAdmin(session, reg.user.id);
+      if (crossBrand) return crossBrand;
     }
 
     // ── L1 / L2 flow (mirrors leaves / WFH / on-duty / comp-off) ───

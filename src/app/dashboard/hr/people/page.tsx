@@ -115,7 +115,7 @@ export default function PeoplePage() {
           ))}
         </div>
         {isAdmin && (
-          <button onClick={() => setShowAdd(true)} className="h-8 px-4 bg-[#008CFF] hover:bg-[#0077dd] text-slate-800 dark:text-white rounded text-[12px] font-semibold transition-colors">
+          <button onClick={() => setShowAdd(true)} className="h-8 px-4 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded text-[12px] font-semibold transition-colors">
             + Add Employee
           </button>
         )}

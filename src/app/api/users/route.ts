@@ -464,11 +464,13 @@ export async function POST(request: NextRequest) {
             return { user: created, isUpdate: !!existing };
         });
 
-        // Persist businessUnit via raw SQL — keeps things working even
-        // if the typed Prisma client hasn't been regenerated after the
-        // schema change. Same pattern other new columns use here.
-        // Defaults to "NB Media" when caller didn't supply one or sent
-        // a blank — we treat it as a single-business-unit org for now.
+        // Persist businessUnit + legalEntity via raw SQL — keeps things
+        // working even if the typed Prisma client hasn't been
+        // regenerated after the schema change. Same pattern other new
+        // columns use here. Defaults businessUnit to "NB Media" when
+        // caller didn't supply one (treat blank as the parent brand);
+        // legalEntity is left NULL when not provided so we don't paper
+        // over a real onboarding gap.
         if (profile && typeof profile === "object") {
             const bu = (typeof profile.businessUnit === "string" && profile.businessUnit.trim())
                 ? profile.businessUnit.trim()
@@ -481,6 +483,20 @@ export async function POST(request: NextRequest) {
                 );
             } catch (e) {
                 console.warn("[users POST] businessUnit update failed:", e);
+            }
+            const le = (typeof profile.legalEntity === "string" && profile.legalEntity.trim())
+                ? profile.legalEntity.trim()
+                : null;
+            if (le) {
+                try {
+                    await prisma.$executeRawUnsafe(
+                        `UPDATE "EmployeeProfile" SET "legalEntity" = $1 WHERE "userId" = $2`,
+                        le,
+                        user.id,
+                    );
+                } catch (e) {
+                    console.warn("[users POST] legalEntity update failed:", e);
+                }
             }
         }
 
