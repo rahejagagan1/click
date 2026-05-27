@@ -117,21 +117,24 @@ export function roleOptions(users: any[]): FilterOption[] {
   return Array.from(discovered).sort().map((v) => ({ value: v, label: getUserRoleLabel(v) }));
 }
 
-// Independent option builders for the three "entity-ish" filters. Each is
-// driven only by its own column (discovered values only — same rationale
-// as departmentOptions / roleOptions).
+// Independent option builders for the three "entity-ish" filters. Each
+// starts with the canonical NB Media + YT Labs values so both brands
+// are always selectable — even before the first YT Labs employee is
+// onboarded — and then unions any extra values discovered in the data
+// (for legacy / custom rows). Same shape as departmentOptions /
+// roleOptions otherwise.
 export function businessUnitOptions(users: any[]): FilterOption[] {
-  const discovered = new Set<string>();
+  const discovered = new Set<string>(["NB Media", "YT Labs"]);
   users.forEach((u) => { const v = deriveBusinessUnit(u); if (v) discovered.add(v); });
   return Array.from(discovered).sort().map((v) => ({ value: v, label: v }));
 }
 export function costCenterOptions(users: any[]): FilterOption[] {
-  const discovered = new Set<string>();
+  const discovered = new Set<string>(["NB Media", "YT Labs"]);
   users.forEach((u) => { const v = deriveCostCenter(u); if (v) discovered.add(v); });
   return Array.from(discovered).sort().map((v) => ({ value: v, label: v }));
 }
 export function legalEntityOptions(users: any[]): FilterOption[] {
-  const discovered = new Set<string>();
+  const discovered = new Set<string>(["NB Media Productions", "YT Labs"]);
   users.forEach((u) => { const v = deriveLegalEntity(u); if (v) discovered.add(v); });
   return Array.from(discovered).sort().map((v) => ({ value: v, label: v }));
 }

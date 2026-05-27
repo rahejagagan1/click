@@ -28,7 +28,9 @@ export async function GET() {
       select: {
         id: true, name: true, email: true, role: true, orgLevel: true,
         teamCapsule: true, profilePictureUrl: true,
-        employeeProfile: { select: { department: true, designation: true, employeeId: true, workLocation: true, attendanceCaptureScheme: true } },
+        // Multi-brand: businessUnit lets the UI split the attendance
+        // dashboard into NB Media vs YT Labs tabs.
+        employeeProfile: { select: { department: true, designation: true, employeeId: true, workLocation: true, attendanceCaptureScheme: true, businessUnit: true } },
       },
     });
     // Drop anyone whose Attendance toggle is OFF — they're "off the
@@ -124,6 +126,7 @@ export async function GET() {
         designation:  u.employeeProfile?.designation ?? null,
         department:   u.employeeProfile?.department  ?? null,
         workLocation: u.employeeProfile?.workLocation ?? null,
+        businessUnit: (u.employeeProfile as any)?.businessUnit ?? null,
         // Capture scheme is the OPERATIONAL flavour of where this user
         // is supposed to punch in from. Often "Remote" even when
         // workLocation is left at the default "office" — we use both
