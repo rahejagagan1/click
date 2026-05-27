@@ -39,7 +39,12 @@ export async function GET(req: NextRequest) {
     const [users, leaveTypes, balances] = await Promise.all([
       prisma.user.findMany({
         where: { isActive: true },
-        select: { id: true, name: true, email: true, profilePictureUrl: true },
+        select: {
+          id: true, name: true, email: true, profilePictureUrl: true,
+          // Multi-brand: lets the admin Leave Balances grid split rows
+          // into NB Media vs YT Labs tabs.
+          employeeProfile: { select: { businessUnit: true } },
+        },
         orderBy: { name: "asc" },
       }),
       prisma.leaveType.findMany({
@@ -68,6 +73,7 @@ export async function GET(req: NextRequest) {
       name: u.name,
       email: u.email,
       profilePictureUrl: u.profilePictureUrl,
+      businessUnit: (u as any).employeeProfile?.businessUnit ?? null,
       balances: leaveTypes.reduce<Record<number, any>>((acc, lt) => {
         const b = idx.get(`${u.id}:${lt.id}`);
         acc[lt.id] = b

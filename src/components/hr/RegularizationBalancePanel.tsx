@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
+import { useSession } from "next-auth/react";
 import { fetcher } from "@/lib/swr";
 import { Search, X, Infinity as InfinityIcon } from "lucide-react";
 
@@ -12,6 +13,7 @@ type EmpRow = {
   profilePictureUrl: string | null;
   role: string | null;
   orgLevel: string | null;
+  businessUnit: string | null;
   used: number;
   limit: number | null;
   remaining: number | null;
@@ -44,14 +46,52 @@ export default function RegularizationBalancePanel() {
   const unlimited = !!data?.unlimited;
   const limit     = data?.limit ?? null;
 
+  // ── Company scope tabs ──────────────────────────────────────────────
+  // Same pattern as ApprovalsPanel: auto-default to viewer's brand
+  // (founders / super-admins land on "all"). Splits the balance list
+  // into NB Media vs YT Labs so each HR manager works on their brand.
+  type CompanyTab = "NB Media" | "YT Labs" | "all";
+  const { data: session } = useSession();
+  const me = session?.user as any;
+  const [companyTab, setCompanyTab] = useState<CompanyTab>("all");
+  const [companyTabTouched, setCompanyTabTouched] = useState(false);
+  const { data: viewerProfile } = useSWR<any>(
+    me ? "/api/hr/profile" : null,
+    fetcher,
+    { revalidateOnFocus: false },
+  );
+  useEffect(() => {
+    if (companyTabTouched) return;
+    const isSuperAdmin = me?.orgLevel === "ceo" || me?.isDeveloper;
+    if (isSuperAdmin) { setCompanyTab("all"); return; }
+    const bu = viewerProfile?.employeeProfile?.businessUnit;
+    if (bu === "YT Labs") setCompanyTab("YT Labs");
+    else if (bu === "NB Media" || bu == null) setCompanyTab("NB Media");
+  }, [viewerProfile, me, companyTabTouched]);
+
+  const companyCounts = useMemo(() => {
+    let nb = 0, yt = 0;
+    employees.forEach((e) => {
+      const bu = e.businessUnit || "NB Media";
+      if (bu === "YT Labs") yt++;
+      else nb++;
+    });
+    return { nb, yt, all: employees.length };
+  }, [employees]);
+
   const filtered = useMemo(() => {
-    if (!query.trim()) return employees;
+    let rows = employees;
+    // Company scope first so the search count reflects the active brand.
+    if (companyTab !== "all") {
+      rows = rows.filter((e) => (e.businessUnit || "NB Media") === companyTab);
+    }
+    if (!query.trim()) return rows;
     const q = query.trim().toLowerCase();
-    return employees.filter((e) =>
+    return rows.filter((e) =>
       (e.name || "").toLowerCase().includes(q) ||
       (e.email || "").toLowerCase().includes(q)
     );
-  }, [employees, query]);
+  }, [employees, query, companyTab]);
 
   // Aggregate counts for the meta strip.
   const stats = useMemo(() => {
@@ -121,6 +161,37 @@ export default function RegularizationBalancePanel() {
                 </button>
               ) : null}
             </div>
+          </div>
+        </div>
+        {/* Company scope tabs — section label matches the Approvals
+            panel so the two pages feel like the same family. */}
+        <div className="px-5 pb-4 border-t border-slate-100 pt-3">
+          <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 mb-2">Brand scope</div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+          {([
+            { key: "NB Media", count: companyCounts.nb  },
+            { key: "YT Labs",  count: companyCounts.yt  },
+            { key: "all",      count: companyCounts.all },
+          ] as const).map(({ key, count }) => {
+            const active = companyTab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => { setCompanyTab(key as CompanyTab); setCompanyTabTouched(true); }}
+                className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
+                  active
+                    ? "bg-[#008CFF] text-white shadow-sm"
+                    : "bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10"
+                }`}
+              >
+                <span>{key === "all" ? "All" : key}</span>
+                <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
+                  active ? "bg-white/20 text-white" : "bg-[#008CFF] text-white"
+                }`}>{count}</span>
+              </button>
+            );
+          })}
           </div>
         </div>
       </header>

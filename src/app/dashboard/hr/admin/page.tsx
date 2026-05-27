@@ -7,6 +7,8 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote, ClipboardCheck, FileSpreadsheet } from "lucide-react";
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
+import { DEPARTMENTS } from "@/lib/departments";
+import { DEPARTMENTS_YT_LABS } from "@/lib/departments-yt-labs";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
 import LeavesAdminPanel from "@/components/hr/LeavesAdminPanel";
@@ -268,11 +270,34 @@ export default function HRAdminPage() {
     }));
   };
 
+  // Company tab scope — splits Department Breakdown into NB Media vs
+  // YT Labs so HR can see each brand's org structure in isolation.
+  // "all" combines both. Default to NB Media (parent brand).
+  type CompanyTab = "NB Media" | "YT Labs" | "all";
+  const [companyTab, setCompanyTab] = useState<CompanyTab>("NB Media");
+
+  // Apply the company scope to the employees list before grouping by
+  // department. Empty businessUnit → bucketed as "NB Media" so legacy
+  // rows stay visible there by default.
+  const scopedEmployees = employees.filter((e: any) => {
+    if (companyTab === "all") return true;
+    const bu = e.employeeProfile?.businessUnit || "NB Media";
+    return bu === companyTab;
+  });
+
   // Dept breakdown from employees — group full employee records by
   // department so the breakdown row can show team avatars instead of
   // a percentage bar. Sort departments by team size, biggest first.
+  // For non-"all" tabs we also seed the canonical YT Labs / NB Media
+  // departments so HR can see the brand's structure even when zero
+  // employees are assigned (helps with the YT Labs cold start).
   const deptEmployees: Record<string, any[]> = {};
-  employees.forEach((e: any) => {
+  if (companyTab === "YT Labs") {
+    DEPARTMENTS_YT_LABS.forEach((d) => { deptEmployees[d] = []; });
+  } else if (companyTab === "NB Media") {
+    DEPARTMENTS.forEach((d) => { deptEmployees[d] = []; });
+  }
+  scopedEmployees.forEach((e: any) => {
     const d = e.employeeProfile?.department || "Unassigned";
     if (!deptEmployees[d]) deptEmployees[d] = [];
     deptEmployees[d].push(e);
@@ -282,12 +307,13 @@ export default function HRAdminPage() {
   // Manager breakdown — anyone with orgLevel manager / hod / hr_manager
   // counts as a manager. We then attach their direct reports (users
   // whose User.managerId points at them) so the panel can show the
-  // team alongside the manager.
+  // team alongside the manager. Scoped to the selected company tab
+  // so YT Labs view shows only YT Labs managers + their reports.
   const isManagerRole = (u: any) =>
     u?.orgLevel === "manager" || u?.orgLevel === "hod" || u?.orgLevel === "hr_manager";
-  const managers = employees.filter(isManagerRole);
+  const managers = scopedEmployees.filter(isManagerRole);
   const reportsByManagerId: Record<number, any[]> = {};
-  employees.forEach((e: any) => {
+  scopedEmployees.forEach((e: any) => {
     if (e.managerId) {
       if (!reportsByManagerId[e.managerId]) reportsByManagerId[e.managerId] = [];
       reportsByManagerId[e.managerId].push(e);
@@ -617,10 +643,43 @@ export default function HRAdminPage() {
                 </span>
               );
             };
-            const totalEmployees = employees.length;
+            const totalEmployees = scopedEmployees.length;
+            // Count per company for the tab chips so HR sees brand sizes
+            // at a glance.
+            const nbCount = employees.filter((e: any) => (e.employeeProfile?.businessUnit || "NB Media") === "NB Media").length;
+            const ytCount = employees.filter((e: any) => e.employeeProfile?.businessUnit === "YT Labs").length;
 
             return (
               <>
+                {/* Company tab strip — scopes the entire Department /
+                    Manager breakdown to one brand. */}
+                <div className="flex items-center gap-1.5 mb-2">
+                  {([
+                    { key: "NB Media", count: nbCount },
+                    { key: "YT Labs",  count: ytCount },
+                    { key: "all",      count: employees.length },
+                  ] as const).map(({ key, count }) => {
+                    const active = companyTab === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setCompanyTab(key as CompanyTab)}
+                        className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
+                          active
+                            ? "bg-[#008CFF] text-white shadow-sm"
+                            : "bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10"
+                        }`}
+                      >
+                        <span>{key === "all" ? "All" : key}</span>
+                        <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
+                          active ? "bg-white/20 text-white" : "bg-[#008CFF] text-white"
+                        }`}>{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
                 {/* Header + sub-tabs */}
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
