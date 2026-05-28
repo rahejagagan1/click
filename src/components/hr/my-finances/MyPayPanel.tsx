@@ -125,6 +125,7 @@ function downloadPayslip(p: any, structure: any) {
   <tr><td>Provident Fund (Employee)</td><td class="amount">₹${fmt(p.pfEmployee)}</td></tr>
   <tr><td>TDS / Income Tax</td><td class="amount">₹${fmt(p.tds)}</td></tr>
   <tr><td>Professional Tax</td><td class="amount">₹${fmt(p.professionalTax)}</td></tr>
+  ${parseFloat(p.additionalTax || 0) > 0 ? `<tr><td>Additional Tax</td><td class="amount">₹${fmt(p.additionalTax)}</td></tr>` : ""}
   <tr class="total-row"><td>Total Deductions</td><td class="amount">₹${fmt(p.totalDeductions)}</td></tr>
 </table>
 
@@ -663,6 +664,12 @@ function PaySlipsView({ payslips, structure, userId }: { payslips: any[]; struct
                         <td className="py-2 text-slate-700">Professional Tax</td>
                         <td className="py-2 text-right text-slate-800 font-medium">{fmtInr(active.professionalTax)}</td>
                       </tr>
+                      {parseFloat(active.additionalTax || 0) > 0 && (
+                        <tr className="border-b border-slate-100">
+                          <td className="py-2 text-slate-700">Additional Tax</td>
+                          <td className="py-2 text-right text-slate-800 font-medium">{fmtInr(active.additionalTax)}</td>
+                        </tr>
+                      )}
                       <tr className="border-b-2 border-slate-300">
                         <td className="py-2 font-semibold text-slate-800">Total Deductions (B)</td>
                         <td className="py-2 text-right font-semibold text-slate-800">{fmtInr(active.totalDeductions)}</td>
