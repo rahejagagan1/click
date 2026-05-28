@@ -535,6 +535,54 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
     router.replace(`/dashboard/hr/approvals?tab=${t}`, { scroll: false });
   };
 
+  // Shared bulk-action toolbar — visible across Leave and the
+  // regularize / WFH / OD / comp-off tables whenever at least one row is
+  // picked. Approve / Reject expand grouped WFH-range leaders via
+  // `_groupIds` so the action covers every underlying day.
+  const bulkActionBar = picked.size > 0 ? (
+    <div className="flex items-center justify-between mb-3 rounded-lg border border-[#008CFF]/30 bg-[#008CFF]/[0.04] dark:bg-[#008CFF]/[0.08] px-4 py-2.5">
+      <span className="text-[12.5px] font-semibold text-slate-700 dark:text-slate-200">
+        {picked.size} selected
+      </span>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => {
+            const acts = filtered
+              .filter((r: any) => picked.has(r.id) && canActOn(r))
+              .flatMap((r: any) => (Array.isArray(r._groupIds) && r._groupIds.length > 0 ? r._groupIds : [r.id]));
+            actOnIds(acts, "approve");
+          }}
+          disabled={actioning}
+          className="h-9 px-4 rounded-lg text-[12px] font-semibold bg-[#008CFF] text-white hover:bg-[#0070cc] disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+        >
+          <Check size={14} strokeWidth={2.5} /> Approve
+        </button>
+        <button
+          onClick={() => {
+            const acts = filtered
+              .filter((r: any) => picked.has(r.id) && canActOn(r))
+              .flatMap((r: any) => (Array.isArray(r._groupIds) && r._groupIds.length > 0 ? r._groupIds : [r.id]));
+            if (acts.length === 0) return;
+            setRejectPending({
+              ids: acts,
+              label: acts.length === 1 ? "this request" : `${acts.length} requests`,
+            });
+          }}
+          disabled={actioning}
+          className="h-9 px-4 rounded-lg text-[12px] font-semibold border border-slate-200 dark:border-white/[0.1] text-slate-600 dark:text-slate-300 hover:border-rose-400 hover:text-rose-600 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 bg-white dark:bg-transparent"
+        >
+          <X size={14} strokeWidth={2.5} /> Reject
+        </button>
+        <button
+          onClick={() => setPicked(new Set())}
+          className="h-9 px-3 rounded-lg text-[11.5px] font-medium text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
+        >
+          Clear selection
+        </button>
+      </div>
+    </div>
+  ) : null;
+
   const body = (
     <>
       {/* Approval module tabs */}
@@ -628,6 +676,7 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
         )}
 
         {/* Simple read/act table for regularize / wfh / on_duty / comp_off tabs */}
+        {(tab === "regularize" || tab === "wfh" || tab === "comp_off") && bulkActionBar}
         {(tab === "regularize" || tab === "wfh" || tab === "comp_off") && (
           <div className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-x-auto">
             {isLoading ? (
@@ -644,6 +693,12 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
               <table className="w-full">
                 <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-[#0a1e3a]/95 backdrop-blur-sm">
                   <tr className="border-b border-slate-200 dark:border-white/[0.06]">
+                    <th className="px-4 py-3 text-left">
+                      <input type="checkbox"
+                        checked={filtered.length > 0 && filtered.every((r) => picked.has(r.id))}
+                        onChange={toggleAllVisible}
+                        className="w-3.5 h-3.5 rounded border-slate-300 accent-[#008CFF]" />
+                    </th>
                     {(tab === "regularize"
                       // Regularization: single-stage HR-only — no L1/L2 split.
                       ? ["EMPLOYEE", "DATE", "REQUESTED IN / OUT", "REASON", "STATUS", "APPROVAL NOTE", "ACTIONS"]
@@ -706,6 +761,13 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                     };
                     return (
                       <tr key={`${r._kind ?? tab}-${r.id}`} className="border-b border-slate-100 dark:border-white/[0.04] hover:bg-slate-50/60 dark:hover:bg-white/[0.015]">
+                        <td className="px-4 py-3">
+                          <input type="checkbox"
+                            checked={picked.has(r.id)}
+                            onChange={() => toggleRow(r.id)}
+                            disabled={!canActOn(r)}
+                            className="w-3.5 h-3.5 rounded border-slate-300 accent-[#008CFF] disabled:opacity-30" />
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <Avatar name={u.name || "?"} url={u.profilePictureUrl} size={32} />
@@ -846,55 +908,7 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
               </div>
             </div>
 
-            {/* Bulk action bar — only renders when something is picked.
-                Avoids a permanently-disabled toolbar above the table.
-                When visible, sits flush above the table with a brand-
-                tinted background so HR can see the bulk-mode is on. */}
-            {picked.size > 0 && (
-              <div className="flex items-center justify-between mb-3 rounded-lg border border-[#008CFF]/30 bg-[#008CFF]/[0.04] dark:bg-[#008CFF]/[0.08] px-4 py-2.5">
-                <span className="text-[12.5px] font-semibold text-slate-700 dark:text-slate-200">
-                  {picked.size} selected
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      // Expand grouped leaders to every underlying day so
-                      // the bulk action actually covers the full range.
-                      const acts = filtered
-                        .filter((r: any) => picked.has(r.id) && canActOn(r))
-                        .flatMap((r: any) => (Array.isArray(r._groupIds) && r._groupIds.length > 0 ? r._groupIds : [r.id]));
-                      actOnIds(acts, "approve");
-                    }}
-                    disabled={actioning}
-                    className="h-9 px-4 rounded-lg text-[12px] font-semibold bg-[#008CFF] text-white hover:bg-[#0070cc] disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-                  >
-                    <Check size={14} strokeWidth={2.5} /> Approve
-                  </button>
-                  <button
-                    onClick={() => {
-                      const acts = filtered
-                        .filter((r: any) => picked.has(r.id) && canActOn(r))
-                        .flatMap((r: any) => (Array.isArray(r._groupIds) && r._groupIds.length > 0 ? r._groupIds : [r.id]));
-                      if (acts.length === 0) return;
-                      setRejectPending({
-                        ids: acts,
-                        label: acts.length === 1 ? "this request" : `${acts.length} requests`,
-                      });
-                    }}
-                    disabled={actioning}
-                    className="h-9 px-4 rounded-lg text-[12px] font-semibold border border-slate-200 dark:border-white/[0.1] text-slate-600 dark:text-slate-300 hover:border-rose-400 hover:text-rose-600 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 bg-white dark:bg-transparent"
-                  >
-                    <X size={14} strokeWidth={2.5} /> Reject
-                  </button>
-                  <button
-                    onClick={() => setPicked(new Set())}
-                    className="h-9 px-3 rounded-lg text-[11.5px] font-medium text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
-                  >
-                    Clear selection
-                  </button>
-                </div>
-              </div>
-            )}
+            {bulkActionBar}
 
             {/* Table — its own scroll region so vertical scrolling stays
                 inside the panel rather than scrolling the whole page.
