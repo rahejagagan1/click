@@ -175,7 +175,13 @@ export async function POST(req: NextRequest) {
       const lwf  = lwfOvr?.emp ?? 0;
       const pf   = pfBase;
 
-      const totalDed  = pf + esi + pt + tds + lwf + adhocDed;
+      // Fixed ₹200/month tax deduction — applies to regular employees,
+      // not interns. Flat amount regardless of LOP (unlike PT which is
+      // waived when LOP > 5). Placeholder name pending HR confirming
+      // the exact tax this maps to.
+      const additionalTax = s.salaryType === "intern" ? 0 : 200;
+
+      const totalDed  = pf + esi + pt + tds + lwf + additionalTax + adhocDed;
       const net       = gross - totalDed;
 
       // payout-hold rows still generate (so HR sees the math) but with
@@ -201,6 +207,7 @@ export async function POST(req: NextRequest) {
         tds:             tds.toFixed(2),
         pfEmployee:      pf.toFixed(2),
         professionalTax: pt.toFixed(2),
+        additionalTax:   additionalTax.toFixed(2),
         status:          isPayoutHold ? "on_hold" : "generated",
       });
     }
