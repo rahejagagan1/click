@@ -191,8 +191,18 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
   const stepStateUrl = selected?.run?.id ? `/api/hr/payroll/runs/${selected.run.id}/step-state` : null;
   const { data: stepStateData } = useSWR<{ states: Record<string, string> }>(stepStateUrl, fetcher);
   const stepStates: Record<string, string> = stepStateData?.states ?? {};
-  const stepDone = (n: number) => stepStates[String(n)] === "complete";
-  const stepsCompleted = [1, 2, 3, 4, 5, 6].filter(stepDone).length;
+  // Step 7 (Review & Finalise) is the only step not stored in stepStates —
+  // it auto-completes when HR clicks Lock (run.status moves to "locked"
+  // or "paid"). Locking IS the act of confirming the review, so we don't
+  // need a separate "Mark Reviewed" toggle.
+  const stepDone = (n: number) => {
+    if (n === 7) {
+      const s = selected?.run?.status;
+      return s === "locked" || s === "paid";
+    }
+    return stepStates[String(n)] === "complete";
+  };
+  const stepsCompleted = [1, 2, 3, 4, 5, 6, 7].filter(stepDone).length;
 
   // Wraps the PATCH for "Mark as Complete" inside any Step panel.
   // Creates a PayrollRun on the fly if none exists yet — without it,
@@ -408,10 +418,10 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
           <div className="bg-white rounded-xl border border-slate-200 shadow-[0_1px_3px_rgba(15,23,42,0.04)] p-5">
             <div className="flex items-center justify-between mb-1">
               <h3 className="text-[14px] font-semibold text-slate-800">Run Payroll</h3>
-              <span className="text-[11.5px] text-slate-500">{stepsCompleted} of 6 steps completed</span>
+              <span className="text-[11.5px] text-slate-500">{stepsCompleted} of 7 steps completed</span>
             </div>
             <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden mb-4">
-              <div className="h-full bg-[#3b82f6] rounded-full transition-[width] duration-300" style={{ width: `${(stepsCompleted / 6) * 100}%` }} />
+              <div className="h-full bg-[#3b82f6] rounded-full transition-[width] duration-300" style={{ width: `${(stepsCompleted / 7) * 100}%` }} />
             </div>
 
             <div className="mb-4 rounded-lg border border-sky-100 bg-sky-50/70 px-3 py-2 text-[12px] text-slate-700">
@@ -436,6 +446,16 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
                 onClick={() => setStep5Open(true)} done={stepDone(5)} />
               <StepCard step={6} title="Override (PT, ESI, TDS, LWF)"       subtitle={stepDone(6) ? "Marked as complete" : "No Action taken"} Icon={UserCheck}
                 onClick={() => setStep6Open(true)} done={stepDone(6)} />
+              {/* Step 7 — final review of the whole org's payslips before
+                  locking. Auto-completes once the run is locked / paid;
+                  clicking the card opens the same PreCheckPanel HR used
+                  to use via the action-row "Review all employees" button.
+                  Disabled until payslips exist (nothing to review yet). */}
+              <StepCard step={7} title="Review & Finalise"
+                subtitle={stepDone(7) ? "Locked — review confirmed" : (totals?.payslipCount ?? 0) > 0 ? "Open to review every payslip" : "Process payroll first"}
+                Icon={ShieldCheck}
+                onClick={() => setPreCheckOpen(true)}
+                done={stepDone(7)} />
             </div>
 
             {/* Bottom action row — Process / Review / Lock — gated by run
@@ -449,13 +469,6 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
                 className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {busyStep === "run-salary" ? "Processing…" : statusForSteps === "generated" ? "Re-process Payroll" : "Process Payroll"}
-              </button>
-              <button
-                onClick={() => setPreCheckOpen(true)}
-                disabled={!selected?.run || (totals?.payslipCount ?? 0) === 0}
-                className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                Review all employees
               </button>
               <button
                 onClick={() => statusForSteps === "locked" ? doTransition("mark_paid") : doTransition("lock")}
