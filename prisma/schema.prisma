@@ -1660,6 +1660,10 @@ model Payslip {
   tds               Decimal  @default(0) @db.Decimal(12, 2)
   pfEmployee        Decimal  @default(0) @db.Decimal(12, 2)
   professionalTax   Decimal  @default(0) @db.Decimal(10, 2)
+  // Fixed ₹200/month deduction for non-intern employees. Placeholder
+  // name — to be renamed once the exact tax (LWF / city tax / etc.) is
+  // confirmed. Interns store 0.
+  additionalTax     Decimal  @default(0) @db.Decimal(10, 2)
   status            String   @default("generated")  // generated | sent | acknowledged
   createdAt         DateTime @default(now())
 
