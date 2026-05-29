@@ -21,6 +21,8 @@ import CandidateActionModal, { type CandidateAction } from "./CandidateActionMod
 type Stage = { id: number; key: string; label: string; color: string; kind: string; sortOrder?: number };
 type Candidate = {
   id: number; fullName: string; email: string; phone: string | null;
+  /** Gravatar URL resolved from the candidate's email (null if not set). */
+  photoUrl?: string | null;
   experienceYears: number | null; currentCompany: string | null;
   resumeUrl: string | null; source: string | null; overallRating: number | null;
   currentStage: Stage | null; enteredStageAt: string | null;
@@ -38,6 +40,41 @@ function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
   return ((parts[0][0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase();
+}
+
+// Candidate avatar — renders the Gravatar photo for the email when
+// one exists, falls back to initials on a 404/onError. The fallback
+// is the same coloured circle the page rendered before, so a missing
+// photo is visually indistinguishable from the previous version.
+function CandidateAvatar({
+  name, photoUrl, size = 36,
+}: {
+  name: string;
+  photoUrl?: string | null;
+  size?: number;
+}) {
+  const [failed, setFailed] = useState(false);
+  const dim = `${size}px`;
+  if (photoUrl && !failed) {
+    return (
+      <img
+        src={photoUrl}
+        alt={name}
+        onError={() => setFailed(true)}
+        loading="lazy"
+        className="flex-shrink-0 rounded-full object-cover"
+        style={{ width: dim, height: dim }}
+      />
+    );
+  }
+  return (
+    <span
+      className={`flex-shrink-0 inline-flex items-center justify-center rounded-full text-white font-bold ${avatarTone(name)}`}
+      style={{ width: dim, height: dim, fontSize: Math.round(size * 0.32) }}
+    >
+      {initials(name)}
+    </span>
+  );
 }
 const AVATAR_TONES = [
   "bg-[#3b82f6]", "bg-violet-500", "bg-rose-500", "bg-amber-500",
@@ -310,9 +347,7 @@ export default function CandidatesTab() {
                     </td>
                     <td className="px-3 py-3.5 cursor-pointer" onClick={() => setActiveId(c.id)}>
                       <div className="flex items-center gap-3 min-w-0">
-                        <span className={`flex-shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-full text-white text-[11.5px] font-bold ${avatarTone(c.fullName)}`}>
-                          {initials(c.fullName)}
-                        </span>
+                        <CandidateAvatar name={c.fullName} photoUrl={c.photoUrl} size={36} />
                         <div className="min-w-0">
                           <p className="text-[13px] font-semibold text-slate-900 uppercase tracking-wide truncate">{c.fullName}</p>
                           {(c.roleTitle || c.overallRating != null) && (
