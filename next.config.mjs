@@ -81,6 +81,18 @@ const nextConfig = {
                 ],
             },
             {
+                // The public-JD streamer is embedded inside an
+                // <iframe> on /jobs/[slug] so applicants can preview
+                // the JD without downloading. Override the global
+                // X-Frame-Options: DENY to allow same-origin
+                // framing for this endpoint only.
+                source: "/api/public/jd/:slug*",
+                headers: [
+                    { key: "X-Frame-Options",      value: "SAMEORIGIN" },
+                    { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+                ],
+            },
+            {
                 // Logo is static; cache aggressively so repeat visits don’t wait on the network
                 source: "/logo.png",
                 headers: [

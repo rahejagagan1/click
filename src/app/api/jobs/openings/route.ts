@@ -10,12 +10,17 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    // Only PUBLISHED roles with a future (or null) close date show up
+    // here — DRAFT / ON_HOLD / CLOSED are intentionally hidden. The
+    // legacy isOpen flag stays consistent (mirrored by the publish
+    // workflow) so anything pre-migration still appears correctly.
     const rows = await prisma.$queryRawUnsafe<
-      Array<{ id: number; title: string; department: string | null; location: string | null }>
+      Array<{ id: number; title: string; department: string | null; location: string | null; slug: string | null }>
     >(
-      `SELECT id, title, department, location
+      `SELECT id, title, department, location, "publicSlug" AS slug
          FROM "JobOpening"
-        WHERE "isOpen" = true
+        WHERE "status" = 'published'
+          AND ("closesAt" IS NULL OR "closesAt" > NOW())
         ORDER BY title ASC`,
     );
     return NextResponse.json(rows);

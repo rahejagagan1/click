@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Sidebar from "./sidebar";
@@ -9,7 +9,7 @@ import Header from "./header";
 export default function LayoutShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const router = useRouter();
-    const { data: session } = useSession();
+    const { data: session, status: sessionStatus } = useSession();
     const isLoginPage = pathname === "/login";
     const isOnboardingPage = pathname === "/onboarding";
     // Public careers / job-application routes — no sidebar / no header.
@@ -17,15 +17,33 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
     // expose any dashboard chrome.
     const isPublicJobsPage = pathname.startsWith("/jobs");
 
+    // Mount gate: Next 16.2.x throws "Router action dispatched before
+    // initialization" when router.replace() runs during the same
+    // commit as initial mount. Waiting one paint guarantees the
+    // router reducer has booted, eliminating the console spam without
+    // changing the redirect behaviour.
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => { setMounted(true); }, []);
+
     // First-login wizard gate. If HR set onboardingPending on this user,
     // every navigation outside /login or /onboarding bounces to /onboarding
     // until they finish it.
     useEffect(() => {
+        if (!mounted) return;
+        // Hold off until next-auth has actually resolved — running on
+        // status='loading' can briefly flip pending undefined → true →
+        // false and dispatch an unnecessary redirect.
+        if (sessionStatus !== "authenticated") return;
         const pending = (session?.user as any)?.onboardingPending === true;
         if (pending && !isOnboardingPage && !isLoginPage && !isPublicJobsPage) {
             router.replace("/onboarding");
         }
-    }, [session, pathname, isOnboardingPage, isLoginPage, isPublicJobsPage, router]);
+        // `router` is intentionally not in deps — useRouter() returns
+        // a stable reference but Next 16 occasionally re-creates it
+        // during HMR, which re-fires the effect and re-dispatches the
+        // same redirect.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [mounted, sessionStatus, session, pathname, isOnboardingPage, isLoginPage, isPublicJobsPage]);
 
     if (isLoginPage || isPublicJobsPage) {
         return <>{children}</>;
