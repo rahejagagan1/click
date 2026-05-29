@@ -435,7 +435,7 @@ export default function JobApplyPage() {
 
   return (
     <div
-      className="relative min-h-screen overflow-hidden py-10 px-4"
+      className="relative min-h-screen overflow-hidden py-6 sm:py-10 px-3 sm:px-4"
       style={{
         background:
           "linear-gradient(180deg, #f8fafc 0%, #f1f5f9 50%, #e9edf3 100%)",
@@ -457,20 +457,21 @@ export default function JobApplyPage() {
       <div className="relative mx-auto w-full max-w-4xl">
         {/* Card */}
         <div className="relative bg-white border-2 border-slate-300 rounded-2xl shadow-[0_10px_40px_rgba(15,23,42,0.12)] ring-1 ring-slate-900/5 overflow-hidden">
-          {/* Watermark — moved up so it sits behind the upper form
-              fields, slightly brighter to be clearly visible. */}
+          {/* Watermark — sits behind the upper form fields. On mobile
+              we shrink it heavily and push it lower so it doesn't
+              dominate the cramped header area. */}
           <img
             src="/logo.png"
             alt=""
             aria-hidden="true"
-            className="pointer-events-none select-none absolute inset-x-0 mx-auto top-[38%] -translate-y-1/2 w-[280px] max-w-[48%] opacity-[0.18]"
+            className="pointer-events-none select-none absolute inset-x-0 mx-auto top-[42%] sm:top-[38%] -translate-y-1/2 w-[160px] sm:w-[280px] max-w-[60%] sm:max-w-[48%] opacity-[0.12] sm:opacity-[0.18]"
           />
 
           {/* Header box — coloured banner with NB Media branding, back link,
               and page title. Uses an indigo→blue gradient with subtle
               decorative blobs so it feels professional and on-brand. */}
-          <div className="relative z-10 px-7 pt-6">
-            <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-gradient-to-br from-white via-[#f8fafc] to-[#f1f5f9] p-5 shadow-[0_4px_18px_rgba(15,23,42,0.06)]">
+          <div className="relative z-10 px-4 sm:px-7 pt-5 sm:pt-6">
+            <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-gradient-to-br from-white via-[#f8fafc] to-[#f1f5f9] p-4 sm:p-5 shadow-[0_4px_18px_rgba(15,23,42,0.06)]">
               {/* Soft warm brand-tinted glows — kept very subtle so the
                   card reads as professional grey/white. */}
               <div aria-hidden="true" className="pointer-events-none absolute -top-12 -right-10 h-40 w-40 rounded-full bg-[#f97316]/10 blur-2xl" />
@@ -509,8 +510,8 @@ export default function JobApplyPage() {
                 <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg>
                 Back to all job openings
               </a>
-              <h1 className="relative mt-2 text-[22px] font-bold tracking-tight text-slate-800">Apply for this job</h1>
-              <p className="relative mt-1 text-[12.5px] text-slate-500">Upload your resume — we'll auto-fill the rest in seconds.</p>
+              <h1 className="relative mt-2 text-[19px] sm:text-[22px] font-bold tracking-tight text-slate-800">Apply for this job</h1>
+              <p className="relative mt-1 text-[12px] sm:text-[12.5px] text-slate-500">Upload your resume — we'll auto-fill the rest in seconds.</p>
             </div>
           </div>
 
@@ -520,10 +521,10 @@ export default function JobApplyPage() {
               one), and the full description in a collapsible block.
               Only renders when ?role=<id> resolved to a published job. */}
           {job && (
-            <div className="relative z-10 px-7 pt-5">
+            <div className="relative z-10 px-4 sm:px-7 pt-4 sm:pt-5">
               <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
                 {/* Top band */}
-                <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-br from-slate-50 to-white">
+                <div className="px-4 sm:px-5 py-4 border-b border-slate-100 bg-gradient-to-br from-slate-50 to-white">
                   <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#3b82f6] mb-1">
                     {job.brand === "yt_labs" ? "YT Labs" : "NB Media"} · Job details
                   </p>
@@ -548,7 +549,7 @@ export default function JobApplyPage() {
             </div>
           )}
 
-          <form onSubmit={onSubmit} className="relative z-10 px-7 py-6 space-y-5">
+          <form onSubmit={onSubmit} className="relative z-10 px-4 sm:px-7 py-5 sm:py-6 space-y-5">
             {draftRestored && (
               <div className="-mb-1 inline-flex items-center gap-2 rounded-lg bg-emerald-50 ring-1 ring-emerald-200 px-3 py-1.5 text-[11.5px] font-medium text-emerald-800">
                 <Sparkles size={12} className="text-emerald-600" />
@@ -635,13 +636,13 @@ export default function JobApplyPage() {
                   <select
                     value={form.mobileCountryCode ?? "+91"}
                     onChange={(e) => set("mobileCountryCode", e.target.value)}
-                    className="h-10 px-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15"
+                    className="h-10 px-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 shrink-0"
                   >
                     {["+91","+1","+44","+61","+65","+971","+86"].map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                   <input
                     type="tel"
-                    className={inputClsNoIcon.replace("h-11", "h-10")}
+                    className={inputClsNoIcon.replace("h-11", "h-10") + " min-w-0 flex-1"}
                     value={form.phone ?? ""}
                     onChange={(e) => set("phone", e.target.value)}
                     required
@@ -693,8 +694,8 @@ export default function JobApplyPage() {
               </div>
               <div>
                 <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Experience (in years)</label>
-                <div className="flex gap-2">
-                  <div className="flex-1 relative">
+                <div className="flex gap-2 items-center">
+                  <div className="flex-1 min-w-0 relative">
                     <input
                       type="number" min={0} max={60}
                       className={inputClsNoIcon.replace("h-11", "h-10") + " pr-14"}
@@ -707,11 +708,11 @@ export default function JobApplyPage() {
                   <select
                     value={form.experienceMonths ?? "0"}
                     onChange={(e) => set("experienceMonths", e.target.value)}
-                    className="h-10 px-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15"
+                    className="h-10 px-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 shrink-0"
                   >
                     {Array.from({ length: 12 }).map((_, i) => <option key={i} value={i}>{i}</option>)}
                   </select>
-                  <span className="self-center text-[12px] text-slate-500 px-1">Months</span>
+                  <span className="text-[12px] text-slate-500 shrink-0">Months</span>
                 </div>
               </div>
             </div>
@@ -801,7 +802,7 @@ export default function JobApplyPage() {
                 {experiences.map((exp, i) => (
                   <div
                     key={`exp-${i}`}
-                    className="relative rounded-lg border border-slate-200 bg-slate-50/60 p-4"
+                    className="relative rounded-lg border border-slate-200 bg-slate-50/60 p-3 sm:p-4 pr-9 sm:pr-4"
                   >
                     <button
                       type="button"
@@ -901,7 +902,7 @@ export default function JobApplyPage() {
                 {educations.map((edu, i) => (
                   <div
                     key={`edu-${i}`}
-                    className="relative rounded-lg border border-slate-200 bg-slate-50/60 p-4"
+                    className="relative rounded-lg border border-slate-200 bg-slate-50/60 p-3 sm:p-4 pr-9 sm:pr-4"
                   >
                     <button
                       type="button"
@@ -1100,15 +1101,18 @@ function SalaryField({
   return (
     <div>
       <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">{label}</label>
+      {/* Mobile: 2-row layout — currency + amount on top, frequency
+          below full-width. Desktop: single inline row. Stops the
+          amount input from getting squeezed into 60px on phones. */}
       <div className="flex flex-wrap gap-2">
         <select
           value={currency}
           onChange={(e) => onCurrency(e.target.value)}
-          className="h-11 px-3 bg-white border border-slate-200 rounded-lg text-[13.5px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15"
+          className="h-11 px-3 bg-white border border-slate-200 rounded-lg text-[13.5px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 shrink-0"
         >
           {["INR","USD","EUR","GBP","AED","SGD"].map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <div className="relative flex-1 min-w-[160px]">
+        <div className="relative flex-1 min-w-[140px]">
           <IndianRupee size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           <input
             type="number" min={0}
@@ -1121,7 +1125,7 @@ function SalaryField({
         <select
           value={freq}
           onChange={(e) => onFreq(e.target.value)}
-          className="h-11 px-3 bg-white border border-slate-200 rounded-lg text-[13.5px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15"
+          className="h-11 px-3 bg-white border border-slate-200 rounded-lg text-[13.5px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 w-full sm:w-auto"
         >
           <option value="monthly">Monthly</option>
           <option value="annual">Annual</option>
