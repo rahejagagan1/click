@@ -41,6 +41,11 @@ yarn-error.log*
 *.dump
 *.sql.gz
 
+# Runtime uploads (CVs, JDs, KPI docs) — these are user-uploaded files
+# at runtime, not source. They live on the deploy host's disk (or an
+# object store) and must not pollute git history.
+/public/uploads/
+
 # One-off ops / diagnostic scripts — not part of the runtime app.
 # Existing tracked scripts remain in git; new untracked ones stay local.
 /scripts/

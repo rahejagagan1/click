@@ -21,11 +21,11 @@
 //   • Component falls back gracefully when /api/hr/options is
 //     unreachable — the defaults still render.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { ChevronDown, Plus, Trash2, Check, X } from "lucide-react";
+import { ChevronDown, Plus, Trash2, Check, X, Search } from "lucide-react";
 
 type CustomItem = { id: number; listKey: string; value: string };
 
@@ -66,6 +66,11 @@ export default function CustomSelect({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // Free-text filter typed into the search box at the top of the
+  // dropdown. Reset whenever the popup closes so re-opening starts
+  // fresh.
+  const [query, setQuery] = useState("");
+  useEffect(() => { if (!open) setQuery(""); }, [open]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const btnRef     = useRef<HTMLButtonElement>(null);
   const panelRef   = useRef<HTMLDivElement>(null);
@@ -93,18 +98,28 @@ export default function CustomSelect({
   // Combined list, with defaults first, then custom values alphabetised
   // by the API. Dedup so a custom value matching a default doesn't show
   // twice.
-  const seen = new Set<string>();
-  const allOptions: Array<{ value: string; isCustom: boolean; id?: number }> = [];
-  for (const v of defaults) {
-    if (!v || seen.has(v)) continue;
-    seen.add(v);
-    allOptions.push({ value: v, isCustom: false });
-  }
-  for (const c of customs) {
-    if (seen.has(c.value)) continue;
-    seen.add(c.value);
-    allOptions.push({ value: c.value, isCustom: true, id: c.id });
-  }
+  const allOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Array<{ value: string; isCustom: boolean; id?: number }> = [];
+    for (const v of defaults) {
+      if (!v || seen.has(v)) continue;
+      seen.add(v);
+      out.push({ value: v, isCustom: false });
+    }
+    for (const c of customs) {
+      if (seen.has(c.value)) continue;
+      seen.add(c.value);
+      out.push({ value: c.value, isCustom: true, id: c.id });
+    }
+    return out;
+  }, [defaults, customs]);
+
+  // Filtered view of the list based on the search input.
+  const visibleOptions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return allOptions;
+    return allOptions.filter((o) => o.value.toLowerCase().includes(q));
+  }, [allOptions, query]);
 
   // Close on outside-click / Escape. The popup now lives in a portal,
   // so a click on it isn't inside `wrapperRef` — we have to check the
@@ -239,11 +254,43 @@ export default function CustomSelect({
             zIndex:    10000,
           }}
         >
+        {/* Search bar — sticky at the top of the popup. Only shown
+            when there are more than a handful of options so a 3-
+            item list doesn't look over-engineered. */}
+        {allOptions.length > 5 && (
+          <div className="px-2 pt-2 pb-1.5 border-b border-slate-100 bg-white">
+            <div className="relative">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                autoFocus
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
+                  // Enter selects the first visible option — fast keyboard
+                  // workflow for "type a few letters, hit return".
+                  if (e.key === "Enter" && visibleOptions.length > 0) {
+                    e.preventDefault();
+                    onPick(visibleOptions[0].value);
+                  }
+                }}
+                placeholder="Search…"
+                className="h-8 w-full rounded-md border border-slate-200 bg-white pl-7 pr-2 text-[12.5px] text-slate-800 placeholder-slate-400 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15"
+              />
+            </div>
+          </div>
+        )}
         <div className="overflow-y-auto" style={{ maxHeight: popupMaxH }}>
           {allOptions.length === 0 && !adding && (
             <p className="px-3 py-2 text-[12px] text-slate-400">No options yet</p>
           )}
-          {allOptions.map((opt) => {
+          {allOptions.length > 0 && visibleOptions.length === 0 && !adding && (
+            <p className="px-3 py-3 text-[12px] text-slate-400">
+              No matches for "{query}".{!readOnlyOptions && <> Try <button type="button" onClick={() => { setAdding(true); setDraft(query); }} className="font-semibold text-[#3b82f6] hover:underline">adding it as a new value</button>.</>}
+            </p>
+          )}
+          {visibleOptions.map((opt) => {
             const selected = opt.value === value;
             return (
               <div
