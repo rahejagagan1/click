@@ -22,8 +22,9 @@ const ALLOWED_COLORS = new Set([
 ]);
 
 export async function GET(req: NextRequest) {
-  const { errorResponse } = await requireAuth();
+  const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+  if (!isHRAdmin(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
     const { searchParams } = new URL(req.url);
