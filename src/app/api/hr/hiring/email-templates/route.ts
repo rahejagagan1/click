@@ -17,8 +17,9 @@ import { isHRAdmin } from "@/lib/access";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const { errorResponse } = await requireAuth();
+  const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+  if (!isHRAdmin(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   try {
     let rows: any[] = [];
     try {

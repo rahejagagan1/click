@@ -33,8 +33,9 @@ const ALLOWED_VISIBILITY = new Set<Visibility>(["required", "optional", "hidden"
 const CHANNEL_KEYS = new Set<string>(CHANNELS.map((c) => c.key));
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { errorResponse } = await requireAuth();
+  const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+  if (!isHRAdmin(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   try {
     const { id: idParam } = await params;
     const jobId = parseInt(idParam, 10);
