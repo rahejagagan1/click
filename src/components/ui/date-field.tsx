@@ -20,6 +20,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Calendar, ChevronLeft, ChevronRight, X } from "lucide-react";
+import SelectField from "@/components/ui/SelectField";
 
 const MONTHS_FULL = [
   "January", "February", "March",     "April",   "May",      "June",
@@ -232,20 +233,23 @@ export function DateField({
                   aria-label="Previous month"
                 ><ChevronLeft size={15} /></button>
                 <div className="flex items-center gap-1.5">
-                  <select
-                    value={view.month}
-                    onChange={(e) => setMonth(Number(e.target.value))}
-                    className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[12.5px] font-semibold text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15"
-                  >
-                    {MONTHS_FULL.map((m, i) => <option key={m} value={i}>{m}</option>)}
-                  </select>
-                  <select
-                    value={view.year}
-                    onChange={(e) => setYear(Number(e.target.value))}
-                    className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[12.5px] font-semibold text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15"
-                  >
-                    {years.map((y) => <option key={y} value={y}>{y}</option>)}
-                  </select>
+                  {/* Branded portal-rendered selects so the OS-native
+                      dark-navy option-highlight (Chromium on Linux)
+                      doesn't appear inside the calendar header. */}
+                  <SelectField
+                    value={String(view.month)}
+                    onChange={(v) => setMonth(Number(v))}
+                    options={MONTHS_FULL.map((m, i) => ({ value: String(i), label: m }))}
+                    className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[12.5px] font-semibold text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 flex items-center justify-between gap-1"
+                    width={130}
+                  />
+                  <SelectField
+                    value={String(view.year)}
+                    onChange={(v) => setYear(Number(v))}
+                    options={years.map((y) => ({ value: String(y), label: String(y) }))}
+                    className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[12.5px] font-semibold text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 flex items-center justify-between gap-1"
+                    width={90}
+                  />
                 </div>
                 <button
                   type="button"

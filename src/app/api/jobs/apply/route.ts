@@ -53,11 +53,11 @@ export async function POST(req: NextRequest) {
     // fetchOpening tries the wider column set first (with the new
     // allowReapplyDays column) and falls back to the legacy shape on
     // DBs where the wizard migration hasn't run yet.
-    type Opening = { id: number; title: string; status: string; closesAt: Date | null; allowReapplyDays?: number | null };
+    type Opening = { id: number; title: string; status: string; closesAt: Date | null; brand?: string | null; allowReapplyDays?: number | null };
     const fetchOpening = async (whereSql: string, param: number | string): Promise<Opening[]> => {
       try {
         return await prisma.$queryRawUnsafe<Opening[]>(
-          `SELECT id, title, "status", "closesAt", "allowReapplyDays"
+          `SELECT id, title, "status", "closesAt", brand, "allowReapplyDays"
              FROM "JobOpening" WHERE ${whereSql} LIMIT 1`,
           param,
         );
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
         const msg = String(e?.meta?.message || e?.message || "");
         if (!/does not exist|42703/i.test(msg)) throw e;
         return await prisma.$queryRawUnsafe<Opening[]>(
-          `SELECT id, title, "status", "closesAt" FROM "JobOpening" WHERE ${whereSql} LIMIT 1`,
+          `SELECT id, title, "status", "closesAt", brand FROM "JobOpening" WHERE ${whereSql} LIMIT 1`,
           param,
         );
       }
@@ -281,6 +281,49 @@ export async function POST(req: NextRequest) {
       }
     }
     const applicationId = inserted[0]?.id;
+
+    // ── Stamp `source` on the new application ──
+    // Derived from the job's brand so HR can filter / report on
+    // "where did this candidate come from". Written as a separate
+    // UPDATE so a missing column (legacy DBs that haven't run the
+    // Keka migration yet) fails gracefully — the insert above still
+    // landed and the candidate isn't lost.
+    if (applicationId) {
+      const brand = String(opening.brand || "").toLowerCase();
+      // Prefer the HTTP Referer when the request came from a known
+      // partner domain so HR can distinguish syndicated postings.
+      const ref = String(req.headers.get("referer") || "");
+      let host = "";
+      try { host = new URL(ref).hostname.replace(/^www\./, ""); } catch {}
+      const partnerHosts: Record<string, string> = {
+        "linkedin.com":   "LinkedIn",
+        "naukri.com":     "Naukri",
+        "instahyre.com":  "Instahyre",
+        "indeed.com":     "Indeed",
+        "wellfound.com":  "Wellfound",
+        "angel.co":       "Wellfound",
+      };
+      const partnerLabel = Object.entries(partnerHosts).find(([h]) => host.endsWith(h))?.[1] || null;
+      const brandLabel =
+        brand === "nb_media" ? "NB Media Careers" :
+        brand === "yt_labs"  ? "YT Labs Careers"  :
+        "Careers Page";
+      const sourceLabel = partnerLabel ? `${partnerLabel} → ${brandLabel}` : brandLabel;
+      try {
+        await prisma.$executeRawUnsafe(
+          `UPDATE "JobApplication" SET source = $1 WHERE id = $2`,
+          sourceLabel,
+          applicationId,
+        );
+      } catch (e: any) {
+        // 42703 = column "source" does not exist (legacy DB). Non-fatal:
+        // the application row is already saved, we just couldn't tag it.
+        const code = e?.meta?.code || e?.code;
+        if (code !== "42703" && !/does not exist/i.test(String(e?.message))) {
+          console.error("Could not stamp source on JobApplication:", e);
+        }
+      }
+    }
 
     // ── Notify hiring stakeholders ──
     // Same recipient set as feedback / report locks: CEO, HR managers,
