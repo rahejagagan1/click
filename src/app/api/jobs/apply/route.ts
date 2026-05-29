@@ -42,22 +42,92 @@ export async function POST(req: NextRequest) {
     // ── Required basics ──
     const fullName     = get("fullName");
     const email        = get("email");
-    const jobOpeningId = Number(get("jobOpeningId"));
+    // Candidates can land here from /jobs/[slug] → ?role=<id> OR a
+    // partner site that POSTs slug instead of id. Accept either.
+    const idRaw   = Number(get("jobOpeningId"));
+    const slugRaw = get("slug");
     if (!fullName)     return NextResponse.json({ error: "Full name is required" },  { status: 400 });
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
                        return NextResponse.json({ error: "A valid email is required" }, { status: 400 });
-    if (!Number.isFinite(jobOpeningId) || jobOpeningId <= 0)
-                       return NextResponse.json({ error: "Pick a job to apply for" }, { status: 400 });
 
-    // Confirm the opening exists and is still open.
-    const openings = await prisma.$queryRawUnsafe<Array<{ id: number; title: string; isOpen: boolean }>>(
-      `SELECT id, title, "isOpen" FROM "JobOpening" WHERE id = $1 LIMIT 1`,
-      jobOpeningId,
-    );
-    const opening = openings[0];
+    // fetchOpening tries the wider column set first (with the new
+    // allowReapplyDays column) and falls back to the legacy shape on
+    // DBs where the wizard migration hasn't run yet.
+    type Opening = { id: number; title: string; status: string; closesAt: Date | null; allowReapplyDays?: number | null };
+    const fetchOpening = async (whereSql: string, param: number | string): Promise<Opening[]> => {
+      try {
+        return await prisma.$queryRawUnsafe<Opening[]>(
+          `SELECT id, title, "status", "closesAt", "allowReapplyDays"
+             FROM "JobOpening" WHERE ${whereSql} LIMIT 1`,
+          param,
+        );
+      } catch (e: any) {
+        const msg = String(e?.meta?.message || e?.message || "");
+        if (!/does not exist|42703/i.test(msg)) throw e;
+        return await prisma.$queryRawUnsafe<Opening[]>(
+          `SELECT id, title, "status", "closesAt" FROM "JobOpening" WHERE ${whereSql} LIMIT 1`,
+          param,
+        );
+      }
+    };
+
+    let opening: Opening | undefined;
+    if (Number.isFinite(idRaw) && idRaw > 0) {
+      const rows = await fetchOpening("id = $1", idRaw);
+      opening = rows[0];
+    } else if (slugRaw) {
+      const rows = await fetchOpening(`"publicSlug" = $1`, slugRaw);
+      opening = rows[0];
+    } else {
+      return NextResponse.json({ error: "Pick a job to apply for" }, { status: 400 });
+    }
     if (!opening) return NextResponse.json({ error: "Selected role no longer exists" }, { status: 400 });
-    if (!opening.isOpen)
+
+    // Only PUBLISHED jobs accept applications. DRAFT / ON_HOLD / CLOSED
+    // all 400 with a friendly message — drafts shouldn't be reachable
+    // via the public site anyway, but defending against ?role= URL
+    // manipulation is cheap.
+    if (opening.status !== "published")
       return NextResponse.json({ error: "This role is no longer accepting applications" }, { status: 400 });
+    if (opening.closesAt && new Date(opening.closesAt) <= new Date())
+      return NextResponse.json({ error: "Applications for this role have closed" }, { status: 400 });
+    const jobOpeningId = opening.id;
+
+    // ── Reapply window ──────────────────────────────────────────────
+    // `allowReapplyDays` semantics (matches Keka):
+    //   • > 0  → block re-application within the last N days; allow
+    //            after the window passes.
+    //   • = 0  → no restriction; same email can re-apply any time.
+    // The check is by email (lowercased) since that's the candidate's
+    // stable identity on the public form (no auth here).
+    const reapplyDays = Number(opening.allowReapplyDays ?? 0);
+    if (reapplyDays > 0) {
+      const dupRows = await prisma.$queryRawUnsafe<Array<{ createdAt: Date }>>(
+        `SELECT "createdAt"
+           FROM "JobApplication"
+          WHERE "jobOpeningId" = $1
+            AND LOWER(email)   = LOWER($2)
+            AND "createdAt"    > NOW() - ($3 || ' days')::interval
+          ORDER BY "createdAt" DESC
+          LIMIT 1`,
+        jobOpeningId, email, String(reapplyDays),
+      );
+      const prev = dupRows[0];
+      if (prev) {
+        // Privacy-conscious wording: we don't echo the precise prior
+        // application date or the email-specific re-apply timestamp,
+        // since the error response would otherwise be a single-shot
+        // email-enumeration oracle ("did this address apply, and
+        // when?"). The legitimate applicant knows when they applied;
+        // a probing third party gets only a generic refusal.
+        return NextResponse.json(
+          {
+            error: `We're unable to accept another application for this role from you right now. Please try again after ${reapplyDays} day${reapplyDays === 1 ? "" : "s"}.`,
+          },
+          { status: 409 },
+        );
+      }
+    }
 
     // ── Optional fields (validated lightly) ──
     const phone        = get("phone");
@@ -128,34 +198,88 @@ export async function POST(req: NextRequest) {
     const experienceDetails       = get("experienceDetails");
 
     // ── Insert via raw SQL — typed client may not know JobApplication yet ──
-    const inserted = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
-      `INSERT INTO "JobApplication"
-         ("jobOpeningId", "fullName", email, phone, "coverLetter",
-          "linkedinUrl", "portfolioUrl", "experienceYears", "currentCompany",
-          "noticePeriod", "resumeFileName", "resumeUrl",
-          "firstName", "middleName", "lastName", gender, "dateOfBirth",
-          "mobileCountryCode", "experienceMonths",
-          "currentSalary", "currentSalaryCurrency", "currentSalaryFreq",
-          "expectedSalary", "expectedSalaryCurrency", "expectedSalaryFreq",
-          "availableToJoinDays", "preferredLocation", "currentLocation",
-          skills, "educationDetails", "experienceDetails",
-          status, "updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
-               $13,$14,$15,$16,$17,$18,$19,
-               $20,$21,$22,$23,$24,$25,
-               $26,$27,$28,$29,$30,$31,
-               'new', now())
-       RETURNING id`,
-      jobOpeningId, fullName, email, phone, coverLetter,
-      linkedinUrl, portfolioUrl, experienceYears, currentCompany,
-      noticePeriod, resumeFileName, resumeUrl,
-      firstName, middleName, lastName, gender, dateOfBirth,
-      mobileCountryCode, experienceMonths,
-      currentSalary, currentSalaryCurrency, currentSalaryFreq,
-      expectedSalary, expectedSalaryCurrency, expectedSalaryFreq,
-      availableToJoinDays, preferredLocation, currentLocationVal,
-      skills, educationDetails, experienceDetails,
-    );
+    // The full INSERT includes the "smart form" columns (firstName,
+    // dateOfBirth, salary fields, etc.). Older deploys haven't run
+    // the smart-form migration yet (the table is owned by a
+    // different Postgres role on some envs so HR has to run the
+    // ALTER manually). When that happens the INSERT fails with
+    // 42703 — fall back to the legacy column-set so the candidate's
+    // basic info still lands.
+    let inserted: Array<{ id: number }> = [];
+    try {
+      inserted = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+        `INSERT INTO "JobApplication"
+           ("jobOpeningId", "fullName", email, phone, "coverLetter",
+            "linkedinUrl", "portfolioUrl", "experienceYears", "currentCompany",
+            "noticePeriod", "resumeFileName", "resumeUrl",
+            "firstName", "middleName", "lastName", gender, "dateOfBirth",
+            "mobileCountryCode", "experienceMonths",
+            "currentSalary", "currentSalaryCurrency", "currentSalaryFreq",
+            "expectedSalary", "expectedSalaryCurrency", "expectedSalaryFreq",
+            "availableToJoinDays", "preferredLocation", "currentLocation",
+            skills, "educationDetails", "experienceDetails",
+            status, "updatedAt")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+                 $13,$14,$15,$16,$17,$18,$19,
+                 $20,$21,$22,$23,$24,$25,
+                 $26,$27,$28,$29,$30,$31,
+                 'new', now())
+         RETURNING id`,
+        jobOpeningId, fullName, email, phone, coverLetter,
+        linkedinUrl, portfolioUrl, experienceYears, currentCompany,
+        noticePeriod, resumeFileName, resumeUrl,
+        firstName, middleName, lastName, gender, dateOfBirth,
+        mobileCountryCode, experienceMonths,
+        currentSalary, currentSalaryCurrency, currentSalaryFreq,
+        expectedSalary, expectedSalaryCurrency, expectedSalaryFreq,
+        availableToJoinDays, preferredLocation, currentLocationVal,
+        skills, educationDetails, experienceDetails,
+      );
+    } catch (insertErr: any) {
+      const code = insertErr?.meta?.code || insertErr?.code;
+      const msg  = String(insertErr?.meta?.message || insertErr?.message || "");
+      if (code === "42703" || /column .* does not exist/i.test(msg)) {
+        // Legacy fallback — only the columns that have been in
+        // JobApplication since day one. Extra profile data (DOB,
+        // salary, skills, etc.) is dropped on the floor; HR can
+        // re-collect that at the interview stage.
+        // Stash the lost extras in coverLetter so nothing's lost.
+        const dropped = [
+          firstName        && `First name: ${firstName}`,
+          middleName       && `Middle name: ${middleName}`,
+          lastName         && `Last name: ${lastName}`,
+          gender           && `Gender: ${gender}`,
+          dobRaw           && `DOB: ${dobRaw}`,
+          mobileCountryCode && `Country code: ${mobileCountryCode}`,
+          (experienceMonths != null)   && `Experience months: ${experienceMonths}`,
+          currentSalary    && `Current salary: ${currentSalaryCurrency || ""} ${currentSalary} ${currentSalaryFreq || ""}`.trim(),
+          expectedSalary   && `Expected salary: ${expectedSalaryCurrency || ""} ${expectedSalary} ${expectedSalaryFreq || ""}`.trim(),
+          (availableToJoinDays != null) && `Available in: ${availableToJoinDays} days`,
+          preferredLocation && `Preferred location: ${preferredLocation}`,
+          currentLocationVal && `Current location: ${currentLocationVal}`,
+          skills            && `Skills: ${skills}`,
+          educationDetails  && `Education: ${educationDetails}`,
+          experienceDetails && `Experience: ${experienceDetails}`,
+        ].filter(Boolean).join("\n");
+        const mergedCover = [coverLetter, dropped].filter(Boolean).join("\n\n---\n\n") || null;
+
+        inserted = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+          `INSERT INTO "JobApplication"
+             ("jobOpeningId", "fullName", email, phone, "coverLetter",
+              "linkedinUrl", "portfolioUrl", "experienceYears", "currentCompany",
+              "noticePeriod", "resumeFileName", "resumeUrl",
+              status, "updatedAt")
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+                   'new', now())
+           RETURNING id`,
+          jobOpeningId, fullName, email, phone, mergedCover,
+          linkedinUrl, portfolioUrl, experienceYears, currentCompany,
+          noticePeriod, resumeFileName, resumeUrl,
+        );
+      } else {
+        throw insertErr;
+      }
+    }
     const applicationId = inserted[0]?.id;
 
     // ── Notify hiring stakeholders ──
@@ -199,7 +323,32 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, id: applicationId });
   } catch (e: any) {
-    console.error("[/api/jobs/apply] failed:", e);
-    return NextResponse.json({ error: "Could not submit application" }, { status: 500 });
+    // This endpoint is public (anyone on the internet can hit /api/
+    // jobs/apply). Never echo raw Postgres / Prisma messages back —
+    // column names, table names, and error codes are recon for an
+    // attacker. Log everything server-side with a correlation id;
+    // return only a generic class-of-error message plus that id so
+    // HR can quote it to support.
+    const code   = e?.meta?.code   || e?.code;
+    const detail = e?.meta?.message || e?.message || "";
+    const reqId  = randomUUID();
+    console.error("[/api/jobs/apply] failed:", reqId, code, detail, e);
+
+    if (/too many .*connections/i.test(detail) || /connection slots/i.test(detail)) {
+      return NextResponse.json(
+        { error: "We're a bit overloaded right now. Please try again in a few seconds.", reqId },
+        { status: 503 },
+      );
+    }
+    if (code === "42703" || code === "42P01" || /does not exist/i.test(detail)) {
+      return NextResponse.json(
+        { error: "Something's misconfigured on our end. Please try again later — your details haven't been saved.", reqId },
+        { status: 500 },
+      );
+    }
+    return NextResponse.json(
+      { error: "Could not submit application. Please try again later.", reqId },
+      { status: 500 },
+    );
   }
 }
