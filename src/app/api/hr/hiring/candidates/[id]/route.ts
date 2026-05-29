@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { isHRAdmin } from "@/lib/access";
+import { gravatarUrl } from "@/lib/gravatar";
 import { resolveTemplate } from "@/lib/hr/email-merge";
 import { sendEmail } from "@/lib/email/sender";
 import { createGoogleMeetEvent, isGoogleMeetConfigured } from "@/lib/google/calendar";
@@ -136,6 +137,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         ? { id: row.s_id, key: row.s_key, label: row.s_label, kind: row.s_kind, color: row.s_color }
         : null,
       s_id: undefined, s_key: undefined, s_label: undefined, s_kind: undefined, s_color: undefined,
+      // Gravatar URL for the avatar — null when the email has no
+      // Gravatar set or is missing entirely. UI does an onError
+      // fallback to the initials avatar.
+      photoUrl: gravatarUrl(row.email, 240),
     };
 
     return NextResponse.json({ candidate, stageHistory, interviews, activity, offers });
