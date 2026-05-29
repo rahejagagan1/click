@@ -21,6 +21,7 @@ import {
   X, ChevronRight, ChevronLeft, Plus, Trash2, Upload, FileText,
   Briefcase, Users, ListChecks, Globe, Calendar,
   AlertCircle, Check, Pencil, ArrowUp, ArrowDown,
+  ClipboardList, Type, AlignLeft, ToggleRight, List, Hash, CalendarDays, Paperclip,
 } from "lucide-react";
 import { JOB_TITLES }           from "@/lib/job-titles";
 import { JOB_TITLES_YT_LABS }   from "@/lib/job-titles-yt-labs";
@@ -55,6 +56,20 @@ interface LocationRow {
   positions: number;
 }
 
+// Custom screening question authored inside the wizard. Mirrors the
+// /api/hr/hiring/jobs/[id]/questions POST contract. `_localId` is a
+// stable client-only key for the React list + edit-in-place state;
+// the real DB id only comes back after the POST lands.
+type QuestionType = "short_text" | "long_text" | "yes_no" | "multiple_choice" | "number" | "date" | "file";
+interface WizardQuestion {
+  _localId: string;
+  text: string;
+  type: QuestionType;
+  required: boolean;
+  // Only populated for type === "multiple_choice".
+  options: string[];
+}
+
 interface WizardForm {
   // Step 1
   title: string;
@@ -87,15 +102,18 @@ interface WizardForm {
   notifyRecruiterOnNewCandidate: boolean;
   notifyHiringMgrOnNewCandidate: boolean;
   interviewFeedbackVisibility: "open" | "restricted" | "private";
-  // Step 4
+  // Step 4 — custom application-form questions per job
+  questions: WizardQuestion[];
+  // Step 5
   publishChannels: string[];
 }
 
 const STEPS = [
-  { key: "description", label: "Job Description", Icon: FileText  },
-  { key: "details",     label: "Job Details",     Icon: ListChecks },
-  { key: "team",        label: "Hiring Team",     Icon: Users     },
-  { key: "publish",     label: "Publish Options", Icon: Globe     },
+  { key: "description", label: "Job Description", Icon: FileText     },
+  { key: "details",     label: "Job Details",     Icon: ListChecks   },
+  { key: "team",        label: "Hiring Team",     Icon: Users        },
+  { key: "questions",   label: "Application Form", Icon: ClipboardList },
+  { key: "publish",     label: "Publish Options", Icon: Globe        },
 ] as const;
 
 const today = () => {
@@ -162,6 +180,7 @@ export default function CreateJobWizard({
     notifyRecruiterOnNewCandidate: false,
     notifyHiringMgrOnNewCandidate: false,
     interviewFeedbackVisibility: "open",
+    questions: [],
     publishChannels: ["career_site"],
   });
   const setField = <K extends keyof WizardForm>(k: K, v: WizardForm[K]) =>
@@ -194,6 +213,16 @@ export default function CreateJobWizard({
         return "Pick the individual to assign new candidates to.";
     }
     if (s === 3) {
+      // Application Form step — questions are optional, but every
+      // question must have non-empty text. Multiple-choice questions
+      // need at least 2 options.
+      for (const q of form.questions) {
+        if (!q.text.trim()) return "Each question needs a prompt.";
+        if (q.type === "multiple_choice" && q.options.filter((o) => o.trim()).length < 2)
+          return `Multiple-choice question "${q.text.slice(0, 40)}…" needs at least 2 options.`;
+      }
+    }
+    if (s === 4) {
       if (form.publishChannels.length === 0)
         return "Pick at least one publish channel.";
     }
@@ -254,6 +283,32 @@ export default function CreateJobWizard({
         fd.append("file", jdFile);
         await fetch(`/api/hr/hiring/jobs/${id}/jd`, { method: "POST", body: fd });
       }
+      // Persist screening questions in the order they were authored.
+      // POSTed sequentially (not Promise.all) so the server's append-
+      // to-end sortOrder logic preserves the wizard order. Failure to
+      // persist a question doesn't abort job creation — the job is
+      // already saved and HR can add questions later via the per-job
+      // Application Form panel.
+      if (id && form.questions.length > 0) {
+        for (const q of form.questions) {
+          const text = q.text.trim();
+          if (!text) continue;
+          try {
+            await fetch(`/api/hr/hiring/jobs/${id}/questions`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                text,
+                type: q.type,
+                required: q.required,
+                options: q.type === "multiple_choice"
+                  ? q.options.map((o) => o.trim()).filter(Boolean)
+                  : undefined,
+              }),
+            });
+          } catch { /* non-fatal — job is already saved */ }
+        }
+      }
       onCreated(Number(id), status);
     } catch (e: any) {
       setError(e?.message || "Something went wrong");
@@ -313,7 +368,8 @@ export default function CreateJobWizard({
           {step === 0 && <Step1Description form={form} setField={setField} jdFile={jdFile} setJdFile={setJdFile} />}
           {step === 1 && <Step2Details      form={form} setField={setField} totalPositions={totalPositions} />}
           {step === 2 && <Step3HiringTeam  form={form} setField={setField} />}
-          {step === 3 && <Step4Publish      form={form} setField={setField} />}
+          {step === 3 && <Step4Questions   form={form} setField={setField} />}
+          {step === 4 && <Step5Publish      form={form} setField={setField} />}
         </div>
       </div>
     </div>
@@ -1032,9 +1088,291 @@ function Step3HiringTeam({
   );
 }
 
-// ── Step 4: Publish Options ───────────────────────────────────────────
+// ── Step 4: Application Form (custom screening questions) ────────────
+//
+// Lets HR add per-job questions the candidate fills out on /jobs/apply.
+// Each question is a small editable card: text, type, required toggle,
+// and (for multiple_choice) an option list. New questions are appended
+// to the end with a friendly "Add a question" CTA.
+//
+// Question types map 1:1 with the API contract in
+// /api/hr/hiring/jobs/[id]/questions/route.ts ALLOWED_TYPES.
 
-function Step4Publish({
+const QUESTION_TYPES: Array<{ value: QuestionType; label: string; hint: string; Icon: any }> = [
+  { value: "short_text",      label: "Short answer",   hint: "Single-line text",     Icon: Type        },
+  { value: "long_text",       label: "Long answer",    hint: "Paragraph response",   Icon: AlignLeft   },
+  { value: "yes_no",          label: "Yes / No",       hint: "Two-option toggle",    Icon: ToggleRight },
+  { value: "multiple_choice", label: "Multiple choice", hint: "Pick one from a list", Icon: List        },
+  { value: "number",          label: "Number",         hint: "Numeric input",        Icon: Hash        },
+  { value: "date",            label: "Date",           hint: "Calendar picker",      Icon: CalendarDays },
+  { value: "file",            label: "File upload",    hint: "Optional attachment",  Icon: Paperclip   },
+];
+
+function newQuestionId() {
+  return `q-${Date.now()}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+}
+
+function Step4Questions({
+  form, setField,
+}: {
+  form: WizardForm;
+  setField: <K extends keyof WizardForm>(k: K, v: WizardForm[K]) => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const questions = form.questions;
+
+  const update = (next: WizardQuestion[]) => setField("questions", next);
+
+  const add = () => {
+    const blank: WizardQuestion = {
+      _localId: newQuestionId(),
+      text: "",
+      type: "short_text",
+      required: false,
+      options: [],
+    };
+    update([...questions, blank]);
+    setEditingId(blank._localId);
+  };
+
+  const remove = (id: string) => {
+    if (!confirm("Delete this question?")) return;
+    update(questions.filter((q) => q._localId !== id));
+    if (editingId === id) setEditingId(null);
+  };
+
+  const move = (id: string, dir: -1 | 1) => {
+    const i = questions.findIndex((q) => q._localId === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= questions.length) return;
+    const next = [...questions];
+    [next[i], next[j]] = [next[j], next[i]];
+    update(next);
+  };
+
+  const patch = (id: string, change: Partial<WizardQuestion>) => {
+    update(questions.map((q) => (q._localId === id ? { ...q, ...change } : q)));
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-4 pb-12">
+      <SectionCard title="Application form questions" subtitle="Add custom questions candidates fill in alongside their resume. Optional — leave empty to use the default fields only.">
+        {questions.length === 0 ? (
+          <button
+            type="button"
+            onClick={add}
+            className="w-full rounded-xl border-2 border-dashed border-slate-200 hover:border-[#3b82f6]/50 bg-slate-50/40 hover:bg-[#3b82f6]/[0.04] transition-colors px-5 py-8 text-center group"
+          >
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[#3b82f6]/10 text-[#3b82f6] mb-2 group-hover:scale-105 transition-transform">
+              <Plus size={18} />
+            </span>
+            <p className="text-[13.5px] font-semibold text-slate-800">Add your first question</p>
+            <p className="mt-1 text-[12px] text-slate-500 max-w-xs mx-auto">
+              e.g. "Why do you want to work at NB Media?" or "Are you comfortable with night shifts?"
+            </p>
+          </button>
+        ) : (
+          <div className="space-y-3">
+            {questions.map((q, idx) => (
+              <QuestionCard
+                key={q._localId}
+                index={idx}
+                total={questions.length}
+                question={q}
+                editing={editingId === q._localId}
+                onEdit={() => setEditingId(q._localId)}
+                onDone={() => setEditingId(null)}
+                onPatch={(change) => patch(q._localId, change)}
+                onDelete={() => remove(q._localId)}
+                onMove={(dir) => move(q._localId, dir)}
+              />
+            ))}
+            <button
+              type="button"
+              onClick={add}
+              className="w-full inline-flex items-center justify-center gap-2 h-11 rounded-xl border-2 border-dashed border-slate-200 hover:border-[#3b82f6]/50 hover:bg-[#3b82f6]/[0.04] text-[#3b82f6] text-[13px] font-semibold transition-colors"
+            >
+              <Plus size={15} /> Add another question
+            </button>
+          </div>
+        )}
+      </SectionCard>
+
+      <p className="text-[11.5px] text-slate-400 text-center px-4">
+        Tip: ordinary fields like Resume, Email, Experience, and Skills are always asked — you don't need to add them here.
+      </p>
+    </div>
+  );
+}
+
+function QuestionCard({
+  index, total, question, editing,
+  onEdit, onDone, onPatch, onDelete, onMove,
+}: {
+  index: number;
+  total: number;
+  question: WizardQuestion;
+  editing: boolean;
+  onEdit:   () => void;
+  onDone:   () => void;
+  onPatch:  (change: Partial<WizardQuestion>) => void;
+  onDelete: () => void;
+  onMove:   (dir: -1 | 1) => void;
+}) {
+  const typeMeta = QUESTION_TYPES.find((t) => t.value === question.type) ?? QUESTION_TYPES[0];
+  const TypeIcon = typeMeta.Icon;
+  const previewText = question.text.trim() || <span className="italic text-slate-400">Untitled question</span>;
+
+  return (
+    <div className={`rounded-xl border ${editing ? "border-[#3b82f6] bg-[#3b82f6]/[0.03] shadow-[0_4px_18px_-6px_rgba(59,130,246,0.25)]" : "border-slate-200 bg-white hover:border-slate-300"} transition-colors`}>
+      {/* Header strip — always visible. Click to expand. */}
+      <div className="px-4 py-3 flex items-center gap-3">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-500 shrink-0 text-[11px] font-bold tabular-nums">
+          {index + 1}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold text-slate-800 truncate">{previewText}</p>
+          <p className="text-[11px] text-slate-500 mt-0.5 inline-flex items-center gap-1.5">
+            <TypeIcon size={11} /> {typeMeta.label}
+            {question.required && <><span className="text-slate-300">·</span><span className="text-rose-600 font-semibold">Required</span></>}
+          </p>
+        </div>
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => onMove(-1)}
+            disabled={index === 0}
+            className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+            aria-label="Move up"
+          ><ArrowUp size={13} /></button>
+          <button
+            type="button"
+            onClick={() => onMove(1)}
+            disabled={index === total - 1}
+            className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+            aria-label="Move down"
+          ><ArrowDown size={13} /></button>
+          <button
+            type="button"
+            onClick={editing ? onDone : onEdit}
+            className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-500 hover:text-[#3b82f6] hover:bg-slate-100"
+            aria-label={editing ? "Done" : "Edit"}
+          >{editing ? <Check size={14} /> : <Pencil size={13} />}</button>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+            aria-label="Delete"
+          ><Trash2 size={13} /></button>
+        </div>
+      </div>
+
+      {/* Editor — expanded when editing. */}
+      {editing && (
+        <div className="border-t border-slate-200/80 px-4 py-4 space-y-4">
+          {/* Question text */}
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Question</label>
+            <textarea
+              value={question.text}
+              onChange={(e) => onPatch({ text: e.target.value })}
+              rows={2}
+              autoFocus
+              placeholder="e.g. Why are you a good fit for this role?"
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 resize-none"
+            />
+          </div>
+
+          {/* Answer type — pill grid */}
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Answer type</label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {QUESTION_TYPES.map((t) => {
+                const Icon = t.Icon;
+                const active = question.type === t.value;
+                return (
+                  <button
+                    key={t.value}
+                    type="button"
+                    onClick={() => {
+                      const change: Partial<WizardQuestion> = { type: t.value };
+                      // Seed two blank options when switching to MC
+                      // so the editor has something to render.
+                      if (t.value === "multiple_choice" && question.options.length < 2) {
+                        change.options = ["", ""];
+                      }
+                      onPatch(change);
+                    }}
+                    className={`flex flex-col items-center gap-1 px-2 py-2.5 rounded-lg border transition-colors text-[12px] font-semibold ${
+                      active
+                        ? "border-[#3b82f6] bg-[#3b82f6]/10 text-[#1d4ed8]"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    <Icon size={15} className={active ? "text-[#3b82f6]" : "text-slate-400"} />
+                    <span>{t.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Multiple-choice options */}
+          {question.type === "multiple_choice" && (
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Options</label>
+              <div className="space-y-2">
+                {question.options.map((opt, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-400 tabular-nums w-5">{i + 1}.</span>
+                    <input
+                      type="text"
+                      value={opt}
+                      onChange={(e) => {
+                        const next = [...question.options];
+                        next[i] = e.target.value;
+                        onPatch({ options: next });
+                      }}
+                      placeholder={`Option ${i + 1}`}
+                      className="flex-1 h-9 px-3 rounded-md border border-slate-200 text-[13px] focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onPatch({ options: question.options.filter((_, j) => j !== i) })}
+                      disabled={question.options.length <= 2}
+                      className="h-9 w-9 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                      aria-label="Remove option"
+                    ><Trash2 size={13} /></button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => onPatch({ options: [...question.options, ""] })}
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-semibold text-[#3b82f6] hover:bg-[#3b82f6]/10"
+                ><Plus size={12} /> Add option</button>
+              </div>
+            </div>
+          )}
+
+          {/* Required toggle */}
+          <label className="flex items-center gap-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={question.required}
+              onChange={(e) => onPatch({ required: e.target.checked })}
+              className="h-4 w-4 rounded border-slate-300 accent-[#3b82f6]"
+            />
+            <span className="text-[12.5px] text-slate-700">Required — candidates must answer to submit</span>
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Step 5: Publish Options ───────────────────────────────────────────
+
+function Step5Publish({
   form, setField,
 }: {
   form: WizardForm;
