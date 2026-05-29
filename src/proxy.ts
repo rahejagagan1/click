@@ -8,12 +8,18 @@ import { getToken } from "next-auth/jwt";
 // reachable without an @nbmediaproductions.com / @ytipro.com login.
 // /api/jobs/* powers those pages (form-fields, openings, [id],
 // parse-resume, apply) so applicants can submit without a session.
+// /api/public/* is reserved by convention for read-only, published-
+// data-only endpoints (the JD PDF streamer, the public openings
+// list). NEVER add an endpoint that touches User / Attendance /
+// payroll / candidate-PII tables here — anything under /api/public
+// is world-readable.
 const PUBLIC_PATHS = [
     "/login",
     "/api/auth",
     "/api/health",
     "/jobs",
     "/api/jobs",
+    "/api/public",
 ];
 
 export async function proxy(request: NextRequest) {

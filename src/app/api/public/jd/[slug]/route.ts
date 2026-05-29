@@ -87,6 +87,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ slu
       // upload mints a new UUID-prefixed name).
       "Cache-Control": "public, max-age=3600",
       "X-Content-Type-Options": "nosniff",
+      // Allow same-origin framing so /jobs/[slug] can <iframe> this
+      // response. Setting these here (vs. only in next.config.mjs)
+      // ensures route-handler headers win — the global (.*) rule
+      // also sets X-Frame-Options: DENY and Next.js MERGES the two,
+      // which causes Chrome/Brave to reject the iframe with "refused
+      // to connect". Route-handler headers replace the config ones,
+      // so the public JD viewer works.
+      "X-Frame-Options":          "SAMEORIGIN",
+      "Content-Security-Policy":  "frame-ancestors 'self'",
     },
   });
 }

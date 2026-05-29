@@ -342,47 +342,70 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
               <Card>
                 <CardHeader title="Full job description" eyebrow="Read the brief" />
                 <div className="px-6 sm:px-8 pb-8">
-                  <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 ring-1 ring-blue-100 text-[#3b82f6] flex-shrink-0">
-                        <FileText size={17} />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#3b82f6]">PDF</p>
-                        <p className="text-[13px] font-semibold text-slate-800 truncate">
-                          {job.jdFileName || "Job description"}
-                        </p>
+                  {/* Branded document frame — looks like a polished
+                      preview card instead of the raw browser PDF
+                      viewer. The PDF itself is rendered chromeless
+                      (toolbar=0) and our own header strip lives above
+                      it so the page's design owns the visuals end-to-
+                      end. */}
+                  <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
+                    {/* Top action strip — subtle brand-blue wash. */}
+                    <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 bg-gradient-to-r from-[#eff6ff] via-white to-white border-b border-slate-200/80 flex-wrap">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#3b82f6] text-white shadow-sm shadow-blue-200 flex-shrink-0">
+                          <FileText size={16} strokeWidth={2.2} />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-[#3b82f6]">
+                            Job description · PDF preview
+                          </p>
+                          <p className="text-[13px] font-semibold text-slate-800 truncate leading-tight mt-0.5">
+                            {job.jdFileName || "Job description"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={`/api/public/jd/${slug}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-200 bg-white hover:border-[#3b82f6] hover:text-[#3b82f6] text-slate-700 text-[12px] font-semibold transition-colors"
+                        >Open full screen</a>
+                        <a
+                          href={`/api/public/jd/${slug}`}
+                          download={job.jdFileName || undefined}
+                          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[12px] font-semibold transition-colors shadow-sm shadow-blue-200"
+                        ><Download size={12} /> Download</a>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <a
-                        href={job.jdFileUrl}
-                        target="_blank" rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-200 bg-white hover:border-[#3b82f6] hover:text-[#3b82f6] text-slate-700 text-[12px] font-semibold transition-colors"
-                      >Open full screen</a>
-                      <a
-                        href={job.jdFileUrl}
-                        download={job.jdFileName || undefined}
-                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-[#60a5fa] hover:bg-[#3b82f6] text-white text-[12px] font-semibold transition-colors"
-                      ><Download size={12} /> Download</a>
+
+                    {/* PDF surface — chromeless, sits like a document
+                        card inside the branded frame. Streamed through
+                        /api/public/jd/[slug] to pin Content-Type +
+                        inline disposition (Next.js static serving
+                        sometimes returns octet-stream and Chrome then
+                        refuses to embed). */}
+                    <div
+                      className="bg-slate-50 p-2 sm:p-4"
+                      style={{ boxShadow: "inset 0 1px 0 rgba(15,23,42,0.03)" }}
+                    >
+                      <iframe
+                        src={`/api/public/jd/${slug}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                        title={job.jdFileName || "Job description"}
+                        className="w-full block rounded-lg bg-white shadow-sm"
+                        style={{ height: 820, border: 0 }}
+                      />
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 overflow-hidden bg-slate-50">
-                    {/* Stream the PDF through /api/public/jd/[slug]
-                        so we control Content-Type + Content-
-                        Disposition: inline. Next.js static serving
-                        from /public sometimes returns octet-stream,
-                        which Chrome refuses to render in an iframe. */}
-                    <iframe
-                      src={`/api/public/jd/${slug}#view=FitH&toolbar=1&navpanes=0`}
-                      title={job.jdFileName || "Job description"}
-                      className="w-full block"
-                      style={{ height: 820, border: 0 }}
-                    />
-                  </div>
-                  <p className="mt-2 text-[10.5px] text-slate-400">
-                    Can't see the PDF? <a href={`/api/public/jd/${slug}`} target="_blank" rel="noopener noreferrer" className="text-[#3b82f6] hover:underline font-medium">Open it in a new tab</a>.
+                  <p className="mt-3 text-[10.5px] text-slate-400 text-center">
+                    Trouble viewing?{" "}
+                    <a href={`/api/public/jd/${slug}`} target="_blank" rel="noopener noreferrer" className="text-[#3b82f6] hover:underline font-medium">
+                      Open the PDF in a new tab
+                    </a>
+                    {" "}or{" "}
+                    <a href={`/api/public/jd/${slug}`} download={job.jdFileName || undefined} className="text-[#3b82f6] hover:underline font-medium">
+                      download it
+                    </a>.
                   </p>
                 </div>
               </Card>
