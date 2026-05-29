@@ -130,13 +130,13 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
 
       {/* ── Top nav ─────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-[#e2e8f0]/85 backdrop-blur supports-[backdrop-filter]:bg-[#e2e8f0]/70">
-        <div className="max-w-5xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
-          <Link href="/jobs" className="flex items-center gap-2.5 group">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#f8fafc] ring-1 ring-slate-300/60 shadow-sm overflow-hidden transition-transform group-hover:scale-[1.04]">
+        <div className="max-w-5xl mx-auto px-4 sm:px-8 h-16 flex items-center justify-between gap-2">
+          <Link href="/jobs" className="flex items-center gap-2.5 group min-w-0">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#f8fafc] ring-1 ring-slate-300/60 shadow-sm overflow-hidden transition-transform group-hover:scale-[1.04] shrink-0">
               <img src="/logo.png" alt={`${brand} logo`} className="h-7 w-7 object-contain" />
             </div>
-            <div className="leading-tight">
-              <p className="text-[13.5px] font-semibold text-slate-900">{brand}</p>
+            <div className="leading-tight min-w-0">
+              <p className="text-[13.5px] font-semibold text-slate-900 truncate">{brand}</p>
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Careers</p>
             </div>
           </Link>
@@ -163,16 +163,16 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
             entrance — same treatment as the careers index hero. */}
         <PlayBadges />
 
-        <div className="w-full max-w-5xl mx-auto px-5 sm:px-8 pt-14 sm:pt-20 pb-16 sm:pb-24">
+        <div className="w-full max-w-5xl mx-auto px-4 sm:px-8 pt-10 sm:pt-20 pb-12 sm:pb-24">
           <Reveal direction="up">
-            <nav className="flex items-center gap-1.5 text-[12px] text-slate-500 mb-7">
-              <Link href="/jobs" className="hover:text-slate-900 transition-colors font-medium">Careers</Link>
+            <nav className="flex items-center gap-1.5 text-[12px] text-slate-500 mb-7 overflow-x-auto whitespace-nowrap">
+              <Link href="/jobs" className="hover:text-slate-900 transition-colors font-medium shrink-0">Careers</Link>
               {showDeptInBreadcrumb && (<>
-                <span className="text-slate-300">/</span>
-                <span>{job.department}</span>
+                <span className="text-slate-300 shrink-0">/</span>
+                <span className="shrink-0">{job.department}</span>
               </>)}
-              <span className="text-slate-300">/</span>
-              <span className="text-slate-900 font-medium truncate max-w-[260px]">{job.title}</span>
+              <span className="text-slate-300 shrink-0">/</span>
+              <span className="text-slate-900 font-medium truncate max-w-[180px] sm:max-w-[260px]">{job.title}</span>
             </nav>
 
             <div className="inline-flex items-center gap-2 rounded-full bg-[#f8fafc] ring-1 ring-slate-300/60 px-3 py-1 text-[11px] font-semibold shadow-[0_1px_2px_rgba(15,23,42,0.04)] mb-6">
@@ -189,14 +189,14 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
           {/* Title — word-by-word reveal. Plain slate-900 so the
               animation is the focus, not a gradient. */}
           <h1
-            className="font-semibold tracking-[-0.025em] text-slate-900 leading-[1.04]"
-            style={{ fontSize: "clamp(2.4rem, 6vw, 3.8rem)" }}
+            className="font-semibold tracking-[-0.025em] text-slate-900 leading-[1.08] sm:leading-[1.04] break-words"
+            style={{ fontSize: "clamp(1.85rem, 6vw, 3.8rem)" }}
           >
             <WordReveal text={job.title} staggerMs={70} baseDelayMs={120} />
           </h1>
           {job.department && (
             <Reveal direction="up" delay={120 + job.title.split(/\s+/).length * 70}>
-              <p className="mt-4 text-[16px] text-slate-500">
+              <p className="mt-4 text-[14.5px] sm:text-[16px] text-slate-500">
                 on the <span className="font-medium text-slate-800">{job.department}</span> team
               </p>
             </Reveal>
@@ -263,7 +263,7 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
       </section>
 
       {/* ── Body ────────────────────────────────────────────── */}
-      <main className="max-w-5xl mx-auto px-5 sm:px-8 py-12 sm:py-16 space-y-8">
+      <main className="max-w-5xl mx-auto px-4 sm:px-8 py-10 sm:py-16 space-y-6 sm:space-y-8">
         {/* At a glance — Each Fact cell staggers in. */}
         <section className="">
           <Reveal direction="up" className="w-full">
@@ -290,7 +290,7 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
                 })()}
               </dl>
               {job.jdFileUrl && (
-                <div className="border-t border-slate-100 px-6 sm:px-8 py-4 flex items-center justify-between gap-4 flex-wrap">
+                <div className="border-t border-slate-100 px-5 sm:px-8 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 ring-1 ring-blue-100 text-[#3b82f6] flex-shrink-0">
                       <FileText size={15} />
@@ -304,7 +304,7 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
                     href={job.jdFileUrl}
                     download={job.jdFileName || undefined}
                     target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-[#60a5fa] hover:bg-[#3b82f6] text-white text-[12px] font-semibold transition-colors"
+                    className="inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg bg-[#60a5fa] hover:bg-[#3b82f6] text-white text-[12px] font-semibold transition-colors w-full sm:w-auto"
                   ><Download size={12} /> Download JD</a>
                 </div>
               )}
@@ -317,13 +317,13 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
           <Reveal direction="up" className="w-full">
             <Card>
               <CardHeader title="About the role" eyebrow="The opportunity" />
-              <div className="px-8 sm:px-10 pb-10">
+              <div className="px-5 sm:px-10 pb-7 sm:pb-10">
                 {job.description && job.description.trim() ? (
-                  <div className="text-[15px] text-slate-700 leading-[1.85] whitespace-pre-wrap max-w-3xl">
+                  <div className="text-[14px] sm:text-[15px] text-slate-700 leading-[1.8] whitespace-pre-wrap max-w-3xl break-words">
                     {job.description}
                   </div>
                 ) : (
-                  <div className="text-[14px] text-slate-600 leading-[1.75] rounded-xl bg-slate-50 border border-slate-100 px-5 py-4 max-w-3xl">
+                  <div className="text-[13.5px] sm:text-[14px] text-slate-600 leading-[1.75] rounded-xl bg-slate-50 border border-slate-100 px-4 sm:px-5 py-4 max-w-3xl">
                     Full role description is shared at the interview stage. If this opportunity excites you, apply and we'll send the brief along.
                   </div>
                 )}
@@ -341,21 +341,23 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
             <Reveal direction="up" className="w-full">
               <Card>
                 <CardHeader title="Full job description" eyebrow="Read the brief" />
-                <div className="px-6 sm:px-8 pb-8">
+                <div className="px-4 sm:px-8 pb-6 sm:pb-8">
                   {/* Branded document frame — looks like a polished
                       preview card instead of the raw browser PDF
                       viewer. The PDF itself is rendered chromeless
                       (toolbar=0) and our own header strip lives above
                       it so the page's design owns the visuals end-to-
                       end. */}
-                  <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
-                    {/* Top action strip — subtle brand-blue wash. */}
-                    <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 bg-gradient-to-r from-[#eff6ff] via-white to-white border-b border-slate-200/80 flex-wrap">
+                  <div className="rounded-xl sm:rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
+                    {/* Top action strip — stacks vertically on phones
+                        so the title and CTAs each get a full row,
+                        side-by-side on tablet/desktop. */}
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 sm:px-5 py-3 bg-gradient-to-r from-[#eff6ff] via-white to-white border-b border-slate-200/80">
                       <div className="flex items-center gap-3 min-w-0">
                         <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#3b82f6] text-white shadow-sm shadow-blue-200 flex-shrink-0">
                           <FileText size={16} strokeWidth={2.2} />
                         </span>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-[#3b82f6]">
                             Job description · PDF preview
                           </p>
@@ -364,40 +366,38 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
                         <a
                           href={`/api/public/jd/${slug}`}
                           target="_blank" rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-200 bg-white hover:border-[#3b82f6] hover:text-[#3b82f6] text-slate-700 text-[12px] font-semibold transition-colors"
-                        >Open full screen</a>
+                          className="inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 h-9 px-3 rounded-lg border border-slate-200 bg-white hover:border-[#3b82f6] hover:text-[#3b82f6] text-slate-700 text-[12px] font-semibold transition-colors"
+                        >Open</a>
                         <a
                           href={`/api/public/jd/${slug}`}
                           download={job.jdFileName || undefined}
-                          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[12px] font-semibold transition-colors shadow-sm shadow-blue-200"
+                          className="inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 h-9 px-3 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[12px] font-semibold transition-colors shadow-sm shadow-blue-200"
                         ><Download size={12} /> Download</a>
                       </div>
                     </div>
 
-                    {/* PDF surface — chromeless, sits like a document
-                        card inside the branded frame. Streamed through
-                        /api/public/jd/[slug] to pin Content-Type +
-                        inline disposition (Next.js static serving
-                        sometimes returns octet-stream and Chrome then
-                        refuses to embed). */}
+                    {/* PDF surface — responsive height: ~60vh on
+                        phones, 820px on tablets+ so the document
+                        feels like a previewable card rather than a
+                        forced 820px column. */}
                     <div
-                      className="bg-slate-50 p-2 sm:p-4"
+                      className="bg-slate-50 p-1.5 sm:p-4"
                       style={{ boxShadow: "inset 0 1px 0 rgba(15,23,42,0.03)" }}
                     >
                       <iframe
                         src={`/api/public/jd/${slug}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
                         title={job.jdFileName || "Job description"}
-                        className="w-full block rounded-lg bg-white shadow-sm"
-                        style={{ height: 820, border: 0 }}
+                        className="w-full block rounded-md sm:rounded-lg bg-white shadow-sm h-[60vh] min-h-[420px] sm:h-[820px]"
+                        style={{ border: 0 }}
                       />
                     </div>
                   </div>
 
-                  <p className="mt-3 text-[10.5px] text-slate-400 text-center">
+                  <p className="mt-3 text-[10.5px] text-slate-400 text-center px-2">
                     Trouble viewing?{" "}
                     <a href={`/api/public/jd/${slug}`} target="_blank" rel="noopener noreferrer" className="text-[#3b82f6] hover:underline font-medium">
                       Open the PDF in a new tab
@@ -440,8 +440,8 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
               <div aria-hidden="true" className="absolute -top-12 -right-12 h-44 w-44 rounded-full bg-[#3b82f6]/[0.06] blur-3xl pointer-events-none" />
               <div className="relative">
                 <CardHeader title={`About ${brand}`} eyebrow="Who we are" />
-                <div className="px-8 sm:px-10 pb-10">
-                  <p className="text-[15px] text-slate-700 leading-[1.8] max-w-3xl">
+                <div className="px-5 sm:px-10 pb-7 sm:pb-10">
+                  <p className="text-[14px] sm:text-[15px] text-slate-700 leading-[1.8] max-w-3xl">
                     {brand === "YT Labs"
                       ? "YT Labs is the strategy, research, and creative engine behind some of India's most-watched YouTube channels. We work end-to-end with creators — from idea to thumbnail to upload — and the team behind the scenes is small, sharp, and unusually obsessed with detail."
                       : "NB Media Productions is an end-to-end content studio shipping work for India's biggest creators and brands. From scripts to edits to release, every part of the pipeline runs in-house. You'll see your work go live on the channels you watch within weeks of joining."}
@@ -494,10 +494,10 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
                 className="absolute inset-x-0 top-0 h-[2px]"
                 style={{ background: "linear-gradient(90deg, transparent 0%, #ef4444 25%, #f97316 50%, #fbbf24 75%, transparent 100%)" }}
               />
-            <div className="relative px-7 sm:px-10 py-10 sm:py-12 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+            <div className="relative px-5 sm:px-10 py-8 sm:py-12 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 sm:gap-6">
               <div className="max-w-xl">
                 <p className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-slate-500 mb-3">Ready when you are</p>
-                <h2 className="text-[24px] sm:text-[28px] font-semibold tracking-tight leading-tight text-slate-900">
+                <h2 className="text-[22px] sm:text-[28px] font-semibold tracking-tight leading-tight text-slate-900">
                   Join{" "}
                   <span
                     style={{
@@ -519,7 +519,7 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
               <Magnetic strength={0.16}>
                 <Link
                   href={applyHref}
-                  className="group inline-flex items-center gap-2 h-12 px-6 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[13.5px] font-semibold transition-colors shadow-[0_8px_20px_-6px_rgba(15,23,42,0.4)] whitespace-nowrap"
+                  className="group inline-flex items-center justify-center gap-2 h-12 px-6 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[13.5px] font-semibold transition-colors shadow-[0_8px_20px_-6px_rgba(15,23,42,0.4)] whitespace-nowrap w-full sm:w-auto"
                 >
                   Apply for this role
                   <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
@@ -563,9 +563,9 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 
 function CardHeader({ title, eyebrow }: { title: string; eyebrow: string }) {
   return (
-    <div className="px-8 sm:px-10 pt-9 pb-6">
-      <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#3b82f6] mb-2">{eyebrow}</p>
-      <h2 className="text-[24px] sm:text-[28px] font-semibold text-slate-900 tracking-tight">{title}</h2>
+    <div className="px-5 sm:px-10 pt-7 sm:pt-9 pb-5 sm:pb-6">
+      <p className="text-[10.5px] sm:text-[11px] font-bold uppercase tracking-[0.16em] text-[#3b82f6] mb-2">{eyebrow}</p>
+      <h2 className="text-[20px] sm:text-[28px] font-semibold text-slate-900 tracking-tight">{title}</h2>
     </div>
   );
 }
