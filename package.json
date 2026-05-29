@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "prisma migrate deploy && prisma generate",
     "dev": "next dev -p 3005",
     "build": "prisma migrate deploy && prisma generate && next build",
     "build:ci": "prisma generate && next build",
@@ -19,6 +20,7 @@
     "autoprefixer": "^10.4.27",
     "clsx": "^2.1.1",
     "exceljs": "^4.4.0",
+    "googleapis": "^173.0.0",
     "lru-cache": "^11.2.6",
     "lucide-react": "^1.8.0",
     "mammoth": "^1.12.0",

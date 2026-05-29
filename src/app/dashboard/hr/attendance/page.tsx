@@ -1627,19 +1627,21 @@ export default function AttendancePage() {
                             )}
                             {/* MISSED — hidden as soon as the employee has
                                 either a PENDING or an APPROVED regularization
-                                for this day. Once HR is in the loop (or has
-                                already corrected the row), the warning chip
-                                is noise. */}
-                            {missedClockOut && !hasPendingAny && !approvedRegRow && (
+                                for this day, OR the Attendance row itself
+                                has been flagged isRegularized=true (server
+                                already corrected the row even if regsData
+                                hasn't refreshed in this client yet). */}
+                            {missedClockOut && !hasPendingAny && !approvedRegRow && !rec.isRegularized && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold uppercase tracking-wider">Missed</span>
                             )}
                             {/* LATE — first clock-in past 10:00 AM IST.
                                 Hidden when a regularization is pending OR
-                                approved for the day, since the regularized
-                                clock-in time supersedes the original late
-                                punch and HR has already taken / is taking
-                                action. */}
-                            {isLateFirstIn && hasClock && !hasPendingAny && !approvedRegRow && (
+                                approved for the day, OR the Attendance row
+                                already carries isRegularized=true. Without
+                                the third guard, approved late-clock-in
+                                regularizations leave the LATE chip up if
+                                regsData hadn't been refreshed yet. */}
+                            {isLateFirstIn && hasClock && !hasPendingAny && !approvedRegRow && !rec.isRegularized && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-bold uppercase tracking-wider">Late</span>
                             )}
                             {/* "ON BREAK" — currently between sessions on
@@ -1894,16 +1896,33 @@ export default function AttendancePage() {
                         <td className="px-5 py-3">
                           {(isHoliday || isWeekend) ? (
                             <span className="text-slate-300 text-lg">···</span>
-                          ) : (
-                            <RowMenu
-                              onRegularize={() => { setRegPrefillDate(dateIso); setShowRegModal(true); }}
-                              onWFH={() => openForm("wfh", dateIso)}
-                              onOnDuty={() => openForm("on_duty", dateIso)}
-                              onLeave={() => openForm("leave", dateIso)}
-                              disableRegularize={hasPendingReg}
-                              disableRegularizeReason="You already have a pending regularization for this date"
-                            />
-                          )}
+                          ) : (() => {
+                            // Hide Regularize whenever there's nothing to
+                            // fix — pending or approved request already
+                            // exists, day is already on leave / WFH, or
+                            // the user already clocked the full 9 hours
+                            // (the rule the rederive step uses to flip
+                            // status → "present"). Reason string is
+                            // shown as a tooltip on the disabled item so
+                            // the menu still surfaces *why* it's gone.
+                            let disableReason: string | null = null;
+                            if (hasPendingReg)          disableReason = "You already have a pending regularization for this date";
+                            else if (approvedRegRow)    disableReason = "Regularization for this date has already been approved";
+                            else if (rec.isRegularized) disableReason = "This date has already been regularized";
+                            else if (onLeave)           disableReason = "You're on leave for this date";
+                            else if (approvedWfh)       disableReason = "WFH is approved for this date";
+                            else if (met9h)             disableReason = "9 hours already completed — nothing to regularize";
+                            return (
+                              <RowMenu
+                                onRegularize={() => { setRegPrefillDate(dateIso); setShowRegModal(true); }}
+                                onWFH={() => openForm("wfh", dateIso)}
+                                onOnDuty={() => openForm("on_duty", dateIso)}
+                                onLeave={() => openForm("leave", dateIso)}
+                                disableRegularize={!!disableReason}
+                                disableRegularizeReason={disableReason ?? undefined}
+                              />
+                            );
+                          })()}
                         </td>
                       </tr>
                     );

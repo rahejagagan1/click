@@ -13,10 +13,11 @@ import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import { DatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
+import { CalendarField } from "@/components/ui/calendar-field";
 import {
   CheckCircle2, AlertCircle, User, Mail, Phone, Briefcase,
   Building2, Clock, Link as LinkIcon, FileText, Upload, X,
-  Sparkles, Send, IndianRupee,
+  Sparkles, Send, IndianRupee, MapPin,
 } from "lucide-react";
 
 // Date-picker class tuned to match the form's input height and brand
@@ -111,6 +112,22 @@ export default function JobApplyPage() {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone]     = useState(false);
   const [error, setError]   = useState("");
+  // The role id from ?role=<id> on the URL. Drives the Job Details
+  // panel so candidates see exactly what they're applying for —
+  // title, brand, meta, full description, and a downloadable JD.
+  const [roleId, setRoleId] = useState<number | null>(null);
+  // (The Job Description download + collapsible text live on the
+  // public /jobs/[slug] page now — the apply form just shows the
+  // basic title + meta so the candidate knows what they're applying
+  // for without duplicating the JD download.)
+  // Fetch the full job whenever roleId resolves. Soft-fails — if the
+  // endpoint 404s (job closed, removed, etc.), the panel just hides
+  // and the candidate continues with the generic form.
+  const { data: jobDetail } = useSWR<{ job: any }>(
+    roleId ? `/api/jobs/${roleId}` : null,
+    fetcher,
+  );
+  const job = jobDetail?.job;
   // Single resume control at the top of the form — drives both the
   // auto-fill (parse) and the actual file submission.
   const smartInputRef = useRef<HTMLInputElement>(null);
@@ -118,7 +135,10 @@ export default function JobApplyPage() {
   const [parsedFields, setParsedFields] = useState<string[]>([]); // names of fields we auto-filled, used for the success badge
   const [parseWarning, setParseWarning] = useState("");           // shown inline next to the resume so users see it
   const [skills, setSkills] = useState<string[]>([]);             // tag-style skill chips
-  const [additionalDoc, setAdditionalDoc] = useState<File | null>(null); // optional second file (cert / portfolio etc.)
+  // Multi-file additional documents (portfolios, certificates, etc.).
+  // First slot mirrors the uploaded resume so HR sees a copy there
+  // automatically; the candidate can stack more on top.
+  const [additionalDocs, setAdditionalDocs] = useState<File[]>([]);
   const [consent, setConsent] = useState(false);                  // privacy-consent checkbox
   // Repeatable experience/education sub-forms — each "+ Add" appends a
   // blank entry which the candidate fills in. Serialized to JSON on
@@ -129,13 +149,73 @@ export default function JobApplyPage() {
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  // Pre-select an opening if the URL carries ?role=<id>.
+  // ── Autosave (draft) ─────────────────────────────────────────
+  // Persist text fields + repeatables to localStorage so candidates
+  // don't lose their progress on accidental refresh / tab close.
+  // Files (resume, additionalDocs) can't go to localStorage so they
+  // stay in memory and must be re-picked on a fresh load — we show
+  // a small "Draft restored" badge to tell the candidate what came
+  // back and what didn't.
+  const DRAFT_KEY = "nb-apply-draft-v1";
+  const [draftRestored, setDraftRestored] = useState(false);
+  // Hydrate from localStorage exactly once on mount. URL-derived
+  // jobOpeningId / roleId still wins over the saved draft so
+  // sharing /jobs/apply?role=N from a different role doesn't snap
+  // back to the previous draft's role.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as {
+        form?: Record<string, string>;
+        skills?: string[];
+        experiences?: ExperienceEntry[];
+        educations?: EducationEntry[];
+        consent?: boolean;
+      };
+      if (draft.form)        setForm((cur) => ({ ...draft.form, ...cur })); // URL params win
+      if (draft.skills)      setSkills(draft.skills);
+      if (draft.experiences) setExperiences(draft.experiences);
+      if (draft.educations)  setEducations(draft.educations);
+      if (typeof draft.consent === "boolean") setConsent(draft.consent);
+      setDraftRestored(true);
+    } catch { /* malformed JSON — ignore and start fresh */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pre-select an opening if the URL carries ?role=<id>. Runs AFTER
+  // the draft hydration above so a fresh ?role= overrides any
+  // stale role in the draft.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const role = params.get("role");
-    if (role && /^\d+$/.test(role)) set("jobOpeningId", role);
+    if (role && /^\d+$/.test(role)) {
+      set("jobOpeningId", role);
+      setRoleId(Number(role));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Debounced save — every change to text fields / skills / repeatable
+  // sub-forms / consent persists 500ms later. Skips files (can't be
+  // serialised) and skips empty drafts on first mount.
+  useEffect(() => {
+    const hasContent =
+      Object.values(form).some((v) => v && String(v).trim().length > 0) ||
+      skills.length > 0 ||
+      experiences.length > 0 ||
+      educations.length > 0;
+    if (!hasContent) return;
+    const t = setTimeout(() => {
+      try {
+        window.localStorage.setItem(
+          DRAFT_KEY,
+          JSON.stringify({ form, skills, experiences, educations, consent }),
+        );
+      } catch { /* quota / private-mode — silently ignore */ }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [form, skills, experiences, educations, consent]);
 
   // Smart upload: parses the resume server-side and pre-fills the form.
   // Also stores the file as the actual resume submission so the candidate
@@ -150,6 +230,17 @@ export default function JobApplyPage() {
       setError("Resume must be a PDF, Word, RTF, ODT, TXT, or HTML file"); return;
     }
     setResume(file);
+    // Mirror the resume into the Additional Documents list so HR
+    // always sees a copy there too — candidates who only attach one
+    // file shouldn't have to upload it twice. Any extra files the
+    // candidate later adds stack on top of this mirror.
+    setAdditionalDocs((prev) => {
+      // If the same file is already first, no-op; otherwise replace
+      // the leading slot with the new resume.
+      if (prev[0]?.name === file.name && prev[0]?.size === file.size) return prev;
+      const others = prev.filter((f) => !(f.name === file.name && f.size === file.size));
+      return [file, ...others];
+    });
     setParsing(true);
     setParsedFields([]);
     setParseWarning("");
@@ -201,12 +292,25 @@ export default function JobApplyPage() {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    // Resume is mandatory — block the submit before doing any work
+    // so the candidate gets immediate, scrollable feedback.
+    if (!resume) {
+      setError("Please upload your resume — it's required to apply.");
+      // Scroll the resume upload zone into view so it's obvious where
+      // the candidate needs to look.
+      try { smartInputRef.current?.closest("form")?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {}
+      return;
+    }
     setSubmitting(true);
     try {
       const fd = new FormData();
       for (const [k, v] of Object.entries(form)) fd.append(k, v);
-      if (resume) fd.append("resume", resume);
-      if (additionalDoc) fd.append("additionalDoc", additionalDoc);
+      fd.append("resume", resume);
+      // Send every selected additional doc under the same form key
+      // so the server can read them via formData.getAll(). Backend
+      // currently persists the first one — extra files are preserved
+      // in the request payload for future multi-attachment storage.
+      additionalDocs.forEach((f) => fd.append("additionalDoc", f));
       // Serialize repeatable sub-forms into the existing text columns.
       if (experiences.length > 0) {
         fd.set("experienceDetails", JSON.stringify(experiences));
@@ -219,6 +323,10 @@ export default function JobApplyPage() {
       const res  = await fetch("/api/jobs/apply", { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || "Submission failed");
+      // Wipe the autosave draft now that the application landed —
+      // we don't want the next visitor on this device to see the
+      // previous candidate's data.
+      try { window.localStorage.removeItem(DRAFT_KEY); } catch {}
       setDone(true);
     } catch (e: any) {
       setError(e?.message || "Submission failed");
@@ -406,7 +514,47 @@ export default function JobApplyPage() {
             </div>
           </div>
 
+          {/* ── Job Details panel ─────────────────────────────────
+              Shows what the candidate is applying for: title, brand,
+              meta chips, downloadable JD attachment (if HR uploaded
+              one), and the full description in a collapsible block.
+              Only renders when ?role=<id> resolved to a published job. */}
+          {job && (
+            <div className="relative z-10 px-7 pt-5">
+              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                {/* Top band */}
+                <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-br from-slate-50 to-white">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#3b82f6] mb-1">
+                    {job.brand === "yt_labs" ? "YT Labs" : "NB Media"} · Job details
+                  </p>
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <h2 className="text-[18px] font-semibold text-slate-900 tracking-tight leading-tight">{job.title}</h2>
+                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5 text-[12px] text-slate-600">
+                        {job.department      && <span className="inline-flex items-center gap-1.5"><Building2 size={12} className="text-slate-400" /> {job.department}</span>}
+                        {job.location        && <span className="inline-flex items-center gap-1.5"><MapPin size={12} className="text-slate-400" /> {job.location}</span>}
+                        {job.employmentType  && <span className="inline-flex items-center gap-1.5"><Briefcase size={12} className="text-slate-400" /> {job.employmentType}</span>}
+                        {job.experienceLevel && <span className="inline-flex items-center gap-1.5"><Clock size={12} className="text-slate-400" /> {job.experienceLevel}</span>}
+                        {job.salaryRange     && <span className="inline-flex items-center gap-1.5"><IndianRupee size={12} className="text-slate-400" /> {job.salaryRange}</span>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {/* JD download moved to the public job page so applicants
+                    can read the brief BEFORE clicking Apply. The apply
+                    form keeps job context (title, meta) but doesn't
+                    duplicate the JD download button. */}
+              </div>
+            </div>
+          )}
+
           <form onSubmit={onSubmit} className="relative z-10 px-7 py-6 space-y-5">
+            {draftRestored && (
+              <div className="-mb-1 inline-flex items-center gap-2 rounded-lg bg-emerald-50 ring-1 ring-emerald-200 px-3 py-1.5 text-[11.5px] font-medium text-emerald-800">
+                <Sparkles size={12} className="text-emerald-600" />
+                Picked up where you left off. Your previous answers are restored — please re-upload your resume.
+              </div>
+            )}
             {/* ── Resume upload — single canonical control. Auto-fills
                 the form AND stores the file for submission. Required. */}
             <input
@@ -432,9 +580,11 @@ export default function JobApplyPage() {
                     : "border-[#3b82f6]/40 bg-[#3b82f6]/[0.04] hover:bg-[#3b82f6]/[0.08]"
                 }`}
               >
-                <p className="text-[13.5px] font-bold text-[#3b82f6]">Upload resume</p>
+                <p className="text-[13.5px] font-bold text-[#3b82f6]">
+                  Upload resume <span className="text-rose-500">*</span>
+                </p>
                 <p className="mt-0.5 text-[11.5px] text-slate-500">
-                  This will auto-fill the fields below. 5MB max file size · Allowed: .pdf, .doc, .docx, .rtf, .odt
+                  Required — also auto-fills the fields below. 5MB max file size · Allowed: .pdf, .doc, .docx, .rtf, .odt
                 </p>
               </div>
             ) : (
@@ -526,17 +676,18 @@ export default function JobApplyPage() {
             {/* ── Additional documents (optional second file) ─────────── */}
             <div>
               <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Additional Documents</label>
-              <AdditionalDocs onChange={setAdditionalDoc} file={additionalDoc} />
+              <AdditionalDocs onChange={setAdditionalDocs} files={additionalDocs} />
             </div>
 
             {/* ── DOB + Experience row ─────────────────────────────────── */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Date of Birth</label>
-                <DateField
+                <CalendarField
                   value={form.dateOfBirth ?? ""}
                   onChange={(v) => set("dateOfBirth", v)}
                   max={new Date().toISOString().slice(0, 10)}
+                  min="1925-01-01"
                   className="w-full"
                 />
               </div>
@@ -607,6 +758,7 @@ export default function JobApplyPage() {
                 >
                   <option value="">Select an option</option>
                   <option value="Mohali">Mohali</option>
+                  <option value="Remote">Remote</option>
                 </select>
               </div>
             </div>
@@ -870,9 +1022,10 @@ export default function JobApplyPage() {
             <button
               type="submit"
               disabled={submitting || !consent || !resume}
+              title={!resume ? "Upload your resume to enable Apply" : (!consent ? "Accept the privacy notice to enable Apply" : "")}
               className="w-full h-11 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-[13.5px] font-semibold transition-colors shadow-[0_1px_2px_rgba(59,130,246,0.25)]"
             >
-              {submitting ? "Submitting…" : "Apply Now"}
+              {submitting ? "Submitting…" : !resume ? "Upload resume to continue" : "Apply Now"}
             </button>
           </form>
         </div>
@@ -1053,58 +1206,81 @@ function SkillsInput({
 
 // "+ Add attachment" tile for the optional Additional Documents slot.
 // Single file, 10 MB cap (slightly larger than the resume's 5 MB so
-// HR can take a portfolio PDF or scanned certificate).
+// Additional documents — multi-file. Candidates can stack as many
+// supporting files as they want (portfolios, certificates, sample
+// scripts). Each file gets its own row with a remove button, and a
+// dashed "Add another" button stays visible at the bottom.
 function AdditionalDocs({
-  file, onChange,
+  files, onChange,
 }: {
-  file: File | null; onChange: (f: File | null) => void;
+  files: File[]; onChange: (next: File[]) => void;
 }) {
   const ref = React.useRef<HTMLInputElement>(null);
-  if (file) {
-    return (
-      <div className="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2.5">
-        <FileText size={16} className="text-[#3b82f6] shrink-0" />
-        <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-semibold text-slate-800 truncate">{file.name}</p>
-          <p className="text-[11px] text-slate-500 tabular-nums">{(file.size / 1024).toFixed(0)} KB</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => { onChange(null); if (ref.current) ref.current.value = ""; }}
-          className="h-7 w-7 rounded-md flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-        >
-          <X size={14} />
-        </button>
-      </div>
-    );
-  }
+  const ALLOWED_BYTES = 10 * 1024 * 1024;
+
+  const onPick = (incoming: FileList | null) => {
+    if (!incoming) return;
+    const next: File[] = [...files];
+    for (const f of Array.from(incoming)) {
+      if (f.size > ALLOWED_BYTES) continue;
+      // Dedup by name+size so the same file isn't added twice.
+      if (next.some((e) => e.name === f.name && e.size === f.size)) continue;
+      next.push(f);
+    }
+    onChange(next);
+    if (ref.current) ref.current.value = "";
+  };
+
+  const removeAt = (i: number) => {
+    const next = files.slice();
+    next.splice(i, 1);
+    onChange(next);
+  };
+
   return (
-    <>
+    <div className="space-y-2">
       <input
         ref={ref}
         type="file"
+        multiple
         className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0] ?? null;
-          if (!f) return;
-          if (f.size > 10 * 1024 * 1024) return;
-          onChange(f);
-        }}
+        onChange={(e) => onPick(e.target.files)}
       />
+
+      {files.map((file, i) => (
+        <div key={`${file.name}-${file.size}-${i}`} className="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2.5">
+          <FileText size={16} className="text-[#3b82f6] shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-semibold text-slate-800 truncate">{file.name}</p>
+            <p className="text-[11px] text-slate-500 tabular-nums">{(file.size / 1024).toFixed(0)} KB</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => removeAt(i)}
+            className="h-7 w-7 rounded-md flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+            title="Remove this attachment"
+          ><X size={14} /></button>
+        </div>
+      ))}
+
+      {/* "Add attachment" always visible — even after files are
+          attached — so candidates can keep stacking documents. */}
       <button
         type="button"
         onClick={() => ref.current?.click()}
-        className="w-full rounded-md border-2 border-dashed border-slate-200 hover:border-[#3b82f6]/40 bg-slate-50/40 hover:bg-[#3b82f6]/[0.04] transition-colors px-4 py-3.5 flex items-center gap-3 text-left"
+        className="w-full rounded-md border-2 border-dashed border-slate-200 hover:border-[#3b82f6]/40 bg-slate-50/40 hover:bg-[#3b82f6]/[0.04] transition-colors px-4 py-3 flex items-center gap-3 text-left"
       >
         <div className="h-9 w-9 rounded-md bg-white border border-slate-200 flex items-center justify-center text-[#3b82f6]">
           <Upload size={15} />
         </div>
         <div>
-          <p className="text-[12.5px] font-semibold text-[#3b82f6]">Add attachment</p>
-          <p className="text-[10.5px] text-slate-500">10MB max size</p>
+          <p className="text-[12.5px] font-semibold text-[#3b82f6]">
+            {files.length === 0 ? "Add attachment" : "Add another attachment"}
+          </p>
+          <p className="text-[10.5px] text-slate-500">10MB max per file · pick multiple at once if you want</p>
         </div>
       </button>
-    </>
+    </div>
   );
 }
 
