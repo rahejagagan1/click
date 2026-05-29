@@ -2,7 +2,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { User as UserIcon, Briefcase, Settings as SettingsIcon, IndianRupee, Check, X } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
 import { JOB_TITLES } from "@/lib/job-titles";
@@ -194,11 +194,15 @@ const EMPTY: Form = {
 // ─────────────────────────────────────────────────────────────────────────────
 export default function OnboardEmployeePage() {
   const router = useRouter();
+  const search = useSearchParams();
   const [step, setStep]       = useState<1 | 2 | 3 | 4 | 5>(1);
   const [form, setForm]       = useState<Form>(EMPTY);
   const [saving, setSaving]   = useState(false);
   const [error, setError]     = useState("");
   const [success, setSuccess] = useState("");
+  // Banner shown when the form was prefilled from a hiring candidate
+  // via ?fromCandidate=<id>. Stays put until HR dismisses it.
+  const [prefilledFrom, setPrefilledFrom] = useState<{ candidateId: number; name: string } | null>(null);
 
   // Keka import state — modal visibility + a small banner telling HR
   // which row was just pulled in. The set of HRM IDs already onboarded
@@ -207,6 +211,50 @@ export default function OnboardEmployeePage() {
   const [importOpen, setImportOpen] = useState(false);
   const [importedFrom, setImportedFrom] = useState<{ hrm: string; name: string } | null>(null);
   const [importDoneIds, setImportDoneIds] = useState<Set<string>>(() => new Set());
+
+  // Prefill from a hiring candidate when the page is opened with
+  // ?fromCandidate=<id>. Fetches the candidate row, splits the full
+  // name into first/middle/last, and seeds the email / phone / job
+  // title fields. Runs once on mount.
+  useEffect(() => {
+    const candidateId = search?.get("fromCandidate");
+    if (!candidateId || !/^\d+$/.test(candidateId)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/hr/hiring/candidates/${candidateId}`);
+        if (!res.ok) return;
+        const json = await res.json();
+        const a = json?.application ?? json?.candidate ?? json; // route shape may vary
+        if (cancelled || !a) return;
+        const full = String(a.fullName ?? "").trim();
+        const parts = full.split(/\s+/).filter(Boolean);
+        const firstName  = parts.length >= 1 ? parts[0] : "";
+        const middleName = parts.length >= 3 ? parts.slice(1, -1).join(" ") : "";
+        const lastName   = parts.length >= 2 ? parts[parts.length - 1] : "";
+        // Strip a country code prefix like "+91 " if present.
+        const phoneRaw = String(a.phone ?? "").trim();
+        const m = phoneRaw.match(/^\+(\d{1,3})\s*(.+)$/);
+        const mobileCountry = m ? `+${m[1]}` : "+91";
+        const mobileNumber  = (m ? m[2] : phoneRaw).replace(/\D/g, "");
+        setForm((f) => ({
+          ...f,
+          firstName,
+          middleName,
+          lastName,
+          displayName: full || f.displayName,
+          workEmail:   a.email ?? f.workEmail,
+          personalEmail: a.email ?? f.personalEmail,
+          mobileCountry,
+          mobileNumber,
+          jobTitle: a.roleTitle ?? f.jobTitle,
+        }));
+        setPrefilledFrom({ candidateId: Number(candidateId), name: full || `candidate #${candidateId}` });
+      } catch { /* silent — prefill is best-effort */ }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // "Same as Current Address" — when checked, the permanent address fields
   // mirror the current ones live and the permanent inputs are disabled.
@@ -771,6 +819,20 @@ export default function OnboardEmployeePage() {
       </div>
 
       {/* ── Banners ── */}
+      {prefilledFrom && (
+        <div className="px-6 pt-4">
+          <div className="flex items-start gap-2 px-4 py-2.5 rounded-lg bg-emerald-50 text-emerald-700 text-[12.5px] ring-1 ring-emerald-200">
+            <Check className="w-4 h-4 shrink-0 mt-0.5" />
+            <span className="flex-1">
+              Prefilled from hiring candidate <strong>{prefilledFrom.name}</strong> — verify everything before saving.
+            </span>
+            <button
+              onClick={() => setPrefilledFrom(null)}
+              className="text-emerald-600 hover:text-emerald-900 text-[12px] font-semibold"
+            >Dismiss</button>
+          </div>
+        </div>
+      )}
       {error && (
         <div className="px-6 pt-4">
           <div className="flex items-start gap-2 px-4 py-2.5 rounded-lg bg-red-500/10 text-red-500 text-[12.5px]">
