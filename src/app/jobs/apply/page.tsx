@@ -14,6 +14,7 @@ import { fetcher } from "@/lib/swr";
 import { DatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
 import { CalendarField } from "@/components/ui/calendar-field";
+import SelectField from "@/components/ui/SelectField";
 import {
   CheckCircle2, AlertCircle, User, Mail, Phone, Briefcase,
   Building2, Clock, Link as LinkIcon, FileText, Upload, X,
@@ -633,13 +634,13 @@ export default function JobApplyPage() {
                   Mobile Phone<span className="text-rose-500"> *</span>
                 </label>
                 <div className="flex gap-2">
-                  <select
+                  <SelectField
                     value={form.mobileCountryCode ?? "+91"}
-                    onChange={(e) => set("mobileCountryCode", e.target.value)}
-                    className="h-10 px-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 shrink-0"
-                  >
-                    {["+91","+1","+44","+61","+65","+971","+86"].map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                    onChange={(v) => set("mobileCountryCode", v)}
+                    options={["+91","+1","+44","+61","+65","+971","+86"]}
+                    className="h-10 px-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-800 flex items-center justify-between gap-1 hover:border-slate-300 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 shrink-0"
+                    width={90}
+                  />
                   <input
                     type="tel"
                     className={inputClsNoIcon.replace("h-11", "h-10") + " min-w-0 flex-1"}
@@ -659,18 +660,18 @@ export default function JobApplyPage() {
                 <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">
                   Gender<span className="text-rose-500"> *</span>
                 </label>
-                <select
+                <SelectField
                   value={form.gender ?? ""}
-                  onChange={(e) => set("gender", e.target.value)}
-                  required
-                  className={inputClsNoIcon.replace("h-11", "h-10")}
-                >
-                  <option value="">Select an option</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="other">Other</option>
-                  <option value="prefer_not_to_say">Prefer not to say</option>
-                </select>
+                  onChange={(v) => set("gender", v)}
+                  options={[
+                    { value: "male",              label: "Male" },
+                    { value: "female",            label: "Female" },
+                    { value: "other",             label: "Other" },
+                    { value: "prefer_not_to_say", label: "Prefer not to say" },
+                  ]}
+                  placeholder="Select an option"
+                  className={inputClsNoIcon.replace("h-11", "h-10") + " flex items-center justify-between gap-2 text-left"}
+                />
               </div>
             </div>
 
@@ -705,13 +706,13 @@ export default function JobApplyPage() {
                     />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400 pointer-events-none">Years</span>
                   </div>
-                  <select
+                  <SelectField
                     value={form.experienceMonths ?? "0"}
-                    onChange={(e) => set("experienceMonths", e.target.value)}
-                    className="h-10 px-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 shrink-0"
-                  >
-                    {Array.from({ length: 12 }).map((_, i) => <option key={i} value={i}>{i}</option>)}
-                  </select>
+                    onChange={(v) => set("experienceMonths", v)}
+                    options={Array.from({ length: 12 }).map((_, i) => ({ value: String(i), label: String(i) }))}
+                    className="h-10 px-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-800 flex items-center justify-between gap-1 hover:border-slate-300 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 shrink-0"
+                    width={70}
+                  />
                   <span className="text-[12px] text-slate-500 shrink-0">Months</span>
                 </div>
               </div>
@@ -752,15 +753,13 @@ export default function JobApplyPage() {
               </div>
               <div>
                 <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Preferred Location</label>
-                <select
+                <SelectField
                   value={form.preferredLocation ?? ""}
-                  onChange={(e) => set("preferredLocation", e.target.value)}
-                  className={inputClsNoIcon.replace("h-11", "h-10")}
-                >
-                  <option value="">Select an option</option>
-                  <option value="Mohali">Mohali</option>
-                  <option value="Remote">Remote</option>
-                </select>
+                  onChange={(v) => set("preferredLocation", v)}
+                  options={["Mohali", "Remote"]}
+                  placeholder="Select an option"
+                  className={inputClsNoIcon.replace("h-11", "h-10") + " flex items-center justify-between gap-2 text-left"}
+                />
               </div>
             </div>
 
@@ -776,19 +775,16 @@ export default function JobApplyPage() {
                 <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">
                   Applying For<span className="text-rose-500"> *</span>
                 </label>
-                <select
-                  className={inputClsNoIcon.replace("h-11", "h-10")}
+                <SelectField
                   value={form.jobOpeningId ?? ""}
-                  onChange={e => set("jobOpeningId", e.target.value)}
-                  required
-                >
-                  <option value="">— Pick a role —</option>
-                  {openings.map(o => (
-                    <option key={o.id} value={o.id}>
-                      {o.title}{o.department ? ` · ${o.department}` : ""}{o.location ? ` · ${o.location}` : ""}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => set("jobOpeningId", v)}
+                  options={openings.map((o) => ({
+                    value: String(o.id),
+                    label: `${o.title}${o.department ? ` · ${o.department}` : ""}${o.location ? ` · ${o.location}` : ""}`,
+                  }))}
+                  placeholder="— Pick a role —"
+                  className={inputClsNoIcon.replace("h-11", "h-10") + " flex items-center justify-between gap-2 text-left"}
+                />
               </div>
             )}
 
@@ -1105,13 +1101,13 @@ function SalaryField({
           below full-width. Desktop: single inline row. Stops the
           amount input from getting squeezed into 60px on phones. */}
       <div className="flex flex-wrap gap-2">
-        <select
+        <SelectField
           value={currency}
-          onChange={(e) => onCurrency(e.target.value)}
-          className="h-11 px-3 bg-white border border-slate-200 rounded-lg text-[13.5px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 shrink-0"
-        >
-          {["INR","USD","EUR","GBP","AED","SGD"].map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
+          onChange={onCurrency}
+          options={["INR","USD","EUR","GBP","AED","SGD"]}
+          className="h-11 px-3 bg-white border border-slate-200 rounded-lg text-[13.5px] text-slate-800 flex items-center justify-between gap-1.5 hover:border-slate-300 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 shrink-0"
+          width={95}
+        />
         <div className="relative flex-1 min-w-[140px]">
           <IndianRupee size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           <input
@@ -1122,14 +1118,16 @@ function SalaryField({
             placeholder="Amount"
           />
         </div>
-        <select
+        <SelectField
           value={freq}
-          onChange={(e) => onFreq(e.target.value)}
-          className="h-11 px-3 bg-white border border-slate-200 rounded-lg text-[13.5px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 w-full sm:w-auto"
-        >
-          <option value="monthly">Monthly</option>
-          <option value="annual">Annual</option>
-        </select>
+          onChange={onFreq}
+          options={[
+            { value: "monthly", label: "Monthly" },
+            { value: "annual",  label: "Annual"  },
+          ]}
+          className="h-11 px-3 bg-white border border-slate-200 rounded-lg text-[13.5px] text-slate-800 flex items-center justify-between gap-1.5 hover:border-slate-300 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 w-full sm:w-auto"
+          width={140}
+        />
       </div>
     </div>
   );

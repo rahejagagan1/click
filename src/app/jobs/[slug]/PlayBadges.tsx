@@ -101,7 +101,12 @@ export default function PlayBadges() {
             badgeFloat  6000ms ease-in-out 1500ms infinite;
         }
       `}</style>
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+      {/* Decorative-only — hidden on phones because the badges crash
+          into the breadcrumb + title + chip pills on narrow screens
+          and make the page look unfinished. The mobile hero leans on
+          gradient depth + premium typography instead of overlapping
+          floating elements. */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden hidden sm:block">
         {BADGES.map((b, i) => {
           const p = PLATFORM[b.platform];
           const isYouTube = b.platform === "youtube";
