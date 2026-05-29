@@ -149,13 +149,13 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
 
       {/* ── Sticky brand nav ──────────────────────────────────── */}
       <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-[#e2e8f0]/85 backdrop-blur supports-[backdrop-filter]:bg-[#e2e8f0]/70">
-        <div className="max-w-6xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
-          <Link href="/jobs" className="flex items-center gap-2.5 group">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#f8fafc] ring-1 ring-slate-300/60 shadow-sm overflow-hidden transition-transform group-hover:scale-[1.04]">
+        <div className="max-w-6xl mx-auto px-4 sm:px-8 h-16 flex items-center justify-between gap-2">
+          <Link href="/jobs" className="flex items-center gap-2.5 group min-w-0">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#f8fafc] ring-1 ring-slate-300/60 shadow-sm overflow-hidden transition-transform group-hover:scale-[1.04] shrink-0">
               <img src="/logo.png" alt={brandLabel} className="h-7 w-7 object-contain" />
             </div>
-            <div className="leading-tight">
-              <p className="text-[13.5px] font-semibold text-slate-900">{brandLabel}</p>
+            <div className="leading-tight min-w-0">
+              <p className="text-[13.5px] font-semibold text-slate-900 truncate">{brandLabel}</p>
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Careers</p>
             </div>
           </Link>
@@ -183,7 +183,7 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
         {/* Floating YouTube play badges — content-studio identity */}
         <PlayBadges />
 
-        <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 py-14">
+        <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-14">
           <Reveal direction="up">
             <div className="inline-flex items-center gap-2 rounded-full bg-[#f8fafc] ring-1 ring-slate-300/60 px-3 py-1 text-[11px] font-semibold shadow-[0_1px_2px_rgba(15,23,42,0.04)] mb-6">
               <span className="relative inline-flex h-1.5 w-1.5">
@@ -201,8 +201,8 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
               text un-split and rely on the per-word reveal of the
               preceding phrase for the entrance motion. */}
           <h1
-            className="font-semibold tracking-[-0.025em] text-slate-900 leading-[1.04] max-w-4xl"
-            style={{ fontSize: "clamp(2.4rem, 6vw, 3.8rem)" }}
+            className="font-semibold tracking-[-0.025em] text-slate-900 leading-[1.08] sm:leading-[1.04] max-w-4xl break-words"
+            style={{ fontSize: "clamp(1.95rem, 6vw, 3.8rem)" }}
           >
             <WordReveal text="Build what's next at" staggerMs={70} baseDelayMs={80} />
             {" "}
@@ -235,18 +235,18 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
           </h1>
 
           <Reveal direction="up" delay={160}>
-            <p className="mt-6 text-[16px] sm:text-[17px] text-slate-600 max-w-2xl leading-[1.65]">
+            <p className="mt-5 sm:mt-6 text-[14.5px] sm:text-[17px] text-slate-600 max-w-2xl leading-[1.65]">
               We're a content-first studio shipping work for India's biggest creators — from scripts to thumbnails to release.
               Every application is reviewed by a human, usually within a week.
             </p>
           </Reveal>
 
           <Reveal direction="up" delay={240}>
-            <div className="mt-9 flex flex-wrap items-center gap-3">
+            <div className="mt-7 sm:mt-9 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
               <Magnetic strength={0.16}>
                 <a
                   href="#open-roles"
-                  className={`group inline-flex items-center justify-center gap-2 h-12 px-6 rounded-xl text-white text-[13.5px] font-semibold transition-all ${
+                  className={`group inline-flex w-full sm:w-auto items-center justify-center gap-2 h-12 px-6 rounded-xl text-white text-[13.5px] font-semibold transition-all ${
                     activeBrand === "yt_labs"
                       ? "bg-[#c084fc] hover:bg-[#a855f7] shadow-[0_4px_14px_-2px_rgba(192,132,252,0.4)] hover:shadow-[0_8px_22px_-4px_rgba(192,132,252,0.5)]"
                       : "bg-[#60a5fa] hover:bg-[#3b82f6] shadow-[0_4px_14px_-2px_rgba(96,165,250,0.4)] hover:shadow-[0_8px_22px_-4px_rgba(96,165,250,0.5)]"
@@ -258,7 +258,7 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
               </Magnetic>
               <a
                 href="#why-us"
-                className="inline-flex items-center gap-1.5 h-12 px-5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 text-slate-800 text-[13px] font-semibold transition-colors"
+                className="inline-flex w-full sm:w-auto items-center justify-center gap-1.5 h-12 px-5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 text-slate-800 text-[13px] font-semibold transition-colors"
               >
                 Why join us
               </a>
@@ -270,11 +270,11 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
 
       {/* ── Open roles — panel 2 ──────────────────────────────── */}
       <section id="open-roles" className="relative border-t border-slate-200 bg-slate-50/50 ">
-        <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20">
+        <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-20">
           <Reveal direction="up">
             <header className="mb-8">
               <p className="text-[11px] font-bold uppercase tracking-[0.16em] mb-2" style={{ color: meta.accent }}>Hiring now</p>
-              <h2 className="text-[26px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">Open roles</h2>
+              <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">Open roles</h2>
               <p className="mt-2 text-[14px] text-slate-500 max-w-xl">
                 {isAll
                   ? "Filter by company or browse everything. Each role has its own page with the full brief and a downloadable JD."
@@ -323,11 +323,11 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
 
       {/* ── Why join us — panel 3 ─────────────────────────────── */}
       <section id="why-us" className="relative border-t border-slate-300/60 ">
-        <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20">
+        <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-20">
           <Reveal direction="up">
             <header className="mb-10 max-w-2xl">
               <p className="text-[11px] font-bold uppercase tracking-[0.16em] mb-2" style={{ color: meta.accent }}>Why us</p>
-              <h2 className="text-[26px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">A place where the work goes live.</h2>
+              <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">A place where the work goes live.</h2>
               <p className="mt-2 text-[14px] text-slate-500">Three reasons people stay long-term — and what new hires tell us in their first month.</p>
             </header>
           </Reveal>
@@ -348,11 +348,11 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
 
       {/* ── About brand(s) — panel 4 ──────────────────────────── */}
       <section className="relative border-t border-slate-200 bg-slate-50/50 ">
-        <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 py-14 sm:py-20">
+        <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-20">
           <Reveal direction="up">
             <header className="mb-10 max-w-2xl">
               <p className="text-[11px] font-bold uppercase tracking-[0.16em] mb-2" style={{ color: meta.accent }}>Who we are</p>
-              <h2 className="text-[26px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">
+              <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">
                 {isAll ? "Two studios. One team." : `About ${meta.label}.`}
               </h2>
               <p className="mt-2 text-[14px] text-slate-500">
@@ -382,7 +382,7 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
 
       {/* ── Bottom apply banner — panel 5 ─────────────────────── */}
       <section className="relative border-t border-slate-200 ">
-        <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 py-12 sm:py-16">
+        <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-16">
           <Reveal direction="up">
             <div
               className="relative overflow-hidden rounded-3xl text-slate-900 ring-1 ring-slate-300/60 bg-white"
@@ -400,12 +400,12 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
                     : "linear-gradient(90deg, transparent 0%, #ef4444 25%, #f97316 50%, #fbbf24 75%, transparent 100%)",
                 }}
               />
-              <div className="relative px-7 sm:px-12 py-12 sm:py-14 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+              <div className="relative px-5 sm:px-12 py-9 sm:py-14 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 sm:gap-6">
                 <div className="max-w-xl">
                   <div className="inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.16em] mb-3 text-slate-500">
                     <Sparkles size={11} /> Ready when you are
                   </div>
-                  <h3 className="text-[26px] sm:text-[30px] font-semibold tracking-tight leading-tight text-slate-900">
+                  <h3 className="text-[22px] sm:text-[30px] font-semibold tracking-tight leading-tight text-slate-900">
                     See yourself at{" "}
                     {activeBrand === "yt_labs" ? (
                       // YT Labs: brand word + trailing "?" both in
@@ -437,7 +437,7 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
                 <Magnetic strength={0.18}>
                   <a
                     href="#open-roles"
-                    className="group inline-flex items-center gap-2 h-12 px-6 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[13.5px] font-semibold transition-colors shadow-[0_8px_20px_-6px_rgba(15,23,42,0.4)] whitespace-nowrap"
+                    className="group inline-flex w-full sm:w-auto items-center justify-center gap-2 h-12 px-6 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[13.5px] font-semibold transition-colors shadow-[0_8px_20px_-6px_rgba(15,23,42,0.4)] whitespace-nowrap"
                   >
                     See open roles
                     <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
@@ -451,7 +451,7 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
 
       {/* ── Footer ───────────────────────────────────────────── */}
       <footer className="border-t border-slate-300/60">
-        <div className="max-w-6xl mx-auto px-5 sm:px-8 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="max-w-6xl mx-auto px-4 sm:px-8 py-7 sm:py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
           <div className="flex items-center gap-2.5">
             <img src="/logo.png" alt="" className="h-5 w-5 opacity-80" />
             <span className="text-[11.5px] text-slate-500">
