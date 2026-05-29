@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { isHRAdmin } from "@/lib/access";
+import { gravatarUrl } from "@/lib/gravatar";
 
 export const dynamic = "force-dynamic";
 
@@ -126,6 +127,10 @@ export async function GET(req: NextRequest) {
       id: r.id,
       fullName: r.fullName,
       email: r.email,
+      // Resolves to a Gravatar URL when the candidate's email has
+      // one set; null otherwise. The UI does an <img onError> fall-
+      // back to initials so a 404 from Gravatar isn't a problem.
+      photoUrl: gravatarUrl(r.email, 160),
       phone: r.phone,
       experienceYears: r.experienceYears,
       currentCompany: r.currentCompany,
