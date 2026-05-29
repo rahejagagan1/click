@@ -19,8 +19,10 @@ const PUBLIC_PATHS = [
 export async function proxy(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
-    // Allow public paths
-    if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
+    // Allow public paths. Match either the exact path or the path as a
+    // prefix with a "/" boundary so /api/jobs whitelists /api/jobs and
+    // /api/jobs/openings but NOT a hypothetical /api/jobs-admin.
+    if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
         return NextResponse.next();
     }
 
