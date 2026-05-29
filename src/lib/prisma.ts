@@ -15,8 +15,22 @@ const globalForPrisma = globalThis as unknown as {
 
 function createPrismaClient(): PrismaClient {
   return new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+    // Dev: drop "query" — verbose and irrelevant to the bug we're
+    // hunting most of the time, and makes the dev console unreadable.
+    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
+}
+
+/** Disconnect a prior client without awaiting (we can't await inside
+ *  a synchronous resolver). Suppress errors — disconnect is best-
+ *  effort; if it fails the GC will eventually clean up the engine. */
+function disconnectQuietly(client: PrismaClient | undefined): void {
+  if (!client) return;
+  try {
+    // void on purpose — fire-and-forget; the resolver returns
+    // synchronously with the fresh client.
+    void client.$disconnect().catch(() => { /* noop */ });
+  } catch { /* noop */ }
 }
 
 function isPrismaClientStale(client: PrismaClient | undefined): boolean {
@@ -45,7 +59,14 @@ function resolveClient(): PrismaClient {
     return globalForPrisma.prisma;
   }
   if (isPrismaClientStale(globalForPrisma.prisma)) {
+    // Disconnect the old (stale) client BEFORE swapping in the new
+    // one. Without this, every stale-replace leaks the entire engine
+    // connection pool (~17 Postgres connections per client by
+    // default) — a few HMR reloads quickly exhaust the database's
+    // connection slot limit.
+    const previous = globalForPrisma.prisma;
     globalForPrisma.prisma = createPrismaClient();
+    disconnectQuietly(previous);
   }
   return globalForPrisma.prisma!;
 }

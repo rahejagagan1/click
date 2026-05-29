@@ -1,0 +1,79 @@
+// POST /api/hr/exits/:id/settlement/finalise
+//
+// Locks the ExitSettlement after HR confirms the Payable Summary on
+// Step 2 of the wizard. Side-effect: also ticks
+// EmployeeExit.finalSettlementDone = true so the global checklist
+// stays in sync with the wizard.
+//
+// We do NOT auto-transition the exit to "exited" here — finalising the
+// settlement is independent of clearance. HR flips the status
+// separately once tasks + interview are done.
+
+import { NextRequest, NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
+import { requireAuth } from "@/lib/api-auth";
+
+export const dynamic = "force-dynamic";
+
+function canManage(session: any): boolean {
+  const u = session?.user;
+  return !!u && (
+    u.orgLevel === "ceo" ||
+    u.orgLevel === "hr_manager" ||
+    u.orgLevel === "special_access" ||
+    u.role === "admin" ||
+    u.isDeveloper === true
+  );
+}
+
+export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { session, errorResponse } = await requireAuth();
+  if (errorResponse) return errorResponse;
+  if (!canManage(session)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  try {
+    const { id: idParam } = await params;
+    const id = parseInt(idParam);
+    if (!Number.isFinite(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+    const rows = await prisma.$queryRawUnsafe<Array<{ id: number; finalised: boolean }>>(
+      `SELECT id, finalised FROM "ExitSettlement" WHERE "exitId" = $1`, id,
+    );
+    if (rows.length === 0) {
+      return NextResponse.json({ error: "Settlement not found — save it first" }, { status: 404 });
+    }
+    if (rows[0].finalised) {
+      return NextResponse.json({ error: "Already finalised" }, { status: 409 });
+    }
+
+    const actor = (session!.user as any)?.dbId ?? null;
+    await prisma.$transaction([
+      prisma.$executeRawUnsafe(
+        `UPDATE "ExitSettlement"
+            SET finalised = TRUE,
+                "finalisedAt" = now(),
+                "finalisedById" = $1,
+                "updatedAt" = now()
+          WHERE id = $2`,
+        actor, rows[0].id,
+      ),
+      prisma.$executeRawUnsafe(
+        `UPDATE "EmployeeExit"
+            SET "finalSettlementDone" = TRUE,
+                "updatedAt" = now()
+          WHERE id = $1`,
+        id,
+      ),
+      prisma.$executeRawUnsafe(
+        `INSERT INTO "ExitNote" ("exitId", "authorId", body)
+           VALUES ($1, $2, 'Settlement finalised.')`,
+        id, actor,
+      ),
+    ]);
+
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    console.error("[POST /api/hr/exits/:id/settlement/finalise] failed:", e);
+    return NextResponse.json({ error: e?.message || "Finalise failed" }, { status: 500 });
+  }
+}
