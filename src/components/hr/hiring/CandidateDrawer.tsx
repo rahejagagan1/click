@@ -34,11 +34,13 @@ import {
 } from "lucide-react";
 import ScheduleInterviewModal from "./ScheduleInterviewModal";
 import ArchiveCandidateModal  from "./ArchiveCandidateModal";
+import SelectField            from "@/components/ui/SelectField";
 
 type Stage = { id: number; key: string; label: string; kind: string; color: string };
 type Candidate = {
   id: number; fullName: string; email: string; phone: string | null;
-  experienceYears: number | null; currentCompany: string | null;
+  experienceYears: number | null; experienceMonths?: number | null;
+  currentCompany: string | null;
   noticePeriod: string | null; resumeUrl: string | null; resumeFileName: string | null;
   linkedinUrl?: string | null; portfolioUrl?: string | null; coverLetter?: string | null;
   source: string | null; overallRating: number | null; roleTitle: string | null;
@@ -48,6 +50,26 @@ type Candidate = {
   expectedSalary?: number | null; currentSalary?: number | null;
   availableToJoinDays?: number | null;
   location?: string | null; city?: string | null;
+  // Smart-form columns added by the public apply flow. Optional so
+  // legacy rows that only have the original column set don't break
+  // the type. JSON columns are stored as serialized strings.
+  currentLocation?: string | null;
+  preferredLocation?: string | null;
+  skills?: string | null;
+  educationDetails?: string | null;
+  experienceDetails?: string | null;
+};
+
+type EducationEntry = {
+  course?: string; branch?: string;
+  startOfCourse?: string; endOfCourse?: string;
+  university?: string; location?: string;
+};
+type ExperienceEntry = {
+  companyName?: string; jobTitle?: string;
+  currentlyWorking?: boolean;
+  dateOfJoining?: string; dateOfRelieving?: string;
+  location?: string;
 };
 
 const fmtMoneyINR = (n: number | null | undefined) =>
@@ -255,17 +277,16 @@ export default function CandidateDrawer({
             <div>
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Hiring stage</p>
               <div className="flex items-center gap-2">
-                <div className="relative">
-                  <select
-                    value={c.currentStage?.id ?? ""}
-                    onChange={(e) => patchStage(Number(e.target.value))}
-                    disabled={busy}
-                    className="appearance-none h-9 pl-3.5 pr-9 rounded-lg border border-slate-200 bg-white text-[12.5px] font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6] min-w-[160px]"
-                  >
-                    {stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-                  </select>
-                  <ChevronDown size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                </div>
+                {/* Branded portal-rendered select — kills the OS-native
+                    dark/khaki option highlight (Chromium on Linux). */}
+                <SelectField
+                  value={c.currentStage?.id != null ? String(c.currentStage.id) : ""}
+                  onChange={(v) => patchStage(Number(v))}
+                  options={stages.map((s) => ({ value: String(s.id), label: s.label }))}
+                  disabled={busy}
+                  className="h-9 pl-3.5 pr-3 rounded-lg border border-slate-200 bg-white text-[12.5px] font-semibold text-slate-800 hover:border-slate-300 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 flex items-center justify-between gap-2 min-w-[160px]"
+                  width={200}
+                />
                 <button
                   onClick={() => setArchiveOpen(true)}
                   className="h-9 px-3.5 rounded-lg border border-rose-300 text-rose-600 hover:bg-rose-50 text-[12.5px] font-semibold"
@@ -439,6 +460,31 @@ function ProfileTab({ c }: { c: Candidate }) {
     globalMutate(`/api/hr/hiring/candidates/${c.id}`);
   };
 
+  // ── Parse JSON sub-forms from the apply flow ─────────────────────
+  // educationDetails / experienceDetails are stored as serialized JSON
+  // strings (the apply route fd.set's them with JSON.stringify). Parse
+  // here so the Profile tab can render entries instead of "—".
+  const educationEntries = parseJsonList<EducationEntry>(c.educationDetails);
+  const experienceEntries = parseJsonList<ExperienceEntry>(c.experienceDetails);
+  // Skills came in as a comma-separated string from the chip input.
+  const skillTags = (c.skills || "")
+    .split(/[,;\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // Current Company falls back to the most relevant experience entry —
+  // the one marked currentlyWorking first, then the most recent by
+  // dateOfJoining.
+  const derivedCurrentCompany = c.currentCompany || (() => {
+    const current = experienceEntries.find((e) => e.currentlyWorking && e.companyName?.trim());
+    if (current) return [current.companyName, current.jobTitle].filter(Boolean).join(" · ");
+    const sorted = [...experienceEntries]
+      .filter((e) => e.companyName?.trim())
+      .sort((a, b) => (b.dateOfJoining || "").localeCompare(a.dateOfJoining || ""));
+    if (sorted.length === 0) return null;
+    return [sorted[0].companyName, sorted[0].jobTitle].filter(Boolean).join(" · ");
+  })();
+  const locationLabel = c.currentLocation ?? c.location ?? c.city ?? c.preferredLocation ?? "—";
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
       <div className="lg:col-span-3 space-y-5">
@@ -448,31 +494,93 @@ function ProfileTab({ c }: { c: Candidate }) {
             <InfoChip Icon={Calendar}    tone="amber"   label="Available To Join (in days)"
               value={c.availableToJoinDays != null ? `${c.availableToJoinDays} days` : "—"} />
             <InfoChip Icon={Briefcase}   tone="slate"   label="Experience"
-              value={fmtExperience(c.experienceYears)} />
+              value={fmtExperience(c.experienceYears, c.experienceMonths)} />
             <InfoChip Icon={MapPin}      tone="orange"  label="Location"
-              value={c.location ?? c.city ?? "—"} />
+              value={locationLabel} />
             <InfoChip Icon={IndianRupee} tone="emerald" label="Current Salary"
               value={c.currentSalary != null ? fmtMoneyINR(c.currentSalary) + " (Monthly)" : "—"} />
             <InfoChip Icon={IndianRupee} tone="emerald" label="Expected Salary"
               value={c.expectedSalary != null ? fmtMoneyINR(c.expectedSalary) + " (Monthly)" : "—"} />
             <InfoChip Icon={Briefcase}   tone="slate"   label="Current Company"
-              value={c.currentCompany ?? "—"} />
+              value={derivedCurrentCompany ?? "—"} />
           </div>
         </Card>
+
+        {/* Experience entries — only render when the candidate filled
+            the repeatable Experience Details on the apply form. */}
+        {experienceEntries.length > 0 && (
+          <Card title="Work experience">
+            <ul className="space-y-3">
+              {experienceEntries.map((e, i) => (
+                <li key={`exp-${i}`} className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold text-slate-800 truncate">
+                        {e.jobTitle || "—"}
+                        {e.companyName ? <span className="text-slate-500 font-medium"> · {e.companyName}</span> : null}
+                      </p>
+                      <p className="mt-0.5 text-[11.5px] text-slate-500">
+                        {fmtDateRange(e.dateOfJoining, e.currentlyWorking ? null : e.dateOfRelieving, e.currentlyWorking)}
+                        {e.location ? <span className="text-slate-400"> · {e.location}</span> : null}
+                      </p>
+                    </div>
+                    {e.currentlyWorking && (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ring-emerald-100">
+                        Current
+                      </span>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
 
         {/* Education / Skills / Tags row */}
         <Card>
           <Section title="Education">
-            <p className="text-[12.5px] text-slate-400 italic">
-              No education details on file. Candidates can add education on the apply form.
-            </p>
+            {educationEntries.length === 0 ? (
+              <p className="text-[12.5px] text-slate-400 italic">
+                No education details on file. Candidates can add education on the apply form.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {educationEntries.map((e, i) => (
+                  <li key={`edu-${i}`} className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3">
+                    <p className="text-[13px] font-semibold text-slate-800">
+                      {e.course || "—"}
+                      {e.branch ? <span className="text-slate-500 font-medium"> · {e.branch}</span> : null}
+                    </p>
+                    <p className="mt-0.5 text-[11.5px] text-slate-500">
+                      {e.university || ""}
+                      {e.university && e.location ? <span className="text-slate-400"> · {e.location}</span> : null}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-slate-400">
+                      {fmtDateRange(e.startOfCourse, e.endOfCourse, false)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Section>
 
           <Section title="Skills">
-            <p className="text-[12.5px] text-slate-400 italic">
-              Skills aren't captured on the apply form yet. Add the field in
-              <strong className="text-slate-600"> Settings → Application Form</strong> to surface them here.
-            </p>
+            {skillTags.length === 0 ? (
+              <p className="text-[12.5px] text-slate-400 italic">
+                No skills captured. The candidate left this empty on the apply form.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {skillTags.map((s, i) => (
+                  <span
+                    key={`${s}-${i}`}
+                    className="inline-flex items-center rounded-full bg-[#3b82f6]/10 text-[#1d4ed8] px-2.5 py-0.5 text-[12px] font-semibold"
+                  >
+                    {s}
+                  </span>
+                ))}
+              </div>
+            )}
           </Section>
 
           <Section title="Tags" last>
@@ -523,15 +631,25 @@ function ProfileTab({ c }: { c: Candidate }) {
           {!resumeHref ? (
             <ResumeEmptyState />
           ) : isPdf ? (
+            // <iframe> is more reliable than <object> for PDF previews
+            // — Chrome / Brave routinely fall through <object> to its
+            // children even when the resource is fetchable, which is
+            // why HR was seeing the "Click to open in new tab"
+            // placeholder. The iframe pins toolbar=0 so the chrome of
+            // the browser-native PDF viewer doesn't fight the card
+            // design. The /uploads path gets a same-origin X-Frame-
+            // Options override in next.config.mjs so the embed isn't
+            // blocked by the global DENY rule.
             <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
-              <object
-                data={`${resumeHref}#view=FitH&toolbar=0`}
-                type="application/pdf"
-                className="w-full"
-                style={{ height: 540 }}
-              >
+              <iframe
+                src={`${resumeHref}#toolbar=0&navpanes=0&view=FitH`}
+                title={c.resumeFileName || "Resume"}
+                className="w-full bg-white block"
+                style={{ height: 600, border: 0 }}
+              />
+              <noscript>
                 <ResumeFallbackCard href={resumeHref} name={c.resumeFileName} />
-              </object>
+              </noscript>
             </div>
           ) : (
             <ResumeFallbackCard href={resumeHref} name={c.resumeFileName} />
@@ -542,15 +660,68 @@ function ProfileTab({ c }: { c: Candidate }) {
   );
 }
 
-function fmtExperience(years: number | null | undefined): string {
-  if (years == null) return "—";
-  if (years >= 1) {
-    const whole = Math.floor(years);
-    const months = Math.round((years - whole) * 12);
-    return months ? `${whole}y ${months}m` : `${whole}y`;
+function fmtExperience(
+  years: number | null | undefined,
+  monthsArg?: number | null,
+): string {
+  // The apply form captures years + months as separate integer
+  // columns. Older legacy rows might only have a fractional
+  // experienceYears value — handle both shapes.
+  const y = Number.isFinite(years as number) ? Number(years) : null;
+  const m = Number.isFinite(monthsArg as number) ? Number(monthsArg) : null;
+  if (y == null && m == null) return "—";
+  // Smart-form shape: integers in their own columns.
+  if (y != null && Number.isInteger(y) && m != null) {
+    if (y === 0 && m === 0) return "—";
+    const parts: string[] = [];
+    if (y > 0) parts.push(`${y}y`);
+    if (m > 0) parts.push(`${m}m`);
+    return parts.join(" ");
   }
-  const months = Math.round(years * 12);
-  return `0y ${months}m`;
+  // Years-only path: integer years, fall back to "Xy" if no months info.
+  if (y != null && (m == null || m === 0)) {
+    if (y === 0) return "—";
+    if (Number.isInteger(y)) return `${y}y`;
+    const whole = Math.floor(y);
+    const monthsFromFrac = Math.round((y - whole) * 12);
+    return monthsFromFrac ? `${whole}y ${monthsFromFrac}m` : `${whole}y`;
+  }
+  // Months-only path (years is null/0, months > 0).
+  if (m != null && m > 0) return `${m}m`;
+  return "—";
+}
+
+// Best-effort parser for the JSON-string columns the apply form writes
+// (experienceDetails, educationDetails). Returns [] on any failure so
+// the Profile tab degrades gracefully when the value is missing or
+// malformed (legacy rows, hand-edits in the DB, etc.).
+function parseJsonList<T>(raw: string | null | undefined): T[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? (v as T[]) : [];
+  } catch { return []; }
+}
+
+const fmtShortDate = (iso?: string | null): string => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+};
+
+// "Aug 2023 — May 2026" / "Sep 2025 — Present" / "May 2026" (single).
+function fmtDateRange(
+  start?: string | null,
+  end?: string | null,
+  current?: boolean,
+): string {
+  const s = fmtShortDate(start);
+  const e = current ? "Present" : fmtShortDate(end);
+  if (!s && !e) return "";
+  if (!e) return s;
+  if (!s) return e;
+  return `${s} — ${e}`;
 }
 
 function Section({ title, children, last }: { title: string; children: React.ReactNode; last?: boolean }) {
