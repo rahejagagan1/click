@@ -325,6 +325,51 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Auto-assign to the initial hiring stage ──
+    // Without this, currentStageId stays NULL forever and the
+    // candidates table shows "Not available" under DAYS IN CURRENT
+    // (daysBetween(null) returns null). Picks the lowest-sortOrder
+    // active stage as the entry point — typically "Sourced". Also
+    // writes a JobApplicationStage history row so the drawer's
+    // Stages timeline starts with this entry. Whole block soft-fails
+    // for legacy DBs that haven't run the kanban migration.
+    if (applicationId) {
+      try {
+        const initial = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+          `SELECT id FROM "HiringStage"
+            WHERE "isActive" = true AND kind = 'active'
+            ORDER BY "sortOrder" ASC, id ASC
+            LIMIT 1`,
+        );
+        const stageId = initial[0]?.id;
+        if (stageId) {
+          await prisma.$executeRawUnsafe(
+            `UPDATE "JobApplication"
+                SET "currentStageId" = $1, "enteredStageAt" = NOW()
+              WHERE id = $2`,
+            stageId,
+            applicationId,
+          );
+          // Stage timeline row — also soft-fail if the join table
+          // doesn't exist yet.
+          try {
+            await prisma.$executeRawUnsafe(
+              `INSERT INTO "JobApplicationStage"
+                  ("applicationId", "stageId", "enteredAt", note)
+                VALUES ($1, $2, NOW(), 'Auto-assigned on application')`,
+              applicationId,
+              stageId,
+            );
+          } catch (_) { /* table missing on legacy — ignore */ }
+        }
+      } catch (e: any) {
+        const code = e?.meta?.code || e?.code;
+        if (code !== "42P01" && code !== "42703" && !/does not exist/i.test(String(e?.message))) {
+          console.error("Could not assign initial hiring stage:", e);
+        }
+      }
+    }
+
     // ── Notify hiring stakeholders ──
     // Same recipient set as feedback / report locks: CEO, HR managers,
     // admins, special_access. Developer accounts gated by the
