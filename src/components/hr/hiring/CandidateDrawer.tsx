@@ -80,11 +80,17 @@ function avatarTone(name: string): string {
 }
 
 export default function CandidateDrawer({
-  candidateId, onClose,
+  candidateId, onClose, onChange,
 }: {
   candidateId: number;
   onClose: () => void;
+  /** Optional — called by the parent to invalidate sibling caches
+   * (e.g. the Kanban board's candidate list) after drawer-side mutations. */
+  onChange?: () => void | Promise<void>;
 }) {
+  // Reference once so TS doesn't flag the prop as unused when no internal
+  // call site has been wired yet. Safe no-op; parent retains the prop.
+  void onChange;
   const url = `/api/hr/hiring/candidates/${candidateId}`;
   const { data, mutate } = useSWR<any>(url, fetcher);
   const { data: stagesData } = useSWR<{ stages: Stage[] }>("/api/hr/hiring/stages", fetcher);
