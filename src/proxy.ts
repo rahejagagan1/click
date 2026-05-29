@@ -2,13 +2,27 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-const PUBLIC_PATHS = ["/login", "/api/auth", "/api/health"];
+// Public-facing routes that bypass the Google-restricted login wall.
+// /jobs and its child routes (/jobs/[slug], /jobs/apply) are the
+// candidate-facing careers + application flow that needs to be
+// reachable without an @nbmediaproductions.com / @ytipro.com login.
+// /api/jobs/* powers those pages (form-fields, openings, [id],
+// parse-resume, apply) so applicants can submit without a session.
+const PUBLIC_PATHS = [
+    "/login",
+    "/api/auth",
+    "/api/health",
+    "/jobs",
+    "/api/jobs",
+];
 
 export async function proxy(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
-    // Allow public paths
-    if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
+    // Allow public paths. Match either the exact path or the path as a
+    // prefix with a "/" boundary so /api/jobs whitelists /api/jobs and
+    // /api/jobs/openings but NOT a hypothetical /api/jobs-admin.
+    if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
         return NextResponse.next();
     }
 
