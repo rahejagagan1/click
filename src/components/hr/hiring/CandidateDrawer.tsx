@@ -39,6 +39,8 @@ import SelectField            from "@/components/ui/SelectField";
 type Stage = { id: number; key: string; label: string; kind: string; color: string };
 type Candidate = {
   id: number; fullName: string; email: string; phone: string | null;
+  /** Gravatar URL resolved from the candidate's email (null when not set). */
+  photoUrl?: string | null;
   experienceYears: number | null; experienceMonths?: number | null;
   currentCompany: string | null;
   noticePeriod: string | null; resumeUrl: string | null; resumeFileName: string | null;
@@ -99,6 +101,41 @@ function avatarTone(name: string): string {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return AVATAR_TONES[h % AVATAR_TONES.length];
+}
+
+// Avatar that tries the Gravatar photo first, falls back to the
+// coloured-initials circle on 404 or any <img onError>. Shared shape
+// with the CandidatesTab one so the same fallback story applies on
+// the list and the drawer.
+function CandidateAvatar({
+  name, photoUrl, size = 64,
+}: {
+  name: string;
+  photoUrl?: string | null;
+  size?: number;
+}) {
+  const [failed, setFailed] = useState(false);
+  const dim = `${size}px`;
+  if (photoUrl && !failed) {
+    return (
+      <img
+        src={photoUrl}
+        alt={name}
+        onError={() => setFailed(true)}
+        loading="lazy"
+        className="shrink-0 rounded-full object-cover"
+        style={{ width: dim, height: dim }}
+      />
+    );
+  }
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center justify-center rounded-full text-white font-bold ${avatarTone(name)}`}
+      style={{ width: dim, height: dim, fontSize: Math.round(size * 0.32) }}
+    >
+      {initials(name)}
+    </span>
+  );
 }
 
 export default function CandidateDrawer({
@@ -224,9 +261,7 @@ export default function CandidateDrawer({
       {/* ── Identity + actions row ─────────────────────────── */}
       <div className="px-6 py-5 border-b border-slate-100">
         <div className="flex items-start gap-5 flex-wrap">
-          <span className={`inline-flex h-16 w-16 items-center justify-center rounded-full text-white text-[18px] font-bold shrink-0 ${avatarTone(c.fullName)}`}>
-            {initials(c.fullName)}
-          </span>
+          <CandidateAvatar name={c.fullName} photoUrl={c.photoUrl} size={64} />
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
