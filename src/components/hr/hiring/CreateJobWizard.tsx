@@ -1189,6 +1189,12 @@ function Combobox({
     return options.filter((o) => o.toLowerCase().includes(q));
   }, [options, q]);
 
+  // True when the typed value isn't one of the existing options — we
+  // surface a clickable "+ Use 'X' as custom" entry so users know they
+  // can pick something outside the suggested list (HR roles + departments
+  // grow over time and the dropdown is just a hint, not a constraint).
+  const isCustom = !!value.trim() && !options.some((o) => o.toLowerCase() === q);
+
   // Keep hovered option in view as the user arrows through the list.
   useEffect(() => {
     if (!open || !listRef.current) return;
@@ -1235,12 +1241,26 @@ function Combobox({
 
       {/* Dropdown is portaled to <body> so parent containers with
           overflow:hidden / overflow:auto don't clip it. */}
-      {mounted && open && coords && filtered.length > 0 && createPortal(
+      {mounted && open && coords && (filtered.length > 0 || isCustom) && createPortal(
         <div
           ref={listRef}
           style={{ position: "fixed", top: coords.top, left: coords.left, width: coords.width }}
           className="z-[1000] max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-[0_10px_30px_-6px_rgba(15,23,42,0.18)] py-1"
         >
+          {/* "+ Use 'X' as custom" — explicit affordance so users know
+              the typed value works even when it isn't in the suggestion
+              list. Sits at the top so it's the first thing they see
+              after typing a new title / department. */}
+          {isCustom && (
+            <button
+              type="button"
+              onClick={() => { onChange(value.trim()); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-[12.5px] text-emerald-700 hover:bg-emerald-50 border-b border-slate-100 inline-flex items-center gap-2 font-medium"
+            >
+              <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-bold leading-none">+</span>
+              Use <span className="font-semibold">"{value.trim()}"</span> as custom
+            </button>
+          )}
           {filtered.map((o, i) => (
             <button
               key={o}
@@ -1259,15 +1279,6 @@ function Combobox({
               {o}
             </button>
           ))}
-        </div>,
-        document.body,
-      )}
-      {mounted && open && coords && filtered.length === 0 && value.trim() && createPortal(
-        <div
-          style={{ position: "fixed", top: coords.top, left: coords.left, width: coords.width }}
-          className="z-[1000] rounded-xl border border-slate-200 bg-white shadow-lg p-3 text-[12px] text-slate-500"
-        >
-          No matches — press Enter to use <span className="font-semibold text-slate-700">"{value}"</span> anyway.
         </div>,
         document.body,
       )}
