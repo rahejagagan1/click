@@ -157,15 +157,19 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
 
       {/* ── Hero — sized to natural content, not forced fullscreen */}
       <section className="relative overflow-hidden border-b border-slate-100">
-        <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-b from-blue-50/50 via-[#e2e8f0] to-[#e2e8f0]" />
-        <div aria-hidden="true" className="absolute -top-32 -left-32 -z-10 h-[460px] w-[460px] rounded-full bg-[#3b82f6]/[0.10] blur-[120px]" />
-        {/* Floating social-platform badges with spread-from-centre
-            entrance — same treatment as the careers index hero. */}
+        {/* Layered gradient backdrop — mobile gets a richer, more
+            saturated wash so the page feels intentional even without
+            the desktop's floating social badges. */}
+        <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-b from-blue-50/60 via-white to-[#e2e8f0]" />
+        <div aria-hidden="true" className="absolute -top-32 -left-32 -z-10 h-[460px] w-[460px] rounded-full bg-[#3b82f6]/[0.12] blur-[110px]" />
+        <div aria-hidden="true" className="absolute -top-20 -right-24 -z-10 h-[360px] w-[360px] rounded-full bg-[#a855f7]/[0.07] blur-[100px] sm:hidden" />
+        {/* Floating social-platform badges — desktop only (component
+            self-hides on phones because they fight the title/chips). */}
         <PlayBadges />
 
-        <div className="w-full max-w-5xl mx-auto px-4 sm:px-8 pt-10 sm:pt-20 pb-12 sm:pb-24">
+        <div className="w-full max-w-5xl mx-auto px-5 sm:px-8 pt-8 sm:pt-20 pb-10 sm:pb-24">
           <Reveal direction="up">
-            <nav className="flex items-center gap-1.5 text-[12px] text-slate-500 mb-7 overflow-x-auto whitespace-nowrap">
+            <nav className="flex items-center gap-1.5 text-[11.5px] sm:text-[12px] text-slate-500 mb-5 sm:mb-7 overflow-x-auto whitespace-nowrap">
               <Link href="/jobs" className="hover:text-slate-900 transition-colors font-medium shrink-0">Careers</Link>
               {showDeptInBreadcrumb && (<>
                 <span className="text-slate-300 shrink-0">/</span>
@@ -175,35 +179,42 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
               <span className="text-slate-900 font-medium truncate max-w-[180px] sm:max-w-[260px]">{job.title}</span>
             </nav>
 
-            <div className="inline-flex items-center gap-2 rounded-full bg-[#f8fafc] ring-1 ring-slate-300/60 px-3 py-1 text-[11px] font-semibold shadow-[0_1px_2px_rgba(15,23,42,0.04)] mb-6">
+            {/* OPEN-ROLE chip — a single tight pill on mobile so it
+                doesn't break to two lines. */}
+            <div className="inline-flex items-center gap-2 rounded-full bg-white/90 ring-1 ring-slate-200/80 px-3 py-1 text-[10.5px] sm:text-[11px] font-semibold shadow-[0_1px_2px_rgba(15,23,42,0.04)] mb-5 sm:mb-6 backdrop-blur">
               <span className="relative inline-flex h-1.5 w-1.5">
                 <span className="absolute inset-0 rounded-full bg-emerald-400/70 animate-ping" />
                 <span className="relative inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
               </span>
               <span className="text-slate-700 uppercase tracking-wider">{brand}</span>
               <span className="text-slate-300">·</span>
-              <span className="text-slate-500 uppercase tracking-wider">Open role</span>
+              <span className="text-emerald-600 uppercase tracking-wider">Open role</span>
             </div>
           </Reveal>
 
           {/* Title — word-by-word reveal. Plain slate-900 so the
-              animation is the focus, not a gradient. */}
+              animation is the focus, not a gradient. Mobile floor
+              tightened to 1.75rem so 2 long words still fit on one
+              line on most 360px+ devices. */}
           <h1
-            className="font-semibold tracking-[-0.025em] text-slate-900 leading-[1.08] sm:leading-[1.04] break-words"
-            style={{ fontSize: "clamp(1.85rem, 6vw, 3.8rem)" }}
+            className="font-bold tracking-[-0.028em] text-slate-900 leading-[1.06] sm:leading-[1.04] break-words"
+            style={{ fontSize: "clamp(1.75rem, 6vw, 3.8rem)" }}
           >
             <WordReveal text={job.title} staggerMs={70} baseDelayMs={120} />
           </h1>
           {job.department && (
             <Reveal direction="up" delay={120 + job.title.split(/\s+/).length * 70}>
-              <p className="mt-4 text-[14.5px] sm:text-[16px] text-slate-500">
-                on the <span className="font-medium text-slate-800">{job.department}</span> team
+              <p className="mt-3 sm:mt-4 text-[14px] sm:text-[16px] text-slate-500">
+                on the <span className="font-semibold text-slate-800">{job.department}</span> team
               </p>
             </Reveal>
           )}
 
+          {/* Meta chips — on mobile we display them as a 2-column
+              grid (tight, easy to scan) instead of a free-wrap that
+              creates uneven row heights. */}
           <Reveal direction="up" delay={160}>
-            <div className="mt-7 flex flex-wrap gap-2">
+            <div className="mt-6 sm:mt-7 grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
               {job.location        && <Chip icon={MapPin}     label={job.location} />}
               {job.employmentType  && <Chip icon={Briefcase}  label={job.employmentType} />}
               {job.experienceLevel && <Chip icon={Clock}      label={job.experienceLevel} />}
@@ -212,12 +223,18 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
             </div>
           </Reveal>
 
+          {/* Primary CTAs — apply is full-width-feel on mobile (h-12,
+              big tap target, gradient + glow), View-JD sits next to
+              it as the secondary. Share + Posted move into their own
+              tertiary row on mobile so the primary actions own the
+              eye-line. */}
           <Reveal direction="up" delay={240}>
-            <div className="mt-8 flex flex-wrap items-center gap-3">
+            <div className="mt-7 sm:mt-8 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2.5 sm:gap-3">
               <Magnetic strength={0.16}>
                 <Link
                   href={applyHref}
-                  className="group inline-flex items-center justify-center gap-2 h-11 px-6 rounded-xl bg-[#60a5fa] hover:bg-[#3b82f6] text-white text-[13.5px] font-semibold transition-all shadow-[0_4px_14px_-2px_rgba(96,165,250,0.4)] hover:shadow-[0_8px_20px_-4px_rgba(96,165,250,0.5)]"
+                  className="group inline-flex w-full sm:w-auto items-center justify-center gap-2 h-12 sm:h-11 px-6 rounded-xl bg-gradient-to-r from-[#3b82f6] via-[#60a5fa] to-[#3b82f6] bg-[length:200%_100%] hover:bg-right text-white text-[14px] sm:text-[13.5px] font-semibold transition-all shadow-[0_6px_18px_-4px_rgba(59,130,246,0.55)] hover:shadow-[0_10px_24px_-4px_rgba(59,130,246,0.6)]"
+                  style={{ transition: "background-position 0.5s ease, box-shadow 0.3s ease" }}
                 >
                   Apply for this role
                   <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
@@ -227,7 +244,7 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
                 /\.pdf(\?|$)/i.test(job.jdFileUrl) ? (
                   <a
                     href="#job-description"
-                    className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl border border-slate-300/60 bg-[#f8fafc] hover:border-[#3b82f6]/60 hover:bg-[#3b82f6]/[0.04] text-slate-800 text-[13px] font-semibold transition-colors"
+                    className="inline-flex w-full sm:w-auto items-center justify-center gap-2 h-12 sm:h-11 px-5 rounded-xl border border-slate-300/70 bg-white hover:border-[#3b82f6]/60 hover:bg-[#3b82f6]/[0.04] text-slate-800 text-[13.5px] sm:text-[13px] font-semibold transition-colors"
                     title={job.jdFileName || "Read the job description below"}
                   >
                     <FileText size={14} /> View JD
@@ -237,23 +254,30 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
                     href={job.jdFileUrl}
                     download={job.jdFileName || undefined}
                     target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl border border-slate-300/60 bg-[#f8fafc] hover:border-[#3b82f6]/60 hover:bg-[#3b82f6]/[0.04] text-slate-800 text-[13px] font-semibold transition-colors"
+                    className="inline-flex w-full sm:w-auto items-center justify-center gap-2 h-12 sm:h-11 px-5 rounded-xl border border-slate-300/70 bg-white hover:border-[#3b82f6]/60 hover:bg-[#3b82f6]/[0.04] text-slate-800 text-[13.5px] sm:text-[13px] font-semibold transition-colors"
                     title={job.jdFileName || "Download the job description"}
                   >
                     <Download size={14} /> Download JD
                   </a>
                 )
               )}
+            </div>
+
+            {/* Tertiary row — Share + Posted date. On mobile this is
+                a separate row beneath the primary CTAs; on desktop it
+                inlines with them. */}
+            <div className="mt-3 sm:mt-3 flex flex-wrap items-center gap-2 sm:gap-3">
               <JobShareButton
                 title={job.title}
                 brand={brand}
-                className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl border border-slate-300/60 bg-[#f8fafc] hover:bg-slate-50 text-slate-700 text-[13px] font-medium transition-colors"
+                className="inline-flex items-center justify-center gap-2 h-10 sm:h-11 px-4 sm:px-5 rounded-xl border border-slate-200 bg-white/80 hover:bg-slate-50 text-slate-700 text-[12.5px] sm:text-[13px] font-medium transition-colors backdrop-blur"
               >
-                <Share2 size={14} /> Share
+                <Share2 size={13} /> Share
               </JobShareButton>
               {publishedLabel && (
-                <span className="text-[12px] text-slate-400 inline-flex items-center gap-1.5 ml-1">
-                  <Calendar size={12} /> Posted {publishedLabel}{closesLabel && <> · Closes {closesLabel}</>}
+                <span className="text-[11.5px] sm:text-[12px] text-slate-500 inline-flex items-center gap-1.5">
+                  <Calendar size={12} /> Posted {publishedLabel}
+                  {closesLabel && <span className="hidden sm:inline"> · Closes {closesLabel}</span>}
                 </span>
               )}
             </div>
@@ -571,10 +595,14 @@ function CardHeader({ title, eyebrow }: { title: string; eyebrow: string }) {
 }
 
 function Chip({ icon: Icon, label }: { icon: any; label: string }) {
+  // On mobile we render the chips inside a 2-column grid (see hero
+  // above). `inline-flex` would collapse to content-width and look
+  // staggered, so we let the chip stretch to its grid cell on mobile
+  // and revert to inline-flex pill on tablet+.
   return (
-    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f8fafc] ring-1 ring-slate-300/60 text-slate-700 text-[12.5px] font-medium shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-      <Icon size={13} className="text-slate-400" />
-      {label}
+    <span className="flex sm:inline-flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-full bg-white ring-1 ring-slate-200 text-slate-700 text-[12px] sm:text-[12.5px] font-medium shadow-[0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur min-w-0">
+      <Icon size={13} className="text-[#3b82f6] shrink-0" />
+      <span className="truncate">{label}</span>
     </span>
   );
 }

@@ -178,9 +178,13 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
 
       {/* ── Hero (scroll-snap panel 1) ───────────────────────── */}
       <section className="relative overflow-hidden border-b border-slate-100 ">
-        <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-b from-blue-50/50 via-[#e2e8f0] to-[#e2e8f0]" />
-        <div aria-hidden="true" className="absolute -top-32 -left-32 -z-10 h-[460px] w-[460px] rounded-full blur-[120px]" style={{ background: `${meta.accent}22` }} />
-        {/* Floating YouTube play badges — content-studio identity */}
+        {/* Two-layer gradient backdrop + side blob so mobile feels
+            intentional even without the desktop's floating badges. */}
+        <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-b from-blue-50/60 via-white to-[#e2e8f0]" />
+        <div aria-hidden="true" className="absolute -top-32 -left-32 -z-10 h-[460px] w-[460px] rounded-full blur-[110px]" style={{ background: `${meta.accent}26` }} />
+        <div aria-hidden="true" className="absolute -top-20 -right-24 -z-10 h-[360px] w-[360px] rounded-full bg-[#a855f7]/[0.07] blur-[100px] sm:hidden" />
+        {/* Floating YouTube play badges — desktop only (component
+            self-hides on phones because they fight the title/chips). */}
         <PlayBadges />
 
         <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-14">
@@ -508,11 +512,13 @@ function JobListCard({ job, activeBrand }: { job: Row; activeBrand: ActiveBrand 
   return (
     <Link
       href={`/jobs/${job.slug}`}
-      className="group relative flex flex-col bg-[#f8fafc] rounded-2xl border border-slate-300/60 hover:border-slate-400/70 hover:shadow-[0_8px_28px_-6px_rgba(15,23,42,0.10)] hover:-translate-y-0.5 transition-all overflow-hidden"
+      className="group relative flex flex-col bg-white rounded-2xl border border-slate-200 hover:border-slate-300 hover:shadow-[0_10px_28px_-8px_rgba(15,23,42,0.12)] active:scale-[0.99] sm:hover:-translate-y-0.5 transition-all overflow-hidden"
     >
-      <div aria-hidden="true" className="h-1 w-full" style={{ background: m.accent }} />
-      <div className="p-5 flex-1 flex flex-col">
-        <div className="flex items-center gap-2 mb-3">
+      {/* Accent strip — wider on mobile so it reads as a deliberate
+          design element, not a hairline. */}
+      <div aria-hidden="true" className="h-[3px] sm:h-1 w-full" style={{ background: m.accent }} />
+      <div className="p-5 sm:p-5 flex-1 flex flex-col">
+        <div className="flex items-center gap-2 mb-2.5 sm:mb-3 flex-wrap">
           {showBrandBadge && (
             <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${m.badgeBg} ${m.badgeText} ring-1 ring-slate-100`}>
               <span className="h-1.5 w-1.5 rounded-full" style={{ background: m.accent }} />
@@ -520,27 +526,30 @@ function JobListCard({ job, activeBrand }: { job: Row; activeBrand: ActiveBrand 
             </span>
           )}
           {job.department && (
-            <span className="text-[11px] font-medium text-slate-500">{job.department}</span>
+            <span className="text-[10.5px] sm:text-[11px] font-semibold uppercase tracking-wider text-slate-400">{job.department}</span>
           )}
         </div>
 
-        <h3 className="text-[17px] font-semibold text-slate-900 group-hover:text-[#3b82f6] transition-colors tracking-tight leading-snug">
+        <h3 className="text-[16.5px] sm:text-[17px] font-bold text-slate-900 group-hover:text-[#3b82f6] transition-colors tracking-tight leading-snug">
           {job.title}
         </h3>
 
-        <div className="mt-3 flex flex-wrap gap-x-3.5 gap-y-1.5 text-[12px] text-slate-600">
-          {job.location        && <span className="inline-flex items-center gap-1.5"><MapPin size={12} className="text-slate-400" /> {job.location}</span>}
-          {job.employmentType  && <span className="inline-flex items-center gap-1.5"><Briefcase size={12} className="text-slate-400" /> {job.employmentType}</span>}
-          {job.experienceLevel && <span className="inline-flex items-center gap-1.5"><Clock size={12} className="text-slate-400" /> {job.experienceLevel}</span>}
-          {job.salaryRange     && <span className="inline-flex items-center gap-1.5"><IndianRupee size={12} className="text-slate-400" /> {job.salaryRange}</span>}
+        {/* Meta — `gap-y-2 gap-x-3` plus `min-w-0` keeps long labels
+            (long salary ranges, "Mid-level (2-5 yrs)") wrapping
+            cleanly on narrow screens. */}
+        <div className="mt-3 flex flex-wrap gap-x-3 gap-y-2 text-[12px] text-slate-600">
+          {job.location        && <span className="inline-flex items-center gap-1.5 min-w-0"><MapPin     size={12} className="text-[#3b82f6] shrink-0" /> <span className="truncate">{job.location}</span></span>}
+          {job.employmentType  && <span className="inline-flex items-center gap-1.5 min-w-0"><Briefcase  size={12} className="text-[#3b82f6] shrink-0" /> <span className="truncate">{job.employmentType}</span></span>}
+          {job.experienceLevel && <span className="inline-flex items-center gap-1.5 min-w-0"><Clock      size={12} className="text-[#3b82f6] shrink-0" /> <span className="truncate">{job.experienceLevel}</span></span>}
+          {job.salaryRange     && <span className="inline-flex items-center gap-1.5 min-w-0"><IndianRupee size={12} className="text-[#3b82f6] shrink-0" /> <span className="truncate">{job.salaryRange}</span></span>}
         </div>
 
-        <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-[12px]">
+        <div className="mt-4 sm:mt-5 pt-3 sm:pt-4 border-t border-slate-100 flex items-center justify-between text-[12px]">
           <span className="inline-flex items-center gap-1.5 text-slate-500">
             <Users size={12} />
             {job.vacancies > 1 ? `${job.vacancies} positions open` : "1 position"}
           </span>
-          <span className="inline-flex items-center gap-1 font-semibold group-hover:gap-1.5 transition-all" style={{ color: m.accent }}>
+          <span className="inline-flex items-center gap-1 font-bold group-hover:gap-1.5 transition-all" style={{ color: m.accent }}>
             View role <ChevronRight size={13} className="transition-transform group-hover:translate-x-0.5" />
           </span>
         </div>
