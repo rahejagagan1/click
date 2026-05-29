@@ -1102,7 +1102,7 @@ export default function EmployeeDetailPage() {
               { key: "penalizationPolicy",      label: "Attendance Penalisation Policy",  type: "select", options: ["Default", "Strict", "Lenient", "None"] },
               { key: "attendanceCaptureScheme", label: "Attendance Capture Scheme",       type: "select", options: ["On-Site", "Remote", "Hybrid"] },
             ]}
-            onFieldChange={(key, value) => {
+            onFieldChange={(key, value): Record<string, string> | void => {
               // ── Time Tracking Policy ↔ Attendance Capture Scheme ──
               // Two stored fields describing the same operational mode.
               // Keep them aligned automatically so HR can't accidentally
