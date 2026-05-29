@@ -360,7 +360,7 @@ model Subtask {
   dueDate           DateTime?
   dateDone          DateTime?
   orderIndex        Int?
-  tat               Decimal?  @db.Decimal(5, 2)
+  tat               Decimal?  @db.Decimal(7, 2)
   customFieldsJson  Json?     @db.JsonB
   dateCreated       DateTime?
   lastSyncedAt      DateTime  @default(now())
