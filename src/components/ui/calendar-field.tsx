@@ -12,6 +12,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import SelectField from "@/components/ui/SelectField";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -167,20 +168,23 @@ export function CalendarField({
             ><ChevronLeft size={14} /></button>
 
             <div className="flex items-center gap-1.5">
-              <select
-                value={cursor.m}
-                onChange={(e) => setCursor((c) => ({ ...c, m: +e.target.value }))}
-                className="text-[12.5px] font-semibold text-slate-900 bg-transparent focus:outline-none cursor-pointer hover:text-[#3b82f6]"
-              >
-                {MONTHS.map((mn, i) => <option key={i} value={i}>{mn}</option>)}
-              </select>
-              <select
-                value={cursor.y}
-                onChange={(e) => setCursor((c) => ({ ...c, y: +e.target.value }))}
-                className="text-[12.5px] font-semibold text-slate-900 bg-transparent focus:outline-none cursor-pointer hover:text-[#3b82f6]"
-              >
-                {years.map((y) => <option key={y} value={y}>{y}</option>)}
-              </select>
+              {/* Branded portal-rendered selects — kills the OS-native
+                  dark-navy option-highlight (Chromium on Linux) that
+                  used to render inside the calendar header. */}
+              <SelectField
+                value={String(cursor.m)}
+                onChange={(v) => setCursor((c) => ({ ...c, m: Number(v) }))}
+                options={MONTHS.map((mn, i) => ({ value: String(i), label: mn }))}
+                className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[12.5px] font-semibold text-slate-900 flex items-center justify-between gap-1 hover:border-slate-300 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15"
+                width={130}
+              />
+              <SelectField
+                value={String(cursor.y)}
+                onChange={(v) => setCursor((c) => ({ ...c, y: Number(v) }))}
+                options={years.map((y) => ({ value: String(y), label: String(y) }))}
+                className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[12.5px] font-semibold text-slate-900 flex items-center justify-between gap-1 hover:border-slate-300 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15"
+                width={90}
+              />
             </div>
 
             <button
