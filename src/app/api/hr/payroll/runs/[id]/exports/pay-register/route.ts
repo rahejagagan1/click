@@ -1,0 +1,163 @@
+// Keka PayRegister_YT Money Productions Pvt. Ltd ({Entity})_{Mon-YYYY}.xlsx
+//
+// Master pay register — 35 columns mirroring Keka's existing export exactly.
+// Bookkeepers reconcile against the column positions, so adding / reordering
+// columns would break their workflow. The "Aganist" typo in column 33 is
+// intentional and preserved (matches Keka's source).
+
+import { NextRequest, NextResponse } from "next/server";
+import ExcelJS from "exceljs";
+import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
+import {
+  loadExportRows, monYearDash, monShort,
+  HEADERS_PAY_REGISTER,
+} from "@/lib/payroll-exports";
+
+export const dynamic = "force-dynamic";
+
+const NB_MEDIA_COMPANY = "YT Money Productions Pvt. Ltd (NB Media)";
+
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { session, errorResponse } = await requireAuth();
+  if (errorResponse) return errorResponse;
+  if (!canViewSalary(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  try {
+    const { id } = await params;
+    const runId = parseInt(id);
+    if (!Number.isFinite(runId)) return NextResponse.json({ error: "Bad runId" }, { status: 400 });
+
+    const { run, rows } = await loadExportRows(runId);
+    if (run.status !== "locked" && run.status !== "paid") {
+      return NextResponse.json({ error: `Lock the run first — currently '${run.status}'` }, { status: 409 });
+    }
+
+    // PayRegister includes EVERY processed payslip — including on-hold
+    // ones — so the register documents the complete cycle, not just
+    // what got paid out. Bookkeeping needs to see the whole picture.
+    const all = rows;
+
+    const monLabel = monShort(run.month);
+    const sheetName = `${monLabel} ${run.year}`;
+    const monthCell = `${monLabel} - ${run.year}`;
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet(sheetName);
+
+    HEADERS_PAY_REGISTER.forEach((h, i) => {
+      const cell = ws.getCell(1, i + 1);
+      cell.value = h;
+      cell.font = { bold: true };
+    });
+
+    all.forEach((r, idx) => {
+      const row = idx + 2;
+      // Salary components for the cycle. SalaryStructure stores annual
+      // amounts; divide by 12 and apply the LOP factor so the columns
+      // already match what each employee actually earned this month.
+      const workingDays = r.workingDays || 30;
+      const lopFactor = workingDays > 0 ? Math.max(0, (workingDays - r.lopDays) / workingDays) : 1;
+
+      const isIntern = r.salaryType === "intern";
+      const basic    = isIntern ? 0 : (r.basicAnnual / 12) * lopFactor;
+      const hra      = isIntern ? 0 : (r.hraAnnual / 12) * lopFactor;
+      const medical  = isIntern ? 0 : (r.medicalAnnual / 12) * lopFactor;
+      const conv     = isIntern ? 0 : (r.conveyanceAnnual / 12) * lopFactor;
+      const special  = isIntern ? 0 : (r.specialAnnual / 12) * lopFactor;
+      const da       = isIntern ? 0 : (r.daAnnual / 12) * lopFactor;
+      // Interns receive their whole monthly amount as a stipend; basic
+      // / HRA / etc. stay at zero on the register.
+      const stipend  = isIntern ? Math.max(0, r.grossEarnings - r.bonus) : 0;
+
+      // Per Q2 from spec — every EmployeeBonus row (any bonusType) goes
+      // into the "Referral Bonus" column for now. Sub-types are kept on
+      // the bonus table for future split.
+      const referralBonus = r.bonus;
+      const businessExpense = (r.adhocPayByType["Reimbursement"] ?? 0)
+                            + (r.adhocPayByType["Travel"] ?? 0);
+
+      // Gross(A) intentionally computed at row level — Keka exports the
+      // numeric value, not the formula. PF Employee is treated as a
+      // contribution (column B); PT + addTax + TDS + adhoc deductions
+      // roll into Total Deductions (column C).
+      const grossA = basic + hra + medical + conv + special + da + stipend + referralBonus + businessExpense;
+      const pfEmployee = r.pfEmployee;
+      const totalContribB = pfEmployee; // ESI not yet wired
+      const profTax = r.professionalTax + r.additionalTax;
+      const totalAdhocDed = Object.values(r.adhocDedByType).reduce((s, v) => s + v, 0);
+      const totalDeductionC = profTax + r.tds + totalAdhocDed;
+      const netPay = grossA - totalContribB - totalDeductionC;
+      // D / E / F kept at zero — the cash-advance + settlement flows
+      // aren't wired to AdhocLineItem yet; revisit when those go live.
+      const cashAdvance = 0;
+      const settlement = 0;
+      const totalReimb = 0;
+      const totalNet = netPay + cashAdvance + settlement + totalReimb;
+
+      const statusLabel = r.status === "on_hold" ? "OnHold" : "ExecutedAsSalary";
+      const payableUnits = `${r.presentDays}/${workingDays} Days`;
+
+      ws.getCell(row, 1).value  = r.employeeId ?? "";
+      ws.getCell(row, 2).value  = r.name;
+      ws.getCell(row, 3).value  = r.designation ?? "";
+      // Keka's existing export emits the raw JS Date toString here. We
+      // match that literally so downstream parsers don't break.
+      ws.getCell(row, 4).value  = r.joiningDate ? r.joiningDate.toString() : "";
+      ws.getCell(row, 5).value  = r.department ?? "";
+      ws.getCell(row, 6).value  = capitalize(r.employmentType ?? "Permanent");
+      ws.getCell(row, 7).value  = monthCell;
+      ws.getCell(row, 8).value  = "Regular";
+      ws.getCell(row, 9).value  = statusLabel;
+      ws.getCell(row, 10).value = statusLabel;
+      ws.getCell(row, 11).value = r.presentDays;
+      ws.getCell(row, 12).value = workingDays;
+      ws.getCell(row, 13).value = r.lopDays;
+      ws.getCell(row, 14).value = r.presentDays;
+      ws.getCell(row, 15).value = payableUnits;
+      ws.getCell(row, 16).value = `${(r.ctcAnnual / 12).toFixed(2)} / MONTH`;
+      ws.getCell(row, 17).value = round2(basic);
+      ws.getCell(row, 18).value = round2(hra);
+      ws.getCell(row, 19).value = round2(medical);
+      ws.getCell(row, 20).value = round2(conv);
+      ws.getCell(row, 21).value = round2(special);
+      ws.getCell(row, 22).value = round2(da);
+      ws.getCell(row, 23).value = round2(stipend);
+      ws.getCell(row, 24).value = round2(referralBonus);
+      ws.getCell(row, 25).value = round2(businessExpense);
+      ws.getCell(row, 26).value = round2(grossA);
+      ws.getCell(row, 27).value = round2(pfEmployee);
+      ws.getCell(row, 28).value = round2(totalContribB);
+      ws.getCell(row, 29).value = round2(profTax);
+      ws.getCell(row, 30).value = round2(totalDeductionC);
+      ws.getCell(row, 31).value = round2(netPay);
+      ws.getCell(row, 32).value = round2(cashAdvance);
+      ws.getCell(row, 33).value = round2(settlement);
+      ws.getCell(row, 34).value = round2(totalReimb);
+      ws.getCell(row, 35).value = round2(totalNet);
+    });
+
+    // Column widths roughly matching the Keka source — wide for names /
+    // titles / departments, narrow for numeric columns.
+    [12, 28, 22, 32, 28, 12, 14, 12, 18, 18,
+     14, 12, 14, 14, 16, 22, 12, 12, 14, 16,
+     16, 14, 12, 14, 22, 12, 14, 18, 14, 16,
+     14, 14, 18, 18, 18].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+
+    const buf = await wb.xlsx.writeBuffer();
+    const filename = `Keka PayRegister_${NB_MEDIA_COMPANY}_${monYearDash(run.month, run.year)}.xlsx`;
+    return new NextResponse(buf as any, {
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    });
+  } catch (e) { return serverError(e, "GET /api/hr/payroll/runs/[id]/exports/pay-register"); }
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function capitalize(s: string): string {
+  return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1).toLowerCase();
+}

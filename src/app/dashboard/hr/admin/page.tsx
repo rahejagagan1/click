@@ -239,7 +239,23 @@ export default function HRAdminPage() {
 
   const openShiftEdit = (s: any) => {
     setEditShift(s);
-    setShiftForm({ name: s.name, startTime: s.startTime, endTime: s.endTime, gracePeriodMinutes: String(s.gracePeriodMinutes), workingDays: s.workingDays });
+    // Server returns workDays as string labels ("Mon","Tue",…) and
+    // breakMinutes as Int. The form state uses numeric day indices and
+    // a string-typed grace input, so map both directions here. Defensive
+    // against legacy rows that stored numeric indices in workDays.
+    const rawDays: unknown[] = Array.isArray(s.workDays) ? s.workDays
+      : Array.isArray(s.workingDays) ? s.workingDays : [];
+    const workingDays = rawDays
+      .map((d) => typeof d === "number" ? d : DAYS_LABEL.indexOf(String(d)))
+      .filter((n): n is number => n >= 0);
+    const breakRaw = s.breakMinutes ?? s.gracePeriodMinutes ?? 15;
+    setShiftForm({
+      name: s.name,
+      startTime: s.startTime,
+      endTime: s.endTime,
+      gracePeriodMinutes: String(breakRaw),
+      workingDays,
+    });
     setShowShiftForm(true);
   };
 
@@ -255,7 +271,20 @@ export default function HRAdminPage() {
 
   const saveShift = async () => {
     const method = editShift ? "PUT" : "POST";
-    const body = editShift ? { ...shiftForm, id: editShift.id } : shiftForm;
+    // Convert numeric day indices → string labels so the Shift.workDays
+    // JSON column stays in the canonical "Mon"/"Tue"/… form that
+    // auto-lop and the rest of the codebase expect.
+    const workDays = shiftForm.workingDays
+      .map((i) => DAYS_LABEL[i])
+      .filter(Boolean);
+    const payload = {
+      name: shiftForm.name,
+      startTime: shiftForm.startTime,
+      endTime: shiftForm.endTime,
+      breakMinutes: shiftForm.gracePeriodMinutes,
+      workDays,
+    };
+    const body = editShift ? { ...payload, id: editShift.id } : payload;
     const res = await fetch("/api/hr/admin/shifts", {
       method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
@@ -577,8 +606,11 @@ export default function HRAdminPage() {
                         <p className="text-[13px] font-semibold text-slate-800 dark:text-white">{s.name}</p>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                           {s.startTime} – {s.endTime}
-                          {" · "}Grace: {s.gracePeriodMinutes}min
-                          {" · "}{(s.workingDays as number[]).map(d => DAYS_LABEL[d]).join(", ")}
+                          {" · "}Grace: {s.breakMinutes ?? s.gracePeriodMinutes ?? 0}min
+                          {" · "}{(Array.isArray(s.workDays) ? s.workDays : [])
+                            .map((d: unknown) => typeof d === "number" ? DAYS_LABEL[d] : String(d))
+                            .filter(Boolean)
+                            .join(", ")}
                         </p>
                       </div>
                     </div>

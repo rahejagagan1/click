@@ -8,7 +8,7 @@ import {
   sendMissedClockOutReminders,
   sendHrLateClockInSummary,
 } from "@/lib/hr/missed-attendance-emails";
-import { maybeRunSickLeaveAccrual } from "@/lib/hr/leave-accrual";
+import { maybeRunMonthlyLeaveAccrual } from "@/lib/leave-accrual";
 
 const TICK_MS    = 60_000;
 const HOUR_MS    = 60 * 60 * 1000;
@@ -222,11 +222,12 @@ export function startInternalCronScheduler(): void {
                 .catch((e) => logSchedulerError("hr-clock-out", e));
         }
 
-        // ── HR: monthly sick-leave accrual (+1 SL day per active user, capped at 12) ──
-        // Idempotent on (IST calendar month); the helper persists its
-        // own last-run key in SyncConfig so it fires once per month even
-        // across restarts.
-        maybeRunSickLeaveAccrual()
-            .catch((e) => logSchedulerError("hr-sick-leave-accrual", e));
+        // ── HR: monthly leave accrual (policy-driven: Sick + Casual + any
+        // other leave type with monthlyAccrual > 0) ──
+        // Single accrual path for ALL leave types. Idempotent on calendar
+        // month; the helper persists its own last-run key in SyncConfig so
+        // it fires once per month even across restarts.
+        maybeRunMonthlyLeaveAccrual()
+            .catch((e) => logSchedulerError("hr-leave-accrual", e));
     }, TICK_MS);
 }
