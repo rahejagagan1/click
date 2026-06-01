@@ -381,7 +381,7 @@ function NewOfferModal({
 
 Greetings from NB Media!
 
-We are pleased to extend an offer of employment to you for the position of "${jobRole}". Your formal offer letter is attached to this email.
+We are pleased to extend an offer of employment to you for the position of "${jobRole}". Your formal offer letter (Word document) is attached to this email.
 
 Kindly review the attached document, sign it, and confirm your acceptance by ${deadlineFmt}. Failure to accept by the deadline will render this offer null and void automatically.
 
