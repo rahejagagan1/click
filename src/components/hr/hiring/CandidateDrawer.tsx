@@ -446,6 +446,9 @@ export default function CandidateDrawer({
                 // optional, server-side joined fields).
                 jobSalaryRange: (c as any).jobSalaryRange ?? null,
                 jobSalaryUnit:  (c as any).jobSalaryUnit  ?? null,
+                // Application date — feeds the offer letter's
+                // "application dated X" line so it isn't a literal "—".
+                createdAt:      c.createdAt ?? null,
               }}
               offers={offers}
               onMutated={() => mutate()}
