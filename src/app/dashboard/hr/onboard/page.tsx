@@ -16,6 +16,7 @@ import CustomSelect from "@/components/ui/CustomSelect";
 import SelectField from "@/components/ui/SelectField";
 import PopupPanel from "@/components/ui/PopupPanel";
 import KekaImportModal from "@/components/hr/KekaImportModal";
+import TeamWelcomeModal from "@/components/hr/TeamWelcomeModal";
 import type { KekaRow, KekaFormPatch } from "@/lib/keka-import";
 import { Upload as UploadIcon } from "lucide-react";
 
@@ -200,6 +201,14 @@ export default function OnboardEmployeePage() {
   const [saving, setSaving]   = useState(false);
   const [error, setError]     = useState("");
   const [success, setSuccess] = useState("");
+  // After a successful onboard, this holds the new joiner's details so
+  // we can open the Team Welcome composer (preview-then-send). Cleared
+  // when HR closes / skips / completes the welcome dialog.
+  const [welcomeFor, setWelcomeFor] = useState<{
+    fullName: string; firstName: string; jobRole: string;
+    workEmail: string; managerName?: string; officeLocation?: string;
+    phone?: string;
+  } | null>(null);
   // Banner shown when the form was prefilled from a hiring candidate
   // via ?fromCandidate=<id>. Stays put until HR dismisses it.
   const [prefilledFrom, setPrefilledFrom] = useState<{ candidateId: number; name: string } | null>(null);
@@ -714,9 +723,19 @@ export default function OnboardEmployeePage() {
       }
       // Wipe the draft so the next visit starts clean.
       try { localStorage.removeItem(DRAFT_KEY); } catch {}
-      // Bounce back to HR Admin so HR can either pick the next employee
-      // from the same Keka import or jump elsewhere in the dashboard.
-      setTimeout(() => router.push("/dashboard/hr/admin"), 1400);
+      // Open the Team Welcome composer so HR can preview + send the
+      // "Introducing X" announcement to the whole team. HR can skip it
+      // (the modal's X / Cancel) and we redirect on close either way.
+      // Manager name stays as the {{Manager Name}} placeholder — HR
+      // edits it inline before sending if needed.
+      setWelcomeFor({
+        fullName:  data.name,
+        firstName: form.firstName || data.name.split(" ")[0] || data.name,
+        jobRole:   form.jobTitle || form.role || "Team member",
+        workEmail: form.workEmail,
+        officeLocation: form.location || undefined,
+        phone: form.mobileNumber ? `${form.mobileCountry} ${form.mobileNumber}` : undefined,
+      });
     } catch (e: any) {
       setError(e?.message || "Failed to onboard");
     } finally {
@@ -1531,6 +1550,19 @@ export default function OnboardEmployeePage() {
           refreshOpts();
         }}
       />
+
+      {welcomeFor && (
+        <TeamWelcomeModal
+          newJoiner={welcomeFor}
+          onClose={() => {
+            setWelcomeFor(null);
+            router.push("/dashboard/hr/admin");
+          }}
+          onSent={() => {
+            setSuccess((s) => s + " Team welcome email sent.");
+          }}
+        />
+      )}
     </div>
   );
 }
