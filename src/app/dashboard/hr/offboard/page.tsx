@@ -668,19 +668,12 @@ function NiceSelect({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onEsc);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onEsc);
-    };
-  }, [open]);
+  // No local outside-click / Escape handler here — `PopupPanel`
+  // already owns both, AND it knows about the portal-rendered
+  // options. Having a second handler in this wrapper would close
+  // the panel before an option's onClick can fire (the option
+  // lives in a portal on document.body, so it tests as "outside"
+  // `ref.current` even though it's logically part of this select).
 
   return (
     <div ref={ref} className="relative">
