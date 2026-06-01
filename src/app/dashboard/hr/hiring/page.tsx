@@ -2,12 +2,11 @@
 
 // HR Hiring console — Keka-style redesign.
 //
-// Five top-level tabs:
+// Top-level tabs:
 //   1. Jobs        — list of openings → click into kanban pipeline
 //   2. Candidates  — cross-job table of all applicants
-//   3. Talent Pool — rated past candidates worth reaching out to
-//   4. Settings    — email templates + pipeline stages + form fields
-//   5. Reports     — funnel, time-to-hire, source breakdown
+//   3. Settings    — email templates + pipeline stages + form fields
+//   4. Reports     — funnel, time-to-hire, source breakdown
 //
 // Each tab is its own component under src/components/hr/hiring/*
 // so this file stays small and the tabs can be iterated
@@ -19,23 +18,21 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { isHRAdmin } from "@/lib/access";
-import { Briefcase, Users, Bookmark, Settings, BarChart3, LayoutDashboard, UserPlus } from "lucide-react";
+import { Briefcase, Users, Settings, BarChart3, LayoutDashboard, UserPlus } from "lucide-react";
 
 import DashboardTab    from "@/components/hr/hiring/DashboardTab";
 import JobsTab         from "@/components/hr/hiring/JobsTab";
 import CandidatesTab   from "@/components/hr/hiring/CandidatesTab";
-import TalentPoolTab   from "@/components/hr/hiring/TalentPoolTab";
 import PreboardingTab  from "@/components/hr/hiring/PreboardingTab";
 import SettingsTab     from "@/components/hr/hiring/SettingsTab";
 import ReportsTab      from "@/components/hr/hiring/ReportsTab";
 
-type TabKey = "dashboard" | "jobs" | "candidates" | "talent" | "preboarding" | "settings" | "reports";
+type TabKey = "dashboard" | "jobs" | "candidates" | "preboarding" | "settings" | "reports";
 
 const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: "dashboard",   label: "Dashboard",    Icon: LayoutDashboard },
   { key: "jobs",        label: "Jobs",         Icon: Briefcase       },
   { key: "candidates",  label: "Candidates",   Icon: Users           },
-  { key: "talent",      label: "Talent Pool",  Icon: Bookmark        },
   { key: "preboarding", label: "Preboarding",  Icon: UserPlus        },
   { key: "settings",    label: "Settings",     Icon: Settings        },
   { key: "reports",     label: "Reports",      Icon: BarChart3       },
@@ -143,7 +140,6 @@ export default function HiringPage() {
       {tab === "dashboard"   && <DashboardTab />}
       {tab === "jobs"        && <JobsTab />}
       {tab === "candidates"  && <CandidatesTab />}
-      {tab === "talent"      && <TalentPoolTab />}
       {tab === "preboarding" && <PreboardingTab />}
       {tab === "settings"    && <SettingsTab />}
       {tab === "reports"     && <ReportsTab />}
