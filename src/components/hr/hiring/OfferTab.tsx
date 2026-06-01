@@ -757,6 +757,47 @@ function OfferPreviewModal({
 
 // ── Helpers ────────────────────────────────────────────────────────
 
+// Step-numbered section card — gives the New Offer modal the
+// "1 → 2 → 3 → 4" flow without screaming wizard-style. Title + hint
+// on the left, optional action buttons on the right.
+function SectionCard({
+  num, title, hint, action, children,
+}: {
+  num: number;
+  title: string;
+  hint?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl bg-white border border-slate-200 shadow-[0_1px_2px_rgba(15,23,42,0.04)] overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-slate-100 flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5 min-w-0">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-50 text-[#1d4ed8] text-[11px] font-bold ring-1 ring-blue-100 shrink-0">
+            {num}
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-[13.5px] font-semibold text-slate-900">{title}</h3>
+            {hint && <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{hint}</p>}
+          </div>
+        </div>
+        {action && <div className="shrink-0">{action}</div>}
+      </div>
+      <div className="px-5 py-4">{children}</div>
+    </section>
+  );
+}
+
+// Label wrapper for form fields — consistent label-on-top styling.
+function FieldLabel({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-[11.5px] font-semibold text-slate-600 mb-1.5">{label}</label>
+      {children}
+    </div>
+  );
+}
+
 function PayRow({ label, value }: { label: string; value: number }) {
   return (
     <tr>
