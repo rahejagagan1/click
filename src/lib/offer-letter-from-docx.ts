@@ -128,6 +128,13 @@ export async function renderOfferLetterDocx(args: DocxOfferArgs): Promise<Buffer
   // ── 4. HR contact at the bottom — Tanvi → Vanshika (or whoever).
   xml = replaceAll(xml, "Tanvi", hrContactName);
 
+  // ── 5. Strip the yellow highlight markers.
+  // The template uses <w:highlight w:val="yellow"/> on placeholder
+  // runs as a visual cue for HR while editing. The candidate should
+  // never see those markers — substituted text reads cleanly on a
+  // plain background.
+  xml = xml.replace(/<w:highlight\s+w:val="yellow"\s*\/>/g, "");
+
   zip.file("word/document.xml", xml);
   const out = zip.generate({ type: "nodebuffer", compression: "DEFLATE" });
   return out;
