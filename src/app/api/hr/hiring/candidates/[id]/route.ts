@@ -354,6 +354,52 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ ok: true });
     }
 
+    if (action === "updateProfile") {
+      // HR-side inline edit of the candidate's basic identity fields:
+      // fullName, email, phone. Used when the parsed resume mislabels
+      // the candidate (e.g. their cover sheet title gets picked up as
+      // the name). Only writes the fields explicitly present in the
+      // body so an HR who sends just { fullName } doesn't blank email.
+      const set: string[] = [];
+      const args: any[] = [];
+      if (typeof body?.fullName === "string") {
+        const v = body.fullName.trim();
+        if (!v) return NextResponse.json({ error: "Name cannot be empty" }, { status: 400 });
+        if (v.length > 200) return NextResponse.json({ error: "Name too long" }, { status: 400 });
+        args.push(v); set.push(`"fullName" = $${args.length}`);
+      }
+      if (typeof body?.email === "string") {
+        const v = body.email.trim();
+        if (!v || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) {
+          return NextResponse.json({ error: "Valid email required" }, { status: 400 });
+        }
+        args.push(v); set.push(`"email" = $${args.length}`);
+      }
+      if ("phone" in body) {
+        const v = body.phone ? String(body.phone).trim() : null;
+        args.push(v); set.push(`"phone" = $${args.length}`);
+      }
+      if (set.length === 0) {
+        return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
+      }
+      args.push(id);
+      await prisma.$executeRawUnsafe(
+        `UPDATE "JobApplication" SET ${set.join(", ")}, "updatedAt" = NOW()
+          WHERE "id" = $${args.length}`,
+        ...args,
+      );
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "CandidateActivity" ("applicationId", "kind", "summary", "meta", "actorId")
+         VALUES ($1, 'profile_edit', $2, $3::jsonb, $4)`,
+        id, "Profile edited",
+        JSON.stringify({
+          fields: set.map((s) => s.split('"')[1]),  // ["fullName", "email", ...]
+        }),
+        actorId,
+      );
+      return NextResponse.json({ ok: true });
+    }
+
     if (action === "setOwner") {
       // Set or clear the recruiter owner for this candidate. ownerId
       // can be null to unassign.
