@@ -191,15 +191,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (application.status === "pending") {
       if (!isDirectManager && !isFinalApprover) return NextResponse.json({ error: "Not authorised" }, { status: 403 });
 
-      // CEO fast-path: when the L1 approver is the CEO (and they're the
-      // direct manager — i.e. the report-to chain ends at the CEO), the
-      // L2 stage is them too. Collapse both stages into a single click so
-      // the CEO doesn't approve, then have to come back and approve their
-      // own decision. Strictly orgLevel="ceo" — other final-approver roles
-      // (HR Manager, Special Access, Developer) still go through the
-      // normal two-step flow.
-      const isCeoAsDirectManager = self.orgLevel === "ceo" && isDirectManager;
-      if (isCeoAsDirectManager) {
+      // Final-approver fast-path: when the L1 approver is themselves
+      // the L2 approver (CEO or HR Manager), collapse both stages into
+      // a single click — there's no point making them approve, then come
+      // back and approve their own decision. Applies whether they are
+      // the direct manager or just stepping in at L1.
+      //
+      // Limited to CEO + HR Manager (the named final approvers in
+      // policy). Other final-approver tiers (special_access, role=admin,
+      // isDeveloper) still go through the normal two-step flow.
+      const isCeo = self.orgLevel === "ceo";
+      const isHrManager = self.orgLevel === "hr_manager" || self.role === "hr_manager";
+      const isFastPathFinalApprover = isCeo || isHrManager;
+      if (isFastPathFinalApprover) {
         const result = await prisma.$transaction(async (tx) => {
           const { count } = await tx.leaveApplication.updateMany({
             where: { id: appId, status: "pending" },
@@ -241,22 +245,24 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           cur.setUTCDate(cur.getUTCDate() + 1);
         }
 
+        const fastPathRole = isCeo ? "CEO" : "HR Manager";
         await writeAuditLog({
           req, actorId: myId, actorEmail: self?.email ?? null,
-          action: "leave.approve_ceo_direct", entityType: "LeaveApplication", entityId: appId,
+          action: isCeo ? "leave.approve_ceo_direct" : "leave.approve_hr_direct",
+          entityType: "LeaveApplication", entityId: appId,
           before: { status: "pending" }, after: { status: "approved", approvalNote },
         });
 
-        const extrasCeo = application.notifyUserIds ?? [];
+        const extrasFast = application.notifyUserIds ?? [];
         await notifyUsers({
           actorId:  myId,
-          userIds:  [application.userId, ...extrasCeo],
+          userIds:  [application.userId, ...extrasFast],
           type:     "leave",
           entityId: appId,
           title:    `${application.user?.name || "An employee"}'s ${application.leaveType?.name || "leave"} is approved`,
-          body:     `${rangeLabel} — approved directly by the CEO.${noteSuffix(approvalNote)}`,
+          body:     `${rangeLabel} — approved directly by the ${fastPathRole}.${noteSuffix(approvalNote)}`,
           linkUrl:  "/dashboard/hr/leaves",
-          emailData: { ...leaveEmailBase, approverName, stageLabel: "Approved by (CEO direct)", approvalNote: approvalNote ?? undefined },
+          emailData: { ...leaveEmailBase, approverName, stageLabel: `Approved by (${fastPathRole} direct)`, approvalNote: approvalNote ?? undefined },
         });
         return NextResponse.json({ success: true });
       }

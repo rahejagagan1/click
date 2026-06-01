@@ -180,6 +180,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       emergencyRelationship,
       attendanceCaptureScheme, costCenter,
       pfNumber, uanNumber, biometricId,
+      // ── Statutory: PF + PT (Edit Statutory Information modal) ──
+      pfEstablishmentId, pfEpsMember, pfNotEligible, pfJoinDate, pfAccountName,
+      ptEstablishmentId,
       // ABOUT-tab bios — used to be self-edit-only via /api/hr/profile.
       // Now HR-admin can edit them on any user's profile too.
       about, jobLove, hobbies,
@@ -446,6 +449,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (pfNumber                !== undefined) { setParts.push(`"pfNumber" = $${i++}`);                args.push(pfNumber                || null); }
       if (uanNumber               !== undefined) { setParts.push(`"uanNumber" = $${i++}`);               args.push(uanNumber               || null); }
       if (biometricId             !== undefined) { setParts.push(`"biometricId" = $${i++}`);             args.push(biometricId             || null); }
+      // ── Statutory: PF + PT ──
+      if (pfEstablishmentId       !== undefined) { setParts.push(`"pfEstablishmentId" = $${i++}`);       args.push(pfEstablishmentId       || null); }
+      if (pfEpsMember             !== undefined) { setParts.push(`"pfEpsMember" = $${i++}`);             args.push(Boolean(pfEpsMember)); }
+      if (pfNotEligible           !== undefined) { setParts.push(`"pfNotEligible" = $${i++}`);           args.push(Boolean(pfNotEligible)); }
+      if (pfJoinDate              !== undefined) { setParts.push(`"pfJoinDate" = $${i++}`);              args.push(pfJoinDate ? new Date(pfJoinDate) : null); }
+      if (pfAccountName           !== undefined) { setParts.push(`"pfAccountName" = $${i++}`);           args.push(pfAccountName           || null); }
+      if (ptEstablishmentId       !== undefined) { setParts.push(`"ptEstablishmentId" = $${i++}`);       args.push(ptEstablishmentId       || null); }
       // ABOUT-tab bios. Empty string clears (stored NULL) to match the
       // /api/hr/profile self-edit behaviour.
       if (about   !== undefined) { setParts.push(`"about" = $${i++}`);   args.push(typeof about   === "string" && about.trim().length   > 0 ? about   : null); }

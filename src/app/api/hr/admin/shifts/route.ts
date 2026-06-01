@@ -21,7 +21,12 @@ export async function POST(req: NextRequest) {
     // Frontend uses gracePeriodMinutes / workingDays; the Shift model
     // stores breakMinutes / workDays. Accept either alias.
     const { name, startTime, endTime } = body;
-    const breakMinutes = body.breakMinutes ?? body.gracePeriodMinutes ?? 60;
+    // Form fields arrive as strings — coerce to Int for the Shift.breakMinutes column.
+    const rawBreak = body.breakMinutes ?? body.gracePeriodMinutes ?? 60;
+    const breakMinutes = Number.parseInt(String(rawBreak), 10);
+    if (!Number.isFinite(breakMinutes)) {
+      return NextResponse.json({ error: "breakMinutes must be an integer" }, { status: 400 });
+    }
     const workDays = body.workDays ?? body.workingDays ?? ["Mon","Tue","Wed","Thu","Fri"];
     if (!name || !startTime || !endTime) return NextResponse.json({ error: "name, startTime, endTime required" }, { status: 400 });
     const shift = await prisma.shift.create({
@@ -37,7 +42,17 @@ export async function PUT(req: NextRequest) {
   try {
     const body = await req.json();
     const { id, name, startTime, endTime } = body;
-    const breakMinutes = body.breakMinutes ?? body.gracePeriodMinutes;
+    const rawBreak = body.breakMinutes ?? body.gracePeriodMinutes;
+    // PUT is a partial update — only coerce + send breakMinutes when the
+    // caller actually supplied it. An undefined Prisma field is a no-op.
+    let breakMinutes: number | undefined = undefined;
+    if (rawBreak !== undefined && rawBreak !== null && rawBreak !== "") {
+      const parsed = Number.parseInt(String(rawBreak), 10);
+      if (!Number.isFinite(parsed)) {
+        return NextResponse.json({ error: "breakMinutes must be an integer" }, { status: 400 });
+      }
+      breakMinutes = parsed;
+    }
     const workDays = body.workDays ?? body.workingDays;
     const shift = await prisma.shift.update({
       where: { id: parseInt(id) },

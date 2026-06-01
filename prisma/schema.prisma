@@ -1015,6 +1015,21 @@ model EmployeeProfile {
   // ── Statutory IDs beyond PAN / Aadhaar ──
   pfNumber          String?
   uanNumber         String?
+  // ── Statutory: Provident Fund (PF) extras — drive the "Edit Statutory
+  //    Information" modal (Keka parity). Establishment IDs are company-level
+  //    EPF/PT registrations; stored per-employee so payroll knows which one
+  //    each employee is filed under. ──
+  pfEstablishmentId String?
+  /// Employee is a member of EPS — contribution split across EPF & EPS.
+  pfEpsMember       Boolean  @default(true)
+  /// HR ticked "PF details not available / employee not eligible for PF".
+  pfNotEligible     Boolean  @default(false)
+  /// PF registration date (distinct from `joiningDate`).
+  pfJoinDate        DateTime?
+  /// Name on the PF account (may differ from the bank account holder).
+  pfAccountName     String?
+  // ── Statutory: Professional Tax (PT) ──
+  ptEstablishmentId String?
   // ── Biometric (IN-specific Keka field) ──
   /// Free-text since some employees have a numeric biometric ID, others
   /// have none ("Not Available") or a multi-part code.
@@ -1110,7 +1125,7 @@ model Attendance {
   clockIn         DateTime?
   clockOut        DateTime?
   totalMinutes    Int       @default(0)
-  status          String    @default("absent")  // present | absent | late | half_day | on_leave | weekend | holiday
+  status          String    @default("absent")  // present | absent | late | half_day | on_leave | weekend | holiday | lop | missed_clock_out
   overtimeMinutes Int       @default(0)
   ipAddress       String?
   location        String?
