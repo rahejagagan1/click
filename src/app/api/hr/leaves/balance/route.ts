@@ -16,13 +16,26 @@ export async function GET(req: NextRequest) {
     const userId = isAdmin ? parseInt(searchParams.get("userId") || String(myId)) : myId;
     const year = parseInt(searchParams.get("year") || String(istTodayDateOnly().getUTCFullYear()));
 
+    // Interns don't accrue or use Casual Leave — per HR policy, the
+    // Intern Leave Plan has no CL entry. We strip CL out of both the
+    // self-heal pass below and the returned list so the UI never
+    // surfaces it for them (widget, leaves page, apply-leave dropdown).
+    const profile = await prisma.employeeProfile.findUnique({
+      where: { userId }, select: { employmentType: true },
+    });
+    const isIntern = profile?.employmentType === "intern";
+    const HIDDEN_CODES_FOR_INTERNS = ["CL"];
+
     // Self-heal: ensure the user has a LeaveBalance row for every active
     // LeaveType in the requested year. Every type defaults to 0 days —
     // Sick Leave fills via monthly accrual; everything else is HR-managed
     // through the admin matrix.
-    const types = await prisma.leaveType.findMany({
+    const allTypes = await prisma.leaveType.findMany({
       where: { isActive: true }, select: { id: true, code: true, daysPerYear: true },
     });
+    const types = isIntern
+      ? allTypes.filter((t) => !HIDDEN_CODES_FOR_INTERNS.includes(t.code))
+      : allTypes;
     const existing = await prisma.leaveBalance.findMany({
       where: { userId, year }, select: { leaveTypeId: true },
     });
@@ -58,7 +71,12 @@ export async function GET(req: NextRequest) {
     const balances = await prisma.leaveBalance.findMany({
       where: { userId, year }, include: { leaveType: true },
     });
-    return NextResponse.json(balances);
+    // Drop any historical CL row for interns — they may have a leftover
+    // from a prior policy that we don't want surfacing in the UI now.
+    const filtered = isIntern
+      ? balances.filter((b) => !HIDDEN_CODES_FOR_INTERNS.includes(b.leaveType?.code ?? ""))
+      : balances;
+    return NextResponse.json(filtered);
   } catch (e) { return serverError(e, "GET /api/hr/leaves/balance"); }
 }
 

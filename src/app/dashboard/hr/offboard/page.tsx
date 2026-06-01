@@ -1,27 +1,31 @@
 "use client";
 
 // HR Offboarding console — two tabs:
-//   • Initiate Exit — pick an active employee, fill exit details, submit.
-//     Triggers an email to the leaver + a heads-up email + in-app
-//     notification to CEO / HR / their manager / admins / developers.
-//     Also flips User.isActive=false so they stop appearing in active
-//     people lists.
-//   • Past Exits — table of every exit on file with clearance checkboxes
-//     (assets / docs / final settlement / exit interview) and a Status
-//     selector (notice_period / cleared / offboarded).
+//   • Initiate Exit  — pick an active employee, fill exit details, submit.
+//                      Fires goodbye email + heads-up email + in-app
+//                      notification to CEO / HR / their manager / admins /
+//                      developers. The employee stays active through the
+//                      Under Review + In Progress stages and only becomes
+//                      inactive once HR flips the status to "exited".
+//   • Pipeline       — 3-state Keka-style board (Under Review / In Progress /
+//                      Exited) with filter chips. Clicking a card opens the
+//                      detail drawer (Summary / Finances / Survey / Tasks /
+//                      Leave Settings) where HR runs the full offboarding
+//                      workflow including the Review & Finalise Payables
+//                      wizard.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { isHRAdmin } from "@/lib/access";
 import {
-  UserMinus, Search, AlertCircle, CheckCircle2, X, Save, Paperclip, HelpCircle,
+  UserMinus, Search, AlertCircle, CheckCircle2, X, Paperclip, HelpCircle,
 } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 import PopupPanel from "@/components/ui/PopupPanel";
+import ExitPipeline from "./ExitPipeline";
 
 type EmpProfile = {
   designation?: string | null;
@@ -37,32 +41,6 @@ type Employee = {
   profilePictureUrl?: string | null;
   employeeProfile?: EmpProfile | null;
 };
-type Exit = {
-  id: number; userId: number; userName: string; userEmail: string;
-  designation: string | null; department: string | null;
-  exitType: string; resignationDate: string; lastWorkingDay: string;
-  noticePeriodDays: number; reason: string | null; notes: string | null;
-  status: string;
-  assetsReturned: boolean; documentsHandled: boolean;
-  finalSettlementDone: boolean; exitInterviewDone: boolean;
-  okToRehire: boolean;
-  createdAt: string;
-};
-
-const EXIT_TYPES = [
-  { value: "resignation",   label: "Resignation"   },
-  { value: "termination",   label: "Termination"   },
-  { value: "contract_end",  label: "Contract End"  },
-  { value: "retirement",    label: "Retirement"    },
-  { value: "other",         label: "Other"         },
-];
-
-const STATUS_TONES: Record<string, string> = {
-  notice_period: "bg-amber-50 text-amber-700 ring-amber-200",
-  cleared:       "bg-blue-50 text-blue-700 ring-blue-200",
-  offboarded:    "bg-slate-100 text-slate-600 ring-slate-200",
-};
-
 const fmtDate = (d: string | Date) =>
   new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
@@ -72,7 +50,7 @@ export default function OffboardPage() {
   // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access.
   const canManage = isHRAdmin(me);
 
-  const [tab, setTab] = useState<"initiate" | "past">("initiate");
+  const [tab, setTab] = useState<"initiate" | "pipeline">("initiate");
 
   if (!canManage) {
     return (
@@ -96,7 +74,7 @@ export default function OffboardPage() {
       <div className="mb-5 flex gap-1 border-b border-slate-200">
         {[
           { k: "initiate", l: "Initiate Exit" },
-          { k: "past",     l: "Past Exits"    },
+          { k: "pipeline", l: "Offboarding Progress" },
         ].map(t => (
           <button
             key={t.k}
@@ -113,7 +91,7 @@ export default function OffboardPage() {
       </div>
 
       {tab === "initiate" && <InitiateExitTab />}
-      {tab === "past"     && <PastExitsTab     />}
+      {tab === "pipeline" && <ExitPipeline     />}
     </div>
   );
 }
@@ -149,16 +127,11 @@ function InitiateExitTab() {
       .slice(0, 12);
   }, [employees, query]);
 
-  // Outside-click to close the dropdown.
+  // PopupPanel handles outside-click + Esc itself (it knows about both
+  // the trigger and the portaled panel). Don't add a second listener —
+  // it would close the dropdown on its own portal clicks, swallowing
+  // the row-button click before its onClick can fire.
   const pickerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
 
   // When an employee is picked, the page swaps from "search + right rail"
   // to a full-width inline exit form (no modal overlay). The search comes
@@ -257,7 +230,7 @@ function InitiateExitTab() {
             <li className="flex gap-2"><span className="text-emerald-500 mt-0.5">●</span><span>Employee account is marked <strong>inactive</strong> — they can no longer sign in.</span></li>
             <li className="flex gap-2"><span className="text-emerald-500 mt-0.5">●</span><span>A goodbye email goes to the employee with their last working day on record.</span></li>
             <li className="flex gap-2"><span className="text-emerald-500 mt-0.5">●</span><span>CEO, HR managers, admins, developers, and their reporting manager get an email + in-app notification.</span></li>
-            <li className="flex gap-2"><span className="text-emerald-500 mt-0.5">●</span><span>The exit lands in the <strong>Past Exits</strong> tab where you can tick off clearance items.</span></li>
+            <li className="flex gap-2"><span className="text-emerald-500 mt-0.5">●</span><span>The exit lands in the <strong>Offboarding Progress</strong> tab under <em>Under Review</em>. From there, HR can finalise payables, run the exit interview, and tick clearance tasks.</span></li>
           </ul>
         </div>
       </aside>
@@ -325,6 +298,16 @@ function InitiateExitForm({
   const [saving, setSaving]                     = useState(false);
   const [error, setError]                       = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // The header back-arrow + X both leave the offboard page entirely
+  // (e.g. back to the user profile that opened this via the 3-dots
+  // "Initiate Offboarding" link). Falls back to /dashboard/hr/people
+  // when there's no history entry to pop (e.g. direct navigation).
+  const router = useRouter();
+  const goBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) router.back();
+    else router.push("/dashboard/hr/people");
+  };
 
   // 5 MB cap — keeps the base64-into-notes approach reasonable without
   // a separate Blob-storage backend. Tweak if HR needs to attach
@@ -423,9 +406,9 @@ function InitiateExitForm({
       <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
         <div className="flex items-center gap-3">
           <button
-            onClick={onCancel}
+            onClick={goBack}
             className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[12.5px] font-medium text-slate-600 hover:bg-slate-100"
-            title="Back to employee search"
+            title="Back to the previous page"
           >
             ← Back
           </button>
@@ -433,7 +416,11 @@ function InitiateExitForm({
             Initiate exit - <span>{employee.name}</span>
           </h3>
         </div>
-        <button onClick={onCancel} className="text-slate-400 hover:text-slate-700">
+        <button
+          onClick={goBack}
+          className="text-slate-400 hover:text-slate-700"
+          title="Close — return to the previous page"
+        >
           <X size={20} />
         </button>
       </div>
@@ -681,19 +668,12 @@ function NiceSelect({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onEsc);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onEsc);
-    };
-  }, [open]);
+  // No local outside-click / Escape handler here — `PopupPanel`
+  // already owns both, AND it knows about the portal-rendered
+  // options. Having a second handler in this wrapper would close
+  // the panel before an option's onClick can fire (the option
+  // lives in a portal on document.body, so it tests as "outside"
+  // `ref.current` even though it's logically part of this select).
 
   return (
     <div ref={ref} className="relative">
@@ -769,291 +749,3 @@ function Radio({ checked, onChange, label }: { checked: boolean; onChange: () =>
   );
 }
 
-/* ─────────────────────────────────────────────────────────────────────
- *  Past Exits — list + clearance checkboxes
- * ─────────────────────────────────────────────────────────────────── */
-
-function PastExitsTab() {
-  const { data: rows, isLoading } = useSWR<Exit[]>("/api/hr/exits", fetcher);
-  const [open, setOpen] = useState<Exit | null>(null);
-
-  if (isLoading) return <p className="text-[13px] text-slate-400 py-6 text-center">Loading…</p>;
-  const list = rows ?? [];
-
-  if (list.length === 0) {
-    return (
-      <div className="bg-white border border-dashed border-slate-200 rounded-xl py-12 text-center text-slate-400 text-[13px]">
-        No exits recorded yet.
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
-      <table className="w-full">
-        <thead>
-          <tr className="bg-slate-50 border-b border-slate-200 text-[10.5px] font-bold uppercase tracking-[0.08em] text-slate-500">
-            <th className="text-left px-4 py-3">Employee</th>
-            <th className="text-left px-4 py-3">Type</th>
-            <th className="text-left px-4 py-3">Last Day</th>
-            <th className="text-left px-4 py-3">Status</th>
-            <th className="text-left px-4 py-3">Clearance</th>
-            <th className="text-left px-4 py-3">Rehire</th>
-            <th className="text-right px-4 py-3"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {list.map(r => {
-            const tone = STATUS_TONES[r.status] || STATUS_TONES.notice_period;
-            const checked = [r.assetsReturned, r.documentsHandled, r.finalSettlementDone, r.exitInterviewDone].filter(Boolean).length;
-            return (
-              <tr key={r.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/40">
-                <td className="px-4 py-3 align-top">
-                  {/* Name is a link to the (now-inactive) profile so HR
-                      can still review the person's old attendance, leaves,
-                      assets, etc. The /api/hr/people/[id] endpoint doesn't
-                      filter by isActive, so the page renders for offboarded
-                      users too. */}
-                  <Link
-                    href={`/dashboard/hr/people/${r.userId}`}
-                    className="text-[13.5px] font-semibold text-slate-800 hover:text-[#0f6ecd] hover:underline"
-                  >
-                    {r.userName}
-                  </Link>
-                  <p className="text-[11.5px] text-slate-500">
-                    {r.userEmail}{r.designation ? ` · ${r.designation}` : ""}
-                  </p>
-                </td>
-                <td className="px-4 py-3 align-top text-[12.5px] text-slate-700 capitalize">
-                  {r.exitType.replace(/_/g, " ")}
-                </td>
-                <td className="px-4 py-3 align-top text-[12.5px] text-slate-700 tabular-nums">
-                  {fmtDate(r.lastWorkingDay)}
-                </td>
-                <td className="px-4 py-3 align-top">
-                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-wide ring-1 ring-inset ${tone}`}>
-                    {r.status.replace(/_/g, " ")}
-                  </span>
-                </td>
-                <td className="px-4 py-3 align-top text-[12.5px] text-slate-600 tabular-nums">
-                  {checked} / 4
-                </td>
-                <td className="px-4 py-3 align-top">
-                  {r.okToRehire ? (
-                    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-wide ring-1 ring-inset bg-emerald-50 text-emerald-700 ring-emerald-500/20">
-                      Ok to rehire
-                    </span>
-                  ) : (
-                    <span className="text-[11.5px] text-slate-400">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 align-top text-right">
-                  <button
-                    onClick={() => setOpen(r)}
-                    className="text-[12px] font-semibold text-[#0f6ecd] hover:underline"
-                  >
-                    Manage →
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-
-      {open && <ExitManageModal exit={open} onClose={() => setOpen(null)} />}
-    </div>
-  );
-}
-
-function ExitManageModal({ exit, onClose }: { exit: Exit; onClose: () => void }) {
-  const [status, setStatus] = useState(exit.status);
-  const [assetsReturned, setAssetsReturned] = useState(exit.assetsReturned);
-  const [documentsHandled, setDocumentsHandled] = useState(exit.documentsHandled);
-  const [finalSettlementDone, setFinalSettlementDone] = useState(exit.finalSettlementDone);
-  const [exitInterviewDone, setExitInterviewDone] = useState(exit.exitInterviewDone);
-  const [okToRehire, setOkToRehire] = useState(exit.okToRehire);
-  const [notes, setNotes] = useState(exit.notes ?? "");
-  const [saving, setSaving] = useState(false);
-  const [reactivating, setReactivating] = useState(false);
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      await fetch(`/api/hr/exits/${exit.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status, assetsReturned, documentsHandled, finalSettlementDone, exitInterviewDone, okToRehire, notes }),
-      });
-      mutate("/api/hr/exits");
-      // Status drives User.isActive — invalidate every cached key that
-      // surfaces active/inactive state so the change shows up instantly
-      // in the directory, the top-bar search, and @-mention pickers.
-      mutate((k: any) => typeof k === "string" && (
-        k.startsWith("/api/hr/employees") ||
-        k.startsWith("/api/search")
-      ));
-      onClose();
-    } finally { setSaving(false); }
-  };
-
-  // Reactivate — flips User.isActive back to true and deletes the exit
-  // row so the employee reappears in active directories and can sign in
-  // again. Historical attendance / leaves / posts are untouched.
-  const reactivate = async () => {
-    const ok = window.confirm(
-      `Bring ${exit.userName} back as an active employee?\n\n` +
-      `• Their account will be re-enabled (they can sign in).\n` +
-      `• They will reappear in the directory and search.\n` +
-      `• This exit record will be removed from Past Exits.\n` +
-      `• Their old attendance, leaves, and history stay intact.`,
-    );
-    if (!ok) return;
-    setReactivating(true);
-    try {
-      const res = await fetch(`/api/hr/exits/${exit.id}/reactivate`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        alert(data?.error || "Reactivate failed");
-        return;
-      }
-      mutate("/api/hr/exits");
-      mutate((k: any) => typeof k === "string" && (
-        k.startsWith("/api/hr/employees") ||
-        k.startsWith("/api/search")
-      ));
-      onClose();
-    } catch (e: any) {
-      alert(e?.message || "Reactivate failed");
-    } finally {
-      setReactivating(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <div>
-            <h3 className="text-[15px] font-semibold text-slate-800">{exit.userName}</h3>
-            <p className="text-[11.5px] text-slate-500">
-              {exit.exitType.replace(/_/g, " ")} · last day {fmtDate(exit.lastWorkingDay)}
-            </p>
-          </div>
-          <button onClick={onClose}><X size={18} className="text-slate-400 hover:text-slate-700" /></button>
-        </div>
-
-        <div className="px-6 py-5 space-y-5">
-          <div>
-            <p className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-slate-500 mb-2">Status</p>
-            <div className="flex gap-1.5">
-              {["notice_period", "cleared", "offboarded"].map(s => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setStatus(s)}
-                  className={`px-3 h-8 rounded-full text-[11.5px] font-semibold ring-1 ring-inset transition-colors ${
-                    status === s ? STATUS_TONES[s] : "bg-white text-slate-600 ring-slate-200 hover:ring-[#0f6ecd]"
-                  }`}
-                >
-                  {s.replace(/_/g, " ")}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <p className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-slate-500 mb-2">Clearance</p>
-            <div className="space-y-1.5">
-              <Check label="Assets returned"          checked={assetsReturned}      onChange={setAssetsReturned} />
-              <Check label="Documents handled"        checked={documentsHandled}    onChange={setDocumentsHandled} />
-              <Check label="Final settlement done"    checked={finalSettlementDone} onChange={setFinalSettlementDone} />
-              <Check label="Exit interview completed" checked={exitInterviewDone}   onChange={setExitInterviewDone} />
-            </div>
-          </div>
-
-          <div>
-            <p className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-slate-500 mb-2">Rehire</p>
-            <Check label="Ok to rehire this employee" checked={okToRehire} onChange={setOkToRehire} />
-          </div>
-
-          <div>
-            <p className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-slate-500 mb-2">Notes</p>
-            <textarea
-              rows={3}
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] text-slate-800 focus:outline-none focus:border-[#0f6ecd] resize-none"
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-slate-200">
-          <button
-            onClick={reactivate}
-            disabled={saving || reactivating}
-            className="h-9 px-4 rounded-lg border border-emerald-300 text-[13px] font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 disabled:cursor-not-allowed"
-            title="Re-enable this employee — account is restored and exit record is removed"
-          >
-            {reactivating ? "Reactivating…" : "Reactivate employee"}
-          </button>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="h-9 px-4 text-[13px] text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-            <button
-              onClick={save}
-              disabled={saving || reactivating}
-              className="h-9 px-5 rounded-lg bg-[#0f6ecd] hover:bg-[#0a5fb3] text-white text-[13px] font-semibold disabled:opacity-60 inline-flex items-center gap-1.5"
-            >
-              <Save size={13} /> {saving ? "Saving…" : "Save"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─────────────────────────────────────────────────────────────────────
- *  Tiny presentational helpers
- * ─────────────────────────────────────────────────────────────────── */
-
-const ipt = "w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] text-slate-800 focus:outline-none focus:border-[#0f6ecd]";
-
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-hidden">
-      <div className="px-5 py-3 border-b border-slate-100">
-        <h3 className="text-[13.5px] font-semibold text-slate-800">{title}</h3>
-      </div>
-      <div className="p-5">{children}</div>
-    </section>
-  );
-}
-
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="block text-[11.5px] font-semibold text-slate-700 mb-1.5">
-        {label}{required ? <span className="text-rose-500"> *</span> : null}
-      </label>
-      {children}
-    </div>
-  );
-}
-
-function Grid2({ children }: { children: React.ReactNode }) {
-  return <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>;
-}
-
-function Check({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label className="flex items-center gap-2.5 cursor-pointer text-[13px] text-slate-700 hover:text-slate-900">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={e => onChange(e.target.checked)}
-        className="h-4 w-4 rounded border-slate-300 text-[#0f6ecd] focus:ring-[#0f6ecd]"
-      />
-      <span>{label}</span>
-    </label>
-  );
-}
