@@ -750,9 +750,13 @@ export default function AttendancePage() {
     ? Math.round(((summary.present - (summary.late || 0)) / summary.present) * 100) : 0;
 
   // Elapsed since clock-in (live while open; snapshot after clock-out).
+  // Clamp to 0: if the client clock is even one second behind the
+  // server-stored clockIn (small drift, post-DST, or just-clocked-in
+  // race), Math.floor(-1/60) is -1 and the formatter spits out
+  // "-1h -1m" instead of "0h 0m".
   const elapsedMins = todayRec?.clockIn && !todayRec?.clockOut && clock
-    ? Math.floor((clock.getTime() - new Date(todayRec.clockIn).getTime()) / 60000)
-    : todayRec?.totalMinutes || 0;
+    ? Math.max(0, Math.floor((clock.getTime() - new Date(todayRec.clockIn).getTime()) / 60000))
+    : Math.max(0, todayRec?.totalMinutes || 0);
   const elapsedStr  = fmtMins(elapsedMins);
 
   // IST minutes-since-midnight for an arbitrary instant (live clock tick).
