@@ -750,9 +750,13 @@ export default function AttendancePage() {
     ? Math.round(((summary.present - (summary.late || 0)) / summary.present) * 100) : 0;
 
   // Elapsed since clock-in (live while open; snapshot after clock-out).
+  // Clamp to 0: if the client clock is even one second behind the
+  // server-stored clockIn (small drift, post-DST, or just-clocked-in
+  // race), Math.floor(-1/60) is -1 and the formatter spits out
+  // "-1h -1m" instead of "0h 0m".
   const elapsedMins = todayRec?.clockIn && !todayRec?.clockOut && clock
-    ? Math.floor((clock.getTime() - new Date(todayRec.clockIn).getTime()) / 60000)
-    : todayRec?.totalMinutes || 0;
+    ? Math.max(0, Math.floor((clock.getTime() - new Date(todayRec.clockIn).getTime()) / 60000))
+    : Math.max(0, todayRec?.totalMinutes || 0);
   const elapsedStr  = fmtMins(elapsedMins);
 
   // IST minutes-since-midnight for an arbitrary instant (live clock tick).
@@ -1471,14 +1475,22 @@ export default function AttendancePage() {
                     // Has a pending request for this date? Any type (regularize, WFH,
                     // On-Duty, or Leave that covers this date) flips the row to
                     // "Pending approval" and disables re-submission of the same kind.
+                    // BOTH "pending" (L1 not yet acted) AND "partially_approved"
+                    // (manager approved, awaiting HR's final L2) count as
+                    // pending from the employee's perspective — the request is
+                    // still being processed, so MISSED / LATE chips must stay
+                    // hidden. (Earlier bug: the boolean only checked "pending",
+                    // so the row reverted to MISSED the moment a manager
+                    // approved L1.)
+                    const isOpen = (s: string) => s === "pending" || s === "partially_approved";
                     const hasPendingReg = Array.isArray(regsData) && regsData.some(
-                      (r: any) => r.status === "pending" && String(r.date).slice(0, 10) === dateIso
+                      (r: any) => isOpen(r.status) && String(r.date).slice(0, 10) === dateIso
                     );
                     const hasPendingWfh = Array.isArray(wfhData) && wfhData.some(
-                      (r: any) => r.status === "pending" && String(r.date).slice(0, 10) === dateIso
+                      (r: any) => isOpen(r.status) && String(r.date).slice(0, 10) === dateIso
                     );
                     const hasPendingOd  = Array.isArray(odData) && odData.some(
-                      (r: any) => r.status === "pending" && String(r.date).slice(0, 10) === dateIso
+                      (r: any) => isOpen(r.status) && String(r.date).slice(0, 10) === dateIso
                     );
                     const hasPendingLeave = myLeaves.some((l: any) => {
                       if (l.status !== "pending" && l.status !== "partially_approved") return false;
@@ -1617,13 +1629,23 @@ export default function AttendancePage() {
                             {onLeave && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400 font-bold">LEAVE</span>
                             )}
-                            {missedClockOut && !hasPendingAny && (
+                            {/* MISSED — hidden as soon as the employee has
+                                either a PENDING or an APPROVED regularization
+                                for this day, OR the Attendance row itself
+                                has been flagged isRegularized=true (server
+                                already corrected the row even if regsData
+                                hasn't refreshed in this client yet). */}
+                            {missedClockOut && !hasPendingAny && !approvedRegRow && !rec.isRegularized && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold uppercase tracking-wider">Missed</span>
                             )}
-                            {/* "LATE" — first clock-in past 10:00 AM IST.
-                                Shown alongside Today/Pending so the row
-                                states are non-exclusive. */}
-                            {isLateFirstIn && hasClock && !hasPendingAny && (
+                            {/* LATE — first clock-in past 10:00 AM IST.
+                                Hidden when a regularization is pending OR
+                                approved for the day, OR the Attendance row
+                                already carries isRegularized=true. Without
+                                the third guard, approved late-clock-in
+                                regularizations leave the LATE chip up if
+                                regsData hadn't been refreshed yet. */}
+                            {isLateFirstIn && hasClock && !hasPendingAny && !approvedRegRow && !rec.isRegularized && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-bold uppercase tracking-wider">Late</span>
                             )}
                             {/* "ON BREAK" — currently between sessions on
@@ -1661,9 +1683,13 @@ export default function AttendancePage() {
                                       ? "On-Duty Pending Approval"
                                       : `Pending ${pendingKind}`}
                             </span>
-                          ) : missedClockOut ? (
+                          ) : missedClockOut && !approvedRegRow ? (
                             <span className="text-[12px] font-medium text-amber-600 dark:text-amber-400">
                               Missed clock-out — regularize to log hours
+                            </span>
+                          ) : approvedRegRow && (missedClockOut || !rec.clockIn) ? (
+                            <span className="text-[12px] font-medium text-emerald-600 dark:text-emerald-400">
+                              Regularized{regWindow(approvedRegRow) ? ` · ${regWindow(approvedRegRow)}` : ""}
                             </span>
                           ) : hasClock ? (
                             // Centered to align under the centred
@@ -1764,6 +1790,13 @@ export default function AttendancePage() {
                                 : pendingKind === "On-Duty"        ? "On-Duty Pending"
                                 : "Pending";
                               c = { label: which, Icon: Clock3, tone: "text-[#008CFF]" };
+                            } else if (approvedRegRow) {
+                              // Approved regularization wins over MISSED /
+                              // partial-swipe states — the underlying
+                              // Attendance row may still look incomplete,
+                              // but HR has signed off and the day counts
+                              // as a successful regularized day.
+                              c = { label: `Regularized${regWindow(approvedRegRow) ? ` · ${regWindow(approvedRegRow)}` : ""}`, Icon: CheckCircle2, tone: "text-emerald-500" };
                             } else if (missedClockOut) {
                               c = { label: "Missed clock-out", Icon: AlertCircle, tone: "text-amber-500" };
                             } else if (rec.clockOut && !rec.clockIn && !isTodayRow && !rec.isRegularized) {
@@ -1867,16 +1900,33 @@ export default function AttendancePage() {
                         <td className="px-5 py-3">
                           {(isHoliday || isWeekend) ? (
                             <span className="text-slate-300 text-lg">···</span>
-                          ) : (
-                            <RowMenu
-                              onRegularize={() => { setRegPrefillDate(dateIso); setShowRegModal(true); }}
-                              onWFH={() => openForm("wfh", dateIso)}
-                              onOnDuty={() => openForm("on_duty", dateIso)}
-                              onLeave={() => openForm("leave", dateIso)}
-                              disableRegularize={hasPendingReg}
-                              disableRegularizeReason="You already have a pending regularization for this date"
-                            />
-                          )}
+                          ) : (() => {
+                            // Hide Regularize whenever there's nothing to
+                            // fix — pending or approved request already
+                            // exists, day is already on leave / WFH, or
+                            // the user already clocked the full 9 hours
+                            // (the rule the rederive step uses to flip
+                            // status → "present"). Reason string is
+                            // shown as a tooltip on the disabled item so
+                            // the menu still surfaces *why* it's gone.
+                            let disableReason: string | null = null;
+                            if (hasPendingReg)          disableReason = "You already have a pending regularization for this date";
+                            else if (approvedRegRow)    disableReason = "Regularization for this date has already been approved";
+                            else if (rec.isRegularized) disableReason = "This date has already been regularized";
+                            else if (onLeave)           disableReason = "You're on leave for this date";
+                            else if (approvedWfh)       disableReason = "WFH is approved for this date";
+                            else if (met9h)             disableReason = "9 hours already completed — nothing to regularize";
+                            return (
+                              <RowMenu
+                                onRegularize={() => { setRegPrefillDate(dateIso); setShowRegModal(true); }}
+                                onWFH={() => openForm("wfh", dateIso)}
+                                onOnDuty={() => openForm("on_duty", dateIso)}
+                                onLeave={() => openForm("leave", dateIso)}
+                                disableRegularize={!!disableReason}
+                                disableRegularizeReason={disableReason ?? undefined}
+                              />
+                            );
+                          })()}
                         </td>
                       </tr>
                     );

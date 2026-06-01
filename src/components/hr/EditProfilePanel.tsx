@@ -1025,7 +1025,22 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
               listKey="timeTrackingPolicy"
               defaults={["On-Site Capture", "Remote Capture", "Hybrid Capture", "None"]}
               value={work.timeTrackingPolicy}
-              onChange={(v) => setWork({ ...work, timeTrackingPolicy: v })}
+              onChange={(v) => setWork((w) => {
+                // Smart cascade: Time Tracking ↔ Capture Scheme are
+                // two stored fields describing the same mode — keep
+                // them in sync. "None" tracking also disables
+                // penalisation (you can't penalise tardiness on a
+                // role you aren't tracking).
+                const next: typeof w = { ...w, timeTrackingPolicy: v };
+                if (v === "On-Site Capture") next.attendanceCaptureScheme = "On-Site";
+                else if (v === "Remote Capture") next.attendanceCaptureScheme = "Remote";
+                else if (v === "Hybrid Capture") next.attendanceCaptureScheme = "Hybrid";
+                else if (v === "None") {
+                  next.attendanceCaptureScheme = "";
+                  next.penalizationPolicy = "None";
+                }
+                return next;
+              })}
             />
           </div>
           <div>
@@ -1043,7 +1058,16 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
               listKey="attendanceCaptureScheme"
               defaults={["On-Site", "Remote", "Hybrid"]}
               value={work.attendanceCaptureScheme}
-              onChange={(v) => setWork({ ...work, attendanceCaptureScheme: v })}
+              onChange={(v) => setWork((w) => {
+                // Reverse leg of the cascade — keep Time Tracking
+                // Policy aligned with whichever capture scheme HR
+                // picks.
+                const next: typeof w = { ...w, attendanceCaptureScheme: v };
+                if (v === "On-Site") next.timeTrackingPolicy = "On-Site Capture";
+                else if (v === "Remote") next.timeTrackingPolicy = "Remote Capture";
+                else if (v === "Hybrid") next.timeTrackingPolicy = "Hybrid Capture";
+                return next;
+              })}
             />
           </div>
           <div>

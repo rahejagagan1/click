@@ -55,9 +55,15 @@ export default function PopupPanel({
   useEffect(() => {
     if (!open || !onClose) return;
     const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node;
+      const t = e.target as Element | null;
+      if (!t) return;
       if (triggerRef.current?.contains(t)) return;
       if (panelRef.current?.contains(t))   return;
+      // Skip clicks inside any OTHER portal popover (e.g. a nested
+      // SelectField / DateField). Without this, clicking an option
+      // in a child popover closes us before the option's onClick
+      // can run.
+      if (t.closest?.('[data-popover-portal]')) return;
       onClose();
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -82,6 +88,12 @@ export default function PopupPanel({
   return createPortal(
     <div
       ref={panelRef}
+      data-popover-portal="true"
+      // Stop bubbling — any outer popover (DateField, modal, etc.)
+      // listening on document for outside-clicks won't see clicks
+      // inside this panel.
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
       className={className}
       style={{
         position:  "fixed",
