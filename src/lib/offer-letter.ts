@@ -113,7 +113,7 @@ Dear "${args.candidateName || "Candidate Name"}"
 
 With reference to your application dated "${applicationDate}" and subsequent interview with us, we are pleased to offer you employment for the position of "${args.jobRole || "Job Role"}" with YT Money Productions Pvt. Ltd. (operating under the brand name NB Media). We trust that your knowledge, skills, and experience will be among our most valuable assets.
 
-Annexure "A" below includes your salary and benefits information and Annexure "B" includes your joining requirement information.
+Annexure "B" below includes your joining requirement information. Your compensation details will be communicated to you separately.
 
 Your signing of these documents confirms your acceptance of the terms and conditions.
 
@@ -145,7 +145,7 @@ const TERMS_AND_CONDITIONS = (jobRole: string) => `Following are the terms and c
 
 <li>Upon attaining the status of a permanent employee, you are required to remain in our organization for a minimum of one year, unless otherwise determined by management (for reasons such as poor performance, disciplinary action, or similar factors). Neglecting to do so will result in the forfeiture of compensation that is owed to you.</li>
 
-<li>You shall be entitled to salary allowances and perquisites as per "Annexure A." In addition, you shall be entitled to receive such insurance, health, and other benefits that the company may, at its discretion, make available to its employees as stipulated in the relevant provisions of the employee policy, in accordance with the terms and requirements relating to the benefits imposed by the company. Individual salary and performance ratings should strictly not be shared with other employees.</li>
+<li>You shall be entitled to salary allowances and perquisites as separately communicated to you. In addition, you shall be entitled to receive such insurance, health, and other benefits that the company may, at its discretion, make available to its employees as stipulated in the relevant provisions of the employee policy, in accordance with the terms and requirements relating to the benefits imposed by the company. Individual salary and performance ratings should strictly not be shared with other employees.</li>
 
 <li>You acknowledge and undertake that your remuneration is a matter purely between yourself and the company, and you are to keep this information and any changes thereto strictly confidential. Your remuneration will be periodically reviewed as per organization guidelines. Your increments and promotions shall be at the discretion of the organization and will be subject to and based on performance.</li>
 
@@ -218,29 +218,17 @@ const JOINING_DOCUMENTS = `<ol>
 // the PDF. Annexure A is regenerated from the latest breakdown so HR
 // doesn't have to keep numbers in sync manually.
 export function buildOfferLetterHTML(args: OfferLetterArgs & { editedBody?: string }): string {
-  const breakdown = computePayBreakdown(args.annualCtcINR);
+  // Annexure A (compensation structure) is intentionally NOT rendered —
+  // candidates don't get a CTC table on the formal letter. HR captures
+  // the package in the New Offer form for their own records; package
+  // specifics are conveyed verbally or in a separate note. If you ever
+  // need to re-add it, restore the `annexureA` block + its page-break
+  // section from git history.
   const body      = args.editedBody?.trim() || letterBody(args);
   const candidate = esc(args.candidateName || "Candidate Name");
   const role      = esc(args.jobRole       || "Job Role");
   const joining   = esc(fmtSlash(args.joiningDate ?? null));
   const hrEmail   = esc(args.hrContactEmail || "HRD@nbmediaproductions.com");
-
-  const annexureA = breakdown ? `
-    <p>Your Annual fixed compensation of <strong>Rs. ${esc(breakdown.annualLPA)} LPA</strong> will be divided per the following break-up:</p>
-    <p class="bold underline">FIXED MONTHLY PAY:</p>
-    <table class="paytable">
-      <thead><tr><th>PAY COMPONENT</th><th>MONTHLY</th></tr></thead>
-      <tbody>
-        <tr><td><strong>Basic Pay</strong></td>           <td>Rs. ${esc(fmtINR(breakdown.basic))}</td></tr>
-        <tr><td><strong>House Rent Allowance</strong></td><td>Rs. ${esc(fmtINR(breakdown.hra))}</td></tr>
-        <tr><td><strong>Dearness Allowance</strong></td>  <td>Rs. ${esc(fmtINR(breakdown.da))}</td></tr>
-        <tr><td><strong>Conveyance Allowance</strong></td><td>Rs. ${esc(fmtINR(breakdown.conveyance))}</td></tr>
-        <tr><td><strong>Medical Allowance</strong></td>   <td>Rs. ${esc(fmtINR(breakdown.medical))}</td></tr>
-        <tr><td><strong>Special Allowance</strong></td>   <td>Rs. ${esc(fmtINR(breakdown.special))}</td></tr>
-        <tr><td><strong>TOTAL MONTHLY CTC</strong></td>   <td><strong>Rs. ${esc(fmtINR(breakdown.totalMonthly))}</strong></td></tr>
-      </tbody>
-    </table>
-  ` : `<p><em>Annual CTC not specified — fill it in the New Offer form and re-generate to populate this annexure.</em></p>`;
 
   return `<!doctype html>
 <html><head>
@@ -317,19 +305,6 @@ export function buildOfferLetterHTML(args: OfferLetterArgs & { editedBody?: stri
     <div class="sig-line"><strong>Address:</strong> _______________________________</div>
     <div class="sig-line"><strong>Date:</strong> _______________________________</div>
   </div>
-
-  <!-- ── Annexure A — Compensation ─────────────────────────── -->
-  <div class="page-break"></div>
-  <p class="note">NOTE: This is a temporary / Conditional offer and cannot be used for Negotiations with other companies.</p>
-  <h2 class="title">Annexure "A"</h2>
-  <h2 class="title" style="font-size: 12pt;">COMPENSATION STRUCTURE</h2>
-  ${annexureA}
-  <p class="bold underline" style="margin-top: 16px;">Note:</p>
-  <ul>
-    <li>You will also be eligible to receive additional bonus amounts, subject to your job performance at NB Media.</li>
-    <li>No bonus, whatsoever, shall be payable in the event of resignation by an employee.</li>
-    <li>Applicable taxes (if any) would be borne by the employee.</li>
-  </ul>
 
   <!-- ── Annexure B — Joining Documents ─────────────────────── -->
   <div class="page-break"></div>
