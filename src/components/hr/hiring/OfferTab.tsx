@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 import { offerLetterEmail } from "@/lib/email/hr-templates";
-import { buildOfferLetter, buildOfferLetterHTML, computePayBreakdown } from "@/lib/offer-letter";
+import { buildOfferLetterHTML, computePayBreakdown } from "@/lib/offer-letter";
 
 type Offer = {
   id: number;
@@ -305,40 +305,54 @@ function NewOfferModal({
   const [error,       setError]       = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  // ── Generate offer letter from template ─────────────────────────
-  // Pure function — uses the verbatim NB Media offer letter template
-  // (src/lib/offer-letter.ts, transcribed from the HR-supplied PDF)
-  // and substitutes the candidate name, role, dates, and CTC. No side
-  // effects so it can also be called from the preview button without
-  // committing to state.
-  const buildLetter = (): string | null => {
-    if (!jobRole.trim()) return null;
-    const r = buildOfferLetter({
-      candidateName: candidate.fullName,
-      jobRole: jobRole.trim(),
-      annualCtcINR: ctcAnnual ? Number(ctcAnnual) : null,
-      joiningDate: joiningDate || null,
-      acceptanceDeadline: expiresAt || null,
-    });
-    return r.body;
-  };
-
-  const generate = () => {
+  // ── Generate offer letter from the .docx template ───────────────
+  // Calls the server-side template-preview endpoint, which fills the
+  // actual NB Media offer-letter .docx via XML find/replace and
+  // returns the resulting body text. The PDF the candidate receives
+  // is rendered from the SAME .docx with the SAME substitutions, so
+  // what HR sees in the textarea matches the final PDF.
+  const [generating, setGenerating] = useState(false);
+  const generate = async () => {
     setError(null);
-    const merged = buildLetter();
-    if (!merged) { setError("Set the Job Role before generating."); return; }
-    setBody(merged);
+    if (!jobRole.trim()) { setError("Set the Job Role before generating."); return; }
+    setGenerating(true);
+    try {
+      const res = await fetch("/api/hr/hiring/offers/template-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidateName:      candidate.fullName,
+          jobRole:            jobRole.trim(),
+          annualCtcINR:       ctcAnnual ? Number(ctcAnnual) : null,
+          joiningDate:        joiningDate        || null,
+          acceptanceDeadline: expiresAt          || null,
+          // Letter date defaults to "today" server-side when omitted.
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || `Couldn't render template (${res.status})`);
+      }
+      const j = await res.json();
+      if (typeof j?.text !== "string") throw new Error("Unexpected response shape");
+      setBody(j.text);
+    } catch (e: any) {
+      setError(e?.message ?? "Couldn't generate from template");
+    } finally {
+      setGenerating(false);
+    }
   };
 
-  // Preview always works — uses HR's edited body when present,
-  // otherwise renders the template on the fly. Doesn't mutate state
-  // so HR can close without committing.
-  const openPreview = () => {
+  // Preview shows the body HR has generated. If nothing's been
+  // generated yet, openPreview triggers a generate first so the
+  // preview never opens empty.
+  const openPreview = async () => {
     setError(null);
     if (!jobRole.trim()) { setError("Set the Job Role before previewing."); return; }
+    if (!body) await generate();
     setPreviewOpen(true);
   };
-  const previewBody = body || buildLetter() || "";
+  const previewBody = body || "";
 
   const handleFile = (f: File) => {
     if (f.size > 4 * 1024 * 1024) {
@@ -540,11 +554,13 @@ NB-Media`;
               <div className="flex items-center gap-2">
                 <button
                   onClick={generate}
-                  className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-semibold shadow-sm"
-                ><Sparkles size={13} /> Generate</button>
+                  disabled={generating}
+                  className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-[12px] font-semibold shadow-sm"
+                ><Sparkles size={13} /> {generating ? "Generating…" : "Generate"}</button>
                 <button
                   onClick={openPreview}
-                  className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[12px] font-semibold shadow-sm"
+                  disabled={generating}
+                  className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-blue-400 text-white text-[12px] font-semibold shadow-sm"
                 ><Eye size={13} /> Preview</button>
               </div>
             }
