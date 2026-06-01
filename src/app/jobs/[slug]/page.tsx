@@ -493,14 +493,6 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
                       ? "YT Labs is the strategy, research, and creative engine behind some of India's most-watched YouTube channels. We work end-to-end with creators — from idea to thumbnail to upload — and the team behind the scenes is small, sharp, and unusually obsessed with detail."
                       : "NB Media Productions is an end-to-end content studio shipping work for India's biggest creators and brands. From scripts to edits to release, every part of the pipeline runs in-house. You'll see your work go live on the channels you watch within weeks of joining."}
                   </p>
-                  <a
-                    href="https://nbmediaproductions.com"
-                    target="_blank" rel="noreferrer"
-                    className="mt-5 inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-slate-900 hover:text-[#3b82f6] transition-colors group"
-                  >
-                    <Globe size={13} /> nbmediaproductions.com
-                    <ChevronRight size={12} className="transition-transform group-hover:translate-x-0.5" />
-                  </a>
                 </div>
               </div>
             </Card>

@@ -24,6 +24,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
+import { useSession } from "next-auth/react";
+import { isHRAdmin } from "@/lib/access";
 import { fetcher } from "@/lib/swr";
 import {
   X, Mail, Phone, ExternalLink, FileText, Calendar, ChevronDown,
@@ -35,6 +37,8 @@ import {
 import ScheduleInterviewModal from "./ScheduleInterviewModal";
 import ArchiveCandidateModal  from "./ArchiveCandidateModal";
 import CandidateActionModal, { type CandidateAction } from "./CandidateActionModal";
+import FeedbackTab            from "./FeedbackTab";
+import OfferTab               from "./OfferTab";
 import SelectField            from "@/components/ui/SelectField";
 
 type Stage = { id: number; key: string; label: string; kind: string; color: string };
@@ -151,6 +155,10 @@ export default function CandidateDrawer({
   // Reference once so TS doesn't flag the prop as unused when no internal
   // call site has been wired yet. Safe no-op; parent retains the prop.
   void onChange;
+  const { data: session } = useSession();
+  const me = session?.user as any;
+  const currentUserId: number | null = me?.id != null ? Number(me.id) : null;
+  const hrAdmin = isHRAdmin(me);
   const url = `/api/hr/hiring/candidates/${candidateId}`;
   const { data, mutate } = useSWR<any>(url, fetcher);
   const { data: stagesData } = useSWR<{ stages: Stage[] }>("/api/hr/hiring/stages", fetcher);
@@ -159,12 +167,11 @@ export default function CandidateDrawer({
   const stages = stagesData?.stages ?? [];
   const candidates = listData?.candidates ?? [];
 
-  const [tab, setTab]               = useState<"profile" | "messages" | "feedback" | "documents" | "activity" | "offer">("profile");
+  const [tab, setTab]               = useState<"profile" | "feedback" | "documents" | "activity" | "offer">("profile");
   const [scheduleMode, setScheduleMode] = useState<"online" | "face_to_face" | "self_schedule" | null>(null);
   const [archiveOpen, setArchiveOpen]   = useState(false);
   const [scheduleMenuOpen, setScheduleMenuOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const [emailOpen, setEmailOpen]   = useState(false);
   const [actionModal, setActionModal] = useState<CandidateAction | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -176,15 +183,16 @@ export default function CandidateDrawer({
   // Esc closes the drawer when no submodals are open.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape" && !scheduleMode && !archiveOpen && !emailOpen) onClose();
+      if (e.key === "Escape" && !scheduleMode && !archiveOpen && !actionModal) onClose();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [scheduleMode, archiveOpen, emailOpen, onClose]);
+  }, [scheduleMode, archiveOpen, actionModal, onClose]);
 
   const c: Candidate | undefined = data?.candidate ?? data?.application;
   const activity = data?.activity ?? [];
   const interviews = data?.interviews ?? [];
+  const offers     = data?.offers ?? [];
 
   // Pipeline siblings — same role + same stage — for prev/next nav.
   const siblings = useMemo(() => {
@@ -366,7 +374,7 @@ export default function CandidateDrawer({
                   )}
                 </div>
 
-                <IconButton title="Send Email" onClick={() => setEmailOpen(true)}>
+                <IconButton title="Send Email" onClick={() => setActionModal("sendEmail")}>
                   <Mail size={14} />
                 </IconButton>
                 <IconButton title="Message on WhatsApp" onClick={() => {
@@ -401,7 +409,7 @@ export default function CandidateDrawer({
       {/* ── Tab bar ────────────────────────────────────────── */}
       <div className="px-6 border-b border-slate-200">
         <div className="flex items-center gap-6 -mb-px">
-          {(["profile", "messages", "feedback", "documents", "activity", "offer"] as const).map((t) => (
+          {(["profile", "feedback", "documents", "activity", "offer"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -417,18 +425,43 @@ export default function CandidateDrawer({
       <div className="flex-1 overflow-y-auto bg-slate-50">
         <div className="max-w-[1300px] mx-auto px-6 py-6">
           {tab === "profile"   && <ProfileTab c={c} />}
-          {tab === "messages"  && <StubTabPanel title="Messages"  desc="Two-way chat with the candidate (email + WhatsApp threaded view). Coming next." />}
-          {tab === "feedback"  && <StubTabPanel title="Feedback"  desc="Interview panel scorecards + comments. Coming next." />}
+          {tab === "feedback"  && (
+            <FeedbackTab
+              interviews={interviews}
+              currentUserId={currentUserId}
+              isHRAdmin={hrAdmin}
+              onMutated={() => mutate()}
+            />
+          )}
           {tab === "documents" && <DocumentsTab c={c} />}
           {tab === "activity"  && <ActivityTab activity={activity} interviews={interviews} />}
-          {tab === "offer"     && <StubTabPanel title="Offer"     desc="Generate or upload an offer letter. Coming next." />}
+          {tab === "offer"     && (
+            <OfferTab
+              candidate={{
+                id: c.id, fullName: c.fullName, email: c.email, roleTitle: c.roleTitle,
+                // Salary auto-fill — the GET endpoint joins JobOpening
+                // and returns jobSalaryRange / jobSalaryUnit on the
+                // candidate row. Cast through `any` since these aren't
+                // on the strict Candidate type yet (they're additive,
+                // optional, server-side joined fields).
+                jobSalaryRange: (c as any).jobSalaryRange ?? null,
+                jobSalaryUnit:  (c as any).jobSalaryUnit  ?? null,
+              }}
+              offers={offers}
+              onMutated={() => mutate()}
+            />
+          )}
         </div>
       </div>
 
       {/* Modals */}
       {scheduleMode && (
         <ScheduleInterviewModal
-          candidate={{ id: c.id, fullName: c.fullName, email: c.email, roleTitle: c.roleTitle, jobOpeningId: c.jobOpeningId }}
+          candidate={{
+            id: c.id, fullName: c.fullName, email: c.email,
+            roleTitle: c.roleTitle, jobOpeningId: c.jobOpeningId,
+            currentStageKey: c.currentStage?.key ?? null,
+          }}
           defaultKind={scheduleMode}
           onClose={() => setScheduleMode(null)}
           onDone={() => { mutate(); }}
@@ -439,13 +472,6 @@ export default function CandidateDrawer({
           candidate={{ id: c.id, fullName: c.fullName, email: c.email, roleTitle: c.roleTitle }}
           onClose={() => setArchiveOpen(false)}
           onDone={() => { mutate(); onClose(); }}
-        />
-      )}
-      {emailOpen && (
-        <QuickEmailModal
-          candidate={{ id: c.id, fullName: c.fullName, email: c.email, roleTitle: c.roleTitle }}
-          onClose={() => setEmailOpen(false)}
-          onDone={() => mutate()}
         />
       )}
       {actionModal && (
@@ -459,6 +485,7 @@ export default function CandidateDrawer({
             roleTitle: c.roleTitle,
             ownerName: c.ownerName ?? null,
             recruiterOwnerId: c.recruiterOwnerId ?? null,
+            currentStageKey: c.currentStage?.key ?? null,
           }}
           onClose={() => setActionModal(null)}
           onDone={() => { mutate(); }}
@@ -987,66 +1014,3 @@ function BrandIcon({
 // Lightweight quick-email modal — separate from the unified
 // CandidateActionModal so we can mount it without changing the
 // parent state shape.
-function QuickEmailModal({
-  candidate, onClose, onDone,
-}: { candidate: { id: number; fullName: string; email: string; roleTitle: string | null }; onClose: () => void; onDone?: () => void }) {
-  const [subject, setSubject] = useState("");
-  const [body, setBody]       = useState(`Hi ${candidate.fullName.split(" ")[0] ?? candidate.fullName},\n\n`);
-  const [saving, setSaving]   = useState(false);
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const send = async () => {
-    if (!subject.trim() || !body.trim()) return alert("Subject and body required");
-    setSaving(true);
-    const res = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "sendEmail",
-        to: candidate.email,
-        subject: subject.trim(),
-        body: body.replace(/\n/g, "<br/>"),
-      }),
-    });
-    setSaving(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      alert(j?.error || "Couldn't send email");
-      return;
-    }
-    onDone?.();
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 max-h-[90vh] flex flex-col">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="text-[15px] font-semibold text-slate-900">Email {candidate.fullName}</h3>
-          <button onClick={onClose} className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100">
-            <X size={14} />
-          </button>
-        </div>
-        <div className="p-5 space-y-3">
-          <p className="text-[11.5px] text-slate-500">To: <span className="text-slate-800">{candidate.email}</span></p>
-          <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject"
-            className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
-          <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={10}
-            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
-        </div>
-        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex items-center justify-end gap-2">
-          <button onClick={onClose} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white">Cancel</button>
-          <button onClick={send} disabled={saving}
-            className="inline-flex items-center gap-1.5 h-9 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-slate-300 text-white text-[12.5px] font-semibold shadow-sm">
-            <Send size={13} /> {saving ? "Sending…" : "Send"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
