@@ -119,11 +119,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Fire the email when sendNow + subject/body present.
     if (sendNow && body?.emailSubject && body?.emailBody) {
       const cand = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT "email", "fullName" FROM "JobApplication" WHERE "id" = $1`,
+        `SELECT "email", "fullName", "createdAt" FROM "JobApplication" WHERE "id" = $1`,
         applicationId,
       );
-      const to       = cand[0]?.email;
-      const fullName = cand[0]?.fullName ?? "Candidate";
+      const to              = cand[0]?.email;
+      const fullName        = cand[0]?.fullName ?? "Candidate";
+      const applicationDate = body?.applicationDate ?? cand[0]?.createdAt ?? null;
       if (to) {
         // Attachment priority:
         //   1. HR's uploaded PDF (already in attachmentBlob)
@@ -152,6 +153,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               annualCtcINR:       ctcAnnual,
               joiningDate,
               acceptanceDeadline: expiresAt,
+              applicationDate,
             });
             attachments = [{
               filename:      generated.filename,
