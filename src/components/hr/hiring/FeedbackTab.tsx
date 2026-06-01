@@ -14,6 +14,7 @@ import { useState } from "react";
 import {
   Star, MessageSquare, ThumbsUp, ThumbsDown, Calendar, MapPin, X,
   Save, AlertCircle, CheckCircle2, Pencil, CalendarClock, Ban,
+  AlertTriangle, Users, Clock, Video, Mail,
 } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 
@@ -381,43 +382,138 @@ function CancelModal({
     }
   };
 
+  const when = interview.scheduledAt ? new Date(interview.scheduledAt) : null;
+  const isOnline = interview.location ? /^https?:/.test(interview.location) : false;
+  const hasFeedback = interview.scorecards.length > 0;
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
-          <h3 className="text-[14.5px] font-semibold text-rose-700 inline-flex items-center gap-2">
-            <Ban size={15} /> Cancel interview?
-          </h3>
-          <button onClick={onClose} className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100">
+        className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+
+        {/* ── Hero strip with warning icon ─────────────────── */}
+        <div className="relative px-6 pt-7 pb-5 bg-gradient-to-br from-rose-50 via-white to-white border-b border-rose-100/60">
+          {/* Decorative blob */}
+          <div className="absolute -top-12 -right-12 h-40 w-40 rounded-full bg-rose-100/50 blur-2xl pointer-events-none" />
+
+          <button onClick={onClose}
+            className="absolute top-3 right-3 h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-white/80 transition-colors">
             <X size={15} />
           </button>
+
+          <div className="relative flex items-start gap-4">
+            <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-rose-100 ring-4 ring-white shadow-sm">
+              <AlertTriangle size={22} className="text-rose-600" />
+            </span>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <h3 className="text-[16px] font-semibold text-slate-900 leading-tight">
+                Cancel this interview?
+              </h3>
+              <p className="mt-1 text-[12.5px] text-slate-500 leading-snug">
+                This action notifies the candidate and panel. The interview stays on file as <span className="font-semibold text-slate-700">cancelled</span> — you won&apos;t lose any data.
+              </p>
+            </div>
+          </div>
         </div>
-        <div className="p-5 space-y-3">
-          <p className="text-[12.5px] text-slate-700">
-            This will mark <strong>{interview.title}</strong> as cancelled
-            {interview.scheduledAt && (
-              <> (scheduled for {new Date(interview.scheduledAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })})</>
-            )}.
-          </p>
-          <p className="text-[11.5px] text-slate-500">
-            The candidate&apos;s Google Calendar invite will be removed automatically. Panel feedback already submitted stays on file.
-          </p>
+
+        {/* ── Interview snapshot ───────────────────────────── */}
+        <div className="px-6 py-4 bg-white">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+            <div className="flex items-start gap-3">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 shrink-0">
+                {isOnline ? <Video size={15} /> : <Calendar size={15} />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-semibold text-slate-900 truncate">{interview.title}</p>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-slate-500">
+                  {when && (
+                    <span className="inline-flex items-center gap-1">
+                      <Clock size={11} className="text-slate-400" />
+                      {when.toLocaleString("en-IN", {
+                        weekday: "short", day: "2-digit", month: "short",
+                        hour: "numeric", minute: "2-digit", hour12: true,
+                      })}
+                      <span className="text-slate-400">· {interview.durationMinutes}m</span>
+                    </span>
+                  )}
+                  {interview.panel.length > 0 && (
+                    <span className="inline-flex items-center gap-1">
+                      <Users size={11} className="text-slate-400" />
+                      {interview.panel.length} panelist{interview.panel.length === 1 ? "" : "s"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Consequence checklist ──────────────────────── */}
+          <ul className="mt-4 space-y-2">
+            <ConsequenceLine
+              icon={<Mail size={12} />}
+              text={<>Google Calendar invite to <span className="font-semibold text-slate-700">{isOnline ? "candidate + panel" : "candidate"}</span> will be removed.</>}
+              tone="info"
+            />
+            {hasFeedback && (
+              <ConsequenceLine
+                icon={<CheckCircle2 size={12} />}
+                text={<><span className="font-semibold text-slate-700">{interview.scorecards.length} scorecard{interview.scorecards.length === 1 ? "" : "s"}</span> already submitted stay on file for audit.</>}
+                tone="success"
+              />
+            )}
+            <ConsequenceLine
+              icon={<AlertCircle size={12} />}
+              text="If you change your mind later, you'll need to schedule a new round."
+              tone="warn"
+            />
+          </ul>
+
           {error && (
-            <div className="text-[12px] text-rose-600 inline-flex items-center gap-1">
-              <AlertCircle size={12} /> {error}
+            <div className="mt-4 rounded-lg bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-[12px] text-rose-700 inline-flex items-center gap-1.5">
+              <AlertCircle size={13} /> {error}
             </div>
           )}
         </div>
-        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl flex items-center justify-end gap-2">
-          <button onClick={onClose} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white">Keep it</button>
-          <button onClick={confirm} disabled={saving}
-            className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white text-[12.5px] font-semibold">
-            <Ban size={13} /> {saving ? "Cancelling…" : "Yes, cancel"}
-          </button>
+
+        {/* ── Footer ──────────────────────────────────────── */}
+        <div className="px-6 py-3.5 border-t border-slate-100 bg-slate-50/40 flex items-center justify-between gap-2">
+          <p className="text-[10.5px] text-slate-400 hidden sm:block">
+            Press <kbd className="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono text-[9.5px]">Esc</kbd> to dismiss
+          </p>
+          <div className="flex items-center gap-2 ml-auto">
+            <button onClick={onClose}
+              className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white border border-transparent hover:border-slate-200 transition-colors">
+              Keep interview
+            </button>
+            <button onClick={confirm} disabled={saving}
+              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white text-[12.5px] font-semibold shadow-sm shadow-rose-600/20 transition-colors">
+              <Ban size={13} /> {saving ? "Cancelling…" : "Yes, cancel"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// Single line in the consequence checklist — bullet + colored icon
+// + body text. Tone drives the icon colour so HR can scan info /
+// success / warning at a glance.
+function ConsequenceLine({
+  icon, text, tone,
+}: { icon: React.ReactNode; text: React.ReactNode; tone: "info" | "success" | "warn" }) {
+  const tones = {
+    info:    { bg: "bg-blue-50",    fg: "text-blue-600",    ring: "ring-blue-100" },
+    success: { bg: "bg-emerald-50", fg: "text-emerald-600", ring: "ring-emerald-100" },
+    warn:    { bg: "bg-amber-50",   fg: "text-amber-600",   ring: "ring-amber-100" },
+  }[tone];
+  return (
+    <li className="flex items-start gap-2.5">
+      <span className={`inline-flex h-5 w-5 items-center justify-center rounded-md ${tones.bg} ${tones.fg} ring-1 ${tones.ring} shrink-0 mt-0.5`}>
+        {icon}
+      </span>
+      <span className="text-[12px] text-slate-600 leading-snug">{text}</span>
+    </li>
   );
 }
 
