@@ -274,7 +274,12 @@ function NewOfferModal({
   const [jobRole,     setJobRole]     = useState<string>(candidate.roleTitle ?? "");
   const [ctcAnnual,   setCtcAnnual]   = useState<string>(initialCtc);
   const [joiningDate, setJoiningDate] = useState<string>(inDays(14));
-  const [expiresAt,   setExpiresAt]   = useState<string>(inDays(7));
+  // Acceptance deadline — defaults to today + 5 days to match clause 24
+  // of NB Media's offer letter T&C ("on or before five days of issuance
+  // of this letter, failing which this employee agreement shall stand
+  // automatically withdrawn"). Always strictly before joining so the
+  // candidate must accept BEFORE they're due to start.
+  const [expiresAt,   setExpiresAt]   = useState<string>(inDays(5));
   const [body,        setBody]        = useState<string>("");
   const [file,        setFile]        = useState<{ name: string; mime: string; base64: string; size: number } | null>(null);
   const [sendNow,     setSendNow]     = useState(false);
@@ -453,9 +458,13 @@ function NewOfferModal({
                 </FieldLabel>
                 <FieldLabel label="Joining date">
                   <DateField value={joiningDate} onChange={setJoiningDate} />
+                  <p className="mt-1 text-[10px] text-slate-400">When the candidate is expected to start.</p>
                 </FieldLabel>
-                <FieldLabel label="Expires on">
+                <FieldLabel label="Acceptance deadline">
                   <DateField value={expiresAt} onChange={setExpiresAt} />
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    Last day the candidate can sign &amp; accept. Per offer T&amp;C clause 24, default is 5 days from today — always before joining.
+                  </p>
                 </FieldLabel>
               </div>
 
