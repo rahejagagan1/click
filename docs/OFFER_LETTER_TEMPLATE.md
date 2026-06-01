@@ -134,7 +134,18 @@ Address: _______________________
 Date: _______________________
 ```
 
-## Annexure A — Compensation Structure (page 4–5)
+## Annexure A — Compensation Structure (REMOVED)
+
+> **Not included in the generated offer letter.** Candidates don't see
+> a CTC breakdown on the formal letter — package specifics are
+> communicated separately (verbally or in a follow-up note).
+>
+> HR still captures `ctcAnnual` in the New Offer form for record-keeping;
+> the value never appears on the PDF the candidate receives.
+
+Historical reference (for context, not rendered):
+
+## ~~Annexure A — Compensation Structure~~ (page 4–5)
 
 ```
 Your Annual fixed compensation of Rs. {{annualLPA}} LPA will be divided per the

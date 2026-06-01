@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Clock, ExternalLink, Wrench, Subtitles, ClipboardList, History } from "lucide-react";
+import { Clock, ExternalLink, Wrench, Subtitles, ClipboardList, History, Search } from "lucide-react";
 
 // Custom "VO" letter-mark, used in place of a Lucide glyph for the
 // Extractor tool (which pulls voice-over audio). Matches the same prop
@@ -75,6 +75,14 @@ const TOOLS: Tool[] = [
     external: true,
     Icon: VoMark,
     accent: "#0d9488",
+  },
+  {
+    name: "Case Researcher",
+    description: "Research and dig deeper into case material — internal tool hosted on the VPS.",
+    href: "http://69.62.79.231.nip.io:3010",
+    external: true,
+    Icon: Search,
+    accent: "#6366f1",
   },
 ];
 
