@@ -23,7 +23,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { isHRAdmin } from "@/lib/access";
 import { sendEmail } from "@/lib/email/sender";
-import { renderOfferLetterPdfFromTemplate } from "@/lib/offer-letter-from-template";
+import { renderOfferLetterDocxAttachment } from "@/lib/offer-letter-from-docx";
 
 export const dynamic = "force-dynamic";
 
@@ -139,12 +139,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           }];
         } else if (body?.autoGeneratePdf) {
           try {
-            // Render directly from the official template PDF —
-            // overlays substituted text onto the highlighted spots
-            // (Candidate Name / Job Role / dates / LPA) so the
-            // candidate sees the EXACT NB Media template, not a
-            // recreated HTML approximation.
-            const generated = await renderOfferLetterPdfFromTemplate({
+            // Render by filling placeholders directly inside the
+            // official NB Media offer letter .docx template. Text
+            // reflows naturally because Word/Google Docs handles
+            // layout — no overlay artifacts, no coordinate math, no
+            // bleeding into surrounding text. Attachment is .docx,
+            // which every candidate can open in Word / Google Docs /
+            // LibreOffice and (if needed) print to PDF themselves.
+            const generated = await renderOfferLetterDocxAttachment({
               candidateName:      fullName,
               jobRole:            String(body?.jobRole ?? ""),
               annualCtcINR:       ctcAnnual,
