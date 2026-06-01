@@ -172,6 +172,48 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         `UPDATE "OfferLetter" SET status = 'accepted', "acceptedAt" = NOW(), "updatedAt" = NOW() WHERE id = $1`, id,
       );
       await activity(row.applicationId, "offer_accepted", "Offer accepted", { offerId: id }, actorId);
+      // Auto-move the candidate to the Preboarding stage so they show
+      // up in the Preboarding tab with a "Proceed to Onboarding" CTA.
+      // Soft-fail if the stage doesn't exist yet (e.g. fresh dev DB
+      // without the migration) — the offer is still marked accepted.
+      try {
+        const stageRows = await prisma.$queryRawUnsafe<any[]>(
+          `SELECT id FROM "HiringStage" WHERE "key" = 'preboarding' LIMIT 1`,
+        );
+        const preboardingStageId = stageRows[0]?.id ? Number(stageRows[0].id) : null;
+        if (preboardingStageId) {
+          await prisma.$transaction(async (tx) => {
+            // Close the prior stage's history row + open a new one.
+            const prev = await tx.$queryRawUnsafe<any[]>(
+              `SELECT "currentStageId" FROM "JobApplication" WHERE "id" = $1`,
+              row.applicationId,
+            );
+            const prevStageId: number | null = prev[0]?.currentStageId ?? null;
+            if (prevStageId && prevStageId !== preboardingStageId) {
+              await tx.$executeRawUnsafe(
+                `UPDATE "JobApplicationStage" SET "exitedAt" = NOW()
+                  WHERE "applicationId" = $1 AND "stageId" = $2 AND "exitedAt" IS NULL`,
+                row.applicationId, prevStageId,
+              );
+            }
+            if (prevStageId !== preboardingStageId) {
+              await tx.$executeRawUnsafe(
+                `INSERT INTO "JobApplicationStage" ("applicationId", "stageId", "movedById", "note")
+                 VALUES ($1, $2, $3, 'Auto-moved on offer acceptance')`,
+                row.applicationId, preboardingStageId, actorId,
+              );
+              await tx.$executeRawUnsafe(
+                `UPDATE "JobApplication"
+                    SET "currentStageId" = $1, "enteredStageAt" = NOW(), "updatedAt" = NOW()
+                  WHERE "id" = $2`,
+                preboardingStageId, row.applicationId,
+              );
+            }
+          });
+        }
+      } catch (e: any) {
+        console.error("[offers] preboarding stage move failed:", e?.message ?? e);
+      }
     } else if (action === "decline") {
       await prisma.$executeRawUnsafe(
         `UPDATE "OfferLetter" SET status = 'declined', "declinedAt" = NOW(), "updatedAt" = NOW() WHERE id = $1`, id,
