@@ -166,9 +166,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             // HR doesn't have a silent black hole.
           }
         }
+        // CC — optional. Filtered to valid-looking addresses so we
+        // never hand the SMTP layer junk. Caller already validated
+        // client-side; this is belt-and-braces.
+        const ccList = Array.isArray(body?.emailCc)
+          ? (body.emailCc as unknown[])
+              .map((e) => String(e ?? "").trim())
+              .filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))
+          : undefined;
         try {
           await sendEmail({
             to,
+            cc: ccList && ccList.length > 0 ? ccList : undefined,
             content: {
               subject: String(body.emailSubject),
               html:    String(body.emailBody),

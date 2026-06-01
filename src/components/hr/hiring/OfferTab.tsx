@@ -306,6 +306,10 @@ function NewOfferModal({
   const [body,        setBody]        = useState<string>("");
   const [file,        setFile]        = useState<{ name: string; mime: string; base64: string; size: number } | null>(null);
   const [sendNow,     setSendNow]     = useState(false);
+  /** Comma- or space-separated additional recipients. Validated +
+   *  split into a clean string[] inside save(). HR uses this to loop
+   *  in the candidate's manager, finance, founders, etc. */
+  const [ccRaw,       setCcRaw]       = useState<string>("");
   const [saving,      setSaving]      = useState(false);
   const [error,       setError]       = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -388,6 +392,12 @@ function NewOfferModal({
     if (ctcAnnual && !Number.isFinite(Number(ctcAnnual))) {
       setError("Annual CTC must be a number."); return;
     }
+    // Parse the CC field — accept comma OR whitespace separation.
+    // Surface bad addresses so HR can't silently mistype.
+    const ccList = parseEmails(ccRaw);
+    if (ccRaw.trim() && ccList === null) {
+      setError("One or more CC emails look invalid. Use comma- or space-separated valid emails."); return;
+    }
     setSaving(true);
     try {
       let extra: any = {};
@@ -417,6 +427,10 @@ NB-Media`;
           // Email body (the short cover) IS HTML — keep the <br/> for
           // line breaks. SMTP clients render this directly.
           emailBody:       coverText.replace(/\n/g, "<br/>"),
+          // CC — additional recipients HR added (manager, finance,
+          // founders, etc.). Empty array is safe: sender treats it
+          // the same as omitting CC entirely.
+          emailCc:         ccList ?? [],
           // Tell the server to render the offer letter HTML to PDF
           // and attach it. The server skips this when HR uploaded a
           // pre-made PDF (that one wins).
@@ -654,6 +668,24 @@ NB-Media`;
                 </p>
               </div>
             </label>
+
+            {/* CC — only meaningful when actually sending now. Stays
+                rendered but disabled until sendNow is on so HR
+                discovers it. */}
+            <div className={`mt-3 transition-opacity ${sendNow ? "opacity-100" : "opacity-60"}`}>
+              <FieldLabel label="CC (optional)">
+                <input
+                  value={ccRaw}
+                  onChange={(e) => setCcRaw(e.target.value)}
+                  disabled={!sendNow}
+                  placeholder="manager@nbmediaproductions.com, finance@nbmediaproductions.com"
+                  className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-white text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6] disabled:bg-slate-50 disabled:cursor-not-allowed"
+                />
+                <p className="mt-1 text-[10.5px] text-slate-400">
+                  Comma- or space-separated. Loop in manager, finance, founders — they&apos;ll receive the offer + PDF too.
+                </p>
+              </FieldLabel>
+            </div>
           </SectionCard>
 
           {error && (
@@ -875,6 +907,27 @@ function FieldLabel({ label, children }: { label: string; children: React.ReactN
   );
 }
 
+
+// Parse a free-text CC field into a clean string[]. Returns `null`
+// when ANY token doesn't look like an email so the caller can surface
+// the error to HR instead of silently dropping bad addresses. Empty
+// or whitespace-only input returns an empty array — no error.
+function parseEmails(raw: string): string[] | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  const tokens = trimmed.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+  const valid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+  for (const t of tokens) if (!valid.test(t)) return null;
+  // Dedupe (case-insensitive) so a typo "a@x.com, A@X.com" doesn't double-send.
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of tokens) {
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key); out.push(t);
+  }
+  return out;
+}
 
 function fmtINR(n: number): string {
   if (!Number.isFinite(n)) return String(n);
