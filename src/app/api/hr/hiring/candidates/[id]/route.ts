@@ -18,6 +18,40 @@ import { createGoogleMeetEvent, isGoogleMeetConfigured } from "@/lib/google/cale
 
 export const dynamic = "force-dynamic";
 
+// Per-attachment cap. 4 MB matches Vercel's default request body limit
+// and keeps a single email well under most SMTP per-message ceilings.
+const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+
+function parseEmailList(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((e): e is string => typeof e === "string")
+    .map((e) => e.trim())
+    .filter(Boolean);
+}
+
+function parseAttachments(input: unknown): { filename: string; contentType?: string; contentBase64: string }[] {
+  if (!Array.isArray(input)) return [];
+  const out: { filename: string; contentType?: string; contentBase64: string }[] = [];
+  for (const raw of input) {
+    if (!raw || typeof raw !== "object") continue;
+    const filename = String((raw as any).filename ?? "").trim();
+    const b64      = String((raw as any).contentBase64 ?? "");
+    if (!filename || !b64) continue;
+    // Approximate base64 → bytes ratio is 4 chars per 3 bytes, padding
+    // accounts for ~1-2 chars. The cap is conservative enough that the
+    // approximation is fine.
+    const approxBytes = Math.floor(b64.length * 0.75);
+    if (approxBytes > MAX_ATTACHMENT_BYTES) continue;
+    out.push({
+      filename,
+      contentType: typeof (raw as any).contentType === "string" ? (raw as any).contentType : undefined,
+      contentBase64: b64,
+    });
+  }
+  return out;
+}
+
 /** Pre-migration soft-fail wrapper — swallows 42P01 (table missing) /
  *  42703 (column missing) and returns `fallback` so /api/hr/hiring
  *  routes don't 500 the dashboard while the migration is in flight on
@@ -55,6 +89,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       safe(
         () => prisma.$queryRawUnsafe<any[]>(
           `SELECT a.*, o."title" AS "roleTitle",
+                  o."salaryRange" AS "jobSalaryRange",
+                  o."salaryUnit"  AS "jobSalaryUnit",
+                  o."employmentType" AS "jobEmploymentType",
                   s."id" AS "s_id", s."key" AS "s_key", s."label" AS "s_label",
                   s."kind" AS "s_kind", s."color" AS "s_color"
              FROM "JobApplication" a
@@ -70,6 +107,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         return safe(
           () => prisma.$queryRawUnsafe<any[]>(
             `SELECT a.*, o."title" AS "roleTitle",
+                    NULL AS "jobSalaryRange", NULL AS "jobSalaryUnit", NULL AS "jobEmploymentType",
                     NULL AS "s_id", NULL AS "s_key", NULL AS "s_label",
                     NULL AS "s_kind", NULL AS "s_color"
                FROM "JobApplication" a
@@ -92,19 +130,48 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         id,
       ), []),
       safe(() => prisma.$queryRawUnsafe<any[]>(
-        `SELECT i."id", i."roundNumber", i."title", i."scheduledAt", i."durationMinutes",
-                i."location", i."status", i."outcome", i."notes",
-                COALESCE(
+        `WITH panel AS (
+           SELECT ip."interviewId",
                   json_agg(
                     json_build_object('id', u."id", 'name', u."name", 'pic', u."profilePictureUrl")
-                  ) FILTER (WHERE u."id" IS NOT NULL),
-                  '[]'::json
-                ) AS "panel"
+                    ORDER BY u."name"
+                  ) AS "members"
+             FROM "InterviewPanelist" ip
+             JOIN "User" u ON u."id" = ip."userId"
+            GROUP BY ip."interviewId"
+         ),
+         cards AS (
+           SELECT s."interviewId",
+                  json_agg(
+                    json_build_object(
+                      'id',                 s."id",
+                      'interviewerId',      s."interviewerId",
+                      'interviewerName',    u."name",
+                      'interviewerPic',     u."profilePictureUrl",
+                      'technicalScore',     s."technicalScore",
+                      'communicationScore', s."communicationScore",
+                      'cultureScore',       s."cultureScore",
+                      'problemSolvingScore',s."problemSolvingScore",
+                      'recommendation',     s."recommendation",
+                      'strengths',          s."strengths",
+                      'weaknesses',         s."weaknesses",
+                      'notes',              s."notes",
+                      'submittedAt',        s."submittedAt"
+                    )
+                    ORDER BY s."submittedAt" DESC NULLS LAST, s."id"
+                  ) AS "scorecards"
+             FROM "InterviewScorecard" s
+             JOIN "User" u ON u."id" = s."interviewerId"
+            GROUP BY s."interviewId"
+         )
+         SELECT i."id", i."roundNumber", i."title", i."scheduledAt", i."durationMinutes",
+                i."location", i."status", i."outcome", i."notes",
+                COALESCE(panel."members",    '[]'::json) AS "panel",
+                COALESCE(cards."scorecards", '[]'::json) AS "scorecards"
            FROM "Interview" i
-           LEFT JOIN "InterviewPanelist" ip ON ip."interviewId" = i."id"
-           LEFT JOIN "User" u ON u."id" = ip."userId"
+           LEFT JOIN panel ON panel."interviewId" = i."id"
+           LEFT JOIN cards ON cards."interviewId" = i."id"
           WHERE i."applicationId" = $1
-          GROUP BY i."id"
           ORDER BY i."roundNumber" ASC, i."scheduledAt" ASC`,
         id,
       ), []),
@@ -449,17 +516,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const to = String(body?.to ?? "").trim();
       const subject = String(body?.subject ?? "").trim();
       const html = String(body?.body ?? "").trim();
+      const cc          = parseEmailList(body?.cc);
+      const bcc         = parseEmailList(body?.bcc);
+      const attachments = parseAttachments(body?.attachments);
       if (!to)      return NextResponse.json({ error: "Recipient required" }, { status: 400 });
       if (!subject) return NextResponse.json({ error: "Subject required" }, { status: 400 });
       if (!html)    return NextResponse.json({ error: "Body required" },    { status: 400 });
       try {
         await sendEmail({
           to,
+          cc, bcc,
           content: {
             subject,
             html,
             text: html.replace(/<[^>]+>/g, ""),
           } as any,
+          attachments,
         });
         const kind = action === "sendAssessment" ? "assessment_sent" : "email_sent";
         await prisma.$executeRawUnsafe(
@@ -570,8 +642,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const note    = body?.note    ? String(body.note).trim()    : null;
       const subject = body?.subject ? String(body.subject).trim() : null;
       const html    = body?.body    ? String(body.body).trim()    : null;
-      const cc      = Array.isArray(body?.cc)  ? body.cc.filter((e: any) => typeof e === "string" && e.trim()) : [];
-      const bcc     = Array.isArray(body?.bcc) ? body.bcc.filter((e: any) => typeof e === "string" && e.trim()) : [];
+      const cc          = parseEmailList(body?.cc);
+      const bcc         = parseEmailList(body?.bcc);
+      const attachments = parseAttachments(body?.attachments);
       if (!reason) return NextResponse.json({ error: "Archive reason required" }, { status: 400 });
 
       // Find the rejected stage so we can move them.
@@ -652,6 +725,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
                 html,
                 text: html.replace(/<[^>]+>/g, ""),
               } as any,
+              attachments,
             } as any);
           } catch (e: any) {
             console.error("[archive] email send failed:", e?.message || e);

@@ -13,8 +13,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { X, Search, Mail, Calendar, ClipboardList, UserCog, Send, UserCircle2, Save } from "lucide-react";
+import { X, Search, Mail, Calendar, ClipboardList, UserCog, Send, UserCircle2, Save, ChevronDown } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
+import { type HRTemplateKey, stageToTemplate } from "@/lib/email/hr-templates";
+import EmailComposer, { type EmailComposerPayload } from "./EmailComposer";
 
 export type CandidateAction =
   | "sendEmail"
@@ -31,6 +33,9 @@ interface Candidate {
   ownerName?: string | null;
   recruiterOwnerId?: number | null;
   roleTitle?: string | null;
+  /** HiringStage.key — drives stage-aware template defaults. Optional
+   *  so older callers that don't pass it just get the "custom" fallback. */
+  currentStageKey?: string | null;
 }
 
 const TITLES: Record<CandidateAction, string> = {
@@ -114,38 +119,34 @@ function EmailForm({
   onClose: () => void;
   onDone?: () => void;
 }) {
-  const [to, setTo] = useState(candidate.email ?? "");
-  const [subject, setSubject] = useState(
-    kind === "assessment"
-      ? `Assessment for ${candidate.roleTitle ?? "your application"}`
-      : "",
-  );
-  const [body, setBody] = useState(
-    kind === "assessment"
-      ? `Hi ${candidate.fullName.split(" ")[0] ?? candidate.fullName},\n\nThanks for applying. As a next step, please complete the assessment linked below.\n\n[Assessment Link]\n\nBest,\nNB Media Hiring Team`
-      : `Hi ${candidate.fullName.split(" ")[0] ?? candidate.fullName},\n\n`,
-  );
-  const [saving, setSaving] = useState(false);
+  const role = candidate.roleTitle ?? "your application";
 
-  const send = async () => {
-    if (!to.trim())      return alert("Recipient required");
-    if (!subject.trim()) return alert("Subject required");
-    if (!body.trim())    return alert("Body required");
-    setSaving(true);
+  // Default template selection — three-layer cascade:
+  //   1. "Send Assessment" kebab → always Portfolio Required.
+  //   2. "Send Email" + candidate has a hiring stage → stage-aware pick
+  //      (e.g. Screening → Portfolio, Offer → Documents Request).
+  //   3. Fallback → "custom" blank canvas for HR to draft freely.
+  const defaultKey: HRTemplateKey =
+    kind === "assessment"
+      ? "portfolio_request"
+      : stageToTemplate(candidate.currentStageKey ?? null);
+
+  const handleSend = async (p: EmailComposerPayload) => {
     const res = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: kind === "assessment" ? "sendAssessment" : "sendEmail",
-        to, subject,
-        body: body.replace(/\n/g, "<br/>"),
+        to: p.to, subject: p.subject,
+        body: p.bodyHtml,
+        cc: p.cc, bcc: p.bcc,
+        attachments: p.attachments.map(({ filename, contentType, contentBase64 }) =>
+          ({ filename, contentType, contentBase64 })),
       }),
     });
-    setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      alert(j?.error || "Couldn't send email");
-      return;
+      throw new Error(j?.error || "Couldn't send email");
     }
     globalMutate("/api/hr/hiring/candidates");
     onDone?.();
@@ -153,37 +154,15 @@ function EmailForm({
   };
 
   return (
-    <div className="p-5 space-y-3">
-      <Field label="To">
-        <input
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          type="email"
-          className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
-        />
-      </Field>
-      <Field label="Subject">
-        <input
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-          className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
-        />
-      </Field>
-      <Field label="Body">
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={9}
-          className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
-        />
-        <p className="mt-1 text-[10.5px] text-slate-400">Plain text — line breaks become &lt;br&gt;.</p>
-      </Field>
-      <FormFooter
-        onClose={onClose}
-        onSubmit={send}
-        submitLabel={saving ? "Sending…" : kind === "assessment" ? "Send assessment" : "Send email"}
-        submitIcon={<Send size={13} />}
-        disabled={saving}
+    <div className="p-5">
+      <EmailComposer
+        candidateName={candidate.fullName}
+        jobRole={role}
+        defaultTo={candidate.email ?? ""}
+        defaultTemplateKey={defaultKey}
+        context={kind === "assessment" ? "assessment" : "email"}
+        onCancel={onClose}
+        onSend={handleSend}
       />
     </div>
   );

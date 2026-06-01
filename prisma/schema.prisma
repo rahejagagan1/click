@@ -2278,8 +2278,18 @@ model JobApplication {
   noticePeriod    String?
 
   resumeFileName  String?
-  /// Public URL the resume is served from (e.g. /uploads/resumes/<uuid>.pdf).
+  /// Public URL the resume is served from. For NEW applications this
+  /// points at /api/hr/hiring/resumes/<id> (which streams resumeBlob).
+  /// LEGACY rows may still point at /uploads/resumes/<uuid>.pdf on the
+  /// filesystem — those files are fragile (deployments wipe them).
   resumeUrl       String?
+  /// Resume bytes stored in-DB so deployments / dev-prod drift can't
+  /// lose the file. nullable on legacy rows that haven't been
+  /// backfilled. 5 MB cap enforced at upload time in the apply route.
+  resumeBlob      Bytes?
+  /// MIME type of the resume blob (application/pdf, etc.). Used by the
+  /// /api/hr/hiring/resumes/<id> endpoint to set Content-Type safely.
+  resumeMime      String?  @db.VarChar(120)
 
   /// LEGACY workflow state: new | reviewed | shortlisted | interviewing | rejected | hired
   /// Kept for backwards-compat with the previous flat-list UI. The

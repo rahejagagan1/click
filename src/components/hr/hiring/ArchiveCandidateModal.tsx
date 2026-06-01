@@ -2,16 +2,19 @@
 
 // Archive Candidate — Keka-parity modal. HR picks a canonical reason
 // (Not Qualified / Position Filled / Out of Budget / etc.), optionally
-// writes a closing email (CC/BCC supported), and the action:
+// composes a closing email via the shared EmailComposer (which forces
+// a preview before sending), and the action:
 //   1. Moves the candidate to the rejected stage.
 //   2. Persists reason + note + archivedAt on JobApplication.
-//   3. Sends the closing email (if subject + body present).
+//   3. Sends the closing email (if HR opted in).
 //   4. Adds an `archived` row to CandidateActivity.
 // All of that is one backend call to action="archive".
 
 import { useEffect, useState } from "react";
 import { mutate as globalMutate } from "swr";
-import { X, ChevronDown, AlertCircle, Eye } from "lucide-react";
+import { X, ChevronDown, AlertCircle } from "lucide-react";
+import { rejectionEmail } from "@/lib/email/hr-templates";
+import EmailComposer, { type EmailComposerPayload } from "./EmailComposer";
 
 interface Candidate {
   id: number;
@@ -60,36 +63,17 @@ export default function ArchiveCandidateModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const role = candidate.roleTitle ?? "the role";
+  const tpl  = rejectionEmail({ candidateName: candidate.fullName, jobRole: role });
+
   const [reason, setReason]   = useState(ARCHIVE_REASONS[4]); // Not Fit
-  const [note, setNote]       = useState("");
-  const [cc, setCc]           = useState("");
-  const [bcc, setBcc]         = useState("");
-  const [showCc, setShowCc]   = useState(false);
-  const [showBcc, setShowBcc] = useState(false);
-  const fname  = (candidate.fullName ?? "").split(/\s+/)[0] ?? candidate.fullName;
-  const role   = candidate.roleTitle ?? "the role";
-  const [subject, setSubject] = useState(`Your application for ${role} at NB Media`);
-  const [body, setBody]       = useState(
-`Dear ${candidate.fullName},
-
-Greetings from NB Media!
-
-We thank you for your application for the ${role} position at NB Media. We appreciate you for showing interest in joining our company and we thank you for investing your precious time and efforts in applying to our company.
-
-We're fortunate to have received a lot of interest in this role, resulting in a very competitive selection process and after the careful evaluation of your application, we regret to inform you that unfortunately this time we won't be able to move forward with your application.
-
-We wish you the best for your future endeavours.
-
-Regards,
-NB Media Hiring Team`);
+  const [note,   setNote]     = useState("");
   const [sendEmail, setSendEmail] = useState(true);
-  const [preview, setPreview]     = useState(false);
-  const [saving, setSaving]       = useState(false);
+  const [saving, setSaving]   = useState(false);
 
-  const splitEmails = (s: string) =>
-    s.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
-
-  const confirm = async () => {
+  // "Archive without email" path — runs when HR unchecks the closing
+  // email checkbox. Single backend hit, no email.
+  const archiveOnly = async () => {
     if (!reason) return alert("Pick a reason");
     setSaving(true);
     const res = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
@@ -99,10 +83,6 @@ NB Media Hiring Team`);
         action: "archive",
         reason,
         note: note.trim() || null,
-        subject: sendEmail ? subject.trim() : null,
-        body:    sendEmail ? body.replace(/\n/g, "<br/>") : null,
-        cc:      sendEmail ? splitEmails(cc)  : [],
-        bcc:     sendEmail ? splitEmails(bcc) : [],
       }),
     });
     setSaving(false);
@@ -116,10 +96,38 @@ NB Media Hiring Team`);
     onClose();
   };
 
+  // EmailComposer "Send & archive" path. The composer enforces preview
+  // before this runs.
+  const archiveAndEmail = async (p: EmailComposerPayload) => {
+    if (!reason) throw new Error("Pick a reason");
+    const res = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "archive",
+        reason,
+        note: note.trim() || null,
+        subject: p.subject,
+        body:    p.bodyHtml,
+        cc:      p.cc,
+        bcc:     p.bcc,
+        attachments: p.attachments.map(({ filename, contentType, contentBase64 }) =>
+          ({ filename, contentType, contentBase64 })),
+      }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j?.error || "Couldn't archive candidate");
+    }
+    globalMutate("/api/hr/hiring/candidates");
+    onDone?.();
+    onClose();
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[640px] bg-white rounded-2xl shadow-2xl border border-slate-200 max-h-[92vh] flex flex-col">
+        className="w-full max-w-[680px] bg-white rounded-2xl shadow-2xl border border-slate-200 max-h-[92vh] flex flex-col">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
           <h3 className="text-[15px] font-semibold text-slate-900 truncate">Archive {candidate.fullName}</h3>
           <button onClick={onClose} className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100">
@@ -164,81 +172,31 @@ NB Media Hiring Team`);
             Send a closing email to the candidate
           </label>
 
-          {sendEmail && (
-            <div className="space-y-3 rounded-xl border border-slate-200 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[11.5px] font-semibold text-slate-600">To: <span className="text-slate-800">{candidate.email}</span></p>
-                <div className="flex items-center gap-2 text-[11.5px] font-semibold">
-                  {!showCc  && <button onClick={() => setShowCc(true)}  className="text-[#3b82f6] hover:underline">CC</button>}
-                  {!showBcc && <button onClick={() => setShowBcc(true)} className="text-[#3b82f6] hover:underline">BCC</button>}
-                </div>
-              </div>
-              {showCc && (
-                <Field label="CC">
-                  <input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="email1, email2"
-                    className="w-full h-9 px-3 rounded-lg border border-slate-200 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
-                </Field>
-              )}
-              {showBcc && (
-                <Field label="BCC">
-                  <input value={bcc} onChange={(e) => setBcc(e.target.value)} placeholder="email1, email2"
-                    className="w-full h-9 px-3 rounded-lg border border-slate-200 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
-                </Field>
-              )}
-              <Field label="Subject">
-                <input value={subject} onChange={(e) => setSubject(e.target.value)}
-                  className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
-              </Field>
-              <Field label="Body">
-                <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={9}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
-              </Field>
+          {sendEmail ? (
+            <div className="rounded-xl border border-slate-200 p-4">
+              <EmailComposer
+                candidateName={candidate.fullName}
+                jobRole={role}
+                defaultTo={candidate.email}
+                initialSubject={tpl.subject}
+                initialBody={tpl.body}
+                showTemplatePicker={false}
+                context="archive"
+                submitLabel="Send & archive"
+                onCancel={onClose}
+                onSend={archiveAndEmail}
+              />
+            </div>
+          ) : (
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button onClick={onClose} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white">Cancel</button>
+              <button onClick={archiveOnly} disabled={saving}
+                className="h-9 px-5 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white text-[12.5px] font-semibold shadow-sm">
+                {saving ? "Archiving…" : "Confirm archive (no email)"}
+              </button>
             </div>
           )}
         </div>
-
-        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex items-center justify-end gap-2">
-          <button onClick={onClose} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white">Cancel</button>
-          {sendEmail && (
-            <button onClick={() => setPreview(true)} className="h-9 px-4 rounded-lg border border-slate-200 bg-white hover:border-[#3b82f6] text-[12.5px] font-semibold text-slate-700 inline-flex items-center gap-1.5">
-              <Eye size={13} /> Preview Email
-            </button>
-          )}
-          <button onClick={confirm} disabled={saving}
-            className="h-9 px-5 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white text-[12.5px] font-semibold shadow-sm">
-            {saving ? "Archiving…" : "Confirm"}
-          </button>
-        </div>
-
-        {preview && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50" onClick={() => setPreview(false)}>
-            <div onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 max-h-[80vh] flex flex-col">
-              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="text-[15px] font-semibold text-slate-900">Preview Email</h3>
-                <button onClick={() => setPreview(false)} className="h-7 w-7 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100">
-                  <X size={14} />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-5 space-y-3 text-[13px]">
-                <div>
-                  <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">To</p>
-                  <p className="mt-1 text-slate-800">{candidate.fullName} &lt;{candidate.email}&gt;</p>
-                  {cc && <p className="mt-1 text-[11.5px] text-slate-500">CC: {cc}</p>}
-                  {bcc && <p className="mt-1 text-[11.5px] text-slate-500">BCC: {bcc}</p>}
-                </div>
-                <div>
-                  <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Subject</p>
-                  <p className="mt-1 text-slate-800 font-semibold">{subject}</p>
-                </div>
-                <div>
-                  <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Body</p>
-                  <pre className="mt-1 whitespace-pre-wrap font-sans text-slate-700">{body}</pre>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

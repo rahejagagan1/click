@@ -581,6 +581,7 @@ export default function CandidatesTab() {
               roleTitle: c.roleTitle,
               ownerName: c.ownerName ?? null,
               recruiterOwnerId: c.recruiterOwnerId ?? null,
+              currentStageKey: c.currentStage?.key ?? null,
             }}
             onClose={() => setActionModal(null)}
             onDone={() => mutateCandidates()}
