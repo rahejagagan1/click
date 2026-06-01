@@ -9,7 +9,7 @@
 // to PDF works via the browser's native print dialog on the rendered
 // preview, so no PDF library dependency is needed.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   FileText, Plus, Send, Check, X as XIcon, Ban, Download,
   Calendar, IndianRupee, AlertCircle, Mail, Sparkles, Printer, Eye, Pencil,
