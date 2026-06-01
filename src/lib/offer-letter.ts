@@ -125,15 +125,16 @@ Working Hours: 09:00 AM to 6.00 PM (Monday to Friday)
 *Please note that Saturdays are flexi-offs.
 
 Kindly acknowledge your acceptance by signing the document, and confirming the joining date by ${acceptanceSlash}.
+
 Failure to accept prior to the specified deadline will render this offer null and void automatically.
 
 For any further questions or concerns feel free to reach us.
 
-We extend our heartfelt wishes for an exceptional tenure aboard!
-
-Regards,
-Nikit Bassi
-Founder & CEO`;
+We extend our heartfelt wishes for an exceptional tenure aboard!`;
+  // Note: the closing "Regards, Nikit Bassi, Founder & CEO" block is
+  // NOT part of the editable body — it's rendered as a fixed
+  // signature block in buildOfferLetterHTML so HR can't accidentally
+  // delete it.
 }
 
 // ── Terms & Conditions — verbatim 25 clauses (pages 2–3) ─────────
@@ -224,7 +225,33 @@ export function buildOfferLetterHTML(args: OfferLetterArgs & { editedBody?: stri
   // specifics are conveyed verbally or in a separate note. If you ever
   // need to re-add it, restore the `annexureA` block + its page-break
   // section from git history.
-  const body      = args.editedBody?.trim() || letterBody(args);
+  const rawBody = args.editedBody?.trim() || letterBody(args);
+  // Defensive: legacy rows may have <br/> tags embedded from the old
+  // client-side conversion. Strip them back to \n so the renderer's
+  // pre-wrap white-space handling restores the visual breaks.
+  const cleanBody = rawBody.replace(/<br\s*\/?>/gi, "\n");
+  // Render the letter body as proper paragraphs. Splitting on blank
+  // lines (one or more) gives us the same visual rhythm as the
+  // template — separated paragraphs with consistent spacing, instead
+  // of one merged block.
+  const bodyHtml = cleanBody
+    .split(/\n{2,}/)
+    .map((para) => {
+      const trimmed = para.trim();
+      if (!trimmed) return "";
+      // The closing line in the template is centred + bold. Match it
+      // case-insensitively so HR edits ("Heartfelt", different
+      // capitalisation, etc.) still get the same treatment.
+      if (/^we extend our heartfelt wishes/i.test(trimmed)) {
+        return `<p class="centred bold">${esc(trimmed).replace(/\n/g, "<br/>")}</p>`;
+      }
+      // "Failure to accept …" runs as italic in the template.
+      if (/failure to accept prior to the specified deadline/i.test(trimmed)) {
+        return `<p class="italic">${esc(trimmed).replace(/\n/g, "<br/>")}</p>`;
+      }
+      return `<p>${esc(trimmed).replace(/\n/g, "<br/>")}</p>`;
+    })
+    .join("");
   const candidate = esc(args.candidateName || "Candidate Name");
   const role      = esc(args.jobRole       || "Job Role");
   const joining   = esc(fmtSlash(args.joiningDate ?? null));
@@ -243,10 +270,14 @@ export function buildOfferLetterHTML(args: OfferLetterArgs & { editedBody?: stri
   .header .org div { margin-top: 2px; }
   .logo { background: #fff; padding: 2px 4px; font-weight: 700; color: #dc2626; font-size: 18pt; letter-spacing: -0.02em; }
   .note { text-align: center; font-size: 10pt; color: #475569; font-weight: 600; margin: 14px 0; padding: 4px 0; border-top: 1px dashed #cbd5e1; border-bottom: 1px dashed #cbd5e1; }
-  h1.title { text-align: center; font-size: 16pt; text-decoration: underline; margin: 22px 0 14px; }
-  h2.title { text-align: center; font-size: 13.5pt; text-decoration: underline; margin: 24px 0 14px; }
-  pre.body { font-family: inherit; font-size: 11.5pt; white-space: pre-wrap; line-height: 1.65; }
-  .signature { margin-top: 28px; font-style: italic; }
+  h1.title { text-align: center; font-size: 16pt; text-decoration: underline; margin: 22px 0 14px; font-weight: 700; }
+  h2.title { text-align: center; font-size: 13.5pt; text-decoration: underline; margin: 24px 0 14px; font-weight: 700; }
+  .body p  { font-size: 11.5pt; line-height: 1.75; margin: 0 0 12px; text-align: justify; }
+  .body p.centred { text-align: center; }
+  .body p.bold    { font-weight: 700; }
+  .body p.italic  { font-style: italic; }
+  .signature { margin-top: 28px; font-style: italic; font-size: 14pt; }
+  .signature-block { margin-top: 6px; font-style: normal; font-size: 11pt; line-height: 1.4; }
   ol { padding-left: 22px; }
   ol li { margin-bottom: 10px; text-align: justify; }
   .acceptance { margin-top: 30px; }
@@ -283,8 +314,9 @@ export function buildOfferLetterHTML(args: OfferLetterArgs & { editedBody?: stri
   <p class="note">NOTE: This is a temporary / Conditional offer and cannot be used for Negotiations with other companies.</p>
 
   <h1 class="title">Letter Of Offer</h1>
-  <pre class="body">${esc(body)}</pre>
+  <div class="body">${bodyHtml}</div>
   <p class="signature">Nikit bassi</p>
+  <p class="signature-block">Regards,<br>Nikit Bassi<br>Founder &amp; CEO</p>
 
   <!-- ── Page 2 — Terms & Conditions ───────────────────────── -->
   <div class="page-break"></div>
