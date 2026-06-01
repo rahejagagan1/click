@@ -133,7 +133,32 @@ export async function POST(req: NextRequest) {
     const phone        = get("phone");
     const linkedinUrl  = get("linkedinUrl");
     const portfolioUrl = get("portfolioUrl");
-    const coverLetter  = get("coverLetter");
+    const rawCover     = get("coverLetter");
+
+    // Per-job screening answers — bundled as JSON by the apply form
+    // when the job has questions configured in Hiring Setup. We append
+    // them to the coverLetter as a structured Q&A block so HR sees
+    // them in the candidate drawer without needing a new schema
+    // column. Bad JSON is ignored silently — the cover letter stays
+    // unchanged in that case.
+    let coverLetter = rawCover;
+    const screeningRaw = get("screeningAnswers");
+    if (screeningRaw) {
+      try {
+        const arr = JSON.parse(screeningRaw);
+        if (Array.isArray(arr) && arr.length > 0) {
+          const block = arr
+            .filter((a: any) => typeof a?.text === "string" && typeof a?.answer === "string" && a.answer.trim())
+            .map((a: any) => `Q: ${a.text}\nA: ${a.answer}`)
+            .join("\n\n");
+          if (block) {
+            coverLetter = coverLetter
+              ? `${coverLetter}\n\n--- Screening Answers ---\n\n${block}`
+              : `--- Screening Answers ---\n\n${block}`;
+          }
+        }
+      } catch { /* malformed — skip merge */ }
+    }
     const currentCompany = get("currentCompany");
     const noticePeriod = get("noticePeriod");
     const expRaw       = get("experienceYears");
