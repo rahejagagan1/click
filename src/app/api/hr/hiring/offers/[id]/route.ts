@@ -14,6 +14,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { isHRAdmin } from "@/lib/access";
 import { sendEmail } from "@/lib/email/sender";
+import { renderOfferLetterPdf } from "@/lib/pdf-from-html";
 
 export const dynamic = "force-dynamic";
 
@@ -94,7 +95,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     const rows = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT id, "applicationId", status, "attachmentBlob", "attachmentFileName", "attachmentMime"
+      `SELECT id, "applicationId", status, "ctcAnnual", "joiningDate", "expiresAt",
+              "bodyHtml", "attachmentBlob", "attachmentFileName", "attachmentMime"
          FROM "OfferLetter" WHERE id = $1`,
       id,
     );
@@ -112,10 +114,43 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // Optional email send
       if (body?.emailSubject && body?.emailBody) {
         const cand = await prisma.$queryRawUnsafe<any[]>(
-          `SELECT "email" FROM "JobApplication" WHERE "id" = $1`, row.applicationId,
+          `SELECT a."email", a."fullName", o."title" AS "roleTitle"
+             FROM "JobApplication" a
+             LEFT JOIN "JobOpening" o ON o."id" = a."jobOpeningId"
+            WHERE a."id" = $1`,
+          row.applicationId,
         );
-        const to = cand[0]?.email;
+        const to       = cand[0]?.email;
+        const fullName = cand[0]?.fullName ?? "Candidate";
+        const roleTtl  = cand[0]?.roleTitle ?? "the role";
         if (to) {
+          // Attachment priority: HR-uploaded > auto-generated PDF.
+          let attachments: { filename: string; contentType: string; contentBase64: string }[] = [];
+          if (row.attachmentBlob && row.attachmentFileName) {
+            attachments = [{
+              filename:      row.attachmentFileName,
+              contentType:   row.attachmentMime ?? "application/pdf",
+              contentBase64: Buffer.from(row.attachmentBlob).toString("base64"),
+            }];
+          } else if (body?.autoGeneratePdf) {
+            try {
+              const generated = await renderOfferLetterPdf({
+                candidateName:      fullName,
+                jobRole:            String(body?.jobRole ?? roleTtl),
+                annualCtcINR:       row.ctcAnnual != null ? Number(row.ctcAnnual) : null,
+                joiningDate:        row.joiningDate,
+                acceptanceDeadline: row.expiresAt,
+                editedBody:         row.bodyHtml,
+              });
+              attachments = [{
+                filename:      generated.filename,
+                contentType:   generated.mime,
+                contentBase64: generated.pdf.toString("base64"),
+              }];
+            } catch (e: any) {
+              console.error("[offers] PDF generation failed:", e?.message ?? e);
+            }
+          }
           try {
             await sendEmail({
               to,
@@ -124,13 +159,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
                 html:    String(body.emailBody),
                 text:    String(body.emailBody).replace(/<[^>]+>/g, ""),
               } as any,
-              attachments: row.attachmentBlob && row.attachmentFileName
-                ? [{
-                    filename:      row.attachmentFileName,
-                    contentType:   row.attachmentMime ?? "application/pdf",
-                    contentBase64: Buffer.from(row.attachmentBlob).toString("base64"),
-                  }]
-                : [],
+              attachments,
             });
           } catch (e: any) {
             console.error("[offers] send email failed:", e?.message ?? e);

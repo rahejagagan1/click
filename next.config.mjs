@@ -16,6 +16,12 @@ const nextConfig = {
         "pdf-parse",
         "mammoth",
         "@napi-rs/canvas",
+        // Puppeteer ships Chromium + native bindings; bundling them
+        // into Next.js's server output breaks resolution of the
+        // chrome-headless-shell binary path. Keeping it external lets
+        // it find its own files at runtime.
+        "puppeteer",
+        "puppeteer-core",
     ],
     // Hosts allowed to hit Next.js dev resources (e.g. /_next/webpack-hmr).
     // The dev server blocks cross-origin requests to dev-only routes by
