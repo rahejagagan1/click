@@ -28,9 +28,21 @@ function getLogoAttachment() {
   }];
 }
 
+// Attachments uploaded by HR via the EmailComposer arrive here as base64
+// strings. nodemailer accepts { filename, content (Buffer|base64 string),
+// contentType, encoding } — we decode to Buffer to keep memory predictable.
+export type UserAttachment = {
+  filename: string;
+  contentType?: string;
+  contentBase64: string;
+};
+
 export async function sendEmail(args: {
   to: string | string[];
+  cc?: string[];
+  bcc?: string[];
   content: EmailContent;
+  attachments?: UserAttachment[];
 }): Promise<void> {
   const recipients = Array.isArray(args.to) ? args.to : [args.to];
   const valid = recipients.filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
@@ -40,17 +52,31 @@ export async function sendEmail(args: {
   if (isDryRun() || !transport) {
     console.log(`[email][dry-run] → ${valid.join(", ")}`);
     console.log(`              subject: ${args.content.subject}`);
+    if (args.attachments?.length) {
+      console.log(`              attachments: ${args.attachments.map((a) => a.filename).join(", ")}`);
+    }
     return;
   }
+
+  // Logo (inline CID) + any HR-provided attachments. Logo first so it
+  // keeps its predictable cid:logo reference; user attachments follow.
+  const logo = getLogoAttachment() ?? [];
+  const userAttachments = (args.attachments ?? []).map((a) => ({
+    filename:    a.filename,
+    content:     Buffer.from(a.contentBase64, "base64"),
+    contentType: a.contentType,
+  }));
 
   try {
     const info = await transport.sendMail({
       from:        emailSenderName(),
       to:          valid.join(", "),
+      cc:          args.cc?.length  ? args.cc.join(", ")  : undefined,
+      bcc:         args.bcc?.length ? args.bcc.join(", ") : undefined,
       subject:     args.content.subject,
       text:        args.content.text,
       html:        args.content.html,
-      attachments: getLogoAttachment(),
+      attachments: [...logo, ...userAttachments],
     });
     console.log(`[email] sent to ${valid.length} (${info.messageId})`);
   } catch (e) {

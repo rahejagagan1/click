@@ -13,10 +13,12 @@ import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import { DatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
+import { CalendarField } from "@/components/ui/calendar-field";
+import SelectField from "@/components/ui/SelectField";
 import {
   CheckCircle2, AlertCircle, User, Mail, Phone, Briefcase,
   Building2, Clock, Link as LinkIcon, FileText, Upload, X,
-  Sparkles, Send, IndianRupee,
+  Sparkles, Send, IndianRupee, MapPin,
 } from "lucide-react";
 
 // Date-picker class tuned to match the form's input height and brand
@@ -111,6 +113,22 @@ export default function JobApplyPage() {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone]     = useState(false);
   const [error, setError]   = useState("");
+  // The role id from ?role=<id> on the URL. Drives the Job Details
+  // panel so candidates see exactly what they're applying for —
+  // title, brand, meta, full description, and a downloadable JD.
+  const [roleId, setRoleId] = useState<number | null>(null);
+  // (The Job Description download + collapsible text live on the
+  // public /jobs/[slug] page now — the apply form just shows the
+  // basic title + meta so the candidate knows what they're applying
+  // for without duplicating the JD download.)
+  // Fetch the full job whenever roleId resolves. Soft-fails — if the
+  // endpoint 404s (job closed, removed, etc.), the panel just hides
+  // and the candidate continues with the generic form.
+  const { data: jobDetail } = useSWR<{ job: any }>(
+    roleId ? `/api/jobs/${roleId}` : null,
+    fetcher,
+  );
+  const job = jobDetail?.job;
   // Single resume control at the top of the form — drives both the
   // auto-fill (parse) and the actual file submission.
   const smartInputRef = useRef<HTMLInputElement>(null);
@@ -118,7 +136,10 @@ export default function JobApplyPage() {
   const [parsedFields, setParsedFields] = useState<string[]>([]); // names of fields we auto-filled, used for the success badge
   const [parseWarning, setParseWarning] = useState("");           // shown inline next to the resume so users see it
   const [skills, setSkills] = useState<string[]>([]);             // tag-style skill chips
-  const [additionalDoc, setAdditionalDoc] = useState<File | null>(null); // optional second file (cert / portfolio etc.)
+  // Multi-file additional documents (portfolios, certificates, etc.).
+  // First slot mirrors the uploaded resume so HR sees a copy there
+  // automatically; the candidate can stack more on top.
+  const [additionalDocs, setAdditionalDocs] = useState<File[]>([]);
   const [consent, setConsent] = useState(false);                  // privacy-consent checkbox
   // Repeatable experience/education sub-forms — each "+ Add" appends a
   // blank entry which the candidate fills in. Serialized to JSON on
@@ -127,15 +148,107 @@ export default function JobApplyPage() {
   const [experiences, setExperiences] = useState<ExperienceEntry[]>([]);
   const [educations,  setEducations]  = useState<EducationEntry[]>([]);
 
+  // Custom screening questions configured per-job by HR under
+  // Hiring Setup → Application Form. Fetched once `roleId` resolves;
+  // answers live in `screeningAnswers` keyed by questionId.
+  type ScreeningQuestion = {
+    id:       number;
+    text:     string;
+    type:     "short_text" | "long_text" | "yes_no" | "multiple_choice" | "number" | "date" | "file";
+    options:  string[] | null;
+    required: boolean;
+  };
+  const [screeningQuestions, setScreeningQuestions] = useState<ScreeningQuestion[]>([]);
+  const [screeningAnswers,   setScreeningAnswers]   = useState<Record<number, string>>({});
+
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  // Pre-select an opening if the URL carries ?role=<id>.
+  // ── Autosave (draft) ─────────────────────────────────────────
+  // Persist text fields + repeatables to localStorage so candidates
+  // don't lose their progress on accidental refresh / tab close.
+  // Files (resume, additionalDocs) can't go to localStorage so they
+  // stay in memory and must be re-picked on a fresh load — we show
+  // a small "Draft restored" badge to tell the candidate what came
+  // back and what didn't.
+  const DRAFT_KEY = "nb-apply-draft-v1";
+  const [draftRestored, setDraftRestored] = useState(false);
+  // Hydrate from localStorage exactly once on mount. URL-derived
+  // jobOpeningId / roleId still wins over the saved draft so
+  // sharing /jobs/apply?role=N from a different role doesn't snap
+  // back to the previous draft's role.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as {
+        form?: Record<string, string>;
+        skills?: string[];
+        experiences?: ExperienceEntry[];
+        educations?: EducationEntry[];
+        consent?: boolean;
+      };
+      if (draft.form)        setForm((cur) => ({ ...draft.form, ...cur })); // URL params win
+      if (draft.skills)      setSkills(draft.skills);
+      if (draft.experiences) setExperiences(draft.experiences);
+      if (draft.educations)  setEducations(draft.educations);
+      if (typeof draft.consent === "boolean") setConsent(draft.consent);
+      setDraftRestored(true);
+    } catch { /* malformed JSON — ignore and start fresh */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pre-select an opening if the URL carries ?role=<id>. Runs AFTER
+  // the draft hydration above so a fresh ?role= overrides any
+  // stale role in the draft.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const role = params.get("role");
-    if (role && /^\d+$/.test(role)) set("jobOpeningId", role);
+    if (role && /^\d+$/.test(role)) {
+      set("jobOpeningId", role);
+      setRoleId(Number(role));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Fetch the screening question set for this job once roleId resolves.
+  // Soft-fails to an empty list — the public endpoint returns
+  // { questions: [] } on missing tables / unpublished jobs so the rest
+  // of the form keeps working.
+  useEffect(() => {
+    if (!roleId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/jobs/${roleId}/questions`, { cache: "no-store" });
+        if (!res.ok) return;
+        const json = await res.json();
+        if (cancelled) return;
+        setScreeningQuestions(Array.isArray(json?.questions) ? json.questions : []);
+      } catch { /* silent — questions block just won't render */ }
+    })();
+    return () => { cancelled = true; };
+  }, [roleId]);
+
+  // Debounced save — every change to text fields / skills / repeatable
+  // sub-forms / consent persists 500ms later. Skips files (can't be
+  // serialised) and skips empty drafts on first mount.
+  useEffect(() => {
+    const hasContent =
+      Object.values(form).some((v) => v && String(v).trim().length > 0) ||
+      skills.length > 0 ||
+      experiences.length > 0 ||
+      educations.length > 0;
+    if (!hasContent) return;
+    const t = setTimeout(() => {
+      try {
+        window.localStorage.setItem(
+          DRAFT_KEY,
+          JSON.stringify({ form, skills, experiences, educations, consent }),
+        );
+      } catch { /* quota / private-mode — silently ignore */ }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [form, skills, experiences, educations, consent]);
 
   // Smart upload: parses the resume server-side and pre-fills the form.
   // Also stores the file as the actual resume submission so the candidate
@@ -150,6 +263,17 @@ export default function JobApplyPage() {
       setError("Resume must be a PDF, Word, RTF, ODT, TXT, or HTML file"); return;
     }
     setResume(file);
+    // Mirror the resume into the Additional Documents list so HR
+    // always sees a copy there too — candidates who only attach one
+    // file shouldn't have to upload it twice. Any extra files the
+    // candidate later adds stack on top of this mirror.
+    setAdditionalDocs((prev) => {
+      // If the same file is already first, no-op; otherwise replace
+      // the leading slot with the new resume.
+      if (prev[0]?.name === file.name && prev[0]?.size === file.size) return prev;
+      const others = prev.filter((f) => !(f.name === file.name && f.size === file.size));
+      return [file, ...others];
+    });
     setParsing(true);
     setParsedFields([]);
     setParseWarning("");
@@ -201,12 +325,45 @@ export default function JobApplyPage() {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    // Resume is mandatory — block the submit before doing any work
+    // so the candidate gets immediate, scrollable feedback.
+    if (!resume) {
+      setError("Please upload your resume — it's required to apply.");
+      // Scroll the resume upload zone into view so it's obvious where
+      // the candidate needs to look.
+      try { smartInputRef.current?.closest("form")?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {}
+      return;
+    }
+    // Enforce required screening questions before sending the request.
+    const missing = screeningQuestions.find(
+      (q) => q.required && !(screeningAnswers[q.id] ?? "").trim(),
+    );
+    if (missing) {
+      setError(`Please answer the screening question: "${missing.text}"`);
+      return;
+    }
     setSubmitting(true);
     try {
       const fd = new FormData();
       for (const [k, v] of Object.entries(form)) fd.append(k, v);
-      if (resume) fd.append("resume", resume);
-      if (additionalDoc) fd.append("additionalDoc", additionalDoc);
+      fd.append("resume", resume);
+      // Bundle per-job screening answers as JSON so the apply route
+      // can append them to coverLetter (no new schema column needed).
+      if (screeningQuestions.length > 0) {
+        const payload = screeningQuestions.map((q) => ({
+          questionId: q.id,
+          text:       q.text,
+          answer:     (screeningAnswers[q.id] ?? "").trim(),
+        })).filter((a) => a.answer.length > 0);
+        if (payload.length > 0) {
+          fd.append("screeningAnswers", JSON.stringify(payload));
+        }
+      }
+      // Send every selected additional doc under the same form key
+      // so the server can read them via formData.getAll(). Backend
+      // currently persists the first one — extra files are preserved
+      // in the request payload for future multi-attachment storage.
+      additionalDocs.forEach((f) => fd.append("additionalDoc", f));
       // Serialize repeatable sub-forms into the existing text columns.
       if (experiences.length > 0) {
         fd.set("experienceDetails", JSON.stringify(experiences));
@@ -219,6 +376,10 @@ export default function JobApplyPage() {
       const res  = await fetch("/api/jobs/apply", { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || "Submission failed");
+      // Wipe the autosave draft now that the application landed —
+      // we don't want the next visitor on this device to see the
+      // previous candidate's data.
+      try { window.localStorage.removeItem(DRAFT_KEY); } catch {}
       setDone(true);
     } catch (e: any) {
       setError(e?.message || "Submission failed");
@@ -327,7 +488,7 @@ export default function JobApplyPage() {
 
   return (
     <div
-      className="relative min-h-screen overflow-hidden py-10 px-4"
+      className="relative min-h-screen overflow-hidden py-6 sm:py-10 px-3 sm:px-4"
       style={{
         background:
           "linear-gradient(180deg, #f8fafc 0%, #f1f5f9 50%, #e9edf3 100%)",
@@ -349,20 +510,21 @@ export default function JobApplyPage() {
       <div className="relative mx-auto w-full max-w-4xl">
         {/* Card */}
         <div className="relative bg-white border-2 border-slate-300 rounded-2xl shadow-[0_10px_40px_rgba(15,23,42,0.12)] ring-1 ring-slate-900/5 overflow-hidden">
-          {/* Watermark — moved up so it sits behind the upper form
-              fields, slightly brighter to be clearly visible. */}
+          {/* Watermark — sits behind the upper form fields. On mobile
+              we shrink it heavily and push it lower so it doesn't
+              dominate the cramped header area. */}
           <img
             src="/logo.png"
             alt=""
             aria-hidden="true"
-            className="pointer-events-none select-none absolute inset-x-0 mx-auto top-[38%] -translate-y-1/2 w-[280px] max-w-[48%] opacity-[0.18]"
+            className="pointer-events-none select-none absolute inset-x-0 mx-auto top-[42%] sm:top-[38%] -translate-y-1/2 w-[160px] sm:w-[280px] max-w-[60%] sm:max-w-[48%] opacity-[0.12] sm:opacity-[0.18]"
           />
 
           {/* Header box — coloured banner with NB Media branding, back link,
               and page title. Uses an indigo→blue gradient with subtle
               decorative blobs so it feels professional and on-brand. */}
-          <div className="relative z-10 px-7 pt-6">
-            <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-gradient-to-br from-white via-[#f8fafc] to-[#f1f5f9] p-5 shadow-[0_4px_18px_rgba(15,23,42,0.06)]">
+          <div className="relative z-10 px-4 sm:px-7 pt-5 sm:pt-6">
+            <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-gradient-to-br from-white via-[#f8fafc] to-[#f1f5f9] p-4 sm:p-5 shadow-[0_4px_18px_rgba(15,23,42,0.06)]">
               {/* Soft warm brand-tinted glows — kept very subtle so the
                   card reads as professional grey/white. */}
               <div aria-hidden="true" className="pointer-events-none absolute -top-12 -right-10 h-40 w-40 rounded-full bg-[#f97316]/10 blur-2xl" />
@@ -401,12 +563,52 @@ export default function JobApplyPage() {
                 <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg>
                 Back to all job openings
               </a>
-              <h1 className="relative mt-2 text-[22px] font-bold tracking-tight text-slate-800">Apply for this job</h1>
-              <p className="relative mt-1 text-[12.5px] text-slate-500">Upload your resume — we'll auto-fill the rest in seconds.</p>
+              <h1 className="relative mt-2 text-[19px] sm:text-[22px] font-bold tracking-tight text-slate-800">Apply for this job</h1>
+              <p className="relative mt-1 text-[12px] sm:text-[12.5px] text-slate-500">Upload your resume — we'll auto-fill the rest in seconds.</p>
             </div>
           </div>
 
-          <form onSubmit={onSubmit} className="relative z-10 px-7 py-6 space-y-5">
+          {/* ── Job Details panel ─────────────────────────────────
+              Shows what the candidate is applying for: title, brand,
+              meta chips, downloadable JD attachment (if HR uploaded
+              one), and the full description in a collapsible block.
+              Only renders when ?role=<id> resolved to a published job. */}
+          {job && (
+            <div className="relative z-10 px-4 sm:px-7 pt-4 sm:pt-5">
+              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                {/* Top band */}
+                <div className="px-4 sm:px-5 py-4 border-b border-slate-100 bg-gradient-to-br from-slate-50 to-white">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#3b82f6] mb-1">
+                    {job.brand === "yt_labs" ? "YT Labs" : "NB Media"} · Job details
+                  </p>
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <h2 className="text-[18px] font-semibold text-slate-900 tracking-tight leading-tight">{job.title}</h2>
+                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5 text-[12px] text-slate-600">
+                        {job.department      && <span className="inline-flex items-center gap-1.5"><Building2 size={12} className="text-slate-400" /> {job.department}</span>}
+                        {job.location        && <span className="inline-flex items-center gap-1.5"><MapPin size={12} className="text-slate-400" /> {job.location}</span>}
+                        {job.employmentType  && <span className="inline-flex items-center gap-1.5"><Briefcase size={12} className="text-slate-400" /> {job.employmentType}</span>}
+                        {job.experienceLevel && <span className="inline-flex items-center gap-1.5"><Clock size={12} className="text-slate-400" /> {job.experienceLevel}</span>}
+                        {job.salaryRange     && <span className="inline-flex items-center gap-1.5"><IndianRupee size={12} className="text-slate-400" /> {job.salaryRange}</span>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {/* JD download moved to the public job page so applicants
+                    can read the brief BEFORE clicking Apply. The apply
+                    form keeps job context (title, meta) but doesn't
+                    duplicate the JD download button. */}
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={onSubmit} className="relative z-10 px-4 sm:px-7 py-5 sm:py-6 space-y-5">
+            {draftRestored && (
+              <div className="-mb-1 inline-flex items-center gap-2 rounded-lg bg-emerald-50 ring-1 ring-emerald-200 px-3 py-1.5 text-[11.5px] font-medium text-emerald-800">
+                <Sparkles size={12} className="text-emerald-600" />
+                Picked up where you left off. Your previous answers are restored — please re-upload your resume.
+              </div>
+            )}
             {/* ── Resume upload — single canonical control. Auto-fills
                 the form AND stores the file for submission. Required. */}
             <input
@@ -432,9 +634,11 @@ export default function JobApplyPage() {
                     : "border-[#3b82f6]/40 bg-[#3b82f6]/[0.04] hover:bg-[#3b82f6]/[0.08]"
                 }`}
               >
-                <p className="text-[13.5px] font-bold text-[#3b82f6]">Upload resume</p>
+                <p className="text-[13.5px] font-bold text-[#3b82f6]">
+                  Upload resume <span className="text-rose-500">*</span>
+                </p>
                 <p className="mt-0.5 text-[11.5px] text-slate-500">
-                  This will auto-fill the fields below. 5MB max file size · Allowed: .pdf, .doc, .docx, .rtf, .odt
+                  Required — also auto-fills the fields below. 5MB max file size · Allowed: .pdf, .doc, .docx, .rtf, .odt
                 </p>
               </div>
             ) : (
@@ -482,16 +686,16 @@ export default function JobApplyPage() {
                   Mobile Phone<span className="text-rose-500"> *</span>
                 </label>
                 <div className="flex gap-2">
-                  <select
+                  <SelectField
                     value={form.mobileCountryCode ?? "+91"}
-                    onChange={(e) => set("mobileCountryCode", e.target.value)}
-                    className="h-10 px-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15"
-                  >
-                    {["+91","+1","+44","+61","+65","+971","+86"].map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                    onChange={(v) => set("mobileCountryCode", v)}
+                    options={["+91","+1","+44","+61","+65","+971","+86"]}
+                    className="h-10 px-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-800 flex items-center justify-between gap-1 hover:border-slate-300 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 shrink-0"
+                    width={90}
+                  />
                   <input
                     type="tel"
-                    className={inputClsNoIcon.replace("h-11", "h-10")}
+                    className={inputClsNoIcon.replace("h-11", "h-10") + " min-w-0 flex-1"}
                     value={form.phone ?? ""}
                     onChange={(e) => set("phone", e.target.value)}
                     required
@@ -508,42 +712,43 @@ export default function JobApplyPage() {
                 <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">
                   Gender<span className="text-rose-500"> *</span>
                 </label>
-                <select
+                <SelectField
                   value={form.gender ?? ""}
-                  onChange={(e) => set("gender", e.target.value)}
-                  required
-                  className={inputClsNoIcon.replace("h-11", "h-10")}
-                >
-                  <option value="">Select an option</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="other">Other</option>
-                  <option value="prefer_not_to_say">Prefer not to say</option>
-                </select>
+                  onChange={(v) => set("gender", v)}
+                  options={[
+                    { value: "male",              label: "Male" },
+                    { value: "female",            label: "Female" },
+                    { value: "other",             label: "Other" },
+                    { value: "prefer_not_to_say", label: "Prefer not to say" },
+                  ]}
+                  placeholder="Select an option"
+                  className={inputClsNoIcon.replace("h-11", "h-10") + " flex items-center justify-between gap-2 text-left"}
+                />
               </div>
             </div>
 
             {/* ── Additional documents (optional second file) ─────────── */}
             <div>
               <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Additional Documents</label>
-              <AdditionalDocs onChange={setAdditionalDoc} file={additionalDoc} />
+              <AdditionalDocs onChange={setAdditionalDocs} files={additionalDocs} />
             </div>
 
             {/* ── DOB + Experience row ─────────────────────────────────── */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Date of Birth</label>
-                <DateField
+                <CalendarField
                   value={form.dateOfBirth ?? ""}
                   onChange={(v) => set("dateOfBirth", v)}
                   max={new Date().toISOString().slice(0, 10)}
+                  min="1925-01-01"
                   className="w-full"
                 />
               </div>
               <div>
                 <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Experience (in years)</label>
-                <div className="flex gap-2">
-                  <div className="flex-1 relative">
+                <div className="flex gap-2 items-center">
+                  <div className="flex-1 min-w-0 relative">
                     <input
                       type="number" min={0} max={60}
                       className={inputClsNoIcon.replace("h-11", "h-10") + " pr-14"}
@@ -553,14 +758,14 @@ export default function JobApplyPage() {
                     />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400 pointer-events-none">Years</span>
                   </div>
-                  <select
+                  <SelectField
                     value={form.experienceMonths ?? "0"}
-                    onChange={(e) => set("experienceMonths", e.target.value)}
-                    className="h-10 px-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15"
-                  >
-                    {Array.from({ length: 12 }).map((_, i) => <option key={i} value={i}>{i}</option>)}
-                  </select>
-                  <span className="self-center text-[12px] text-slate-500 px-1">Months</span>
+                    onChange={(v) => set("experienceMonths", v)}
+                    options={Array.from({ length: 12 }).map((_, i) => ({ value: String(i), label: String(i) }))}
+                    className="h-10 px-2 bg-white border border-slate-200 rounded-md text-[13px] text-slate-800 flex items-center justify-between gap-1 hover:border-slate-300 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 shrink-0"
+                    width={70}
+                  />
+                  <span className="text-[12px] text-slate-500 shrink-0">Months</span>
                 </div>
               </div>
             </div>
@@ -600,14 +805,13 @@ export default function JobApplyPage() {
               </div>
               <div>
                 <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Preferred Location</label>
-                <select
+                <SelectField
                   value={form.preferredLocation ?? ""}
-                  onChange={(e) => set("preferredLocation", e.target.value)}
-                  className={inputClsNoIcon.replace("h-11", "h-10")}
-                >
-                  <option value="">Select an option</option>
-                  <option value="Mohali">Mohali</option>
-                </select>
+                  onChange={(v) => set("preferredLocation", v)}
+                  options={["Mohali", "Remote"]}
+                  placeholder="Select an option"
+                  className={inputClsNoIcon.replace("h-11", "h-10") + " flex items-center justify-between gap-2 text-left"}
+                />
               </div>
             </div>
 
@@ -623,19 +827,16 @@ export default function JobApplyPage() {
                 <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">
                   Applying For<span className="text-rose-500"> *</span>
                 </label>
-                <select
-                  className={inputClsNoIcon.replace("h-11", "h-10")}
+                <SelectField
                   value={form.jobOpeningId ?? ""}
-                  onChange={e => set("jobOpeningId", e.target.value)}
-                  required
-                >
-                  <option value="">— Pick a role —</option>
-                  {openings.map(o => (
-                    <option key={o.id} value={o.id}>
-                      {o.title}{o.department ? ` · ${o.department}` : ""}{o.location ? ` · ${o.location}` : ""}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => set("jobOpeningId", v)}
+                  options={openings.map((o) => ({
+                    value: String(o.id),
+                    label: `${o.title}${o.department ? ` · ${o.department}` : ""}${o.location ? ` · ${o.location}` : ""}`,
+                  }))}
+                  placeholder="— Pick a role —"
+                  className={inputClsNoIcon.replace("h-11", "h-10") + " flex items-center justify-between gap-2 text-left"}
+                />
               </div>
             )}
 
@@ -649,7 +850,7 @@ export default function JobApplyPage() {
                 {experiences.map((exp, i) => (
                   <div
                     key={`exp-${i}`}
-                    className="relative rounded-lg border border-slate-200 bg-slate-50/60 p-4"
+                    className="relative rounded-lg border border-slate-200 bg-slate-50/60 p-3 sm:p-4 pr-9 sm:pr-4"
                   >
                     <button
                       type="button"
@@ -742,98 +943,13 @@ export default function JobApplyPage() {
               )}
             </div>
 
-            {/* ── Education Details (repeatable) ───────────────────────── */}
-            <div>
-              <p className="text-[13px] font-bold text-slate-800 mb-2">Education Details</p>
-              <div className="space-y-3">
-                {educations.map((edu, i) => (
-                  <div
-                    key={`edu-${i}`}
-                    className="relative rounded-lg border border-slate-200 bg-slate-50/60 p-4"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setEducations(arr => arr.filter((_, j) => j !== i))}
-                      className="absolute top-3 right-3 text-slate-400 hover:text-red-500 transition-colors"
-                      aria-label="Remove education"
-                    >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
-                      </svg>
-                    </button>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
-                      <div>
-                        <label className="block text-[12px] font-medium text-slate-700 mb-1">Course</label>
-                        <input
-                          type="text"
-                          className={inputClsNoIcon}
-                          placeholder="B.Tech"
-                          value={edu.course}
-                          onChange={(e) => setEducations(arr => arr.map((x, j) => j === i ? { ...x, course: e.target.value } : x))}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-slate-700 mb-1">Branch / Specialization</label>
-                        <input
-                          type="text"
-                          className={inputClsNoIcon}
-                          placeholder="Computer Science"
-                          value={edu.branch}
-                          onChange={(e) => setEducations(arr => arr.map((x, j) => j === i ? { ...x, branch: e.target.value } : x))}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-slate-700 mb-1">Start of Course</label>
-                        <DatePicker
-                          value={edu.startOfCourse}
-                          onChange={(v) => setEducations(arr => arr.map((x, j) => j === i ? { ...x, startOfCourse: v } : x))}
-                          className={datePickerCls}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-slate-700 mb-1">End of Course</label>
-                        <DatePicker
-                          value={edu.endOfCourse}
-                          onChange={(v) => setEducations(arr => arr.map((x, j) => j === i ? { ...x, endOfCourse: v } : x))}
-                          className={datePickerCls}
-                          futureYears={10}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-slate-700 mb-1">University / College</label>
-                        <input
-                          type="text"
-                          className={inputClsNoIcon}
-                          placeholder="IIT, Mumbai"
-                          value={edu.university}
-                          onChange={(e) => setEducations(arr => arr.map((x, j) => j === i ? { ...x, university: e.target.value } : x))}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-slate-700 mb-1">Location</label>
-                        <input
-                          type="text"
-                          className={inputClsNoIcon}
-                          placeholder="Hyderabad"
-                          value={edu.location}
-                          onChange={(e) => setEducations(arr => arr.map((x, j) => j === i ? { ...x, location: e.target.value } : x))}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {educations.length === 0 && (
-                <button
-                  type="button"
-                  onClick={() => setEducations([{ ...emptyEducation }])}
-                  className="mt-2 inline-flex items-center gap-1 text-[13px] font-semibold text-[#3b82f6] hover:text-[#2563eb] transition-colors"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                  Add Education Details
-                </button>
-              )}
-            </div>
+            {/* Education Details section intentionally not rendered.
+                The `educations` state still exists in the page so the
+                resume parser can populate it on upload — the JSON
+                payload is sent to HR via the `educationDetails`
+                column at submit time. Candidates don't see a manual
+                form; if their resume has degree info it shows up on
+                the HR side, otherwise the field stays empty. */}
 
             {/* ── Skills (tag input) ───────────────────────────────────── */}
             <div>
@@ -843,6 +959,121 @@ export default function JobApplyPage() {
                 onChange={(arr) => { setSkills(arr); set("skills", arr.join(", ")); }}
               />
             </div>
+
+            {/* ── Screening questions (per-job, configured by HR) ──────
+                Rendered only when the job has at least one question
+                attached via Hiring Setup → Application Form. Answers
+                are bundled into the form payload on submit. */}
+            {screeningQuestions.length > 0 && (
+              <div>
+                <p className="text-[13px] font-bold text-slate-800 mb-1">Screening questions</p>
+                <p className="text-[11.5px] text-slate-500 mb-3">
+                  A few quick questions from the hiring team.
+                </p>
+                <div className="space-y-4">
+                  {screeningQuestions.map((q) => {
+                    const value = screeningAnswers[q.id] ?? "";
+                    const setVal = (v: string) =>
+                      setScreeningAnswers((prev) => ({ ...prev, [q.id]: v }));
+                    return (
+                      <div key={q.id}>
+                        <label className="block text-[12.5px] font-semibold text-slate-800 mb-1.5">
+                          {q.text}
+                          {q.required && <span className="text-rose-500 ml-0.5">*</span>}
+                        </label>
+
+                        {q.type === "long_text" && (
+                          <textarea
+                            value={value}
+                            onChange={(e) => setVal(e.target.value)}
+                            rows={4}
+                            required={q.required}
+                            placeholder="Type your answer"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
+                          />
+                        )}
+
+                        {q.type === "short_text" && (
+                          <input
+                            type="text"
+                            value={value}
+                            onChange={(e) => setVal(e.target.value)}
+                            required={q.required}
+                            placeholder="Type your answer"
+                            className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
+                          />
+                        )}
+
+                        {q.type === "number" && (
+                          <input
+                            type="number"
+                            value={value}
+                            onChange={(e) => setVal(e.target.value)}
+                            required={q.required}
+                            placeholder="0"
+                            className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
+                          />
+                        )}
+
+                        {q.type === "date" && (
+                          <input
+                            type="date"
+                            value={value}
+                            onChange={(e) => setVal(e.target.value)}
+                            required={q.required}
+                            className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
+                          />
+                        )}
+
+                        {q.type === "yes_no" && (
+                          <div className="flex items-center gap-4">
+                            {(["Yes", "No"] as const).map((opt) => (
+                              <label key={opt} className="inline-flex items-center gap-2 cursor-pointer text-[13px] text-slate-700">
+                                <input
+                                  type="radio"
+                                  name={`screen_${q.id}`}
+                                  value={opt}
+                                  checked={value === opt}
+                                  onChange={() => setVal(opt)}
+                                  required={q.required}
+                                  className="h-4 w-4 text-[#3b82f6] focus:ring-[#3b82f6]"
+                                />
+                                {opt}
+                              </label>
+                            ))}
+                          </div>
+                        )}
+
+                        {q.type === "multiple_choice" && Array.isArray(q.options) && (
+                          <div className="space-y-1.5">
+                            {q.options.map((opt) => (
+                              <label key={opt} className="flex items-center gap-2 cursor-pointer text-[13px] text-slate-700">
+                                <input
+                                  type="radio"
+                                  name={`screen_${q.id}`}
+                                  value={opt}
+                                  checked={value === opt}
+                                  onChange={() => setVal(opt)}
+                                  required={q.required}
+                                  className="h-4 w-4 text-[#3b82f6] focus:ring-[#3b82f6]"
+                                />
+                                {opt}
+                              </label>
+                            ))}
+                          </div>
+                        )}
+
+                        {q.type === "file" && (
+                          <p className="text-[11.5px] text-slate-500 italic">
+                            File-type questions aren't supported in v1 — please attach the file under "Additional documents" above and mention it in another question if needed.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* ── Privacy consent ──────────────────────────────────────── */}
             <label className="flex items-start gap-2.5 cursor-pointer text-[12px] text-slate-600 leading-relaxed">
@@ -870,9 +1101,10 @@ export default function JobApplyPage() {
             <button
               type="submit"
               disabled={submitting || !consent || !resume}
+              title={!resume ? "Upload your resume to enable Apply" : (!consent ? "Accept the privacy notice to enable Apply" : "")}
               className="w-full h-11 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-[13.5px] font-semibold transition-colors shadow-[0_1px_2px_rgba(59,130,246,0.25)]"
             >
-              {submitting ? "Submitting…" : "Apply Now"}
+              {submitting ? "Submitting…" : !resume ? "Upload resume to continue" : "Apply Now"}
             </button>
           </form>
         </div>
@@ -947,15 +1179,18 @@ function SalaryField({
   return (
     <div>
       <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">{label}</label>
+      {/* Mobile: 2-row layout — currency + amount on top, frequency
+          below full-width. Desktop: single inline row. Stops the
+          amount input from getting squeezed into 60px on phones. */}
       <div className="flex flex-wrap gap-2">
-        <select
+        <SelectField
           value={currency}
-          onChange={(e) => onCurrency(e.target.value)}
-          className="h-11 px-3 bg-white border border-slate-200 rounded-lg text-[13.5px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15"
-        >
-          {["INR","USD","EUR","GBP","AED","SGD"].map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <div className="relative flex-1 min-w-[160px]">
+          onChange={onCurrency}
+          options={["INR","USD","EUR","GBP","AED","SGD"]}
+          className="h-11 px-3 bg-white border border-slate-200 rounded-lg text-[13.5px] text-slate-800 flex items-center justify-between gap-1.5 hover:border-slate-300 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 shrink-0"
+          width={95}
+        />
+        <div className="relative flex-1 min-w-[140px]">
           <IndianRupee size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           <input
             type="number" min={0}
@@ -965,14 +1200,16 @@ function SalaryField({
             placeholder="Amount"
           />
         </div>
-        <select
+        <SelectField
           value={freq}
-          onChange={(e) => onFreq(e.target.value)}
-          className="h-11 px-3 bg-white border border-slate-200 rounded-lg text-[13.5px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15"
-        >
-          <option value="monthly">Monthly</option>
-          <option value="annual">Annual</option>
-        </select>
+          onChange={onFreq}
+          options={[
+            { value: "monthly", label: "Monthly" },
+            { value: "annual",  label: "Annual"  },
+          ]}
+          className="h-11 px-3 bg-white border border-slate-200 rounded-lg text-[13.5px] text-slate-800 flex items-center justify-between gap-1.5 hover:border-slate-300 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 w-full sm:w-auto"
+          width={140}
+        />
       </div>
     </div>
   );
@@ -1053,58 +1290,81 @@ function SkillsInput({
 
 // "+ Add attachment" tile for the optional Additional Documents slot.
 // Single file, 10 MB cap (slightly larger than the resume's 5 MB so
-// HR can take a portfolio PDF or scanned certificate).
+// Additional documents — multi-file. Candidates can stack as many
+// supporting files as they want (portfolios, certificates, sample
+// scripts). Each file gets its own row with a remove button, and a
+// dashed "Add another" button stays visible at the bottom.
 function AdditionalDocs({
-  file, onChange,
+  files, onChange,
 }: {
-  file: File | null; onChange: (f: File | null) => void;
+  files: File[]; onChange: (next: File[]) => void;
 }) {
   const ref = React.useRef<HTMLInputElement>(null);
-  if (file) {
-    return (
-      <div className="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2.5">
-        <FileText size={16} className="text-[#3b82f6] shrink-0" />
-        <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-semibold text-slate-800 truncate">{file.name}</p>
-          <p className="text-[11px] text-slate-500 tabular-nums">{(file.size / 1024).toFixed(0)} KB</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => { onChange(null); if (ref.current) ref.current.value = ""; }}
-          className="h-7 w-7 rounded-md flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-        >
-          <X size={14} />
-        </button>
-      </div>
-    );
-  }
+  const ALLOWED_BYTES = 10 * 1024 * 1024;
+
+  const onPick = (incoming: FileList | null) => {
+    if (!incoming) return;
+    const next: File[] = [...files];
+    for (const f of Array.from(incoming)) {
+      if (f.size > ALLOWED_BYTES) continue;
+      // Dedup by name+size so the same file isn't added twice.
+      if (next.some((e) => e.name === f.name && e.size === f.size)) continue;
+      next.push(f);
+    }
+    onChange(next);
+    if (ref.current) ref.current.value = "";
+  };
+
+  const removeAt = (i: number) => {
+    const next = files.slice();
+    next.splice(i, 1);
+    onChange(next);
+  };
+
   return (
-    <>
+    <div className="space-y-2">
       <input
         ref={ref}
         type="file"
+        multiple
         className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0] ?? null;
-          if (!f) return;
-          if (f.size > 10 * 1024 * 1024) return;
-          onChange(f);
-        }}
+        onChange={(e) => onPick(e.target.files)}
       />
+
+      {files.map((file, i) => (
+        <div key={`${file.name}-${file.size}-${i}`} className="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2.5">
+          <FileText size={16} className="text-[#3b82f6] shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-semibold text-slate-800 truncate">{file.name}</p>
+            <p className="text-[11px] text-slate-500 tabular-nums">{(file.size / 1024).toFixed(0)} KB</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => removeAt(i)}
+            className="h-7 w-7 rounded-md flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+            title="Remove this attachment"
+          ><X size={14} /></button>
+        </div>
+      ))}
+
+      {/* "Add attachment" always visible — even after files are
+          attached — so candidates can keep stacking documents. */}
       <button
         type="button"
         onClick={() => ref.current?.click()}
-        className="w-full rounded-md border-2 border-dashed border-slate-200 hover:border-[#3b82f6]/40 bg-slate-50/40 hover:bg-[#3b82f6]/[0.04] transition-colors px-4 py-3.5 flex items-center gap-3 text-left"
+        className="w-full rounded-md border-2 border-dashed border-slate-200 hover:border-[#3b82f6]/40 bg-slate-50/40 hover:bg-[#3b82f6]/[0.04] transition-colors px-4 py-3 flex items-center gap-3 text-left"
       >
         <div className="h-9 w-9 rounded-md bg-white border border-slate-200 flex items-center justify-center text-[#3b82f6]">
           <Upload size={15} />
         </div>
         <div>
-          <p className="text-[12.5px] font-semibold text-[#3b82f6]">Add attachment</p>
-          <p className="text-[10.5px] text-slate-500">10MB max size</p>
+          <p className="text-[12.5px] font-semibold text-[#3b82f6]">
+            {files.length === 0 ? "Add attachment" : "Add another attachment"}
+          </p>
+          <p className="text-[10.5px] text-slate-500">10MB max per file · pick multiple at once if you want</p>
         </div>
       </button>
-    </>
+    </div>
   );
 }
 
