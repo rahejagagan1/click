@@ -106,13 +106,23 @@ export function DateField({
     };
   }, [open]);
 
-  // Click-outside + Esc to close
+  // Click-outside + Esc to close. The month/year SelectFields inside
+  // our calendar render their option lists in their OWN portals (so
+  // they escape our calendar's clipping) — those clicks land OUTSIDE
+  // our panelRef and would close the calendar before the option's
+  // onClick gets to run. We honour any element tagged with
+  // `data-popover-portal` (a marker every portal-popover in the app
+  // sets on its outer wrapper) so nested popovers compose cleanly.
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (wrapRef.current?.contains(t)) return;
+      const t = e.target as Element | null;
+      if (!t) return;
+      if (wrapRef.current?.contains(t))   return;
       if (panelRef.current?.contains(t))  return;
+      // Skip clicks inside any other portal popover (SelectField's
+      // dropdown lives there).
+      if (t.closest?.('[data-popover-portal]')) return;
       closePanel();
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closePanel(); };
@@ -221,6 +231,14 @@ export function DateField({
               ref={panelRef}
               role="dialog"
               aria-modal="false"
+              data-popover-portal="true"
+              // Stop mousedown bubbling so any outer popover's
+              // outside-click handler doesn't see clicks inside our
+              // calendar (the month/year SelectFields portal their
+              // options elsewhere — those panels stop propagation
+              // themselves; this covers everything else).
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
               className="fixed rounded-xl border border-slate-200 bg-white shadow-[0_12px_36px_-8px_rgba(15,23,42,0.18)] p-3"
               style={{ top, left, width: PANEL_W, zIndex: 10000 }}
             >
