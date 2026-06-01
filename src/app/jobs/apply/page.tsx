@@ -148,6 +148,19 @@ export default function JobApplyPage() {
   const [experiences, setExperiences] = useState<ExperienceEntry[]>([]);
   const [educations,  setEducations]  = useState<EducationEntry[]>([]);
 
+  // Custom screening questions configured per-job by HR under
+  // Hiring Setup → Application Form. Fetched once `roleId` resolves;
+  // answers live in `screeningAnswers` keyed by questionId.
+  type ScreeningQuestion = {
+    id:       number;
+    text:     string;
+    type:     "short_text" | "long_text" | "yes_no" | "multiple_choice" | "number" | "date" | "file";
+    options:  string[] | null;
+    required: boolean;
+  };
+  const [screeningQuestions, setScreeningQuestions] = useState<ScreeningQuestion[]>([]);
+  const [screeningAnswers,   setScreeningAnswers]   = useState<Record<number, string>>({});
+
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
   // ── Autosave (draft) ─────────────────────────────────────────
@@ -196,6 +209,25 @@ export default function JobApplyPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Fetch the screening question set for this job once roleId resolves.
+  // Soft-fails to an empty list — the public endpoint returns
+  // { questions: [] } on missing tables / unpublished jobs so the rest
+  // of the form keeps working.
+  useEffect(() => {
+    if (!roleId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/jobs/${roleId}/questions`, { cache: "no-store" });
+        if (!res.ok) return;
+        const json = await res.json();
+        if (cancelled) return;
+        setScreeningQuestions(Array.isArray(json?.questions) ? json.questions : []);
+      } catch { /* silent — questions block just won't render */ }
+    })();
+    return () => { cancelled = true; };
+  }, [roleId]);
 
   // Debounced save — every change to text fields / skills / repeatable
   // sub-forms / consent persists 500ms later. Skips files (can't be
@@ -302,11 +334,31 @@ export default function JobApplyPage() {
       try { smartInputRef.current?.closest("form")?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {}
       return;
     }
+    // Enforce required screening questions before sending the request.
+    const missing = screeningQuestions.find(
+      (q) => q.required && !(screeningAnswers[q.id] ?? "").trim(),
+    );
+    if (missing) {
+      setError(`Please answer the screening question: "${missing.text}"`);
+      return;
+    }
     setSubmitting(true);
     try {
       const fd = new FormData();
       for (const [k, v] of Object.entries(form)) fd.append(k, v);
       fd.append("resume", resume);
+      // Bundle per-job screening answers as JSON so the apply route
+      // can append them to coverLetter (no new schema column needed).
+      if (screeningQuestions.length > 0) {
+        const payload = screeningQuestions.map((q) => ({
+          questionId: q.id,
+          text:       q.text,
+          answer:     (screeningAnswers[q.id] ?? "").trim(),
+        })).filter((a) => a.answer.length > 0);
+        if (payload.length > 0) {
+          fd.append("screeningAnswers", JSON.stringify(payload));
+        }
+      }
       // Send every selected additional doc under the same form key
       // so the server can read them via formData.getAll(). Backend
       // currently persists the first one — extra files are preserved
@@ -891,98 +943,13 @@ export default function JobApplyPage() {
               )}
             </div>
 
-            {/* ── Education Details (repeatable) ───────────────────────── */}
-            <div>
-              <p className="text-[13px] font-bold text-slate-800 mb-2">Education Details</p>
-              <div className="space-y-3">
-                {educations.map((edu, i) => (
-                  <div
-                    key={`edu-${i}`}
-                    className="relative rounded-lg border border-slate-200 bg-slate-50/60 p-3 sm:p-4 pr-9 sm:pr-4"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setEducations(arr => arr.filter((_, j) => j !== i))}
-                      className="absolute top-3 right-3 text-slate-400 hover:text-red-500 transition-colors"
-                      aria-label="Remove education"
-                    >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
-                      </svg>
-                    </button>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
-                      <div>
-                        <label className="block text-[12px] font-medium text-slate-700 mb-1">Course</label>
-                        <input
-                          type="text"
-                          className={inputClsNoIcon}
-                          placeholder="B.Tech"
-                          value={edu.course}
-                          onChange={(e) => setEducations(arr => arr.map((x, j) => j === i ? { ...x, course: e.target.value } : x))}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-slate-700 mb-1">Branch / Specialization</label>
-                        <input
-                          type="text"
-                          className={inputClsNoIcon}
-                          placeholder="Computer Science"
-                          value={edu.branch}
-                          onChange={(e) => setEducations(arr => arr.map((x, j) => j === i ? { ...x, branch: e.target.value } : x))}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-slate-700 mb-1">Start of Course</label>
-                        <DatePicker
-                          value={edu.startOfCourse}
-                          onChange={(v) => setEducations(arr => arr.map((x, j) => j === i ? { ...x, startOfCourse: v } : x))}
-                          className={datePickerCls}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-slate-700 mb-1">End of Course</label>
-                        <DatePicker
-                          value={edu.endOfCourse}
-                          onChange={(v) => setEducations(arr => arr.map((x, j) => j === i ? { ...x, endOfCourse: v } : x))}
-                          className={datePickerCls}
-                          futureYears={10}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-slate-700 mb-1">University / College</label>
-                        <input
-                          type="text"
-                          className={inputClsNoIcon}
-                          placeholder="IIT, Mumbai"
-                          value={edu.university}
-                          onChange={(e) => setEducations(arr => arr.map((x, j) => j === i ? { ...x, university: e.target.value } : x))}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[12px] font-medium text-slate-700 mb-1">Location</label>
-                        <input
-                          type="text"
-                          className={inputClsNoIcon}
-                          placeholder="Hyderabad"
-                          value={edu.location}
-                          onChange={(e) => setEducations(arr => arr.map((x, j) => j === i ? { ...x, location: e.target.value } : x))}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {educations.length === 0 && (
-                <button
-                  type="button"
-                  onClick={() => setEducations([{ ...emptyEducation }])}
-                  className="mt-2 inline-flex items-center gap-1 text-[13px] font-semibold text-[#3b82f6] hover:text-[#2563eb] transition-colors"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                  Add Education Details
-                </button>
-              )}
-            </div>
+            {/* Education Details section intentionally not rendered.
+                The `educations` state still exists in the page so the
+                resume parser can populate it on upload — the JSON
+                payload is sent to HR via the `educationDetails`
+                column at submit time. Candidates don't see a manual
+                form; if their resume has degree info it shows up on
+                the HR side, otherwise the field stays empty. */}
 
             {/* ── Skills (tag input) ───────────────────────────────────── */}
             <div>
@@ -992,6 +959,121 @@ export default function JobApplyPage() {
                 onChange={(arr) => { setSkills(arr); set("skills", arr.join(", ")); }}
               />
             </div>
+
+            {/* ── Screening questions (per-job, configured by HR) ──────
+                Rendered only when the job has at least one question
+                attached via Hiring Setup → Application Form. Answers
+                are bundled into the form payload on submit. */}
+            {screeningQuestions.length > 0 && (
+              <div>
+                <p className="text-[13px] font-bold text-slate-800 mb-1">Screening questions</p>
+                <p className="text-[11.5px] text-slate-500 mb-3">
+                  A few quick questions from the hiring team.
+                </p>
+                <div className="space-y-4">
+                  {screeningQuestions.map((q) => {
+                    const value = screeningAnswers[q.id] ?? "";
+                    const setVal = (v: string) =>
+                      setScreeningAnswers((prev) => ({ ...prev, [q.id]: v }));
+                    return (
+                      <div key={q.id}>
+                        <label className="block text-[12.5px] font-semibold text-slate-800 mb-1.5">
+                          {q.text}
+                          {q.required && <span className="text-rose-500 ml-0.5">*</span>}
+                        </label>
+
+                        {q.type === "long_text" && (
+                          <textarea
+                            value={value}
+                            onChange={(e) => setVal(e.target.value)}
+                            rows={4}
+                            required={q.required}
+                            placeholder="Type your answer"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
+                          />
+                        )}
+
+                        {q.type === "short_text" && (
+                          <input
+                            type="text"
+                            value={value}
+                            onChange={(e) => setVal(e.target.value)}
+                            required={q.required}
+                            placeholder="Type your answer"
+                            className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
+                          />
+                        )}
+
+                        {q.type === "number" && (
+                          <input
+                            type="number"
+                            value={value}
+                            onChange={(e) => setVal(e.target.value)}
+                            required={q.required}
+                            placeholder="0"
+                            className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
+                          />
+                        )}
+
+                        {q.type === "date" && (
+                          <input
+                            type="date"
+                            value={value}
+                            onChange={(e) => setVal(e.target.value)}
+                            required={q.required}
+                            className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
+                          />
+                        )}
+
+                        {q.type === "yes_no" && (
+                          <div className="flex items-center gap-4">
+                            {(["Yes", "No"] as const).map((opt) => (
+                              <label key={opt} className="inline-flex items-center gap-2 cursor-pointer text-[13px] text-slate-700">
+                                <input
+                                  type="radio"
+                                  name={`screen_${q.id}`}
+                                  value={opt}
+                                  checked={value === opt}
+                                  onChange={() => setVal(opt)}
+                                  required={q.required}
+                                  className="h-4 w-4 text-[#3b82f6] focus:ring-[#3b82f6]"
+                                />
+                                {opt}
+                              </label>
+                            ))}
+                          </div>
+                        )}
+
+                        {q.type === "multiple_choice" && Array.isArray(q.options) && (
+                          <div className="space-y-1.5">
+                            {q.options.map((opt) => (
+                              <label key={opt} className="flex items-center gap-2 cursor-pointer text-[13px] text-slate-700">
+                                <input
+                                  type="radio"
+                                  name={`screen_${q.id}`}
+                                  value={opt}
+                                  checked={value === opt}
+                                  onChange={() => setVal(opt)}
+                                  required={q.required}
+                                  className="h-4 w-4 text-[#3b82f6] focus:ring-[#3b82f6]"
+                                />
+                                {opt}
+                              </label>
+                            ))}
+                          </div>
+                        )}
+
+                        {q.type === "file" && (
+                          <p className="text-[11.5px] text-slate-500 italic">
+                            File-type questions aren't supported in v1 — please attach the file under "Additional documents" above and mention it in another question if needed.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* ── Privacy consent ──────────────────────────────────────── */}
             <label className="flex items-start gap-2.5 cursor-pointer text-[12px] text-slate-600 leading-relaxed">
