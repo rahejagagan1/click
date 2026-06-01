@@ -2,7 +2,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { User as UserIcon, Briefcase, Settings as SettingsIcon, IndianRupee, Check, X } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
 import { JOB_TITLES } from "@/lib/job-titles";
@@ -16,6 +16,7 @@ import CustomSelect from "@/components/ui/CustomSelect";
 import SelectField from "@/components/ui/SelectField";
 import PopupPanel from "@/components/ui/PopupPanel";
 import KekaImportModal from "@/components/hr/KekaImportModal";
+import TeamWelcomeModal from "@/components/hr/TeamWelcomeModal";
 import type { KekaRow, KekaFormPatch } from "@/lib/keka-import";
 import { Upload as UploadIcon } from "lucide-react";
 
@@ -194,11 +195,23 @@ const EMPTY: Form = {
 // ─────────────────────────────────────────────────────────────────────────────
 export default function OnboardEmployeePage() {
   const router = useRouter();
+  const search = useSearchParams();
   const [step, setStep]       = useState<1 | 2 | 3 | 4 | 5>(1);
   const [form, setForm]       = useState<Form>(EMPTY);
   const [saving, setSaving]   = useState(false);
   const [error, setError]     = useState("");
   const [success, setSuccess] = useState("");
+  // After a successful onboard, this holds the new joiner's details so
+  // we can open the Team Welcome composer (preview-then-send). Cleared
+  // when HR closes / skips / completes the welcome dialog.
+  const [welcomeFor, setWelcomeFor] = useState<{
+    fullName: string; firstName: string; jobRole: string;
+    workEmail: string; managerName?: string; officeLocation?: string;
+    phone?: string;
+  } | null>(null);
+  // Banner shown when the form was prefilled from a hiring candidate
+  // via ?fromCandidate=<id>. Stays put until HR dismisses it.
+  const [prefilledFrom, setPrefilledFrom] = useState<{ candidateId: number; name: string } | null>(null);
 
   // Keka import state — modal visibility + a small banner telling HR
   // which row was just pulled in. The set of HRM IDs already onboarded
@@ -207,6 +220,50 @@ export default function OnboardEmployeePage() {
   const [importOpen, setImportOpen] = useState(false);
   const [importedFrom, setImportedFrom] = useState<{ hrm: string; name: string } | null>(null);
   const [importDoneIds, setImportDoneIds] = useState<Set<string>>(() => new Set());
+
+  // Prefill from a hiring candidate when the page is opened with
+  // ?fromCandidate=<id>. Fetches the candidate row, splits the full
+  // name into first/middle/last, and seeds the email / phone / job
+  // title fields. Runs once on mount.
+  useEffect(() => {
+    const candidateId = search?.get("fromCandidate");
+    if (!candidateId || !/^\d+$/.test(candidateId)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/hr/hiring/candidates/${candidateId}`);
+        if (!res.ok) return;
+        const json = await res.json();
+        const a = json?.application ?? json?.candidate ?? json; // route shape may vary
+        if (cancelled || !a) return;
+        const full = String(a.fullName ?? "").trim();
+        const parts = full.split(/\s+/).filter(Boolean);
+        const firstName  = parts.length >= 1 ? parts[0] : "";
+        const middleName = parts.length >= 3 ? parts.slice(1, -1).join(" ") : "";
+        const lastName   = parts.length >= 2 ? parts[parts.length - 1] : "";
+        // Strip a country code prefix like "+91 " if present.
+        const phoneRaw = String(a.phone ?? "").trim();
+        const m = phoneRaw.match(/^\+(\d{1,3})\s*(.+)$/);
+        const mobileCountry = m ? `+${m[1]}` : "+91";
+        const mobileNumber  = (m ? m[2] : phoneRaw).replace(/\D/g, "");
+        setForm((f) => ({
+          ...f,
+          firstName,
+          middleName,
+          lastName,
+          displayName: full || f.displayName,
+          workEmail:   a.email ?? f.workEmail,
+          personalEmail: a.email ?? f.personalEmail,
+          mobileCountry,
+          mobileNumber,
+          jobTitle: a.roleTitle ?? f.jobTitle,
+        }));
+        setPrefilledFrom({ candidateId: Number(candidateId), name: full || `candidate #${candidateId}` });
+      } catch { /* silent — prefill is best-effort */ }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // "Same as Current Address" — when checked, the permanent address fields
   // mirror the current ones live and the permanent inputs are disabled.
@@ -347,16 +404,16 @@ export default function OnboardEmployeePage() {
   }, [leavePolicies]);
   const activeSeries = (Array.isArray(numberSeries) ? numberSeries : []).find((s: any) => s.isActive) ?? (Array.isArray(numberSeries) ? numberSeries[0] : null);
   // Resolve the prefix / next-number from the dropdown selection.
-  // YT Labs is a sibling brand and uses a separate "YTL" prefix; until
-  // the EmployeeNumberSeries table is seeded with a YTL row, we
-  // optimistically start the preview at YTL1 so HR sees the right
+  // YT Labs is a sibling brand and uses a separate "YL" prefix; until
+  // the EmployeeNumberSeries table is seeded with a YL row, we
+  // optimistically start the preview at YL1 so HR sees the right
   // shape. The backend allocation needs the DB row to persist properly.
   const seriesByName = (Array.isArray(numberSeries) ? numberSeries : []).find(
     (s: any) => s?.name === form.numberSeries,
   );
   const selectedPrefix =
     seriesByName?.prefix
-    ?? (form.numberSeries === "YT Labs Series" ? "YTL" : activeSeries?.prefix ?? "HRM");
+    ?? (form.numberSeries === "YT Labs Series" ? "YL" : activeSeries?.prefix ?? "HRM");
   const selectedNextNumber =
     seriesByName?.nextNumber
     ?? (form.numberSeries === "YT Labs Series" ? 1 : activeSeries?.nextNumber ?? 1);
@@ -561,7 +618,7 @@ export default function OnboardEmployeePage() {
           businessUnit: form.businessUnit || "NB Media",
           legalEntity:  form.legalEntity || undefined,
           // Pass the resolved EmployeeNumberSeries FK so the backend
-          // bumps the right counter (HRM vs YTL). Falls back server-side
+          // bumps the right counter (HRM vs YL). Falls back server-side
           // to the lowest active series when undefined.
           numberSeriesId: seriesByName?.id ?? undefined,
           employmentType:
@@ -666,9 +723,19 @@ export default function OnboardEmployeePage() {
       }
       // Wipe the draft so the next visit starts clean.
       try { localStorage.removeItem(DRAFT_KEY); } catch {}
-      // Bounce back to HR Admin so HR can either pick the next employee
-      // from the same Keka import or jump elsewhere in the dashboard.
-      setTimeout(() => router.push("/dashboard/hr/admin"), 1400);
+      // Open the Team Welcome composer so HR can preview + send the
+      // "Introducing X" announcement to the whole team. HR can skip it
+      // (the modal's X / Cancel) and we redirect on close either way.
+      // Manager name stays as the {{Manager Name}} placeholder — HR
+      // edits it inline before sending if needed.
+      setWelcomeFor({
+        fullName:  data.name,
+        firstName: form.firstName || data.name.split(" ")[0] || data.name,
+        jobRole:   form.jobTitle || form.role || "Team member",
+        workEmail: form.workEmail,
+        officeLocation: form.location || undefined,
+        phone: form.mobileNumber ? `${form.mobileCountry} ${form.mobileNumber}` : undefined,
+      });
     } catch (e: any) {
       setError(e?.message || "Failed to onboard");
     } finally {
@@ -771,6 +838,20 @@ export default function OnboardEmployeePage() {
       </div>
 
       {/* ── Banners ── */}
+      {prefilledFrom && (
+        <div className="px-6 pt-4">
+          <div className="flex items-start gap-2 px-4 py-2.5 rounded-lg bg-emerald-50 text-emerald-700 text-[12.5px] ring-1 ring-emerald-200">
+            <Check className="w-4 h-4 shrink-0 mt-0.5" />
+            <span className="flex-1">
+              Prefilled from hiring candidate <strong>{prefilledFrom.name}</strong> — verify everything before saving.
+            </span>
+            <button
+              onClick={() => setPrefilledFrom(null)}
+              className="text-emerald-600 hover:text-emerald-900 text-[12px] font-semibold"
+            >Dismiss</button>
+          </div>
+        </div>
+      )}
       {error && (
         <div className="px-6 pt-4">
           <div className="flex items-start gap-2 px-4 py-2.5 rounded-lg bg-red-500/10 text-red-500 text-[12.5px]">
@@ -1182,15 +1263,43 @@ export default function OnboardEmployeePage() {
                 />
               </Field>
               <Field label="Time Tracking Policy">
-                <CustomSelect listKey="timeTrackingPolicy" defaults={["On-Site Capture", "Remote Capture", "Hybrid"]}
-                  value={form.timeTrackingPolicy} onChange={v => set("timeTrackingPolicy", v)} />
+                <CustomSelect listKey="timeTrackingPolicy" defaults={["On-Site Capture", "Remote Capture", "Hybrid Capture", "None"]}
+                  value={form.timeTrackingPolicy}
+                  onChange={v => {
+                    // Smart cascade — keep Time Tracking Policy in
+                    // sync with Capture Scheme + auto-clear
+                    // Penalisation when tracking is set to None.
+                    setForm(f => {
+                      const next = { ...f, timeTrackingPolicy: v };
+                      if (v === "On-Site Capture") next.attendanceCaptureScheme = "On-Site";
+                      else if (v === "Remote Capture") next.attendanceCaptureScheme = "Remote";
+                      else if (v === "Hybrid Capture") next.attendanceCaptureScheme = "Hybrid";
+                      else if (v === "None") {
+                        next.attendanceCaptureScheme = "";
+                        next.penalizationPolicy = "None";
+                      }
+                      return next;
+                    });
+                  }} />
               </Field>
               <Field label="Penalization Policy">
-                <CustomSelect listKey="penalizationPolicy" defaults={["Default", "Strict", "Lenient"]}
+                <CustomSelect listKey="penalizationPolicy" defaults={["Default", "Strict", "Lenient", "None"]}
                   value={form.penalizationPolicy} onChange={v => set("penalizationPolicy", v)} />
               </Field>
               <Field label="Attendance Capture Scheme">
-                <Select v={form.attendanceCaptureScheme} set={v => set("attendanceCaptureScheme", v)} opts={["On-Site", "Remote", "Hybrid"]} />
+                <Select v={form.attendanceCaptureScheme}
+                  set={v => {
+                    // Reverse leg of the cascade — keep Time Tracking
+                    // Policy aligned with the capture scheme.
+                    setForm(f => {
+                      const next = { ...f, attendanceCaptureScheme: v };
+                      if (v === "On-Site") next.timeTrackingPolicy = "On-Site Capture";
+                      else if (v === "Remote") next.timeTrackingPolicy = "Remote Capture";
+                      else if (v === "Hybrid") next.timeTrackingPolicy = "Hybrid Capture";
+                      return next;
+                    });
+                  }}
+                  opts={["On-Site", "Remote", "Hybrid"]} />
               </Field>
               <Field label="Cost Center">
                 <CustomSelect listKey="costCenter" defaults={["NB Media", "YT Labs"]}
@@ -1441,6 +1550,19 @@ export default function OnboardEmployeePage() {
           refreshOpts();
         }}
       />
+
+      {welcomeFor && (
+        <TeamWelcomeModal
+          newJoiner={welcomeFor}
+          onClose={() => {
+            setWelcomeFor(null);
+            router.push("/dashboard/hr/admin");
+          }}
+          onSent={() => {
+            setSuccess((s) => s + " Team welcome email sent.");
+          }}
+        />
+      )}
     </div>
   );
 }
