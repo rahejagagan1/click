@@ -691,52 +691,87 @@ NB-Media`;
   );
 }
 
-// ── Offer preview — document-style render of the offer letter +
-// "Use this draft" / "Print / Save PDF" actions. Browser's print
-// dialog handles PDF export — no library dependency.
+// ── Offer preview — embeds the ACTUAL PDF (rendered from the .docx
+// template via Word/LO) inside an iframe so HR sees the same file
+// the candidate receives. No HTML approximation, no overlay tricks.
 function OfferPreviewModal({
-  body, candidateName, jobRole, annualCtcINR, joiningDate, acceptanceDeadline,
-  dirty, onUseDraft, onClose,
+  candidateName, jobRole, annualCtcINR, joiningDate, acceptanceDeadline,
+  onClose,
 }: {
-  body: string;
+  body?: string;     // kept for API compat — no longer used
   candidateName: string;
   jobRole: string;
   annualCtcINR: number | null;
   joiningDate: string | null;
   acceptanceDeadline: string | null;
-  /** True when HR has edited the inline textarea — show a hint that
-   *  "Use this draft" will overwrite their edits if clicked. */
-  dirty: boolean;
-  onUseDraft: () => void;
+  dirty?: boolean;     // kept for API compat — no longer used
+  onUseDraft?: () => void; // kept for API compat — no longer used
   onClose: () => void;
 }) {
-  const print = () => {
-    // Build the full multi-page offer letter (letterhead + page 1 +
-    // T&Cs + Acceptance + Annexure B). The (possibly HR-edited) body
-    // flows in as `editedBody` so any tweaks make it into the PDF.
-    // Opened via Blob URL — no document.write().
-    const html = buildOfferLetterHTML({
-      candidateName, jobRole,
-      annualCtcINR, joiningDate, acceptanceDeadline,
-      editedBody: body,
-    });
-    const blob = new Blob([html], { type: "text/html" });
-    const url  = URL.createObjectURL(blob);
-    const w    = window.open(url, "_blank", "noopener,noreferrer,width=900,height=1000");
-    // Release the blob after the new tab has navigated to it. 60s is
-    // generous; browsers keep the doc alive after the URL is revoked.
-    if (w) setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState<string | null>(null);
+
+  // Fetch the actual PDF (same one the candidate gets) and create a
+  // blob URL for the iframe to point at. Revoke on unmount so we
+  // don't leak the blob.
+  useEffect(() => {
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch("/api/hr/hiring/offers/template-preview?format=pdf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            candidateName,
+            jobRole,
+            annualCtcINR,
+            joiningDate,
+            acceptanceDeadline,
+          }),
+        });
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(txt || `Render failed (${res.status})`);
+        }
+        const blob = await res.blob();
+        if (cancelled) return;
+        createdUrl = URL.createObjectURL(blob);
+        setPdfUrl(createdUrl);
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message ?? "Couldn't render the preview PDF");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [candidateName, jobRole, annualCtcINR, joiningDate, acceptanceDeadline]);
+
+  const download = () => {
+    if (!pdfUrl) return;
+    const a = document.createElement("a");
+    a.href = pdfUrl;
+    a.download = `Offer Letter - ${candidateName || "Candidate"}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 max-h-[92vh] flex flex-col">
+        className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-200 max-h-[94vh] flex flex-col">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-[15px] font-semibold text-slate-900">Offer letter preview</h3>
             <p className="text-[11px] text-slate-500">
-              This is exactly how the offer letter will read. Edit inline first if anything looks off — your changes flow through to email + PDF.
+              Rendered from the NB Media template — this is the EXACT PDF the candidate will receive.
             </p>
           </div>
           <button onClick={onClose} className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100">
@@ -744,44 +779,36 @@ function OfferPreviewModal({
           </button>
         </div>
 
-        {/* Document-style page surface — paper background, comfortable
-            margins, serif-ish leading so it reads like a real letter
-            instead of a UI textarea. */}
-        <div className="flex-1 overflow-y-auto bg-slate-100 p-6 sm:p-8">
-          <div className="mx-auto max-w-[680px] bg-white rounded-md ring-1 ring-slate-200 shadow-md">
-            <div className="px-8 py-6 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-rose-600">NB Media</p>
-                <h2 className="mt-1 text-[15px] font-semibold text-slate-900">Offer Letter — {jobRole || "Role"}</h2>
-              </div>
-              <p className="text-[10.5px] text-slate-500">For {candidateName}</p>
+        <div className="flex-1 overflow-hidden bg-slate-100 p-3">
+          {loading ? (
+            <div className="h-full flex flex-col items-center justify-center text-slate-500">
+              <div className="h-8 w-8 rounded-full border-2 border-slate-300 border-t-[#3b82f6] animate-spin" />
+              <p className="mt-3 text-[12.5px]">Rendering offer letter…</p>
+              <p className="mt-0.5 text-[10.5px] text-slate-400">Filling the .docx template + converting to PDF</p>
             </div>
-            <div className="px-8 py-7">
-              <pre className="whitespace-pre-wrap font-sans text-[13.5px] leading-[1.75] text-slate-800">{body}</pre>
+          ) : error ? (
+            <div className="h-full flex flex-col items-center justify-center text-rose-600 px-6 text-center">
+              <p className="text-[13px] font-semibold">Couldn't render the preview PDF</p>
+              <p className="mt-1 text-[11.5px] text-slate-600">{error}</p>
+              <p className="mt-3 text-[10.5px] text-slate-500 max-w-md">
+                On the VPS this needs LibreOffice installed (<span className="font-mono">apt install libreoffice --no-install-recommends</span>). Locally it uses Microsoft Word if available.
+              </p>
             </div>
-          </div>
-
-          {/* No compensation annexure on the preview — the offer
-              letter doesn't disclose CTC; HR communicates package
-              specifics separately. CTC stays in the form for HR
-              record-keeping only. */}
+          ) : pdfUrl ? (
+            <iframe
+              src={pdfUrl}
+              title="Offer Letter Preview"
+              className="w-full h-full bg-white rounded-md border border-slate-200 shadow-sm"
+              style={{ minHeight: "70vh" }}
+            />
+          ) : null}
         </div>
 
-        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex items-center justify-between gap-2 flex-wrap">
-          <p className="text-[10.5px] text-slate-500 max-w-md">
-            {dirty
-              ? "⚠ You have edits in the textarea — clicking ‘Use this draft’ will overwrite them with the freshly-generated version."
-              : "Tip: ‘Use this draft’ pastes the previewed letter into the editor so you can fine-tune it before saving."}
-          </p>
-          <div className="flex items-center gap-2">
-            <button onClick={onClose} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white">Close</button>
-            <button onClick={onUseDraft}
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[12.5px] font-semibold shadow-sm"
-            ><Pencil size={13} /> Use this draft</button>
-            <button onClick={print}
-              className="inline-flex items-center gap-1.5 h-9 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[12.5px] font-semibold shadow-sm"
-            ><Printer size={13} /> Save as PDF</button>
-          </div>
+        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex items-center justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white">Close</button>
+          <button onClick={download} disabled={!pdfUrl}
+            className="inline-flex items-center gap-1.5 h-9 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-slate-300 text-white text-[12.5px] font-semibold shadow-sm"
+          ><Printer size={13} /> Download PDF</button>
         </div>
       </div>
     </div>
