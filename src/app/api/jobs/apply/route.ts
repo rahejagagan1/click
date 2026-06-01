@@ -10,9 +10,7 @@
 // per-IP rate-limit shield can be added later if abuse becomes an issue.
 
 import { NextRequest, NextResponse } from "next/server";
-import { randomUUID } from "node:crypto";
-import { writeFile, mkdir } from "node:fs/promises";
-import { resolve, extname } from "node:path";
+import { extname } from "node:path";
 import prisma from "@/lib/prisma";
 import { notifyUsers } from "@/lib/notifications";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
@@ -165,26 +163,28 @@ export async function POST(req: NextRequest) {
     const experienceYears = expRaw && /^\d+$/.test(expRaw) ? Math.min(60, Number(expRaw)) : null;
 
     // ── Resume upload ──
+    // Resume bytes go into the DB (JobApplication.resumeBlob) so files
+    // can't be lost when deployments wipe public/uploads/. The legacy
+    // filesystem path is retained only for old rows that pre-date this
+    // migration. New apps: resumeUrl is set to /api/hr/hiring/resumes/<id>
+    // after the INSERT returns the row's id.
     const resume = form.get("resume");
     let resumeFileName: string | null = null;
     let resumeUrl:      string | null = null;
+    let resumeBlob:     Buffer | null = null;
+    let resumeMime:     string | null = null;
     if (resume instanceof File && resume.size > 0) {
       if (resume.size > MAX_FILE_BYTES)
         return NextResponse.json({ error: "Resume must be 5 MB or smaller" }, { status: 400 });
       const ext = extname(resume.name).toLowerCase();
       if (!ALLOWED_EXTS.has(ext))
         return NextResponse.json({ error: "Resume must be a PDF, Word, RTF, ODT, TXT, or HTML file" }, { status: 400 });
-      const safeBase = resume.name
-        .replace(/\.[^.]+$/, "")
-        .replace(/[^A-Za-z0-9._-]+/g, "_")
-        .slice(0, 60) || "resume";
-      const stamped = `${randomUUID()}-${safeBase}${ext}`;
-      const dir     = resolve(process.cwd(), "public", "uploads", "resumes");
-      await mkdir(dir, { recursive: true });
-      const buf     = Buffer.from(await resume.arrayBuffer());
-      await writeFile(resolve(dir, stamped), buf);
       resumeFileName = resume.name;
-      resumeUrl      = `/uploads/resumes/${stamped}`;
+      resumeMime     = resume.type || "application/octet-stream";
+      resumeBlob     = Buffer.from(await resume.arrayBuffer());
+      // Final resumeUrl is set AFTER the INSERT (we need the new row's
+      // id to build /api/hr/hiring/resumes/<id>). Insert with null so
+      // the row lands cleanly first.
     }
 
     // ── Extra "smart form" fields (added in the redesigned UI) ──────
@@ -306,6 +306,34 @@ export async function POST(req: NextRequest) {
       }
     }
     const applicationId = inserted[0]?.id;
+
+    // ── Stamp resume blob + URL onto the row ──
+    // Done as a post-insert UPDATE because the URL embeds the row's id
+    // (which we don't have until after the INSERT lands). Soft-fail
+    // when resumeBlob/resumeMime columns aren't migrated yet — the
+    // candidate row already lives, and the legacy resumeUrl/disk file
+    // (if any) keeps working.
+    if (applicationId && resumeBlob) {
+      try {
+        const newUrl = `/api/hr/hiring/resumes/${applicationId}`;
+        await prisma.$executeRawUnsafe(
+          `UPDATE "JobApplication"
+              SET "resumeBlob" = $1,
+                  "resumeMime" = $2,
+                  "resumeUrl"  = $3
+            WHERE "id" = $4`,
+          resumeBlob, resumeMime, newUrl, applicationId,
+        );
+      } catch (e: any) {
+        const code = e?.meta?.code || e?.code;
+        const msg  = String(e?.meta?.message || e?.message || "");
+        if (code === "42703" || /column .* does not exist/i.test(msg)) {
+          console.warn("[apply] resumeBlob column missing — run scripts/_migrate-resume-blob.ts on this env");
+        } else {
+          console.error("[apply] resume blob save failed:", e);
+        }
+      }
+    }
 
     // ── Stamp `source` on the new application ──
     // Derived from the job's brand so HR can filter / report on
