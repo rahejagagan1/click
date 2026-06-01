@@ -24,12 +24,15 @@ import { useEffect, useMemo, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { DateField } from "@/components/ui/date-field";
+import { technicalRoundEmail, finalRoundEmail, stageToInterviewRound } from "@/lib/email/hr-templates";
+import EmailComposer, { type EmailComposerPayload } from "./EmailComposer";
 import {
   X, Calendar, Clock, Users, Video, MapPin, Send, Eye, ChevronDown,
   Paperclip, FileText, Check,
 } from "lucide-react";
 
 type InterviewKind = "online" | "face_to_face" | "self_schedule";
+type InterviewRound = "technical" | "final";
 
 interface UserRow { id: number; name: string; email?: string }
 interface Candidate {
@@ -38,6 +41,9 @@ interface Candidate {
   email: string;
   roleTitle: string | null;
   jobOpeningId: number;
+  /** HiringStage.key — drives Round picker default (technical vs final).
+   *  Optional so older callers fall back to "technical". */
+  currentStageKey?: string | null;
 }
 
 const DURATIONS = [15, 30, 45, 60, 90, 120];
@@ -51,6 +57,11 @@ export default function ScheduleInterviewModal({
   onDone?: () => void;
 }) {
   const [kind, setKind] = useState<InterviewKind>(defaultKind ?? "online");
+  // Round defaults from the candidate's current hiring stage:
+  //   Manager Round / Offer → "final"
+  //   anything else         → "technical"
+  // HR can still flip it via the Round toggle in the modal.
+  const [round, setRound] = useState<InterviewRound>(stageToInterviewRound(candidate.currentStageKey));
   const [panelIds, setPanelIds] = useState<number[]>([]);
   // Default: tomorrow 10:30 AM.
   const tomorrow = useMemo(() => {
@@ -63,42 +74,44 @@ export default function ScheduleInterviewModal({
   const [title, setTitle]       = useState(`${kind === "online" ? "Online" : kind === "face_to_face" ? "On-site" : "Self-schedule"} Interview`);
   const [location, setLocation] = useState("");
   const [meetingLink, setMeetingLink] = useState("");
-  const [subject, setSubject]   = useState(
-    `${kind === "online" ? "Online Interview" : kind === "face_to_face" ? "Onsite Interview" : "Pick your interview slot"} — ${candidate.fullName} with NB Media`,
+  const initial = useMemo(
+    () => defaultBody(candidate, kind, round, date, time, duration),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
   );
-  const [body, setBody]         = useState(defaultBody(candidate, kind, date, time, duration));
-  const [attachJd, setAttachJd] = useState(true);
+  const [subject, setSubject]   = useState(initial.subject);
+  const [body, setBody]         = useState(initial.body);
   const [paneTab, setPaneTab]   = useState<"email" | "note">("email");
   const [noteToPanel, setNoteToPanel] = useState("");
-  const [preview, setPreview]   = useState(false);
   const [saving, setSaving]     = useState(false);
 
-  // Refresh subject + body whenever the kind changes so HR sees the
-  // right defaults without manually retyping.
+  // Refresh title + subject + body whenever kind OR round changes so HR
+  // sees the right defaults from the HR template doc without retyping.
   useEffect(() => {
-    setTitle(`${kind === "online" ? "Online" : kind === "face_to_face" ? "On-site" : "Self-schedule"} Interview`);
-    setSubject(`${kind === "online" ? "Online Interview" : kind === "face_to_face" ? "Onsite Interview" : "Pick your interview slot"} — ${candidate.fullName} with NB Media`);
-    setBody(defaultBody(candidate, kind, date, time, duration));
+    setTitle(
+      `${round === "technical" ? "Technical" : "Final"} Interview — ${
+        kind === "online" ? "Online" : kind === "face_to_face" ? "On-site" : "Self-schedule"
+      }`,
+    );
+    const next = defaultBody(candidate, kind, round, date, time, duration);
+    setSubject(next.subject);
+    setBody(next.body);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind]);
+  }, [kind, round]);
 
   // ?all=true → include regular employees in the panel picker.
   const { data: usersData } = useSWR<{ users?: UserRow[] } | UserRow[]>("/api/users?all=true", fetcher);
   const users: UserRow[] = Array.isArray(usersData)
     ? usersData : Array.isArray((usersData as any)?.users) ? (usersData as any).users : [];
 
-  const submit = async () => {
+  // Used by the Note tab (schedule without sending an email).
+  const scheduleOnly = async () => {
     if (!title.trim())                  return alert("Title required");
     if (!date || !time)                 return alert("Date and time required");
-    if (!subject.trim() || !body.trim()) return alert("Subject and body are required");
     const scheduledAt = new Date(`${date}T${time}`);
     if (isNaN(scheduledAt.getTime()))   return alert("Invalid date/time");
-
     setSaving(true);
     try {
-      // Step 1 — create the Interview row. For kind=online the backend
-      // mints a Google Meet link automatically; we read it from the
-      // response below.
       const r1 = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -116,35 +129,6 @@ export default function ScheduleInterviewModal({
         const j = await r1.json().catch(() => ({}));
         throw new Error(j?.error || "Couldn't schedule interview");
       }
-      const r1Json: any = await r1.json().catch(() => ({}));
-      const autoMeetUrl: string | null = r1Json?.interview?.meetingUrl ?? null;
-
-      // Step 2 — mail the candidate. The body is plaintext-with-
-      // newlines; backend converts to <br/> before sending.
-      // Prefer the manually-pasted link, then the auto-created one,
-      // then a clearly-unfilled placeholder so HR notices.
-      const linkForBody = meetingLink || autoMeetUrl || "{{MeetingLink — fill in before sending}}";
-      const finalBody = body
-        .replaceAll("{{CandidateName}}", candidate.fullName)
-        .replaceAll("{{JobTitle}}",       candidate.roleTitle ?? "your application")
-        .replaceAll("{{InterviewDate}}",  scheduledAt.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }))
-        .replaceAll("{{MeetingLink}}",    linkForBody);
-      const r2 = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "sendEmail",
-          to: candidate.email,
-          subject: subject.trim(),
-          body: finalBody.replace(/\n/g, "<br/>"),
-        }),
-      });
-      if (!r2.ok) {
-        const j = await r2.json().catch(() => ({}));
-        // Don't blow up — Interview is already saved.
-        alert(`Interview scheduled, but email failed: ${j?.error || "unknown error"}. You can resend from the candidate drawer.`);
-      }
-
       globalMutate("/api/hr/hiring/candidates");
       onDone?.();
       onClose();
@@ -153,6 +137,80 @@ export default function ScheduleInterviewModal({
     } finally {
       setSaving(false);
     }
+  };
+
+  // EmailComposer drives this — runs after HR confirms the preview.
+  // Schedules the interview row first (so the Meet link is minted),
+  // then sends the email with the link substituted into the body.
+  const scheduleAndSend = async (p: EmailComposerPayload) => {
+    if (!title.trim())  throw new Error("Title required");
+    if (!date || !time) throw new Error("Date and time required");
+    const scheduledAt = new Date(`${date}T${time}`);
+    if (isNaN(scheduledAt.getTime())) throw new Error("Invalid date/time");
+
+    // Step 1 — schedule the interview (auto-mints Google Meet if online).
+    const r1 = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "scheduleInterview",
+        kind,
+        title: title.trim(),
+        scheduledAt: scheduledAt.toISOString(),
+        durationMinutes: duration,
+        location: kind === "online" ? (meetingLink || "{{MeetingLink}}") : location.trim() || null,
+        note: noteToPanel.trim() || null,
+      }),
+    });
+    if (!r1.ok) {
+      const j = await r1.json().catch(() => ({}));
+      throw new Error(j?.error || "Couldn't schedule interview");
+    }
+    const r1Json: any = await r1.json().catch(() => ({}));
+    const autoMeetUrl: string | null = r1Json?.interview?.meetingUrl ?? null;
+
+    // Step 2 — substitute placeholders and send the email.
+    const linkForBody = meetingLink || autoMeetUrl || "{{MeetingLink — fill in before sending}}";
+    const whenStr = scheduledAt.toLocaleString("en-IN", {
+      weekday: "long", day: "2-digit", month: "long", year: "numeric",
+      hour: "numeric", minute: "2-digit", hour12: true,
+    });
+    const finalHtml = p.bodyHtml
+      .replaceAll("{{CandidateName}}",     candidate.fullName)
+      .replaceAll("{{JobTitle}}",          candidate.roleTitle ?? "your application")
+      .replaceAll("{{InterviewDateTime}}", whenStr)
+      .replaceAll("{{InterviewDate}}",     whenStr)
+      .replaceAll("{{MeetingLink}}",       linkForBody);
+    // Resolve panel member emails and CC them on the candidate's
+    // invite so every interviewer also gets the Meet link + time
+    // without HR having to forward it manually. Dedup against any
+    // emails HR explicitly typed in the CC field.
+    const panelEmails = users
+      .filter((u) => panelIds.includes(u.id))
+      .map((u) => u.email?.trim())
+      .filter((e): e is string => !!e && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
+    const ccLower    = new Set(p.cc.map((e) => e.toLowerCase()));
+    const mergedCc   = [...p.cc, ...panelEmails.filter((e) => !ccLower.has(e.toLowerCase()))];
+    const r2 = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "sendEmail",
+        to:      p.to || candidate.email,
+        cc:      mergedCc, bcc: p.bcc,
+        subject: p.subject,
+        body:    finalHtml,
+        attachments: p.attachments.map(({ filename, contentType, contentBase64 }) =>
+          ({ filename, contentType, contentBase64 })),
+      }),
+    });
+    if (!r2.ok) {
+      const j = await r2.json().catch(() => ({}));
+      throw new Error(`Interview scheduled, but email failed: ${j?.error || "unknown error"}`);
+    }
+    globalMutate("/api/hr/hiring/candidates");
+    onDone?.();
+    onClose();
   };
 
   return (
@@ -173,8 +231,12 @@ export default function ScheduleInterviewModal({
           </button>
         </div>
 
-        {/* Kind toggle */}
-        <div className="px-5 pt-4">
+        {/* Round + Kind toggles */}
+        <div className="px-5 pt-4 flex flex-wrap items-center gap-3">
+          <div className="inline-flex p-1 rounded-lg border border-slate-200 bg-slate-50">
+            <KindButton active={round === "technical"} onClick={() => setRound("technical")} Icon={FileText} label="Technical Round" />
+            <KindButton active={round === "final"}     onClick={() => setRound("final")}     Icon={Check}    label="Final Round" />
+          </div>
           <div className="inline-flex p-1 rounded-lg border border-slate-200 bg-slate-50">
             <KindButton active={kind === "online"}       onClick={() => setKind("online")}       Icon={Video}   label="Online" />
             <KindButton active={kind === "face_to_face"} onClick={() => setKind("face_to_face")} Icon={MapPin}  label="Face to Face" />
@@ -254,25 +316,60 @@ export default function ScheduleInterviewModal({
             </div>
 
             {paneTab === "email" ? (
-              <div className="pt-4 space-y-3">
-                <Field label="Subject">
-                  <input value={subject} onChange={(e) => setSubject(e.target.value)}
-                    className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
-                </Field>
-                <Field label="Body">
-                  <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={9}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
-                  <p className="mt-1 text-[10.5px] text-slate-400">
-                    Placeholders: <code>{`{{CandidateName}}`}</code> · <code>{`{{JobTitle}}`}</code> · <code>{`{{InterviewDate}}`}</code> · <code>{`{{MeetingLink}}`}</code>
-                  </p>
-                </Field>
-                <label className="inline-flex items-center gap-2.5 text-[12.5px] text-slate-700 cursor-pointer">
-                  <input type="checkbox" checked={attachJd} onChange={(e) => setAttachJd(e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 accent-[#3b82f6]" />
-                  <Paperclip size={13} className="text-slate-400" />
-                  Attach job description
-                  <span className="text-[10.5px] text-slate-400">(automatic if the job has a JD file)</span>
-                </label>
+              <div className="pt-4">
+                <p className="mb-3 text-[11px] text-slate-500">
+                  Body comes from the <strong>{round === "technical" ? "Technical" : "Final"} Round</strong> template.
+                  Edit freely; <code>{`{{MeetingLink}}`}</code> is swapped in at send time.
+                </p>
+
+                {/* Panel-members-as-CC notice. We resolve panelIds →
+                    emails right here so HR can SEE who's getting the
+                    invite before clicking Send. The actual CC merge
+                    happens inside scheduleAndSend so a late panel
+                    change still picks up correctly. */}
+                {(() => {
+                  const panel = users.filter((u) => panelIds.includes(u.id));
+                  const withEmail    = panel.filter((u) => u.email);
+                  const withoutEmail = panel.filter((u) => !u.email);
+                  if (panel.length === 0) {
+                    return (
+                      <div className="mb-3 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-[11.5px] text-amber-800">
+                        ⚠ No panel members selected — only the candidate will receive the Meet link.
+                        Add interviewers in the Panel Members field above so they get the invite too.
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="mb-3 rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-[11.5px] text-blue-900">
+                      <p className="font-semibold mb-0.5">
+                        ✓ {withEmail.length} panel member{withEmail.length === 1 ? "" : "s"} will be CC&apos;d on this invite:
+                      </p>
+                      <p className="text-blue-800">
+                        {withEmail.map((u) => u.name).join(", ")}
+                      </p>
+                      {withoutEmail.length > 0 && (
+                        <p className="mt-1 text-amber-700">
+                          ⚠ Skipping (no email on file): {withoutEmail.map((u) => u.name).join(", ")}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* key on round+kind so toggling re-mounts with fresh body. */}
+                <EmailComposer
+                  key={`${round}-${kind}`}
+                  candidateName={candidate.fullName}
+                  jobRole={candidate.roleTitle ?? "your application"}
+                  defaultTo={candidate.email}
+                  initialSubject={subject}
+                  initialBody={body}
+                  showTemplatePicker={false}
+                  context="interview"
+                  submitLabel="Schedule & send"
+                  onCancel={onClose}
+                  onSend={scheduleAndSend}
+                />
               </div>
             ) : (
               <div className="pt-4">
@@ -281,37 +378,17 @@ export default function ScheduleInterviewModal({
                     placeholder="Anything the panel should know before the interview — strengths, gaps, what to probe."
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
                 </Field>
+                <div className="mt-4 flex items-center justify-end gap-2">
+                  <button onClick={onClose} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white">Cancel</button>
+                  <button onClick={scheduleOnly} disabled={saving}
+                    className="inline-flex items-center gap-1.5 h-9 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-slate-300 text-white text-[12.5px] font-semibold shadow-sm">
+                    <Calendar size={13} /> {saving ? "Scheduling…" : "Schedule (no email)"}
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </div>
-
-        {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex items-center justify-end gap-2">
-          <button onClick={onClose} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white">Cancel</button>
-          <button onClick={() => setPreview(true)} className="h-9 px-4 rounded-lg border border-slate-200 bg-white hover:border-[#3b82f6] text-[12.5px] font-semibold text-slate-700 inline-flex items-center gap-1.5">
-            <Eye size={13} /> Preview Email
-          </button>
-          <button onClick={submit} disabled={saving}
-            className="inline-flex items-center gap-1.5 h-9 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-slate-300 text-white text-[12.5px] font-semibold shadow-sm">
-            <Send size={13} /> {saving ? "Scheduling…" : "Send"}
-          </button>
-        </div>
-
-        {preview && (
-          <PreviewModal
-            candidate={candidate}
-            subject={subject
-              .replaceAll("{{CandidateName}}", candidate.fullName)
-              .replaceAll("{{JobTitle}}", candidate.roleTitle ?? "your application")}
-            body={body
-              .replaceAll("{{CandidateName}}", candidate.fullName)
-              .replaceAll("{{JobTitle}}",       candidate.roleTitle ?? "your application")
-              .replaceAll("{{InterviewDate}}",  new Date(`${date}T${time}`).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }))
-              .replaceAll("{{MeetingLink}}",    meetingLink || "{{MeetingLink}}")}
-            onClose={() => setPreview(false)}
-          />
-        )}
       </div>
     </div>
   );
@@ -339,81 +416,40 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function PreviewModal({
-  candidate, subject, body, onClose,
-}: { candidate: Candidate; subject: string; body: string; onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 max-h-[80vh] flex flex-col">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="text-[15px] font-semibold text-slate-900">Preview Email</h3>
-          <button onClick={onClose} className="h-7 w-7 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100">
-            <X size={14} />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-5 space-y-3 text-[13px]">
-          <div>
-            <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">To</p>
-            <p className="mt-1 text-slate-800">{candidate.fullName} &lt;{candidate.email}&gt;</p>
-          </div>
-          <div>
-            <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Subject</p>
-            <p className="mt-1 text-slate-800 font-semibold">{subject}</p>
-          </div>
-          <div>
-            <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Body</p>
-            <pre className="mt-1 whitespace-pre-wrap font-sans text-slate-700">{body}</pre>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function defaultBody(c: Candidate, kind: InterviewKind, date: string, time: string, duration: number): string {
+// Build subject + body using the verbatim HR templates (Technical Round /
+// Final Round). Self-schedule falls back to the Technical Round wording
+// but with the meeting link replaced by a "pick a time" placeholder.
+function defaultBody(
+  c: Candidate,
+  kind: InterviewKind,
+  round: InterviewRound,
+  date: string,
+  time: string,
+  _duration: number,
+): { subject: string; body: string } {
   const when = new Date(`${date}T${time}`);
   const whenStr = isNaN(when.getTime())
-    ? "{{InterviewDate}}"
-    : when.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
-  const fname = (c.fullName ?? "").split(/\s+/)[0] ?? c.fullName;
-  const role  = c.roleTitle ?? "your application";
-  const hrEmail = process.env.NEXT_PUBLIC_HR_CONTACT_EMAIL || "hr@nbmediaproductions.com";
-  const hrLine = `If you have any queries, please reach out to the HR Department — HR Manager: ${hrEmail}.`;
+    ? "{{InterviewDateTime}}"
+    : when.toLocaleString("en-IN", {
+        weekday: "long", day: "2-digit", month: "long", year: "numeric",
+        hour: "numeric", minute: "2-digit", hour12: true,
+      });
+  const role = c.roleTitle ?? "your application";
 
-  if (kind === "online") {
-    return `Hi ${fname},
-
-We are excited about your interview at NB Media for the post of ${role}.
-
-Your Online Interview is scheduled on ${whenStr} (duration: ${duration} minutes).
-
-Join the meeting using this link: {{MeetingLink}}
-
-${hrLine}
-
-NB Media Hiring Team`;
+  if (round === "final") {
+    return finalRoundEmail({
+      candidateName: c.fullName,
+      jobRole: role,
+      interviewDateTime: whenStr,
+      mode: kind === "face_to_face" ? "onsite" : "online",
+    });
   }
-  if (kind === "face_to_face") {
-    return `Hi ${fname},
-
-We are excited about your interview at NB Media for the post of ${role}.
-
-Your Onsite Interview is scheduled on ${whenStr} (duration: ${duration} minutes) at our office. Please bring a photo ID and your resume.
-
-${hrLine}
-
-NB Media Hiring Team`;
-  }
-  return `Hi ${fname},
-
-Thanks for applying for the role of ${role} at NB Media. Please pick a time that works for you using the link below — the slot is roughly ${duration} minutes.
-
-{{MeetingLink}}
-
-${hrLine}
-
-NB Media Hiring Team`;
+  // Technical (default)
+  return technicalRoundEmail({
+    candidateName: c.fullName,
+    jobRole: role,
+    interviewDateTime: whenStr,
+  });
 }
 
 // ── User multi-picker (lightweight inline version) ─────────────────
