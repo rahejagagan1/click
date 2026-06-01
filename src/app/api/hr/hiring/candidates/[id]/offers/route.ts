@@ -23,7 +23,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { isHRAdmin } from "@/lib/access";
 import { sendEmail } from "@/lib/email/sender";
-import { renderOfferLetterPdf } from "@/lib/pdf-from-html";
+import { renderOfferLetterPdfFromTemplate } from "@/lib/offer-letter-from-template";
 
 export const dynamic = "force-dynamic";
 
@@ -139,13 +139,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           }];
         } else if (body?.autoGeneratePdf) {
           try {
-            const generated = await renderOfferLetterPdf({
+            // Render directly from the official template PDF —
+            // overlays substituted text onto the highlighted spots
+            // (Candidate Name / Job Role / dates / LPA) so the
+            // candidate sees the EXACT NB Media template, not a
+            // recreated HTML approximation.
+            const generated = await renderOfferLetterPdfFromTemplate({
               candidateName:      fullName,
               jobRole:            String(body?.jobRole ?? ""),
               annualCtcINR:       ctcAnnual,
               joiningDate,
               acceptanceDeadline: expiresAt,
-              editedBody:         body?.offerBody ? String(body.offerBody) : null,
             });
             attachments = [{
               filename:      generated.filename,

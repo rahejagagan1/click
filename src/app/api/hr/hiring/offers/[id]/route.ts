@@ -14,7 +14,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { isHRAdmin } from "@/lib/access";
 import { sendEmail } from "@/lib/email/sender";
-import { renderOfferLetterPdf } from "@/lib/pdf-from-html";
+import { renderOfferLetterPdfFromTemplate } from "@/lib/offer-letter-from-template";
 
 export const dynamic = "force-dynamic";
 
