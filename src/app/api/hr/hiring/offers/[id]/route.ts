@@ -114,15 +114,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // Optional email send
       if (body?.emailSubject && body?.emailBody) {
         const cand = await prisma.$queryRawUnsafe<any[]>(
-          `SELECT a."email", a."fullName", o."title" AS "roleTitle"
+          `SELECT a."email", a."fullName", a."createdAt", o."title" AS "roleTitle"
              FROM "JobApplication" a
              LEFT JOIN "JobOpening" o ON o."id" = a."jobOpeningId"
             WHERE a."id" = $1`,
           row.applicationId,
         );
-        const to       = cand[0]?.email;
-        const fullName = cand[0]?.fullName ?? "Candidate";
-        const roleTtl  = cand[0]?.roleTitle ?? "the role";
+        const to              = cand[0]?.email;
+        const fullName        = cand[0]?.fullName ?? "Candidate";
+        const roleTtl         = cand[0]?.roleTitle ?? "the role";
+        const applicationDate = body?.applicationDate ?? cand[0]?.createdAt ?? null;
         if (to) {
           // Attachment priority: HR-uploaded > auto-generated PDF.
           let attachments: { filename: string; contentType: string; contentBase64: string }[] = [];
@@ -142,6 +143,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
                 annualCtcINR:       row.ctcAnnual != null ? Number(row.ctcAnnual) : null,
                 joiningDate:        row.joiningDate,
                 acceptanceDeadline: row.expiresAt,
+                applicationDate,
               });
               attachments = [{
                 filename:      generated.filename,
