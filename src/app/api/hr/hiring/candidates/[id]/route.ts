@@ -606,9 +606,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           });
           if (meet.meetingUrl) {
             meetingUrl = meet.meetingUrl;
+            // Store googleEventId too — the Reschedule + Cancel
+            // endpoints use it to patch/delete the calendar event so
+            // the candidate's existing invite updates in place
+            // instead of going stale.
             await prisma.$executeRawUnsafe(
-              `UPDATE "Interview" SET "location" = $1 WHERE "id" = $2`,
-              meetingUrl, interviewId,
+              `UPDATE "Interview" SET "location" = $1, "googleEventId" = $2 WHERE "id" = $3`,
+              meetingUrl, meet.eventId, interviewId,
             );
             location = meetingUrl;
           }
