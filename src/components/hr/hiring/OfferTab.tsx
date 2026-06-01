@@ -392,13 +392,19 @@ HR Department
 NB-Media`;
         extra = {
           emailSubject:    subject,
+          // Email body (the short cover) IS HTML — keep the <br/> for
+          // line breaks. SMTP clients render this directly.
           emailBody:       coverText.replace(/\n/g, "<br/>"),
           // Tell the server to render the offer letter HTML to PDF
           // and attach it. The server skips this when HR uploaded a
           // pre-made PDF (that one wins).
           autoGeneratePdf: true,
           jobRole,
-          offerBody:       body ? body.replace(/\n/g, "<br/>") : null,
+          // offerBody is PLAIN TEXT — the PDF renderer wraps it in a
+          // <div class="body"> with white-space: pre-wrap, so \n
+          // becomes a real line break. Don't convert to <br/> here or
+          // the tags get escaped and shown as literal text in the PDF.
+          offerBody:       body || null,
         };
       }
       const res = await fetch(`/api/hr/hiring/candidates/${candidate.id}/offers`, {
@@ -408,7 +414,11 @@ NB-Media`;
           ctcAnnual:          ctcAnnual ? Number(ctcAnnual) : null,
           joiningDate:        joiningDate || null,
           expiresAt:          expiresAt   || null,
-          bodyHtml:           body ? body.replace(/\n/g, "<br/>") : null,
+          // Stored as plain text in OfferLetter.bodyHtml (the column
+          // name predates this refactor). The serve flow reads it and
+          // passes straight to the PDF renderer; same rendering rule
+          // as offerBody above.
+          bodyHtml:           body || null,
           attachmentFileName: file?.name,
           attachmentMime:     file?.mime,
           attachmentBase64:   file?.base64,
