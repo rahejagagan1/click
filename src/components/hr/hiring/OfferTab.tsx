@@ -684,14 +684,11 @@ function OfferPreviewModal({
   onUseDraft: () => void;
   onClose: () => void;
 }) {
-  // Live pay-breakdown preview so HR sees the Annexure A numbers
-  // before printing. Re-renders if CTC changes.
-  const breakdown = computePayBreakdown(annualCtcINR);
   const print = () => {
     // Build the full multi-page offer letter (letterhead + page 1 +
-    // T&Cs + Acceptance + Annexure A + Annexure B). The (possibly
-    // HR-edited) body flows in as `editedBody` so any tweaks make it
-    // into the PDF. Opened via Blob URL — no document.write().
+    // T&Cs + Acceptance + Annexure B). The (possibly HR-edited) body
+    // flows in as `editedBody` so any tweaks make it into the PDF.
+    // Opened via Blob URL — no document.write().
     const html = buildOfferLetterHTML({
       candidateName, jobRole,
       annualCtcINR, joiningDate, acceptanceDeadline,
@@ -738,45 +735,10 @@ function OfferPreviewModal({
             </div>
           </div>
 
-          {/* Annexure A — pay breakdown preview. Renders below the
-              letter as a separate "page" so HR sees the auto-computed
-              numbers before printing. Numbers update live with CTC. */}
-          {breakdown && (
-            <div className="mx-auto max-w-[680px] mt-6 bg-white rounded-md ring-1 ring-slate-200 shadow-md">
-              <div className="px-8 py-6 border-b border-slate-100">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-rose-600">Annexure "A"</p>
-                <h2 className="mt-1 text-[15px] font-semibold text-slate-900">Compensation Structure</h2>
-                <p className="mt-2 text-[12.5px] text-slate-700">
-                  Annual fixed compensation of <strong>Rs. {breakdown.annualLPA} LPA</strong>, divided per the following monthly break-up:
-                </p>
-              </div>
-              <div className="px-8 py-6">
-                <table className="w-full text-[12.5px] border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50">
-                      <th className="border border-slate-300 px-3 py-2 text-left font-bold uppercase tracking-wider text-[10.5px]">Pay Component</th>
-                      <th className="border border-slate-300 px-3 py-2 text-right font-bold uppercase tracking-wider text-[10.5px]">Monthly</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <PayRow label="Basic Pay"            value={breakdown.basic} />
-                    <PayRow label="House Rent Allowance" value={breakdown.hra} />
-                    <PayRow label="Dearness Allowance"   value={breakdown.da} />
-                    <PayRow label="Conveyance Allowance" value={breakdown.conveyance} />
-                    <PayRow label="Medical Allowance"    value={breakdown.medical} />
-                    <PayRow label="Special Allowance"    value={breakdown.special} />
-                    <tr className="bg-slate-50">
-                      <td className="border border-slate-300 px-3 py-2 font-bold">TOTAL MONTHLY CTC</td>
-                      <td className="border border-slate-300 px-3 py-2 text-right font-bold">Rs. {fmtINR(breakdown.totalMonthly)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-                <p className="mt-3 text-[10.5px] text-slate-500 leading-[1.6]">
-                  Auto-computed from the entered annual CTC. Override individual lines by editing the printable PDF directly if needed.
-                </p>
-              </div>
-            </div>
-          )}
+          {/* No compensation annexure on the preview — the offer
+              letter doesn't disclose CTC; HR communicates package
+              specifics separately. CTC stays in the form for HR
+              record-keeping only. */}
         </div>
 
         <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex items-center justify-between gap-2 flex-wrap">
@@ -843,14 +805,6 @@ function FieldLabel({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-function PayRow({ label, value }: { label: string; value: number }) {
-  return (
-    <tr>
-      <td className="border border-slate-300 px-3 py-2 font-semibold">{label}</td>
-      <td className="border border-slate-300 px-3 py-2 text-right">Rs. {fmtINR(value)}</td>
-    </tr>
-  );
-}
 
 function fmtINR(n: number): string {
   if (!Number.isFinite(n)) return String(n);
