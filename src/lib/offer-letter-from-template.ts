@@ -143,12 +143,18 @@ export async function renderOfferLetterFromTemplate(args: OfferTemplateArgs): Pr
     // w probe=56.1.
     { page: 1, x: 502.5, y: 237.4, width: 58,   height: 14, size: 11.5, text: acceptanceDeadline, bold: true },
 
-    // ── Page 2 — Job Role in T&C lead-in — w probe=48 ──
-    { page: 2, x: 351.7, y: 713.7, width: 50,   height: 13, size: 11,   text: `“${jobRole}”`, bold: true },
+    // ── Page 2 — Job Role in T&C lead-in. Same overflow concern as
+    // page 1: long role titles bleed over " at YT Money Productions
+    // Pvt. Ltd.". Mask the trailing context and redraw it. Loses the
+    // bold-italic styling on "YT Money …" but reads cleanly. ──
+    { page: 2, x: 351.7, y: 713.7, width: 50,   height: 13, size: 11,   text: `“${jobRole}” at YT Money Productions Pvt. Ltd.`, bold: true, padRight: 230 },
 
     // ── Page 4 — Acceptance section ──
-    // "Candidate Name" with both curly quotes — w probe=91.4.
-    { page: 4, x: 72.0,  y: 667.4, width: 93,   height: 14, size: 11.5, text: `“${candidateName}”`, bold: true },
+    // "Candidate Name" with trailing " hereby" so a short name doesn't
+    // leave a visible gap before "hereby accept...". The original line
+    // wraps at "...the conditions"; we only redraw up to "hereby" so
+    // we don't disturb the line break.
+    { page: 4, x: 72.0,  y: 667.4, width: 93,   height: 14, size: 11.5, text: `“${candidateName}” hereby`, bold: true, padRight: 50 },
     // Joining "DD/MM/YYYY" with both curly quotes — w probe=82.9.
     { page: 4, x: 106.6, y: 654.7, width: 85,   height: 14, size: 11.5, text: `“${joiningDate}”`, bold: true },
 
