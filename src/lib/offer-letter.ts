@@ -113,7 +113,7 @@ Dear "${args.candidateName || "Candidate Name"}"
 
 With reference to your application dated "${applicationDate}" and subsequent interview with us, we are pleased to offer you employment for the position of "${args.jobRole || "Job Role"}" with YT Money Productions Pvt. Ltd. (operating under the brand name NB Media). We trust that your knowledge, skills, and experience will be among our most valuable assets.
 
-Annexure "A" below includes your salary and benefits information and Annexure "B" includes your joining requirement information.
+Annexure "B" below includes your joining requirement information. Your compensation details will be communicated to you separately.
 
 Your signing of these documents confirms your acceptance of the terms and conditions.
 
@@ -125,15 +125,16 @@ Working Hours: 09:00 AM to 6.00 PM (Monday to Friday)
 *Please note that Saturdays are flexi-offs.
 
 Kindly acknowledge your acceptance by signing the document, and confirming the joining date by ${acceptanceSlash}.
+
 Failure to accept prior to the specified deadline will render this offer null and void automatically.
 
 For any further questions or concerns feel free to reach us.
 
-We extend our heartfelt wishes for an exceptional tenure aboard!
-
-Regards,
-Nikit Bassi
-Founder & CEO`;
+We extend our heartfelt wishes for an exceptional tenure aboard!`;
+  // Note: the closing "Regards, Nikit Bassi, Founder & CEO" block is
+  // NOT part of the editable body — it's rendered as a fixed
+  // signature block in buildOfferLetterHTML so HR can't accidentally
+  // delete it.
 }
 
 // ── Terms & Conditions — verbatim 25 clauses (pages 2–3) ─────────
@@ -145,7 +146,7 @@ const TERMS_AND_CONDITIONS = (jobRole: string) => `Following are the terms and c
 
 <li>Upon attaining the status of a permanent employee, you are required to remain in our organization for a minimum of one year, unless otherwise determined by management (for reasons such as poor performance, disciplinary action, or similar factors). Neglecting to do so will result in the forfeiture of compensation that is owed to you.</li>
 
-<li>You shall be entitled to salary allowances and perquisites as per "Annexure A." In addition, you shall be entitled to receive such insurance, health, and other benefits that the company may, at its discretion, make available to its employees as stipulated in the relevant provisions of the employee policy, in accordance with the terms and requirements relating to the benefits imposed by the company. Individual salary and performance ratings should strictly not be shared with other employees.</li>
+<li>You shall be entitled to salary allowances and perquisites as separately communicated to you. In addition, you shall be entitled to receive such insurance, health, and other benefits that the company may, at its discretion, make available to its employees as stipulated in the relevant provisions of the employee policy, in accordance with the terms and requirements relating to the benefits imposed by the company. Individual salary and performance ratings should strictly not be shared with other employees.</li>
 
 <li>You acknowledge and undertake that your remuneration is a matter purely between yourself and the company, and you are to keep this information and any changes thereto strictly confidential. Your remuneration will be periodically reviewed as per organization guidelines. Your increments and promotions shall be at the discretion of the organization and will be subject to and based on performance.</li>
 
@@ -218,29 +219,43 @@ const JOINING_DOCUMENTS = `<ol>
 // the PDF. Annexure A is regenerated from the latest breakdown so HR
 // doesn't have to keep numbers in sync manually.
 export function buildOfferLetterHTML(args: OfferLetterArgs & { editedBody?: string }): string {
-  const breakdown = computePayBreakdown(args.annualCtcINR);
-  const body      = args.editedBody?.trim() || letterBody(args);
+  // Annexure A (compensation structure) is intentionally NOT rendered —
+  // candidates don't get a CTC table on the formal letter. HR captures
+  // the package in the New Offer form for their own records; package
+  // specifics are conveyed verbally or in a separate note. If you ever
+  // need to re-add it, restore the `annexureA` block + its page-break
+  // section from git history.
+  const rawBody = args.editedBody?.trim() || letterBody(args);
+  // Defensive: legacy rows may have <br/> tags embedded from the old
+  // client-side conversion. Strip them back to \n so the renderer's
+  // pre-wrap white-space handling restores the visual breaks.
+  const cleanBody = rawBody.replace(/<br\s*\/?>/gi, "\n");
+  // Render the letter body as proper paragraphs. Splitting on blank
+  // lines (one or more) gives us the same visual rhythm as the
+  // template — separated paragraphs with consistent spacing, instead
+  // of one merged block.
+  const bodyHtml = cleanBody
+    .split(/\n{2,}/)
+    .map((para) => {
+      const trimmed = para.trim();
+      if (!trimmed) return "";
+      // The closing line in the template is centred + bold. Match it
+      // case-insensitively so HR edits ("Heartfelt", different
+      // capitalisation, etc.) still get the same treatment.
+      if (/^we extend our heartfelt wishes/i.test(trimmed)) {
+        return `<p class="centred bold">${esc(trimmed).replace(/\n/g, "<br/>")}</p>`;
+      }
+      // "Failure to accept …" runs as italic in the template.
+      if (/failure to accept prior to the specified deadline/i.test(trimmed)) {
+        return `<p class="italic">${esc(trimmed).replace(/\n/g, "<br/>")}</p>`;
+      }
+      return `<p>${esc(trimmed).replace(/\n/g, "<br/>")}</p>`;
+    })
+    .join("");
   const candidate = esc(args.candidateName || "Candidate Name");
   const role      = esc(args.jobRole       || "Job Role");
   const joining   = esc(fmtSlash(args.joiningDate ?? null));
   const hrEmail   = esc(args.hrContactEmail || "HRD@nbmediaproductions.com");
-
-  const annexureA = breakdown ? `
-    <p>Your Annual fixed compensation of <strong>Rs. ${esc(breakdown.annualLPA)} LPA</strong> will be divided per the following break-up:</p>
-    <p class="bold underline">FIXED MONTHLY PAY:</p>
-    <table class="paytable">
-      <thead><tr><th>PAY COMPONENT</th><th>MONTHLY</th></tr></thead>
-      <tbody>
-        <tr><td><strong>Basic Pay</strong></td>           <td>Rs. ${esc(fmtINR(breakdown.basic))}</td></tr>
-        <tr><td><strong>House Rent Allowance</strong></td><td>Rs. ${esc(fmtINR(breakdown.hra))}</td></tr>
-        <tr><td><strong>Dearness Allowance</strong></td>  <td>Rs. ${esc(fmtINR(breakdown.da))}</td></tr>
-        <tr><td><strong>Conveyance Allowance</strong></td><td>Rs. ${esc(fmtINR(breakdown.conveyance))}</td></tr>
-        <tr><td><strong>Medical Allowance</strong></td>   <td>Rs. ${esc(fmtINR(breakdown.medical))}</td></tr>
-        <tr><td><strong>Special Allowance</strong></td>   <td>Rs. ${esc(fmtINR(breakdown.special))}</td></tr>
-        <tr><td><strong>TOTAL MONTHLY CTC</strong></td>   <td><strong>Rs. ${esc(fmtINR(breakdown.totalMonthly))}</strong></td></tr>
-      </tbody>
-    </table>
-  ` : `<p><em>Annual CTC not specified — fill it in the New Offer form and re-generate to populate this annexure.</em></p>`;
 
   return `<!doctype html>
 <html><head>
@@ -255,10 +270,14 @@ export function buildOfferLetterHTML(args: OfferLetterArgs & { editedBody?: stri
   .header .org div { margin-top: 2px; }
   .logo { background: #fff; padding: 2px 4px; font-weight: 700; color: #dc2626; font-size: 18pt; letter-spacing: -0.02em; }
   .note { text-align: center; font-size: 10pt; color: #475569; font-weight: 600; margin: 14px 0; padding: 4px 0; border-top: 1px dashed #cbd5e1; border-bottom: 1px dashed #cbd5e1; }
-  h1.title { text-align: center; font-size: 16pt; text-decoration: underline; margin: 22px 0 14px; }
-  h2.title { text-align: center; font-size: 13.5pt; text-decoration: underline; margin: 24px 0 14px; }
-  pre.body { font-family: inherit; font-size: 11.5pt; white-space: pre-wrap; line-height: 1.65; }
-  .signature { margin-top: 28px; font-style: italic; }
+  h1.title { text-align: center; font-size: 16pt; text-decoration: underline; margin: 22px 0 14px; font-weight: 700; }
+  h2.title { text-align: center; font-size: 13.5pt; text-decoration: underline; margin: 24px 0 14px; font-weight: 700; }
+  .body p  { font-size: 11.5pt; line-height: 1.75; margin: 0 0 12px; text-align: justify; }
+  .body p.centred { text-align: center; }
+  .body p.bold    { font-weight: 700; }
+  .body p.italic  { font-style: italic; }
+  .signature { margin-top: 28px; font-style: italic; font-size: 14pt; }
+  .signature-block { margin-top: 6px; font-style: normal; font-size: 11pt; line-height: 1.4; }
   ol { padding-left: 22px; }
   ol li { margin-bottom: 10px; text-align: justify; }
   .acceptance { margin-top: 30px; }
@@ -295,8 +314,9 @@ export function buildOfferLetterHTML(args: OfferLetterArgs & { editedBody?: stri
   <p class="note">NOTE: This is a temporary / Conditional offer and cannot be used for Negotiations with other companies.</p>
 
   <h1 class="title">Letter Of Offer</h1>
-  <pre class="body">${esc(body)}</pre>
+  <div class="body">${bodyHtml}</div>
   <p class="signature">Nikit bassi</p>
+  <p class="signature-block">Regards,<br>Nikit Bassi<br>Founder &amp; CEO</p>
 
   <!-- ── Page 2 — Terms & Conditions ───────────────────────── -->
   <div class="page-break"></div>
@@ -317,19 +337,6 @@ export function buildOfferLetterHTML(args: OfferLetterArgs & { editedBody?: stri
     <div class="sig-line"><strong>Address:</strong> _______________________________</div>
     <div class="sig-line"><strong>Date:</strong> _______________________________</div>
   </div>
-
-  <!-- ── Annexure A — Compensation ─────────────────────────── -->
-  <div class="page-break"></div>
-  <p class="note">NOTE: This is a temporary / Conditional offer and cannot be used for Negotiations with other companies.</p>
-  <h2 class="title">Annexure "A"</h2>
-  <h2 class="title" style="font-size: 12pt;">COMPENSATION STRUCTURE</h2>
-  ${annexureA}
-  <p class="bold underline" style="margin-top: 16px;">Note:</p>
-  <ul>
-    <li>You will also be eligible to receive additional bonus amounts, subject to your job performance at NB Media.</li>
-    <li>No bonus, whatsoever, shall be payable in the event of resignation by an employee.</li>
-    <li>Applicable taxes (if any) would be borne by the employee.</li>
-  </ul>
 
   <!-- ── Annexure B — Joining Documents ─────────────────────── -->
   <div class="page-break"></div>

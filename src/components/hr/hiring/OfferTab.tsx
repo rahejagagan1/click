@@ -84,11 +84,29 @@ export default function OfferTab({
     try {
       let extra: any = {};
       if (action === "send") {
-        const tpl = offerLetterEmail({
-          candidateName: candidate.fullName,
-          jobRole: candidate.roleTitle ?? "the role",
-        });
-        extra = { emailSubject: tpl.subject, emailBody: tpl.body.replace(/\n/g, "<br/>") };
+        // Short cover note — full offer letter goes as PDF attachment
+        // (server auto-generates it from the stored OfferLetter row).
+        const firstName = candidate.fullName.split(" ")[0] ?? candidate.fullName;
+        const role      = candidate.roleTitle ?? "the role";
+        const cover = `Dear ${firstName},
+
+Greetings from NB Media!
+
+We are pleased to extend an offer of employment to you for the position of "${role}". Your formal offer letter is attached to this email.
+
+Kindly review the attached document, sign it, and confirm your acceptance by the deadline specified in the letter. Failure to accept by the deadline will render this offer null and void automatically.
+
+For any questions, feel free to reach out to the HR Department.
+
+Warms Regards,
+HR Department
+NB-Media`;
+        extra = {
+          emailSubject:    `Congratulations on Your Selection as "${role}" at NB Media`,
+          emailBody:       cover.replace(/\n/g, "<br/>"),
+          autoGeneratePdf: true,
+          jobRole:         role,
+        };
       }
       const res = await fetch(`/api/hr/hiring/offers/${offerId}`, {
         method: "PATCH",
@@ -274,7 +292,12 @@ function NewOfferModal({
   const [jobRole,     setJobRole]     = useState<string>(candidate.roleTitle ?? "");
   const [ctcAnnual,   setCtcAnnual]   = useState<string>(initialCtc);
   const [joiningDate, setJoiningDate] = useState<string>(inDays(14));
-  const [expiresAt,   setExpiresAt]   = useState<string>(inDays(7));
+  // Acceptance deadline — defaults to today + 5 days to match clause 24
+  // of NB Media's offer letter T&C ("on or before five days of issuance
+  // of this letter, failing which this employee agreement shall stand
+  // automatically withdrawn"). Always strictly before joining so the
+  // candidate must accept BEFORE they're due to start.
+  const [expiresAt,   setExpiresAt]   = useState<string>(inDays(5));
   const [body,        setBody]        = useState<string>("");
   const [file,        setFile]        = useState<{ name: string; mime: string; base64: string; size: number } | null>(null);
   const [sendNow,     setSendNow]     = useState(false);
@@ -347,18 +370,42 @@ function NewOfferModal({
     try {
       let extra: any = {};
       if (sendNow) {
-        const subject = `Congratulations on Your Selection as "${jobRole}" at NB Media`;
-        const bodyForEmail = body
-          ? body.replace(/\n/g, "<br/>")
-          : (() => {
-              const tpl = offerLetterEmail({
-                candidateName: candidate.fullName, jobRole: jobRole.trim() || "the role",
-                joiningDate: joiningDate ? fmtDate(joiningDate) : undefined,
-                responseDeadline: expiresAt ? fmtDate(expiresAt) : undefined,
-              });
-              return tpl.body.replace(/\n/g, "<br/>");
-            })();
-        extra = { emailSubject: subject, emailBody: bodyForEmail };
+        // Short cover email — the full offer letter rides as a PDF
+        // attachment, NOT as the email body. The server auto-renders
+        // the PDF from buildOfferLetterHTML when autoGeneratePdf=true
+        // and HR didn't upload a pre-made one.
+        const firstName  = candidate.fullName.split(" ")[0] ?? candidate.fullName;
+        const subject    = `Congratulations on Your Selection as "${jobRole}" at NB Media`;
+        const deadlineFmt = expiresAt ? fmtDate(expiresAt) : "the deadline below";
+        const coverText = `Dear ${firstName},
+
+Greetings from NB Media!
+
+We are pleased to extend an offer of employment to you for the position of "${jobRole}". Your formal offer letter (Word document) is attached to this email.
+
+Kindly review the attached document, sign it, and confirm your acceptance by ${deadlineFmt}. Failure to accept by the deadline will render this offer null and void automatically.
+
+For any questions, feel free to reach out to the HR Department.
+
+Warms Regards,
+HR Department
+NB-Media`;
+        extra = {
+          emailSubject:    subject,
+          // Email body (the short cover) IS HTML — keep the <br/> for
+          // line breaks. SMTP clients render this directly.
+          emailBody:       coverText.replace(/\n/g, "<br/>"),
+          // Tell the server to render the offer letter HTML to PDF
+          // and attach it. The server skips this when HR uploaded a
+          // pre-made PDF (that one wins).
+          autoGeneratePdf: true,
+          jobRole,
+          // offerBody is PLAIN TEXT — the PDF renderer wraps it in a
+          // <div class="body"> with white-space: pre-wrap, so \n
+          // becomes a real line break. Don't convert to <br/> here or
+          // the tags get escaped and shown as literal text in the PDF.
+          offerBody:       body || null,
+        };
       }
       const res = await fetch(`/api/hr/hiring/candidates/${candidate.id}/offers`, {
         method: "POST",
@@ -367,7 +414,11 @@ function NewOfferModal({
           ctcAnnual:          ctcAnnual ? Number(ctcAnnual) : null,
           joiningDate:        joiningDate || null,
           expiresAt:          expiresAt   || null,
-          bodyHtml:           body ? body.replace(/\n/g, "<br/>") : null,
+          // Stored as plain text in OfferLetter.bodyHtml (the column
+          // name predates this refactor). The serve flow reads it and
+          // passes straight to the PDF renderer; same rendering rule
+          // as offerBody above.
+          bodyHtml:           body || null,
           attachmentFileName: file?.name,
           attachmentMime:     file?.mime,
           attachmentBase64:   file?.base64,
@@ -453,9 +504,13 @@ function NewOfferModal({
                 </FieldLabel>
                 <FieldLabel label="Joining date">
                   <DateField value={joiningDate} onChange={setJoiningDate} />
+                  <p className="mt-1 text-[10px] text-slate-400">When the candidate is expected to start.</p>
                 </FieldLabel>
-                <FieldLabel label="Expires on">
+                <FieldLabel label="Acceptance deadline">
                   <DateField value={expiresAt} onChange={setExpiresAt} />
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    Last day the candidate can sign &amp; accept. Per offer T&amp;C clause 24, default is 5 days from today — always before joining.
+                  </p>
                 </FieldLabel>
               </div>
 
@@ -639,14 +694,11 @@ function OfferPreviewModal({
   onUseDraft: () => void;
   onClose: () => void;
 }) {
-  // Live pay-breakdown preview so HR sees the Annexure A numbers
-  // before printing. Re-renders if CTC changes.
-  const breakdown = computePayBreakdown(annualCtcINR);
   const print = () => {
     // Build the full multi-page offer letter (letterhead + page 1 +
-    // T&Cs + Acceptance + Annexure A + Annexure B). The (possibly
-    // HR-edited) body flows in as `editedBody` so any tweaks make it
-    // into the PDF. Opened via Blob URL — no document.write().
+    // T&Cs + Acceptance + Annexure B). The (possibly HR-edited) body
+    // flows in as `editedBody` so any tweaks make it into the PDF.
+    // Opened via Blob URL — no document.write().
     const html = buildOfferLetterHTML({
       candidateName, jobRole,
       annualCtcINR, joiningDate, acceptanceDeadline,
@@ -693,45 +745,10 @@ function OfferPreviewModal({
             </div>
           </div>
 
-          {/* Annexure A — pay breakdown preview. Renders below the
-              letter as a separate "page" so HR sees the auto-computed
-              numbers before printing. Numbers update live with CTC. */}
-          {breakdown && (
-            <div className="mx-auto max-w-[680px] mt-6 bg-white rounded-md ring-1 ring-slate-200 shadow-md">
-              <div className="px-8 py-6 border-b border-slate-100">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-rose-600">Annexure "A"</p>
-                <h2 className="mt-1 text-[15px] font-semibold text-slate-900">Compensation Structure</h2>
-                <p className="mt-2 text-[12.5px] text-slate-700">
-                  Annual fixed compensation of <strong>Rs. {breakdown.annualLPA} LPA</strong>, divided per the following monthly break-up:
-                </p>
-              </div>
-              <div className="px-8 py-6">
-                <table className="w-full text-[12.5px] border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50">
-                      <th className="border border-slate-300 px-3 py-2 text-left font-bold uppercase tracking-wider text-[10.5px]">Pay Component</th>
-                      <th className="border border-slate-300 px-3 py-2 text-right font-bold uppercase tracking-wider text-[10.5px]">Monthly</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <PayRow label="Basic Pay"            value={breakdown.basic} />
-                    <PayRow label="House Rent Allowance" value={breakdown.hra} />
-                    <PayRow label="Dearness Allowance"   value={breakdown.da} />
-                    <PayRow label="Conveyance Allowance" value={breakdown.conveyance} />
-                    <PayRow label="Medical Allowance"    value={breakdown.medical} />
-                    <PayRow label="Special Allowance"    value={breakdown.special} />
-                    <tr className="bg-slate-50">
-                      <td className="border border-slate-300 px-3 py-2 font-bold">TOTAL MONTHLY CTC</td>
-                      <td className="border border-slate-300 px-3 py-2 text-right font-bold">Rs. {fmtINR(breakdown.totalMonthly)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-                <p className="mt-3 text-[10.5px] text-slate-500 leading-[1.6]">
-                  Auto-computed from the entered annual CTC. Override individual lines by editing the printable PDF directly if needed.
-                </p>
-              </div>
-            </div>
-          )}
+          {/* No compensation annexure on the preview — the offer
+              letter doesn't disclose CTC; HR communicates package
+              specifics separately. CTC stays in the form for HR
+              record-keeping only. */}
         </div>
 
         <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex items-center justify-between gap-2 flex-wrap">
@@ -757,14 +774,47 @@ function OfferPreviewModal({
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-function PayRow({ label, value }: { label: string; value: number }) {
+// Step-numbered section card — gives the New Offer modal the
+// "1 → 2 → 3 → 4" flow without screaming wizard-style. Title + hint
+// on the left, optional action buttons on the right.
+function SectionCard({
+  num, title, hint, action, children,
+}: {
+  num: number;
+  title: string;
+  hint?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <tr>
-      <td className="border border-slate-300 px-3 py-2 font-semibold">{label}</td>
-      <td className="border border-slate-300 px-3 py-2 text-right">Rs. {fmtINR(value)}</td>
-    </tr>
+    <section className="rounded-xl bg-white border border-slate-200 shadow-[0_1px_2px_rgba(15,23,42,0.04)] overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-slate-100 flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5 min-w-0">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-50 text-[#1d4ed8] text-[11px] font-bold ring-1 ring-blue-100 shrink-0">
+            {num}
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-[13.5px] font-semibold text-slate-900">{title}</h3>
+            {hint && <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{hint}</p>}
+          </div>
+        </div>
+        {action && <div className="shrink-0">{action}</div>}
+      </div>
+      <div className="px-5 py-4">{children}</div>
+    </section>
   );
 }
+
+// Label wrapper for form fields — consistent label-on-top styling.
+function FieldLabel({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-[11.5px] font-semibold text-slate-600 mb-1.5">{label}</label>
+      {children}
+    </div>
+  );
+}
+
 
 function fmtINR(n: number): string {
   if (!Number.isFinite(n)) return String(n);
