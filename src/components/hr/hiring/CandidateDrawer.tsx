@@ -530,7 +530,18 @@ function ProfileTab({ c }: { c: Candidate }) {
   const resumeHref = safeUrl(c.resumeUrl);
   // We only attempt to inline-preview PDFs. DOC/DOCX render is best
   // handled by the user opening in a new tab.
-  const isPdf = !!(resumeHref && /\.pdf(\?|$)/i.test(resumeHref));
+  //
+  // After the resume-in-DB migration the URL is an API path with no
+  // file extension (e.g. /api/hr/hiring/resumes/2), so the original
+  // URL-suffix check returned false and HR saw the "Click to open"
+  // fallback. Fall back to the candidate's stored filename when the
+  // URL doesn't carry an extension.
+  const isPdf = !!(
+    resumeHref && (
+      /\.pdf(\?|$)/i.test(resumeHref) ||
+      /\.pdf$/i.test(c.resumeFileName ?? "")
+    )
+  );
   const [note, setNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
 
@@ -726,20 +737,36 @@ function ProfileTab({ c }: { c: Candidate }) {
           ) : isPdf ? (
             // <iframe> is more reliable than <object> for PDF previews
             // — Chrome / Brave routinely fall through <object> to its
-            // children even when the resource is fetchable, which is
-            // why HR was seeing the "Click to open in new tab"
-            // placeholder. The iframe pins toolbar=0 so the chrome of
-            // the browser-native PDF viewer doesn't fight the card
-            // design. The /uploads path gets a same-origin X-Frame-
-            // Options override in next.config.mjs so the embed isn't
-            // blocked by the global DENY rule.
-            <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
-              <iframe
-                src={`${resumeHref}#toolbar=0&navpanes=0&view=FitH`}
-                title={c.resumeFileName || "Resume"}
-                className="w-full bg-white block"
-                style={{ height: 600, border: 0 }}
-              />
+            // children even when the resource is fetchable. The
+            // iframe pins toolbar=0 so the browser's PDF chrome
+            // doesn't fight the card design.
+            //
+            // Sizing: container uses A4 portrait aspect (1 : 1.414)
+            // capped at 80vh so the resume looks like a document
+            // rather than a stretched textbox, on any screen. The
+            // PDF URL hint `zoom=page-width` makes Chrome's viewer
+            // fit the page width to the iframe — keeps the rendering
+            // consistent across narrow and wide columns.
+            <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50 shadow-sm">
+              <div
+                className="relative w-full mx-auto bg-white"
+                style={{
+                  aspectRatio: "1 / 1.414",
+                  maxHeight: "80vh",
+                  // When the height is clamped by maxHeight on tall
+                  // viewports, calc the matching width so the page
+                  // stays centred and proportional rather than left-
+                  // anchored with empty bands.
+                  maxWidth: "min(100%, calc(80vh / 1.414))",
+                }}
+              >
+                <iframe
+                  src={`${resumeHref}#toolbar=0&navpanes=0&scrollbar=1&view=FitH&zoom=page-width`}
+                  title={c.resumeFileName || "Resume"}
+                  className="absolute inset-0 w-full h-full bg-white block"
+                  style={{ border: 0 }}
+                />
+              </div>
               <noscript>
                 <ResumeFallbackCard href={resumeHref} name={c.resumeFileName} />
               </noscript>
