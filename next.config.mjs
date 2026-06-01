@@ -111,6 +111,19 @@ const nextConfig = {
                 ],
             },
             {
+                // DB-served resumes — the legacy /uploads/resumes/ path
+                // was replaced by /api/hr/hiring/resumes/<id> (resumes
+                // now live in JobApplication.resumeBlob, not on disk).
+                // CandidateDrawer iframes this URL for preview, so the
+                // global X-Frame-Options: DENY must be overridden here
+                // too. Same same-origin pattern as /uploads above.
+                source: "/api/hr/hiring/resumes/:id*",
+                headers: [
+                    { key: "X-Frame-Options",      value: "SAMEORIGIN" },
+                    { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+                ],
+            },
+            {
                 // Logo is static; cache aggressively so repeat visits don’t wait on the network
                 source: "/logo.png",
                 headers: [
