@@ -84,11 +84,29 @@ export default function OfferTab({
     try {
       let extra: any = {};
       if (action === "send") {
-        const tpl = offerLetterEmail({
-          candidateName: candidate.fullName,
-          jobRole: candidate.roleTitle ?? "the role",
-        });
-        extra = { emailSubject: tpl.subject, emailBody: tpl.body.replace(/\n/g, "<br/>") };
+        // Short cover note — full offer letter goes as PDF attachment
+        // (server auto-generates it from the stored OfferLetter row).
+        const firstName = candidate.fullName.split(" ")[0] ?? candidate.fullName;
+        const role      = candidate.roleTitle ?? "the role";
+        const cover = `Dear ${firstName},
+
+Greetings from NB Media!
+
+We are pleased to extend an offer of employment to you for the position of "${role}". Your formal offer letter is attached to this email.
+
+Kindly review the attached document, sign it, and confirm your acceptance by the deadline specified in the letter. Failure to accept by the deadline will render this offer null and void automatically.
+
+For any questions, feel free to reach out to the HR Department.
+
+Warms Regards,
+HR Department
+NB-Media`;
+        extra = {
+          emailSubject:    `Congratulations on Your Selection as "${role}" at NB Media`,
+          emailBody:       cover.replace(/\n/g, "<br/>"),
+          autoGeneratePdf: true,
+          jobRole:         role,
+        };
       }
       const res = await fetch(`/api/hr/hiring/offers/${offerId}`, {
         method: "PATCH",
@@ -352,18 +370,36 @@ function NewOfferModal({
     try {
       let extra: any = {};
       if (sendNow) {
-        const subject = `Congratulations on Your Selection as "${jobRole}" at NB Media`;
-        const bodyForEmail = body
-          ? body.replace(/\n/g, "<br/>")
-          : (() => {
-              const tpl = offerLetterEmail({
-                candidateName: candidate.fullName, jobRole: jobRole.trim() || "the role",
-                joiningDate: joiningDate ? fmtDate(joiningDate) : undefined,
-                responseDeadline: expiresAt ? fmtDate(expiresAt) : undefined,
-              });
-              return tpl.body.replace(/\n/g, "<br/>");
-            })();
-        extra = { emailSubject: subject, emailBody: bodyForEmail };
+        // Short cover email — the full offer letter rides as a PDF
+        // attachment, NOT as the email body. The server auto-renders
+        // the PDF from buildOfferLetterHTML when autoGeneratePdf=true
+        // and HR didn't upload a pre-made one.
+        const firstName  = candidate.fullName.split(" ")[0] ?? candidate.fullName;
+        const subject    = `Congratulations on Your Selection as "${jobRole}" at NB Media`;
+        const deadlineFmt = expiresAt ? fmtDate(expiresAt) : "the deadline below";
+        const coverText = `Dear ${firstName},
+
+Greetings from NB Media!
+
+We are pleased to extend an offer of employment to you for the position of "${jobRole}". Your formal offer letter is attached to this email.
+
+Kindly review the attached document, sign it, and confirm your acceptance by ${deadlineFmt}. Failure to accept by the deadline will render this offer null and void automatically.
+
+For any questions, feel free to reach out to the HR Department.
+
+Warms Regards,
+HR Department
+NB-Media`;
+        extra = {
+          emailSubject:    subject,
+          emailBody:       coverText.replace(/\n/g, "<br/>"),
+          // Tell the server to render the offer letter HTML to PDF
+          // and attach it. The server skips this when HR uploaded a
+          // pre-made PDF (that one wins).
+          autoGeneratePdf: true,
+          jobRole,
+          offerBody:       body ? body.replace(/\n/g, "<br/>") : null,
+        };
       }
       const res = await fetch(`/api/hr/hiring/candidates/${candidate.id}/offers`, {
         method: "POST",
