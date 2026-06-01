@@ -11,7 +11,7 @@ import prisma from "@/lib/prisma";
 import {
   MapPin, Briefcase, Clock, IndianRupee, Users, ArrowRight,
   Share2, ChevronLeft, Rocket, Heart, TrendingUp,
-  Globe, Mail, Calendar, ChevronRight, Download, FileText,
+  Mail, Calendar, ChevronRight, Download, FileText,
   ChevronDown,
 } from "lucide-react";
 import JobShareButton from "./JobShareButton";
@@ -579,7 +579,6 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
           <div className="flex items-center gap-5">
             <Link href="/jobs" className="hover:text-slate-700 transition-colors">All openings</Link>
             <a href="mailto:careers@nbmediaproductions.com" className="hover:text-slate-700 transition-colors inline-flex items-center gap-1"><Mail size={11} /> careers</a>
-            <a href="https://nbmediaproductions.com" target="_blank" rel="noreferrer" className="hover:text-slate-700 transition-colors inline-flex items-center gap-1"><Globe size={11} /> Website</a>
           </div>
         </footer>
       </main>
