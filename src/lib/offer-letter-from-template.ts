@@ -107,41 +107,53 @@ export async function renderOfferLetterFromTemplate(args: OfferTemplateArgs): Pr
   const acceptanceDeadline = fmtSlashDate(args.acceptanceDeadline ?? null);
   const annualLPA         = ctcToLpa(args.annualCtcINR);
 
-  // Coords from scripts/_probe-offer-template-coords.ts. The opening
-  // curly quote of each "Candidate Name" / "Job Role" / "XX" spans
-  // tends to live in a separate text run a few units before the
-  // placeholder start — padLeft covers that.
+  // Mask widths match the placeholder spans found by
+  // scripts/_probe-offer-template-coords.ts. Going wider eats into the
+  // surrounding original text (e.g. " and subsequent interview" right
+  // after the application date) which is what produced the
+  // "missing words" bug.
+  //
+  // Where the template has the OPENING curly quote in a separate text
+  // run just before the placeholder (e.g. for page-1 "Candidate Name"
+  // and "Job Role"), we replace BOTH quotes in our text and use a
+  // small padLeft so the original leading quote is also masked — the
+  // typography stays balanced.
   const overlays: Overlay[] = [
     // ── Page 1 ──
-    // Letter date — left-aligned date line above the greeting.
-    { page: 1, x: 41.8,  y: 576.4, width: 95,   height: 14, size: 11.5, text: letterDate, padRight: 4 },
-    // Candidate Name in greeting. Template has leading `"` in a
-    // separate run (lower x), which we cover with padLeft. Replacement
-    // includes both curly quotes for consistent typography.
-    { page: 1, x: 71.1,  y: 553.9, width: 100,  height: 14, size: 11.5, text: `${candidateName}”`, padLeft: 8 },
-    // Application date in body (curly-quoted).
-    { page: 1, x: 234.8, y: 528.4, width: 110,  height: 14, size: 11.5, text: `“${applicationDate}”`, bold: true },
-    // Job Role in greeting. Roles vary widely in length
-    // ("Intern" vs "Artificial Intelligence Intern"), so we mask the
-    // remainder of the line (covering "with YT Money Productions
+    // Letter date — w probe=81.5
+    { page: 1, x: 41.8,  y: 576.4, width: 84,   height: 14, size: 11.5, text: letterDate },
+    // Candidate Name in greeting — w probe=83.9. Probe matched the
+    // "Candidate Name”" span (with trailing curly quote). The leading
+    // curly quote sits in a separate run at ~x=66; padLeft=8 masks it
+    // and we redraw both quotes in our replacement.
+    { page: 1, x: 71.1,  y: 553.9, width: 86,   height: 14, size: 11.5, text: `“${candidateName}”`, padLeft: 8 },
+    // Application date "10th January 2024" with curly quotes —
+    // w probe=95.3. KEEP mask tight so " and subsequent" after the
+    // date isn't wiped out.
+    { page: 1, x: 234.8, y: 528.4, width: 96,   height: 14, size: 11.5, text: `“${applicationDate}”`, bold: true },
+    // Job Role in greeting. Roles vary widely in length so we mask
+    // the remainder of the line (covering "with YT Money Productions
     // Pvt. Ltd.") and redraw both the role AND the trailing context.
     // Loses the bold-italic styling on "YT Money …" but the sentence
     // reads cleanly without overlap.
-    { page: 1, x: 290.8, y: 515.9, width: 90,   height: 14, size: 11.5, text: `“${jobRole}” with YT Money Productions Pvt. Ltd.`, bold: true, padRight: 200 },
-    // Joining Date.
-    { page: 1, x: 104.9, y: 401.9, width: 95,   height: 14, size: 11.5, text: joiningDate, bold: true, padRight: 4 },
-    // Acceptance deadline (lowercase placeholder in template).
-    { page: 1, x: 502.5, y: 237.4, width: 65,   height: 14, size: 11.5, text: acceptanceDeadline, bold: true, padRight: 4 },
+    { page: 1, x: 290.8, y: 515.9, width: 56,   height: 14, size: 11.5, text: `“${jobRole}” with YT Money Productions Pvt. Ltd.`, bold: true, padRight: 200 },
+    // Joining Date "DD/MM/YYYY" — w probe=74.4.
+    { page: 1, x: 104.9, y: 401.9, width: 76,   height: 14, size: 11.5, text: joiningDate, bold: true },
+    // Acceptance deadline (lowercase placeholder in template) —
+    // w probe=56.1.
+    { page: 1, x: 502.5, y: 237.4, width: 58,   height: 14, size: 11.5, text: acceptanceDeadline, bold: true },
 
-    // ── Page 2 — Job Role in T&C lead-in ──
-    { page: 2, x: 351.7, y: 713.7, width: 70,   height: 13, size: 11,   text: `“${jobRole}”`, bold: true },
+    // ── Page 2 — Job Role in T&C lead-in — w probe=48 ──
+    { page: 2, x: 351.7, y: 713.7, width: 50,   height: 13, size: 11,   text: `“${jobRole}”`, bold: true },
 
     // ── Page 4 — Acceptance section ──
-    { page: 4, x: 72.0,  y: 667.4, width: 110,  height: 14, size: 11.5, text: `“${candidateName}”`, bold: true, padLeft: 4 },
-    { page: 4, x: 106.6, y: 654.7, width: 110,  height: 14, size: 11.5, text: `“${joiningDate}”`, bold: true, padLeft: 4 },
+    // "Candidate Name" with both curly quotes — w probe=91.4.
+    { page: 4, x: 72.0,  y: 667.4, width: 93,   height: 14, size: 11.5, text: `“${candidateName}”`, bold: true },
+    // Joining "DD/MM/YYYY" with both curly quotes — w probe=82.9.
+    { page: 4, x: 106.6, y: 654.7, width: 85,   height: 14, size: 11.5, text: `“${joiningDate}”`, bold: true },
 
-    // ── Page 4 (bottom) — Annexure A annual LPA ──
-    { page: 4, x: 245.6, y: 58.8,  width: 45,   height: 14, size: 11.5, text: `“${annualLPA}”`, bold: true, padLeft: 4 },
+    // ── Page 4 (bottom) — Annexure A annual LPA — w probe=27.1 ──
+    { page: 4, x: 245.6, y: 58.8,  width: 29,   height: 14, size: 11.5, text: `“${annualLPA}”`, bold: true },
   ];
 
   for (const o of overlays) {
