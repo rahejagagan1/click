@@ -2379,6 +2379,11 @@ model Interview {
   /// Free-text notes from the interview panel — pre-filled by the
   /// first interviewer who saves, editable by anyone on the panel.
   notes           String?         @db.Text
+  /// Google Calendar event id — set when a Meet link is auto-created.
+  /// Needed so reschedule/cancel can patch/delete the calendar event
+  /// instead of orphaning it. NULL for off-Google interviews
+  /// (face-to-face / HR-pasted Zoom URL / pre-Meet-integration rows).
+  googleEventId   String?
 
   panelists       InterviewPanelist[]
   scorecards      InterviewScorecard[]
