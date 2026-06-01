@@ -672,9 +672,20 @@ function Step2Details({
               <div className="inline-flex items-center gap-2">
                 <input
                   type="number" min={0}
-                  value={form.allowReapplyDays}
-                  onChange={(e) => setField("allowReapplyDays", Math.max(0, Number(e.target.value) || 0))}
+                  // Show empty when the underlying value is 0 so HR can
+                  // type "30" naturally instead of getting "030" / "300"
+                  // from the literal "0" the controlled input would
+                  // otherwise display. Empty input parses back to 0 on
+                  // submit via the existing Number(...) || 0 guard.
+                  value={form.allowReapplyDays || ""}
+                  onChange={(e) => {
+                    // Strip any leading zeros that browsers may still
+                    // accept (e.g. paste of "030"), then coerce.
+                    const cleaned = e.target.value.replace(/^0+(?=\d)/, "");
+                    setField("allowReapplyDays", Math.max(0, parseInt(cleaned, 10) || 0));
+                  }}
                   disabled={!form.allowReapplyEnabled}
+                  placeholder="30"
                   className="w-20 h-8 px-2 rounded border border-slate-200 text-[12.5px] tabular-nums disabled:opacity-40"
                 />
                 <span className="text-[12px] text-slate-500">days</span>

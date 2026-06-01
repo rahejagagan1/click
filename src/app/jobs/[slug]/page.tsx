@@ -33,6 +33,7 @@ type PublicJob = {
   employmentType: string | null;
   experienceLevel: string | null;
   salaryRange: string | null;
+  salaryUnit:  string | null;   // 'lpa' | 'monthly' | 'annual'
   description: string | null;
   vacancies: number;
   publishedAt: Date | null;
@@ -41,12 +42,31 @@ type PublicJob = {
   jdFileName: string | null;
 };
 
+// Append the configured unit suffix to a free-text compensation
+// figure when it doesn't already carry one. HR types "5" or "5 - 15"
+// in the wizard and the public page should render "5 LPA" / "5 - 15
+// LPA" / "₹50,000 monthly" depending on the unit they picked.
+function fmtCompensation(range: string | null | undefined, unit: string | null | undefined): string | null {
+  if (!range) return null;
+  const trimmed = range.trim();
+  if (!trimmed) return null;
+  // Already contains a unit hint — leave it alone.
+  if (/lpa|per\s*annum|annual|p\.?\s*a\.?|monthly|per\s*month|p\.?\s*m\.?|\/month|\/year|crore|cr\b|\bk\b|\$|€|£/i.test(trimmed)) {
+    return trimmed;
+  }
+  const suffix =
+    unit === "monthly" ? "monthly"
+    : unit === "annual" ? "annual"
+    : "LPA";   // default for both null and "lpa"
+  return `${trimmed} ${suffix}`;
+}
+
 async function loadJob(slug: string): Promise<PublicJob | null> {
   try {
     try {
       const rows = await prisma.$queryRawUnsafe<any[]>(
         `SELECT id, title, "publicSlug" AS slug, department, location, brand,
-                "employmentType", "experienceLevel", "salaryRange",
+                "employmentType", "experienceLevel", "salaryRange", "salaryUnit",
                 description, vacancies, "publishedAt", "closesAt",
                 "jdFileUrl", "jdFileName"
            FROM "JobOpening"
@@ -60,9 +80,11 @@ async function loadJob(slug: string): Promise<PublicJob | null> {
     } catch (e: any) {
       const code = e?.meta?.code || e?.code;
       if (code !== "42703" && !/does not exist/i.test(String(e?.message))) throw e;
+      // Legacy fallback — older DBs lack salaryUnit and/or jdFile* cols.
       const rows = await prisma.$queryRawUnsafe<any[]>(
         `SELECT id, title, "publicSlug" AS slug, department, location, brand,
                 "employmentType", "experienceLevel", "salaryRange",
+                NULL AS "salaryUnit",
                 description, vacancies, "publishedAt", "closesAt",
                 NULL AS "jdFileUrl", NULL AS "jdFileName"
            FROM "JobOpening"
@@ -218,7 +240,7 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
               {job.location        && <Chip icon={MapPin}     label={job.location} />}
               {job.employmentType  && <Chip icon={Briefcase}  label={job.employmentType} />}
               {job.experienceLevel && <Chip icon={Clock}      label={job.experienceLevel} />}
-              {job.salaryRange     && <Chip icon={IndianRupee} label={job.salaryRange} />}
+              {fmtCompensation(job.salaryRange, job.salaryUnit) && <Chip icon={IndianRupee} label={fmtCompensation(job.salaryRange, job.salaryUnit)!} />}
               {job.vacancies > 1   && <Chip icon={Users}      label={`${job.vacancies} positions`} />}
             </div>
           </Reveal>
@@ -233,8 +255,8 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
               <Magnetic strength={0.16}>
                 <Link
                   href={applyHref}
-                  className="group inline-flex w-full sm:w-auto items-center justify-center gap-2 h-12 sm:h-11 px-6 rounded-xl bg-gradient-to-r from-[#3b82f6] via-[#60a5fa] to-[#3b82f6] bg-[length:200%_100%] hover:bg-right text-white text-[14px] sm:text-[13.5px] font-semibold transition-all shadow-[0_6px_18px_-4px_rgba(59,130,246,0.55)] hover:shadow-[0_10px_24px_-4px_rgba(59,130,246,0.6)]"
-                  style={{ transition: "background-position 0.5s ease, box-shadow 0.3s ease" }}
+                  className="group inline-flex w-full sm:w-auto items-center justify-center gap-2 h-12 sm:h-11 px-6 rounded-xl bg-gradient-to-r from-[#3b82f6] via-[#60a5fa] to-[#3b82f6] bg-[length:200%_100%] hover:bg-right !text-white text-[14px] sm:text-[13.5px] font-semibold transition-all shadow-[0_6px_18px_-4px_rgba(59,130,246,0.55)] hover:shadow-[0_10px_24px_-4px_rgba(59,130,246,0.6)] [&_svg]:text-white"
+                  style={{ color: "#fff", transition: "background-position 0.5s ease, box-shadow 0.3s ease" }}
                 >
                   Apply for this role
                   <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
@@ -303,7 +325,8 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
                   if (job.location)        facts.push(["Location",        job.location]);
                   if (job.employmentType)  facts.push(["Employment",      job.employmentType]);
                   if (job.experienceLevel) facts.push(["Experience",      job.experienceLevel]);
-                  if (job.salaryRange)     facts.push(["Compensation",    job.salaryRange]);
+                  const comp = fmtCompensation(job.salaryRange, job.salaryUnit);
+                  if (comp)                facts.push(["Compensation",    comp]);
                   if (job.vacancies > 1)   facts.push(["Openings",        `${job.vacancies} positions`]);
                   if (closesLabel)         facts.push(["Closes",          closesLabel]);
                   return facts.map(([label, value], i) => (
@@ -543,7 +566,8 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
               <Magnetic strength={0.16}>
                 <Link
                   href={applyHref}
-                  className="group inline-flex items-center justify-center gap-2 h-12 px-6 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[13.5px] font-semibold transition-colors shadow-[0_8px_20px_-6px_rgba(15,23,42,0.4)] whitespace-nowrap w-full sm:w-auto"
+                  className="group inline-flex items-center justify-center gap-2 h-12 px-6 rounded-xl bg-slate-900 hover:bg-slate-800 !text-white text-[13.5px] font-semibold transition-colors shadow-[0_8px_20px_-6px_rgba(15,23,42,0.4)] whitespace-nowrap w-full sm:w-auto [&_svg]:text-white"
+                  style={{ color: "#fff" }}
                 >
                   Apply for this role
                   <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
