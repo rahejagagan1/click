@@ -14,7 +14,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { isHRAdmin } from "@/lib/access";
 import { sendEmail } from "@/lib/email/sender";
-import { renderOfferLetterPdfFromTemplate } from "@/lib/offer-letter-from-template";
+import { renderOfferLetterDocxAttachment } from "@/lib/offer-letter-from-docx";
 
 export const dynamic = "force-dynamic";
 
@@ -134,13 +134,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             }];
           } else if (body?.autoGeneratePdf) {
             try {
-              const generated = await renderOfferLetterPdf({
+              // Fill the official .docx template — see the POST
+              // /offers handler for the rationale.
+              const generated = await renderOfferLetterDocxAttachment({
                 candidateName:      fullName,
                 jobRole:            String(body?.jobRole ?? roleTtl),
                 annualCtcINR:       row.ctcAnnual != null ? Number(row.ctcAnnual) : null,
                 joiningDate:        row.joiningDate,
                 acceptanceDeadline: row.expiresAt,
-                editedBody:         row.bodyHtml,
               });
               attachments = [{
                 filename:      generated.filename,
