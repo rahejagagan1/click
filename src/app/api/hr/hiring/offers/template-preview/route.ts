@@ -17,9 +17,18 @@ import mammoth from "mammoth";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { isHRAdmin } from "@/lib/access";
 import { renderOfferLetterDocx } from "@/lib/offer-letter-from-docx";
+import { docxToPdf } from "@/lib/docx-to-pdf";
 
 export const dynamic = "force-dynamic";
 
+// Two response modes:
+//   • Default JSON { text }     — the textarea "Generate" button.
+//   • ?format=pdf binary        — the modal "Preview" iframe; HR sees
+//                                 the EXACT PDF the candidate will
+//                                 receive.
+//
+// Both modes render from the SAME .docx template path so there's no
+// drift between what HR previews and what the candidate gets.
 export async function POST(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
@@ -29,6 +38,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json().catch(() => ({}));
+    const wantPdf = new URL(req.url).searchParams.get("format") === "pdf";
+
     const docxBytes = await renderOfferLetterDocx({
       candidateName:      String(body?.candidateName ?? "").trim(),
       jobRole:            String(body?.jobRole ?? "").trim(),
@@ -40,12 +51,24 @@ export async function POST(req: NextRequest) {
       hrContactName:      body?.hrContactName ? String(body.hrContactName) : undefined,
     });
 
-    // Convert the filled docx to raw text. mammoth.extractRawText
-    // accepts a Buffer via `buffer` (not `path`), avoiding a
-    // round-trip through disk.
+    if (wantPdf) {
+      // Convert filled .docx → PDF using Word COM (Windows dev) or
+      // LibreOffice (Linux prod). Headers tell the browser to render
+      // inline so the iframe in the Preview modal can embed it.
+      const pdfBytes = await docxToPdf(docxBytes);
+      return new NextResponse(pdfBytes, {
+        headers: {
+          "Content-Type":           "application/pdf",
+          "Content-Disposition":    'inline; filename="offer-letter-preview.pdf"',
+          "Cache-Control":          "private, no-store",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    }
+
+    // JSON path — extract text via mammoth, normalise paragraph
+    // spacing, return for the editable textarea.
     const result = await mammoth.extractRawText({ buffer: docxBytes });
-    // Mammoth output uses LF line endings — normalise paragraph
-    // spacing so the textarea preview reads cleanly.
     const text = result.value
       .replace(/\r\n/g, "\n")
       .replace(/\n{3,}/g, "\n\n")
