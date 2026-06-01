@@ -71,6 +71,10 @@ export default function OfferTab({
     jobSalaryRange?: string | null;
     /** From JobOpening.salaryUnit — disambiguates "5" as 5 LPA vs ₹5/month. */
     jobSalaryUnit?:  string | null;
+    /** JobApplication.createdAt — the candidate's application date.
+     *  Threaded through to the offer letter's "application dated X"
+     *  line so the body fills with a real date instead of "—". */
+    createdAt?: string | null;
   };
   offers: Offer[];
   onMutated: () => void;
@@ -268,6 +272,7 @@ function NewOfferModal({
   candidate: {
     id: number; fullName: string; email: string; roleTitle: string | null;
     jobSalaryRange?: string | null; jobSalaryUnit?: string | null;
+    createdAt?: string | null;
   };
   onClose: () => void;
   onCreated: () => void;
@@ -326,6 +331,9 @@ function NewOfferModal({
           annualCtcINR:       ctcAnnual ? Number(ctcAnnual) : null,
           joiningDate:        joiningDate        || null,
           acceptanceDeadline: expiresAt          || null,
+          // "Application dated X" → candidate's createdAt, so the
+          // letter body reads with the real date instead of "—".
+          applicationDate:    candidate.createdAt ?? null,
           // Letter date defaults to "today" server-side when omitted.
         }),
       });
@@ -414,6 +422,7 @@ NB-Media`;
           // pre-made PDF (that one wins).
           autoGeneratePdf: true,
           jobRole,
+          applicationDate: candidate.createdAt ?? null,
           // offerBody is PLAIN TEXT — the PDF renderer wraps it in a
           // <div class="body"> with white-space: pre-wrap, so \n
           // becomes a real line break. Don't convert to <br/> here or
@@ -682,6 +691,7 @@ NB-Media`;
           annualCtcINR={ctcAnnual ? Number(ctcAnnual) : null}
           joiningDate={joiningDate || null}
           acceptanceDeadline={expiresAt || null}
+          applicationDate={candidate.createdAt ?? null}
           onUseDraft={() => { setBody(previewBody); setPreviewOpen(false); }}
           dirty={body !== "" && body !== previewBody}
           onClose={() => setPreviewOpen(false)}
@@ -696,7 +706,7 @@ NB-Media`;
 // the candidate receives. No HTML approximation, no overlay tricks.
 function OfferPreviewModal({
   candidateName, jobRole, annualCtcINR, joiningDate, acceptanceDeadline,
-  onClose,
+  applicationDate, onClose,
 }: {
   body?: string;     // kept for API compat — no longer used
   candidateName: string;
@@ -704,6 +714,7 @@ function OfferPreviewModal({
   annualCtcINR: number | null;
   joiningDate: string | null;
   acceptanceDeadline: string | null;
+  applicationDate?: string | null;
   dirty?: boolean;     // kept for API compat — no longer used
   onUseDraft?: () => void; // kept for API compat — no longer used
   onClose: () => void;
@@ -711,6 +722,9 @@ function OfferPreviewModal({
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
+  // Drives the staged loading card — each step takes ~600ms before
+  // advancing so HR sees forward motion even when the server is fast.
+  const [step, setStep] = useState(0);
 
   // Fetch the actual PDF (same one the candidate gets) and create a
   // blob URL for the iframe to point at. Revoke on unmount so we
@@ -718,6 +732,10 @@ function OfferPreviewModal({
   useEffect(() => {
     let cancelled = false;
     let createdUrl: string | null = null;
+    setStep(0);
+    const stepTimer = setInterval(() => {
+      setStep((s) => (s < 2 ? s + 1 : s));
+    }, 650);
     (async () => {
       setLoading(true);
       setError(null);
@@ -731,6 +749,7 @@ function OfferPreviewModal({
             annualCtcINR,
             joiningDate,
             acceptanceDeadline,
+            applicationDate,
           }),
         });
         if (!res.ok) {
@@ -745,13 +764,15 @@ function OfferPreviewModal({
         if (!cancelled) setError(e?.message ?? "Couldn't render the preview PDF");
       } finally {
         if (!cancelled) setLoading(false);
+        clearInterval(stepTimer);
       }
     })();
     return () => {
       cancelled = true;
+      clearInterval(stepTimer);
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [candidateName, jobRole, annualCtcINR, joiningDate, acceptanceDeadline]);
+  }, [candidateName, jobRole, annualCtcINR, joiningDate, acceptanceDeadline, applicationDate]);
 
   const download = () => {
     if (!pdfUrl) return;
@@ -781,11 +802,7 @@ function OfferPreviewModal({
 
         <div className="flex-1 overflow-hidden bg-slate-100 p-3">
           {loading ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-500">
-              <div className="h-8 w-8 rounded-full border-2 border-slate-300 border-t-[#3b82f6] animate-spin" />
-              <p className="mt-3 text-[12.5px]">Rendering offer letter…</p>
-              <p className="mt-0.5 text-[10.5px] text-slate-400">Filling the .docx template + converting to PDF</p>
-            </div>
+            <OfferPreviewLoading step={step} candidateName={candidateName} jobRole={jobRole} />
           ) : error ? (
             <div className="h-full flex flex-col items-center justify-center text-rose-600 px-6 text-center">
               <p className="text-[13px] font-semibold">Couldn't render the preview PDF</p>
@@ -865,4 +882,144 @@ function fmtINR(n: number): string {
 }
 function fmtDate(d: string | Date): string {
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+// ── Preview loading card ─────────────────────────────────────────
+// Branded loading state with a document-skeleton placeholder on the
+// left and three checkable status steps on the right. `step` is
+// driven by the modal — 0 = filling, 1 = converting, 2 = preparing —
+// and is mapped to step.icon + text. Steps below `step` show a ✓.
+function OfferPreviewLoading({
+  step, candidateName, jobRole,
+}: { step: number; candidateName: string; jobRole: string }) {
+  const steps = [
+    { label: "Filling template",  detail: "Merging name, role, dates & CTC into the NB Media .docx" },
+    { label: "Rendering PDF",     detail: "Converting via Word / LibreOffice with original formatting" },
+    { label: "Preparing preview", detail: "Wrapping up — final layout pass" },
+  ];
+
+  return (
+    <div className="h-full flex items-center justify-center px-4 py-6">
+      <div className="w-full max-w-2xl rounded-2xl bg-white border border-slate-200 shadow-[0_8px_28px_rgba(15,23,42,0.08)] overflow-hidden">
+        <div className="px-6 py-4 bg-gradient-to-br from-[#1d4ed8] to-[#3b82f6] text-white flex items-center gap-3">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 backdrop-blur-sm font-bold tracking-tight text-[14px]">
+            nb
+          </span>
+          <div className="min-w-0">
+            <p className="text-[13.5px] font-semibold leading-tight">Generating Offer Letter</p>
+            <p className="text-[11px] text-white/80 truncate">
+              {candidateName || "Candidate"} · {jobRole || "Role"}
+            </p>
+          </div>
+          <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/15 text-[10.5px] font-semibold uppercase tracking-wide">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 animate-pulse" />
+            Working
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.05fr] gap-0">
+          {/* Document skeleton — hints at the multi-page letter
+              layout while it's being rendered. Pure CSS, no SVG. */}
+          <div className="p-5 bg-slate-50/60 border-b sm:border-b-0 sm:border-r border-slate-100">
+            <div className="mx-auto w-full max-w-[220px] aspect-[1/1.32] rounded-lg bg-white border border-slate-200 shadow-sm p-4 relative overflow-hidden">
+              {/* Letterhead band */}
+              <div className="flex items-start gap-2">
+                <div className="h-2 flex-1 rounded-full bg-slate-200 animate-pulse" />
+                <div className="h-5 w-5 rounded bg-rose-200 animate-pulse" />
+              </div>
+              <div className="mt-1.5 h-1.5 w-3/4 rounded-full bg-slate-200 animate-pulse" />
+              <div className="mt-0.5 h-1.5 w-2/3 rounded-full bg-slate-200 animate-pulse" />
+
+              {/* Title */}
+              <div className="mt-4 mx-auto h-2.5 w-1/2 rounded-full bg-slate-300 animate-pulse" />
+
+              {/* Body lines */}
+              <div className="mt-4 space-y-1.5">
+                {[100, 96, 88, 100, 92, 70, 100, 84].map((w, i) => (
+                  <div
+                    key={i}
+                    className="h-1.5 rounded-full bg-slate-200 animate-pulse"
+                    style={{ width: `${w}%`, animationDelay: `${i * 80}ms` }}
+                  />
+                ))}
+              </div>
+
+              {/* Signature block */}
+              <div className="mt-4">
+                <div className="h-2 w-20 rounded-full bg-slate-300 animate-pulse" />
+                <div className="mt-1 h-1.5 w-14 rounded-full bg-slate-200 animate-pulse" />
+              </div>
+
+              {/* Sweep shimmer */}
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent -translate-x-full animate-[shimmer_2s_ease-in-out_infinite]" />
+            </div>
+            <p className="mt-3 text-center text-[10.5px] text-slate-500 font-medium">
+              Page 1 of 5 · NB Media offer letter template
+            </p>
+          </div>
+
+          {/* Step checklist */}
+          <div className="p-5 flex flex-col justify-center">
+            <p className="text-[10.5px] font-semibold uppercase tracking-wider text-slate-400">
+              Progress
+            </p>
+            <ol className="mt-2.5 space-y-2.5">
+              {steps.map((s, i) => {
+                const done    = i <  step;
+                const active  = i === step;
+                return (
+                  <li key={s.label} className="flex items-start gap-3">
+                    <span className={`mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold shrink-0 transition-colors ${
+                      done   ? "bg-emerald-500 text-white" :
+                      active ? "bg-[#3b82f6] text-white shadow-[0_0_0_4px_rgba(59,130,246,0.18)]" :
+                               "bg-slate-100 text-slate-400 ring-1 ring-slate-200"
+                    }`}>
+                      {done ? (
+                        <Check size={13} strokeWidth={3} />
+                      ) : active ? (
+                        <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
+                      ) : (
+                        i + 1
+                      )}
+                    </span>
+                    <div className="min-w-0">
+                      <p className={`text-[12.5px] font-semibold ${
+                        done ? "text-slate-500 line-through decoration-slate-300" :
+                        active ? "text-slate-900" :
+                        "text-slate-500"
+                      }`}>
+                        {s.label}
+                      </p>
+                      <p className="text-[10.5px] text-slate-400 leading-snug">{s.detail}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+
+            {/* Indeterminate progress bar */}
+            <div className="mt-5 h-1 w-full rounded-full bg-slate-100 overflow-hidden">
+              <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-[#3b82f6] to-[#1d4ed8] animate-[indeterminate_1.4s_ease-in-out_infinite]" />
+            </div>
+            <p className="mt-2 text-[10px] text-slate-400">
+              Usually completes in 2–4 seconds.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Keyframes for the skeleton shimmer + progress bar */}
+      <style jsx>{`
+        @keyframes shimmer {
+          0%   { transform: translateX(-100%); }
+          50%  { transform: translateX(100%); }
+          100% { transform: translateX(100%); }
+        }
+        @keyframes indeterminate {
+          0%   { transform: translateX(-100%); }
+          100% { transform: translateX(400%); }
+        }
+      `}</style>
+    </div>
+  );
 }
