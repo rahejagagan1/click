@@ -72,9 +72,25 @@ type Row = {
   employmentType: string | null;
   experienceLevel: string | null;
   salaryRange: string | null;
+  salaryUnit:  string | null;
   vacancies: number;
   publishedAt: Date | null;
 };
+
+// Same formatter as the per-job detail page: append the configured
+// unit ("LPA" by default) to a free-text compensation figure when
+// it doesn't already carry one. Keeps "5" → "5 LPA" consistent
+// across both /jobs and /jobs/[slug].
+function fmtComp(range: string | null | undefined, unit: string | null | undefined): string | null {
+  if (!range) return null;
+  const trimmed = range.trim();
+  if (!trimmed) return null;
+  if (/lpa|per\s*annum|annual|p\.?\s*a\.?|monthly|per\s*month|p\.?\s*m\.?|\/month|\/year|crore|cr\b|\bk\b|\$|€|£/i.test(trimmed)) {
+    return trimmed;
+  }
+  const suffix = unit === "monthly" ? "monthly" : unit === "annual" ? "annual" : "LPA";
+  return `${trimmed} ${suffix}`;
+}
 
 async function loadJobs(brandFilter: string): Promise<Row[]> {
   try {
@@ -87,7 +103,7 @@ async function loadJobs(brandFilter: string): Promise<Row[]> {
     try {
       return await prisma.$queryRawUnsafe<Row[]>(
         `SELECT id, title, "publicSlug" AS slug, department, location, brand,
-                "employmentType", "experienceLevel", "salaryRange", vacancies, "publishedAt"
+                "employmentType", "experienceLevel", "salaryRange", "salaryUnit", vacancies, "publishedAt"
            FROM "JobOpening"
           WHERE ${where}
           ORDER BY "isPriority" DESC, "publishedAt" DESC NULLS LAST, "createdAt" DESC`,
@@ -96,7 +112,9 @@ async function loadJobs(brandFilter: string): Promise<Row[]> {
     } catch {
       return await prisma.$queryRawUnsafe<Row[]>(
         `SELECT id, title, "publicSlug" AS slug, department, location, brand,
-                "employmentType", "experienceLevel", "salaryRange", vacancies, "publishedAt"
+                "employmentType", "experienceLevel", "salaryRange",
+                NULL AS "salaryUnit",
+                vacancies, "publishedAt"
            FROM "JobOpening"
           WHERE ${where}
           ORDER BY "publishedAt" DESC NULLS LAST, "createdAt" DESC`,
@@ -541,7 +559,7 @@ function JobListCard({ job, activeBrand }: { job: Row; activeBrand: ActiveBrand 
           {job.location        && <span className="inline-flex items-center gap-1.5 min-w-0"><MapPin     size={12} className="text-[#3b82f6] shrink-0" /> <span className="truncate">{job.location}</span></span>}
           {job.employmentType  && <span className="inline-flex items-center gap-1.5 min-w-0"><Briefcase  size={12} className="text-[#3b82f6] shrink-0" /> <span className="truncate">{job.employmentType}</span></span>}
           {job.experienceLevel && <span className="inline-flex items-center gap-1.5 min-w-0"><Clock      size={12} className="text-[#3b82f6] shrink-0" /> <span className="truncate">{job.experienceLevel}</span></span>}
-          {job.salaryRange     && <span className="inline-flex items-center gap-1.5 min-w-0"><IndianRupee size={12} className="text-[#3b82f6] shrink-0" /> <span className="truncate">{job.salaryRange}</span></span>}
+          {fmtComp(job.salaryRange, job.salaryUnit) && <span className="inline-flex items-center gap-1.5 min-w-0"><IndianRupee size={12} className="text-[#3b82f6] shrink-0" /> <span className="truncate">{fmtComp(job.salaryRange, job.salaryUnit)}</span></span>}
         </div>
 
         <div className="mt-4 sm:mt-5 pt-3 sm:pt-4 border-t border-slate-100 flex items-center justify-between text-[12px]">

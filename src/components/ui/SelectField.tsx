@@ -125,6 +125,16 @@ export default function SelectField({
         return (
           <div
             ref={panelRef}
+            // Marker so parent popovers (e.g. DateField's calendar)
+            // don't treat clicks on this dropdown's options as
+            // "outside" and close themselves before our onClick fires.
+            data-popover-portal="true"
+            // Belt + suspenders: stop mousedown from bubbling to
+            // document so any parent's outside-click listener
+            // (DateField, PopupPanel, modal backdrops, etc.) never
+            // sees this click at all, regardless of marker checks.
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
             className="bg-white border border-slate-200 rounded-lg shadow-2xl overflow-hidden"
             style={{
               position: "fixed",

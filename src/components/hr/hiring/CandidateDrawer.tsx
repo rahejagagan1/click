@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import ScheduleInterviewModal from "./ScheduleInterviewModal";
 import ArchiveCandidateModal  from "./ArchiveCandidateModal";
+import CandidateActionModal, { type CandidateAction } from "./CandidateActionModal";
 import SelectField            from "@/components/ui/SelectField";
 
 type Stage = { id: number; key: string; label: string; kind: string; color: string };
@@ -164,6 +165,7 @@ export default function CandidateDrawer({
   const [scheduleMenuOpen, setScheduleMenuOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [emailOpen, setEmailOpen]   = useState(false);
+  const [actionModal, setActionModal] = useState<CandidateAction | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -266,16 +268,29 @@ export default function CandidateDrawer({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="text-[22px] font-bold text-slate-900 tracking-tight truncate">{c.fullName}</h1>
-              <button className="h-7 w-7 inline-flex items-center justify-center rounded text-slate-400 hover:text-slate-700" title="Edit details">
+              <button
+                onClick={() => setActionModal("editProfile")}
+                className="h-7 w-7 inline-flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                title="Edit name / email / phone"
+              >
                 <Edit3 size={13} />
               </button>
             </div>
             <p className="mt-0.5 text-[12px] text-slate-500">
               Applied from {c.source ?? "—"} on {fmtDate(c.createdAt)}
               {!c.ownerName && (
-                <button className="ml-2 text-[#3b82f6] hover:underline font-semibold">+ Assign owner</button>
+                <button
+                  onClick={() => setActionModal("updateOwner")}
+                  className="ml-2 text-[#3b82f6] hover:underline font-semibold"
+                >+ Assign owner</button>
               )}
-              {c.ownerName && <span className="ml-2 text-slate-700 font-medium">· Owner: {c.ownerName}</span>}
+              {c.ownerName && (
+                <button
+                  onClick={() => setActionModal("updateOwner")}
+                  className="ml-2 text-slate-700 hover:text-[#3b82f6] font-medium"
+                  title="Change owner"
+                >· Owner: {c.ownerName}</button>
+              )}
             </p>
 
             {/* Contact row */}
@@ -431,6 +446,22 @@ export default function CandidateDrawer({
           candidate={{ id: c.id, fullName: c.fullName, email: c.email, roleTitle: c.roleTitle }}
           onClose={() => setEmailOpen(false)}
           onDone={() => mutate()}
+        />
+      )}
+      {actionModal && (
+        <CandidateActionModal
+          action={actionModal}
+          candidate={{
+            id: c.id,
+            fullName: c.fullName,
+            email: c.email,
+            phone: c.phone,
+            roleTitle: c.roleTitle,
+            ownerName: c.ownerName ?? null,
+            recruiterOwnerId: c.recruiterOwnerId ?? null,
+          }}
+          onClose={() => setActionModal(null)}
+          onDone={() => { mutate(); }}
         />
       )}
     </div>
@@ -702,6 +733,12 @@ function fmtExperience(
   // The apply form captures years + months as separate integer
   // columns. Older legacy rows might only have a fractional
   // experienceYears value — handle both shapes.
+  // Uses full words ("Year"/"Years"/"Month"/"Months") instead of
+  // shorthand y/m so the chip reads naturally: "10 Months",
+  // "1 Year 6 Months", etc.
+  const yLabel = (n: number) => `${n} ${n === 1 ? "Year"  : "Years"}`;
+  const mLabel = (n: number) => `${n} ${n === 1 ? "Month" : "Months"}`;
+
   const y = Number.isFinite(years as number) ? Number(years) : null;
   const m = Number.isFinite(monthsArg as number) ? Number(monthsArg) : null;
   if (y == null && m == null) return "—";
@@ -709,20 +746,22 @@ function fmtExperience(
   if (y != null && Number.isInteger(y) && m != null) {
     if (y === 0 && m === 0) return "—";
     const parts: string[] = [];
-    if (y > 0) parts.push(`${y}y`);
-    if (m > 0) parts.push(`${m}m`);
+    if (y > 0) parts.push(yLabel(y));
+    if (m > 0) parts.push(mLabel(m));
     return parts.join(" ");
   }
-  // Years-only path: integer years, fall back to "Xy" if no months info.
+  // Years-only path: integer years, fall back to "X Years" if no months info.
   if (y != null && (m == null || m === 0)) {
     if (y === 0) return "—";
-    if (Number.isInteger(y)) return `${y}y`;
+    if (Number.isInteger(y)) return yLabel(y);
     const whole = Math.floor(y);
     const monthsFromFrac = Math.round((y - whole) * 12);
-    return monthsFromFrac ? `${whole}y ${monthsFromFrac}m` : `${whole}y`;
+    return monthsFromFrac
+      ? `${yLabel(whole)} ${mLabel(monthsFromFrac)}`
+      : yLabel(whole);
   }
   // Months-only path (years is null/0, months > 0).
-  if (m != null && m > 0) return `${m}m`;
+  if (m != null && m > 0) return mLabel(m);
   return "—";
 }
 

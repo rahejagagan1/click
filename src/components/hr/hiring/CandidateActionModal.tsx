@@ -13,19 +13,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { X, Search, Mail, Calendar, ClipboardList, UserCog, Send } from "lucide-react";
+import { X, Search, Mail, Calendar, ClipboardList, UserCog, Send, UserCircle2, Save } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 
 export type CandidateAction =
   | "sendEmail"
   | "sendAssessment"
   | "scheduleInterview"
-  | "updateOwner";
+  | "updateOwner"
+  | "editProfile";
 
 interface Candidate {
   id: number;
   fullName: string;
   email: string;
+  phone?: string | null;
   ownerName?: string | null;
   recruiterOwnerId?: number | null;
   roleTitle?: string | null;
@@ -36,12 +38,14 @@ const TITLES: Record<CandidateAction, string> = {
   sendAssessment:    "Send assessment",
   scheduleInterview: "Schedule interview",
   updateOwner:       "Update owner",
+  editProfile:       "Edit candidate details",
 };
 const ICONS: Record<CandidateAction, any> = {
   sendEmail:         Mail,
   sendAssessment:    ClipboardList,
   scheduleInterview: Calendar,
   updateOwner:       UserCog,
+  editProfile:       UserCircle2,
 };
 
 export default function CandidateActionModal({
@@ -93,6 +97,7 @@ export default function CandidateActionModal({
           {action === "sendAssessment"   && <EmailForm        candidate={candidate} kind="assessment" onClose={onClose} onDone={onDone} />}
           {action === "scheduleInterview" && <InterviewForm   candidate={candidate} onClose={onClose} onDone={onDone} />}
           {action === "updateOwner"       && <OwnerPicker     candidate={candidate} onClose={onClose} onDone={onDone} />}
+          {action === "editProfile"       && <EditProfileForm candidate={candidate} onClose={onClose} onDone={onDone} />}
         </div>
       </div>
     </div>
@@ -414,6 +419,92 @@ function OwnerPicker({
           className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-slate-100"
         >Done</button>
       </div>
+    </div>
+  );
+}
+
+// ── Edit profile ─────────────────────────────────────────────────────
+// HR-side inline edit for the candidate's identity fields. Used when
+// the resume parser mislabels someone (e.g. their cover sheet title
+// gets parsed as their name) or when contact info needs correcting.
+
+function EditProfileForm({
+  candidate, onClose, onDone,
+}: {
+  candidate: Candidate;
+  onClose: () => void;
+  onDone?: () => void;
+}) {
+  const [fullName, setFullName] = useState(candidate.fullName);
+  const [email,    setEmail]    = useState(candidate.email);
+  const [phone,    setPhone]    = useState(candidate.phone ?? "");
+  const [saving,   setSaving]   = useState(false);
+
+  const save = async () => {
+    if (!fullName.trim()) return alert("Name is required");
+    if (!email.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
+      return alert("Valid email is required");
+    }
+    setSaving(true);
+    const res = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "updateProfile",
+        fullName: fullName.trim(),
+        email:    email.trim(),
+        phone:    phone.trim() || null,
+      }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      alert(j?.error || "Couldn't save profile");
+      return;
+    }
+    globalMutate(`/api/hr/hiring/candidates/${candidate.id}`);
+    globalMutate("/api/hr/hiring/candidates");
+    onDone?.();
+    onClose();
+  };
+
+  return (
+    <div className="p-5 space-y-3">
+      <p className="text-[11.5px] text-slate-500">
+        Correct any wrong info parsed from the resume. Changes are logged in the candidate's activity feed.
+      </p>
+      <Field label="Full name">
+        <input
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          autoFocus
+          maxLength={200}
+          className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
+        />
+      </Field>
+      <Field label="Email">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
+        />
+      </Field>
+      <Field label="Phone (optional)">
+        <input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="+91 9876543210"
+          className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
+        />
+      </Field>
+      <FormFooter
+        onClose={onClose}
+        onSubmit={save}
+        submitLabel={saving ? "Saving…" : "Save changes"}
+        submitIcon={<Save size={13} />}
+        disabled={saving}
+      />
     </div>
   );
 }
