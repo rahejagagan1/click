@@ -482,7 +482,8 @@ function Step1Description({
           onChange={(e) => setField("description", e.target.value)}
           rows={6}
           placeholder="What the role entails — outcomes, responsibilities, what success looks like."
-          className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
+          style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
+          className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[14px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
         />
       </Field>
 
@@ -492,7 +493,8 @@ function Step1Description({
           onChange={(e) => setField("internalNotes", e.target.value)}
           rows={3}
           placeholder="Context for the hiring team — budget, hidden constraints, candidate sources."
-          className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
+          style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
+          className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[14px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
         />
       </Field>
 
