@@ -120,6 +120,17 @@ export async function POST(req: NextRequest) {
 
     // Normalise whitespace — collapse triple+ newlines, strip CR.
     text = text.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+
+    // Strip page-break artefacts: "-- 1 of 2 --", "Page 1 of 2",
+    // "1 of 2", "Page 1", etc. PDF-to-text converters often emit
+    // these as page separators and they look unprofessional on the
+    // candidate-facing JD render.
+    text = text
+      .split("\n")
+      .filter((ln) => !/^[\s\-–—]*(?:page\s+)?\d+(?:\s*(?:of|\/)\s*\d+)?[\s\-–—]*$/i.test(ln.trim()))
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
     console.log(`[jd-extract] done in ${Date.now() - t0}ms — ${text.length} chars`);
 
     return NextResponse.json({ text });
