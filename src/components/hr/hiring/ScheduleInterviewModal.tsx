@@ -234,8 +234,8 @@ export default function ScheduleInterviewModal({
         {/* Round + Kind toggles */}
         <div className="px-5 pt-4 flex flex-wrap items-center gap-3">
           <div className="inline-flex p-1 rounded-lg border border-slate-200 bg-slate-50">
-            <KindButton active={round === "technical"} onClick={() => setRound("technical")} Icon={FileText} label="Technical Round" />
             <KindButton active={round === "final"}     onClick={() => setRound("final")}     Icon={Check}    label="Final Round" />
+            <KindButton active={round === "technical"} onClick={() => setRound("technical")} Icon={FileText} label="Technical Round" />
           </div>
           <div className="inline-flex p-1 rounded-lg border border-slate-200 bg-slate-50">
             <KindButton active={kind === "online"}       onClick={() => setKind("online")}       Icon={Video}   label="Online" />
@@ -376,7 +376,8 @@ export default function ScheduleInterviewModal({
                 <Field label="Note (visible to the interview panel)">
                   <textarea value={noteToPanel} onChange={(e) => setNoteToPanel(e.target.value)} rows={4}
                     placeholder="Anything the panel should know before the interview — strengths, gaps, what to probe."
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
+                    style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[14px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
                 </Field>
                 <div className="mt-4 flex items-center justify-end gap-2">
                   <button onClick={onClose} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white">Cancel</button>
