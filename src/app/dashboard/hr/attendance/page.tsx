@@ -14,6 +14,7 @@ import { isHRAdmin, canApplyRestrictedLeave } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { DateField } from "@/components/ui/date-field";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 
 // ── Form copy per kind ───────────────────────────────────────────────────────
 const FORM_TITLE: Record<LeaveRequestKind, string> = {
@@ -539,7 +540,7 @@ export default function AttendancePage() {
   const [month, setMonth] = useState(
     `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
   );
-  const [subTab, setSubTab] = useState<"log" | "calendar" | "requests">("log");
+  const [subTab, setSubTab] = useUrlTab<"log" | "calendar" | "requests">("view", "log", ["log", "calendar", "requests"] as const);
   const [reqType, setReqType] = useState<"punch" | "wfh" | "od">("punch");
   const [use24, setUse24] = useState(false);
   const [period, setPeriod] = useState<"30d" | "month">("30d");
@@ -570,7 +571,7 @@ export default function AttendancePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [regView, setRegView] = useState<"my" | "team">("my");
+  const [regView, setRegView] = useUrlTab<"my" | "team">("regs", "my", ["my", "team"] as const);
 
   // Browser geolocation permission state. Attendance needs location, so we
   // check this up-front and show a banner + disable the clock-in button when

@@ -154,9 +154,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
               console.error("[offers] PDF generation failed:", e?.message ?? e);
             }
           }
+          // CC — optional, sanitized so a stray space or typo doesn't
+          // crash the SMTP send.
+          const ccList = Array.isArray(body?.emailCc)
+            ? (body.emailCc as unknown[])
+                .map((e) => String(e ?? "").trim())
+                .filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))
+            : undefined;
           try {
             await sendEmail({
               to,
+              cc: ccList && ccList.length > 0 ? ccList : undefined,
               content: {
                 subject: String(body.emailSubject),
                 html:    String(body.emailBody),

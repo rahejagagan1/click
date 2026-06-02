@@ -9,7 +9,7 @@ import type { Metadata } from "next";
 import prisma from "@/lib/prisma";
 import {
   MapPin, Briefcase, Clock, ArrowRight, Sparkles, Building2,
-  Rocket, Heart, TrendingUp, Users, Globe, Mail, ChevronRight,
+  Rocket, Heart, TrendingUp, Users, Mail, ChevronRight,
   IndianRupee, ChevronDown,
 } from "lucide-react";
 import Reveal       from "./[slug]/Reveal";
@@ -482,7 +482,6 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
           </div>
           <div className="flex items-center gap-5 text-[11.5px] text-slate-500">
             <a href="mailto:careers@nbmediaproductions.com" className="hover:text-slate-800 transition-colors inline-flex items-center gap-1.5"><Mail size={11} /> careers</a>
-            <a href={`https://${meta.domain}`} target="_blank" rel="noreferrer" className="hover:text-slate-800 transition-colors inline-flex items-center gap-1.5"><Globe size={11} /> Website</a>
           </div>
         </div>
       </footer>
@@ -638,13 +637,6 @@ function BrandCard({
             {roleCount} open role{roleCount === 1 ? "" : "s"} at {meta.label}
             <ChevronRight size={13} />
           </Link>
-          <a
-            href={`https://${meta.domain}`}
-            target="_blank" rel="noreferrer"
-            className="inline-flex items-center gap-1.5 text-[12px] font-medium text-slate-500 hover:text-slate-800 transition-colors"
-          >
-            <Globe size={11} /> {meta.domain}
-          </a>
         </div>
       </div>
     </div>
