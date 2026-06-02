@@ -290,7 +290,69 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
         </div>
       </section>
 
-      {/* ── Open roles — panel 2 ──────────────────────────────── */}
+      {/* ── Why join us — panel 2 ─────────────────────────────── */}
+      <section id="why-us" className="relative border-t border-slate-200 bg-slate-50/50 ">
+        <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-20">
+          <Reveal direction="up">
+            <header className="mb-10 max-w-2xl">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] mb-2" style={{ color: meta.accent }}>Why us</p>
+              <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">A place where the work goes live.</h2>
+              <p className="mt-2 text-[14px] text-slate-500">Three reasons people stay long-term — and what new hires tell us in their first month.</p>
+            </header>
+          </Reveal>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <Reveal direction="up" delay={0}>
+              <ValueCard icon={Rocket} title="Real impact, fast" body="Ship work that goes live on the channels you watch. From day one your edits, scripts, and thumbnails reach millions — no holding pattern." />
+            </Reveal>
+            <Reveal direction="up" delay={120}>
+              <ValueCard icon={Heart} title="A team that ships" body="Hybrid setup from Mohali. Async docs, regular reviews, zero busywork. People who care about the craft, not the hours." />
+            </Reveal>
+            <Reveal direction="up" delay={240}>
+              <ValueCard icon={TrendingUp} title="Growth, honestly" body="Quarterly reviews, transparent KPI tracking, and clear paths to lead or senior — earned, not given. We tell you exactly what gets you there." />
+            </Reveal>
+          </div>
+        </div>
+      </section>
+
+      {/* ── About brand(s) — panel 3 ──────────────────────────── */}
+      <section className="relative border-t border-slate-300/60 ">
+        <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-20">
+          <Reveal direction="up">
+            <header className="mb-10 max-w-2xl">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] mb-2" style={{ color: meta.accent }}>Who we are</p>
+              <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">
+                {isAll ? "Two studios. One team." : `About ${meta.label}.`}
+              </h2>
+              <p className="mt-2 text-[14px] text-slate-500">
+                {isAll
+                  ? "You'll be hired into one brand but work alongside both — same office, shared learnings, separate creative tracks."
+                  : meta.tagline}
+              </p>
+            </header>
+          </Reveal>
+
+          {isAll ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <Reveal direction="up" delay={0}>
+                <BrandCard meta={BRAND_META.nb_media} roleCount={nbCount} brandKey="nb_media" />
+              </Reveal>
+              <Reveal direction="up" delay={120}>
+                <BrandCard meta={BRAND_META.yt_labs} roleCount={ytCount} brandKey="yt_labs" />
+              </Reveal>
+            </div>
+          ) : (
+            <Reveal direction="up">
+              <BrandCard meta={meta} roleCount={jobs.length} brandKey={activeBrand as "nb_media" | "yt_labs"} expanded />
+            </Reveal>
+          )}
+        </div>
+      </section>
+
+      {/* ── Open roles — panel 4 ──────────────────────────────── */}
+      {/* Moved BELOW the company-info panels (Why join us + About
+          brand) so a fresh visitor reads the company pitch first
+          and lands on the role list with context. */}
       <section id="open-roles" className="relative border-t border-slate-200 bg-slate-50/50 ">
         <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-20">
           <Reveal direction="up">
@@ -339,65 +401,6 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
                 </Reveal>
               ))}
             </div>
-          )}
-        </div>
-      </section>
-
-      {/* ── Why join us — panel 3 ─────────────────────────────── */}
-      <section id="why-us" className="relative border-t border-slate-300/60 ">
-        <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-20">
-          <Reveal direction="up">
-            <header className="mb-10 max-w-2xl">
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] mb-2" style={{ color: meta.accent }}>Why us</p>
-              <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">A place where the work goes live.</h2>
-              <p className="mt-2 text-[14px] text-slate-500">Three reasons people stay long-term — and what new hires tell us in their first month.</p>
-            </header>
-          </Reveal>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            <Reveal direction="up" delay={0}>
-              <ValueCard icon={Rocket} title="Real impact, fast" body="Ship work that goes live on the channels you watch. From day one your edits, scripts, and thumbnails reach millions — no holding pattern." />
-            </Reveal>
-            <Reveal direction="up" delay={120}>
-              <ValueCard icon={Heart} title="A team that ships" body="Hybrid setup from Mohali. Async docs, regular reviews, zero busywork. People who care about the craft, not the hours." />
-            </Reveal>
-            <Reveal direction="up" delay={240}>
-              <ValueCard icon={TrendingUp} title="Growth, honestly" body="Quarterly reviews, transparent KPI tracking, and clear paths to lead or senior — earned, not given. We tell you exactly what gets you there." />
-            </Reveal>
-          </div>
-        </div>
-      </section>
-
-      {/* ── About brand(s) — panel 4 ──────────────────────────── */}
-      <section className="relative border-t border-slate-200 bg-slate-50/50 ">
-        <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-20">
-          <Reveal direction="up">
-            <header className="mb-10 max-w-2xl">
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] mb-2" style={{ color: meta.accent }}>Who we are</p>
-              <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">
-                {isAll ? "Two studios. One team." : `About ${meta.label}.`}
-              </h2>
-              <p className="mt-2 text-[14px] text-slate-500">
-                {isAll
-                  ? "You'll be hired into one brand but work alongside both — same office, shared learnings, separate creative tracks."
-                  : meta.tagline}
-              </p>
-            </header>
-          </Reveal>
-
-          {isAll ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Reveal direction="up" delay={0}>
-                <BrandCard meta={BRAND_META.nb_media} roleCount={nbCount} brandKey="nb_media" />
-              </Reveal>
-              <Reveal direction="up" delay={120}>
-                <BrandCard meta={BRAND_META.yt_labs} roleCount={ytCount} brandKey="yt_labs" />
-              </Reveal>
-            </div>
-          ) : (
-            <Reveal direction="up">
-              <BrandCard meta={meta} roleCount={jobs.length} brandKey={activeBrand as "nb_media" | "yt_labs"} expanded />
-            </Reveal>
           )}
         </div>
       </section>

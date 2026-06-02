@@ -197,19 +197,24 @@ NB-Media
 
 ## 7. Candidate Selection E-Mail (For Final Round)
 
+> Restructured to mirror the Technical Round body paragraph-for-paragraph
+> so HR sees consistent wording across both rounds. Round-specific
+> language ("initial stages" / "all the previous rounds" / round name)
+> is the only thing that differs between §6 and §7.
+
 **Subject:** Invitation for Final Interview Round for {{JobRole}} at NB Media
 
 Dear {{CandidateName}},
 
 Greetings from NB Media!
 
-We want to extend our congratulations as you have successfully cleared all the previous rounds of our interview process.
+We would like to express our appreciation for your participation in the previous rounds of our interview process. After careful consideration, we are pleased to inform you that you have successfully cleared all the previous rounds of the Selection Process.
 
-Your achievements thus far have been impressive, and we are excited to invite you to the final round of interviews. This round will provide you with an opportunity to meet key members of our team, discuss the specific responsibilities of the **{{JobRole}}** position, and gain further insights into our company culture.
+Congratulations on your accomplishment!
 
-The Final Interview Round is scheduled for **[date]** at **[time]**.
+The next step in our selection process is the **Final Interview Round.** The interview will be conducted virtually via **Google Meet** where you will have the opportunity to meet key members of our team and discuss the specific responsibilities of the **{{JobRole}}** position. Please come prepared to engage in discussions about your experiences, skills, and how you envision contributing to our team.
 
-The next step in our selection process is the **Final Interview Round.** The location of the interview will be the **{{OfficeAddress}}** / It will be conducted virtually via **Google Meet** where you will have the opportunity to showcase your technical abilities and discuss your experience with our team. Please come prepared to engage in discussions about your experiences, skills, and how you envision contributing to our team.
+_For onsite final interviews, swap the line above for: "The interview will be held at **{{OfficeAddress}}**, where you will meet key members of our team and discuss the specific responsibilities of the **{{JobRole}}** position. Please come prepared to engage in discussions about your experiences, skills, and how you envision contributing to our team."_
 
 **Meeting Link:**
 {{InterviewDateTime}}
@@ -217,7 +222,7 @@ Video call link: {{MeetingLink}}
 
 Should you have any questions or require further information about the Final Interview Round, please feel free to contact the undersigned.
 
-Congratulations once again on reaching this stage, and we look forward to meeting with you for the final interview.
+Once again, congratulations on your progress, and we look forward to meeting with you for the final interview.
 
 Warms Regards,
 HR Department
