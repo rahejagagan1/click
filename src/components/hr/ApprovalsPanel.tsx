@@ -655,22 +655,17 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
           </div>
         </div>
 
-        {/* Legal Entity scope — single-select dropdown that scopes the
-            queue to NB Media / YT Labs / All. Replaces the old three-
-            button "Brand scope" strip for a more compact, professional
-            look. Same companyTab state powers the filtering. */}
+        {/* Brand scope — pill toggle strip matching LeavesAdminPanel.
+            Lets HR jump between NB Media, YT Labs, and All with one
+            click, and reads at a glance how many requests live in
+            each. Count badges update with the underlying queue. */}
         {(tab === "regularize" || tab === "wfh" || tab === "comp_off") && (
           <div className="mb-4 rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/60 px-5 py-4">
-            <label className="block text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 dark:text-slate-500 mb-2">Legal Entity</label>
-            <SelectField
+            <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 dark:text-slate-500 mb-2">Brand scope</div>
+            <BrandScopePills
               value={companyTab}
-              onChange={(v) => { setCompanyTab(v as CompanyTab); setCompanyTabTouched(true); }}
-              options={[
-                { value: "NB Media", label: `NB Media · ${companyCounts.nb}` },
-                { value: "YT Labs",  label: `YT Labs · ${companyCounts.yt}` },
-                { value: "all",      label: `All brands · ${companyCounts.all}` },
-              ]}
-              className="h-9 w-full sm:w-[260px] rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1e3a] px-3 text-[12.5px] text-slate-800 dark:text-white"
+              counts={companyCounts}
+              onChange={(v) => { setCompanyTab(v); setCompanyTabTouched(true); }}
             />
           </div>
         )}
@@ -871,20 +866,15 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                 filters) with tiny section labels so HR can scan from
                 top to bottom rather than guessing which row does what. */}
             <div className="mb-4 rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/60 px-5 py-4 space-y-4">
-              {/* Section: Legal Entity scope — single-select dropdown
-                  instead of the previous 3-button "Brand scope" strip
-                  for a cleaner / more professional look. */}
+              {/* Section: Brand scope — pill toggle strip. One-click
+                  jump between NB Media / YT Labs / All with count
+                  badges visible at a glance. */}
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 dark:text-slate-500 mb-2">Legal Entity</label>
-                <SelectField
+                <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 dark:text-slate-500 mb-2">Brand scope</div>
+                <BrandScopePills
                   value={companyTab}
-                  onChange={(v) => { setCompanyTab(v as CompanyTab); setCompanyTabTouched(true); }}
-                  options={[
-                    { value: "NB Media", label: `NB Media · ${companyCounts.nb}` },
-                    { value: "YT Labs",  label: `YT Labs · ${companyCounts.yt}` },
-                    { value: "all",      label: `All brands · ${companyCounts.all}` },
-                  ]}
-                  className="h-9 w-full sm:w-[260px] rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1e3a] px-3 text-[12.5px] text-slate-800 dark:text-white"
+                  counts={companyCounts}
+                  onChange={(v) => { setCompanyTab(v); setCompanyTabTouched(true); }}
                 />
               </div>
 
@@ -1140,6 +1130,51 @@ function RejectReasonModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Brand scope pill toggle ───────────────────────────────────────
+// Three-button strip (NB Media / YT Labs / All) with live count
+// badges. Used in two places in this panel — the standalone scope
+// strip above the regularize/wfh/comp_off tables, and inside the
+// Leave-approvals filter drawer. Same visual treatment as the
+// equivalent control on the Leaves admin matrix.
+type CompanyScope = "NB Media" | "YT Labs" | "all";
+function BrandScopePills({
+  value, counts, onChange,
+}: {
+  value: CompanyScope;
+  counts: { nb: number; yt: number; all: number };
+  onChange: (v: CompanyScope) => void;
+}) {
+  const items: Array<{ key: CompanyScope; label: string; count: number }> = [
+    { key: "NB Media", label: "NB Media", count: counts.nb  },
+    { key: "YT Labs",  label: "YT Labs",  count: counts.yt  },
+    { key: "all",      label: "All",      count: counts.all },
+  ];
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {items.map(({ key, label, count }) => {
+        const active = value === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onChange(key)}
+            className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
+              active
+                ? "bg-[#008CFF] text-white shadow-sm"
+                : "bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10"
+            }`}
+          >
+            <span>{label}</span>
+            <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
+              active ? "bg-white/20 text-white" : "bg-[#008CFF] text-white"
+            }`}>{count}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
