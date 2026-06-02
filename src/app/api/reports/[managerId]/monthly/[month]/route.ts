@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
-import { notifyUsers } from "@/lib/notifications";
+import { notifyUsers, ceoRecipientIdForEmployee } from "@/lib/notifications";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
 import { getQualifiedCasesForRole } from "@/lib/ratings/data-resolver";
 import { getManagerReportFormat } from "@/lib/reports/manager-report-format";
@@ -423,23 +423,28 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
         if (shouldLock) {
             try {
                 const devClause = await devEmailRecipientsClause();
-                const [manager, recipients] = await Promise.all([
+                const [manager, recipients, ceoRecipient] = await Promise.all([
                     prisma.user.findUnique({ where: { id: managerId }, select: { name: true } }),
                     prisma.user.findMany({
                         where: {
                             isActive: true,
+                            // CEO excluded from the blanket fan-out — only re-added
+                            // below when the submitting manager is their OWN direct
+                            // report. Top-level NOT because the CEO/owner account
+                            // also carries role="admin" / may be a dev email.
+                            orgLevel: { not: "ceo" },
                             OR: [
-                                // CEO + Special Access + HR Manager (role).
+                                // Special Access + HR Manager (role).
                                 // Drops orgLevel="hr_manager"-only members (HR-team
-                                // folks like Vanshika are role=member) and role="admin"
-                                // alone (covered via orgLevel=ceo / special_access).
-                                { orgLevel: { in: ["ceo", "special_access"] } },
+                                // folks like Vanshika are role=member) and role="admin" alone.
+                                { orgLevel: "special_access" },
                                 { role: "hr_manager" },
                                 ...devClause,
                             ],
                         },
                         select: { id: true },
                     }),
+                    ceoRecipientIdForEmployee(managerId),
                 ]);
                 // `month` is the 0-based index parsed from the URL (0=Jan,
                 // 11=Dec) — same convention as the client-side monthIndex
