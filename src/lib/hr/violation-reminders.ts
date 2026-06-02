@@ -24,6 +24,7 @@ type DueRow = {
     category: string | null;
     actionTaken: string | null;
     createdAt: Date;
+    userId: number | null;
     userName: string | null;
     reporterName: string | null;
 };
@@ -45,7 +46,7 @@ export async function sendViolationInProgressReminders(): Promise<number> {
     // cases: brand-new in-progress + already-reminded-but-stale.
     const due = await prisma.$queryRawUnsafe<DueRow[]>(
         `SELECT v.id, v.title, v.severity::text AS severity, v.category, v."actionTaken",
-                v."createdAt",
+                v."createdAt", v."userId",
                 u.name AS "userName",
                 r.name AS "reporterName"
            FROM "Violation" v
@@ -61,15 +62,16 @@ export async function sendViolationInProgressReminders(): Promise<number> {
     );
     if (due.length === 0) return 0;
 
-    // Recipient list — same set we use for feedback inbox / job
-    // applications: CEO / special_access / admin / hr_manager.
-    // Developer accounts are conditional on the "Notify developers"
-    // toggle in Admin → Emails Automation.
+    // Recipient list — special_access / admin / hr_manager. The CEO is
+    // EXCLUDED here (top-level NOT, because the CEO/owner account also
+    // carries role="admin"); they're reminded only about violations of
+    // their OWN direct reports, added per-violation below.
     const recipients = await prisma.user.findMany({
         where: {
             isActive: true,
+            orgLevel: { not: "ceo" },
             OR: [
-                { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
+                { orgLevel: { in: ["hr_manager", "special_access"] } },
                 { role: "admin" },
                 { role: "hr_manager" },
                 ...(await devEmailRecipientsClause()),
@@ -78,7 +80,25 @@ export async function sendViolationInProgressReminders(): Promise<number> {
         select: { name: true, email: true },
     });
     const validRecipients = recipients.filter((r) => !!r.email);
-    if (validRecipients.length === 0) return 0;
+
+    // CEO-per-direct-report lookup: resolve each affected employee's direct
+    // manager once; when that manager is the (active) CEO, the CEO is added
+    // to that violation's recipients (and only that violation's).
+    const affectedIds = [...new Set(due.map((d) => d.userId).filter((id): id is number => id != null))];
+    const ceoByEmployee = new Map<number, { name: string | null; email: string }>();
+    if (affectedIds.length) {
+        const reports = await prisma.user.findMany({
+            where:  { id: { in: affectedIds } },
+            select: { id: true, manager: { select: { orgLevel: true, isActive: true, name: true, email: true } } },
+        });
+        for (const r of reports) {
+            const m = r.manager;
+            if (m && m.isActive && m.orgLevel === "ceo" && m.email) {
+                ceoByEmployee.set(r.id, { name: m.name, email: m.email });
+            }
+        }
+    }
+    if (validRecipients.length === 0 && ceoByEmployee.size === 0) return 0;
 
     let processed = 0;
     for (const v of due) {
@@ -86,9 +106,13 @@ export async function sendViolationInProgressReminders(): Promise<number> {
             1,
             Math.floor((Date.now() - new Date(v.createdAt).getTime()) / (24 * 60 * 60 * 1000)),
         );
+        // Base recipients (HR / special_access / admin) plus the CEO only
+        // when this violation is about one of their own direct reports.
+        const ceo = v.userId != null ? ceoByEmployee.get(v.userId) : undefined;
+        const violationRecipients = ceo ? [...validRecipients, ceo] : validRecipients;
         // Send one mail per recipient — keeps the salutation personal
         // and avoids exposing the recipient list in the To header.
-        for (const r of validRecipients) {
+        for (const r of violationRecipients) {
             try {
                 await sendEmail({
                     to: r.email!,
