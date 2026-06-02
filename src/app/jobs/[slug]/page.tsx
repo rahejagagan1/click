@@ -518,12 +518,20 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
                   <p className="text-[13.5px] font-semibold text-slate-900">Questions about this role?</p>
                   <p className="text-[12.5px] text-slate-500 mt-0.5">We usually reply within a working day.</p>
                 </div>
-                <a
-                  href="mailto:vanshika@nbmediaproductions.com"
-                  className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-900 text-[12.5px] font-semibold transition-colors"
-                >
-                  <Mail size={13} /> vanshika@nbmediaproductions.com
-                </a>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <a
+                    href="mailto:vanshika@nbmediaproductions.com"
+                    className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-900 text-[12.5px] font-semibold transition-colors"
+                  >
+                    <Mail size={13} /> vanshika@nbmediaproductions.com
+                  </a>
+                  <a
+                    href="mailto:tanvi@nbmediaproductions.com"
+                    className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-900 text-[12.5px] font-semibold transition-colors"
+                  >
+                    <Mail size={13} /> tanvi@nbmediaproductions.com
+                  </a>
+                </div>
               </div>
             </Card>
 
