@@ -2197,6 +2197,12 @@ model JobOpening {
   /// candidates see a "Download JD" link on the apply form.
   jdFileUrl     String?
   jdFileName    String?
+  /// Extracted/edited plain-text version of the JD. Populated when
+  /// HR uses the inline preview-and-edit UI in the wizard: the file
+  /// is parsed (mammoth/pdf-parse), HR tweaks the text, and the
+  /// edited copy lands here. Independent of jdFileUrl so the
+  /// original file remains downloadable too.
+  jdText        String?    @db.Text
 
   // Hiring team — who is responsible for this requisition.
   recruiterId       Int?
@@ -2379,6 +2385,11 @@ model Interview {
   /// Free-text notes from the interview panel — pre-filled by the
   /// first interviewer who saves, editable by anyone on the panel.
   notes           String?         @db.Text
+  /// Google Calendar event id — set when a Meet link is auto-created.
+  /// Needed so reschedule/cancel can patch/delete the calendar event
+  /// instead of orphaning it. NULL for off-Google interviews
+  /// (face-to-face / HR-pasted Zoom URL / pre-Meet-integration rows).
+  googleEventId   String?
 
   panelists       InterviewPanelist[]
   scorecards      InterviewScorecard[]

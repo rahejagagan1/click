@@ -15,6 +15,7 @@ import { gravatarUrl } from "@/lib/gravatar";
 import { resolveTemplate } from "@/lib/hr/email-merge";
 import { sendEmail } from "@/lib/email/sender";
 import { createGoogleMeetEvent, isGoogleMeetConfigured } from "@/lib/google/calendar";
+import { extractResumeData } from "@/lib/resume-auto-extract";
 
 export const dynamic = "force-dynamic";
 
@@ -197,6 +198,66 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
     const row = appRows[0];
     if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    // ── Auto-backfill from the resume ──────────────────────────────
+    // When HR opens a candidate's drawer and any of the parseable
+    // profile fields are still null, run the resume through the
+    // shared extractor and persist whatever it returns. One-time
+    // cost per candidate (subsequent loads hit the populated row).
+    // Soft-fails — a parse error never breaks the candidate detail
+    // response.
+    if (
+      row.resumeBlob &&
+      (!row.linkedinUrl || !row.portfolioUrl || !row.skills || !row.educationDetails)
+    ) {
+      try {
+        const buf = Buffer.from(row.resumeBlob);
+        const fileName = String(row.resumeFileName ?? "resume.pdf");
+        const ext = await extractResumeData(buf, fileName);
+
+        // Detect existing skills that need to be rebuilt — a previous
+        // parser version dumped language names ("Hindi", "English",
+        // etc.) into the skills field. The new extractor keeps them
+        // separate, so if we see any in the current skills value
+        // it's a clear signal of a stale bad-shape parse and we
+        // should overwrite.
+        const KNOWN_LANGS = new Set([
+          "english","hindi","punjabi","tamil","telugu","kannada","malayalam","marathi",
+          "gujarati","bengali","odia","assamese","sanskrit","urdu",
+        ]);
+        const existingSkillsHasLangs = typeof row.skills === "string" &&
+          row.skills.split(/[,|;/]/).map((s: string) => s.trim().toLowerCase()).some((s: string) => KNOWN_LANGS.has(s));
+
+        const patch: Record<string, any> = {};
+        if (!row.linkedinUrl  && ext.linkedinUrl)        { patch.linkedinUrl  = ext.linkedinUrl;  row.linkedinUrl  = ext.linkedinUrl; }
+        if (!row.portfolioUrl && ext.portfolioUrl)       { patch.portfolioUrl = ext.portfolioUrl; row.portfolioUrl = ext.portfolioUrl; }
+        if (ext.skills.length > 0 && (!row.skills || existingSkillsHasLangs)) {
+          const joined = ext.skills.join(", ");
+          patch.skills = joined; row.skills = joined;
+        }
+        if (!row.educationDetails && ext.educations.length > 0) {
+          const json = JSON.stringify(ext.educations);
+          patch.educationDetails = json; row.educationDetails = json;
+        }
+        if (Object.keys(patch).length > 0) {
+          const setClauses: string[] = [];
+          const params: any[] = [];
+          let i = 1;
+          for (const [k, v] of Object.entries(patch)) {
+            setClauses.push(`"${k}" = $${i}`);
+            params.push(v);
+            i++;
+          }
+          params.push(id);
+          await prisma.$executeRawUnsafe(
+            `UPDATE "JobApplication" SET ${setClauses.join(", ")} WHERE id = $${i}`,
+            ...params,
+          );
+        }
+      } catch (e: any) {
+        console.error("[candidates GET] auto-backfill failed:", e?.message ?? e);
+      }
+    }
 
     const candidate = {
       ...row,
@@ -606,9 +667,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           });
           if (meet.meetingUrl) {
             meetingUrl = meet.meetingUrl;
+            // Store googleEventId too — the Reschedule + Cancel
+            // endpoints use it to patch/delete the calendar event so
+            // the candidate's existing invite updates in place
+            // instead of going stale.
             await prisma.$executeRawUnsafe(
-              `UPDATE "Interview" SET "location" = $1 WHERE "id" = $2`,
-              meetingUrl, interviewId,
+              `UPDATE "Interview" SET "location" = $1, "googleEventId" = $2 WHERE "id" = $3`,
+              meetingUrl, meet.eventId, interviewId,
             );
             location = meetingUrl;
           }

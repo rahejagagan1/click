@@ -10,6 +10,7 @@ import { DateField } from "@/components/ui/date-field";
 import EmployeePicker, { type PickerUser } from "@/components/hr/EmployeePicker";
 import HandoffSection from "@/components/hr/HandoffSection";
 import { leaveMinDate } from "@/lib/hr/leave-date-rules";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 
 const TOP_TABS = [
   { key: "home",        label: "HOME",              href: "/dashboard/hr/home"  },
@@ -47,7 +48,7 @@ export default function LeavesPage() {
   const user = session?.user as any;
   // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access + role=admin.
   const isAdmin = isHRAdmin(user);
-  const [view, setView] = useState<"my" | "team">("my");
+  const [view, setView] = useUrlTab<"my" | "team">("view", "my", ["my", "team"] as const);
   const [showApply, setShowApply] = useState(false);
   const [showCompOff, setShowCompOff] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<number | null>(null);

@@ -312,6 +312,33 @@ export default function JobApplyPage() {
         setForm((f) => ({ ...f, experienceYears: String(p.experienceYears) }));
         filled.push("Experience");
       }
+      // Education — only auto-fill when the candidate hasn't already
+      // added entries by hand. Each extracted entry maps 1:1 to the
+      // EducationEntry shape the form's repeatable sub-form uses.
+      if (Array.isArray(p.educations) && p.educations.length > 0) {
+        setEducations((prev) => {
+          if (prev.length > 0) return prev;
+          return p.educations.map((e: any) => ({
+            course:        String(e?.course ?? ""),
+            branch:        String(e?.branch ?? ""),
+            startOfCourse: String(e?.startOfCourse ?? ""),
+            endOfCourse:   String(e?.endOfCourse ?? ""),
+            university:    String(e?.university ?? ""),
+            location:      String(e?.location ?? ""),
+          }));
+        });
+        filled.push("Education");
+      }
+      // Skills — extracted as a flat string[]. Push them into the
+      // chip state AND mirror to form.skills (comma-separated) so the
+      // existing submit-time serialization picks them up.
+      if (Array.isArray(p.skills) && p.skills.length > 0) {
+        setSkills((prev) => (prev.length > 0 ? prev : p.skills));
+        if (skills.length === 0) {
+          setForm((f) => ({ ...f, skills: (p.skills as string[]).join(", ") }));
+        }
+        filled.push("Skills");
+      }
       setParsedFields(filled);
     } catch {
       // Non-fatal — the resume file is still attached, the candidate
@@ -785,7 +812,13 @@ export default function JobApplyPage() {
                 label="Expected Salary"
                 amount={form.expectedSalary ?? ""}
                 currency={form.expectedSalaryCurrency ?? "INR"}
-                freq={form.expectedSalaryFreq ?? "monthly"}
+                // Default to annual — candidates in India typically
+                // quote their expected package as LPA (e.g. "10 LPA"
+                // = 10,00,000/year). Defaulting to monthly was
+                // causing applicants to type their annual figure
+                // while leaving the unit on "Monthly", which
+                // inflated the captured expectation 12x.
+                freq={form.expectedSalaryFreq ?? "annual"}
                 onAmount={(v) => set("expectedSalary", v)}
                 onCurrency={(v) => set("expectedSalaryCurrency", v)}
                 onFreq={(v) => set("expectedSalaryFreq", v)}

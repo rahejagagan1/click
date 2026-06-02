@@ -8,6 +8,7 @@
 import { useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import { Mail, ChevronDown, ChevronRight, Edit3, Trash2, Plus, Save, X, ToggleLeft, ToggleRight, Upload, FileText, GripVertical } from "lucide-react";
 
 type Stage = { id: number; key: string; label: string; sortOrder: number; kind: string; color: string; isActive: boolean };
@@ -32,7 +33,12 @@ const TRIGGER_LABELS: Record<string, string> = {
 // tags can't escape the iframe sandbox.
 
 export default function SettingsTab() {
-  const [section, setSection] = useState<"stages" | "templates" | "form">("templates");
+  // URL-synced so refresh on Stages / Templates / Form returns to
+  // the same section. Distinct from outer "tab" param.
+  const [section, setSection] = useUrlTab<"stages" | "templates" | "form">(
+    "section", "templates",
+    ["stages", "templates", "form"] as const,
+  );
 
   return (
     <div className="space-y-5">

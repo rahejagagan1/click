@@ -104,3 +104,50 @@ export function isGoogleMeetConfigured(): boolean {
     process.env.GOOGLE_MEET_REFRESH_TOKEN,
   );
 }
+
+interface UpdateMeetArgs {
+  eventId:      string;
+  summary?:     string;
+  description?: string;
+  startISO?:    string;
+  endISO?:      string;
+  timeZone?:    string;
+}
+
+/**
+ * Patch a previously-created event — used when HR reschedules.
+ * Only fields the caller passes are touched; the Meet link survives a
+ * time change because we patch instead of recreating.
+ */
+export async function updateGoogleMeetEvent(a: UpdateMeetArgs): Promise<void> {
+  const cal = getCalendarClient();
+  const calendarId = process.env.GOOGLE_MEET_CALENDAR_ID || "primary";
+  const body: Record<string, unknown> = {};
+  if (a.summary     !== undefined) body.summary     = a.summary;
+  if (a.description !== undefined) body.description = a.description;
+  if (a.startISO)                  body.start       = { dateTime: a.startISO, timeZone: a.timeZone ?? "Asia/Kolkata" };
+  if (a.endISO)                    body.end         = { dateTime: a.endISO,   timeZone: a.timeZone ?? "Asia/Kolkata" };
+  await cal.events.patch({
+    calendarId,
+    eventId:    a.eventId,
+    sendUpdates: "none",
+    requestBody: body,
+  });
+}
+
+/**
+ * Hard-delete the event when HR cancels an interview. Soft-fails on
+ * 404/410 (already gone) so the caller can proceed with marking the
+ * row cancelled even if Google's already lost the event.
+ */
+export async function deleteGoogleMeetEvent(eventId: string): Promise<void> {
+  const cal = getCalendarClient();
+  const calendarId = process.env.GOOGLE_MEET_CALENDAR_ID || "primary";
+  try {
+    await cal.events.delete({ calendarId, eventId, sendUpdates: "none" });
+  } catch (e: any) {
+    const code = e?.code ?? e?.response?.status;
+    if (code === 404 || code === 410) return; // already gone
+    throw e;
+  }
+}

@@ -76,3 +76,11 @@ logs/
 *.log
 # Added by code-review-graph
 .code-review-graph/
+
+# Tesseract.js language models — downloaded at runtime on first
+# OCR call. ~10MB, never belongs in the repo.
+*.traineddata
+
+# Local probe / smoke-test artifacts produced by scripts/
+/tmp-*.pdf
+/tmp-*.docx

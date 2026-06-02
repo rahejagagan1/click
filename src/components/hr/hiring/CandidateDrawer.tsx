@@ -27,6 +27,7 @@ import useSWR, { mutate as globalMutate } from "swr";
 import { useSession } from "next-auth/react";
 import { isHRAdmin } from "@/lib/access";
 import { fetcher } from "@/lib/swr";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import {
   X, Mail, Phone, ExternalLink, FileText, Calendar, ChevronDown,
   ChevronLeft, ChevronRight, Globe,
@@ -167,7 +168,12 @@ export default function CandidateDrawer({
   const stages = stagesData?.stages ?? [];
   const candidates = listData?.candidates ?? [];
 
-  const [tab, setTab]               = useState<"profile" | "feedback" | "documents" | "activity" | "offer">("profile");
+  // URL-synced so reload (or shared link) returns to the same drawer tab.
+  // Key "pane" to avoid colliding with the outer hiring "tab" param.
+  const [tab, setTab] = useUrlTab<"profile" | "feedback" | "documents" | "activity" | "offer">(
+    "pane", "profile",
+    ["profile", "feedback", "documents", "activity", "offer"] as const,
+  );
   const [scheduleMode, setScheduleMode] = useState<"online" | "face_to_face" | "self_schedule" | null>(null);
   const [archiveOpen, setArchiveOpen]   = useState(false);
   const [scheduleMenuOpen, setScheduleMenuOpen] = useState(false);
@@ -531,16 +537,18 @@ function MoreMenuItem({ label, onClick, disabled }: { label: string; onClick: ()
 
 function ProfileTab({ c }: { c: Candidate }) {
   const resumeHref = safeUrl(c.resumeUrl);
-  // We only attempt to inline-preview PDFs. DOC/DOCX render is best
-  // handled by the user opening in a new tab.
-  //
-  // After the resume-in-DB migration the URL is an API path with no
-  // file extension (e.g. /api/hr/hiring/resumes/2), so the original
-  // URL-suffix check returned false and HR saw the "Click to open"
-  // fallback. Fall back to the candidate's stored filename when the
-  // URL doesn't carry an extension.
+  // Inline-preview eligibility:
+  //   1. The new in-DB resume API (`/api/hr/hiring/resumes/<id>`)
+  //      ALWAYS responds with a PDF — the endpoint auto-converts .doc
+  //      / .docx via LibreOffice (or Word COM on Windows dev) before
+  //      sending the bytes back. So if the URL points there, trust it
+  //      and render the iframe regardless of the original filename
+  //      extension.
+  //   2. Legacy /uploads/resumes/<uuid>.pdf static URLs predate the
+  //      conversion path — keep the extension-based heuristic there.
   const isPdf = !!(
     resumeHref && (
+      /^\/api\/hr\/hiring\/resumes\//i.test(resumeHref) ||
       /\.pdf(\?|$)/i.test(resumeHref) ||
       /\.pdf$/i.test(c.resumeFileName ?? "")
     )

@@ -66,6 +66,15 @@ async function extractText(file: File): Promise<string> {
     });
     const doc = await loadingTask.promise;
     const pages: string[] = [];
+    // PDF link hyperlinks live in PER-PAGE ANNOTATIONS, not in the
+    // text stream. Many designed resumes only show icons (no visible
+    // URL text), and even when the URL IS rendered as text, pdfjs
+    // often splits it into one-glyph-per-item (causing the LinkedIn /
+    // GitHub regex to fail because the dots and slashes land on
+    // separate lines after reconstruction). Collect annotation URLs
+    // separately and append them at the end — the existing regexes
+    // pick them up cleanly.
+    const annotUrls = new Set<string>();
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i);
       const content = await page.getTextContent();
@@ -88,10 +97,27 @@ async function extractText(file: File): Promise<string> {
         if (y != null) lastY = y;
       }
       pages.push(buf);
+      // Collect hyperlink annotations — covers icon-only social links
+      // and PDFs where the URL text is glyph-shredded by pdfjs. Each
+      // annotation looks like { subtype: "Link", url: "https://..." }.
+      try {
+        const annots = await page.getAnnotations();
+        type PdfAnnot = { url?: string; subtype?: string };
+        for (const a of annots as PdfAnnot[]) {
+          if (a.url) annotUrls.add(a.url);
+        }
+      } catch {
+        // Some PDFs throw on getAnnotations(); ignore + continue.
+      }
       page.cleanup();
     }
     await doc.destroy();
-    return pages.join("\n");
+    // Append annotation URLs as their own line block so the regexes
+    // running against the joined text find them.
+    const tail = annotUrls.size > 0
+      ? "\n\n" + [...annotUrls].join("\n")
+      : "";
+    return pages.join("\n") + tail;
   }
   if (ext === ".docx") {
     const mammoth = await import("mammoth");
@@ -187,6 +213,317 @@ function splitName(full: string): { first: string; middle: string; last: string 
   return { first: parts[0], middle: parts.slice(1, -1).join(" "), last: parts[parts.length - 1] };
 }
 
+// ── Section extraction ───────────────────────────────────────────────
+// Resumes typically split into named blocks: EDUCATION, SKILLS, etc.
+// Find the heading line for a section, then take everything until the
+// next heading. Headings are detected by short uppercase-or-titlecase
+// lines that match well-known labels. Returns "" when no section.
+const SECTION_HEADINGS = [
+  // listed roughly in the order they appear so adjacency boundaries work
+  "summary", "objective", "profile", "about me",
+  "experience", "work experience", "professional experience", "employment",
+  "work history", "career history", "career",
+  "education", "academic", "qualifications", "academics",
+  "skills", "technical skills", "core skills", "key skills", "expertise", "key competencies",
+  "languages", "languages known",
+  "projects", "personal projects", "key projects",
+  "certifications", "certificates", "courses",
+  "achievements", "awards", "accomplishments",
+  "hobbies", "interests",
+  "references", "contact", "personal details",
+  "responsibilities", "key responsibilities",
+];
+
+function isHeadingLine(line: string): { kind: string | null; raw: string } {
+  const t = line.trim().replace(/[:•·\-_=*]+$/g, "").trim();
+  if (t.length < 3 || t.length > 40) return { kind: null, raw: line };
+  // Heuristic: heading lines are short + don't contain commas/digits/periods
+  // and match one of the canonical labels (case-insensitive).
+  const norm = t.toLowerCase();
+  for (const h of SECTION_HEADINGS) {
+    if (norm === h || norm === h.toUpperCase()) return { kind: h, raw: line };
+    // Allow "Education:" / "EDUCATION" / "Education -"
+    if (norm.replace(/[^\w\s]/g, "").trim() === h) return { kind: h, raw: line };
+  }
+  return { kind: null, raw: line };
+}
+
+function extractSection(text: string, names: string[]): string {
+  const lines = text.split(/\r?\n/);
+  const wanted = names.map((n) => n.toLowerCase());
+  let startLine = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const { kind } = isHeadingLine(lines[i]);
+    if (kind && wanted.includes(kind)) { startLine = i + 1; break; }
+  }
+  if (startLine === -1) return "";
+  let endLine = lines.length;
+  for (let i = startLine; i < lines.length; i++) {
+    const { kind } = isHeadingLine(lines[i]);
+    if (kind && !wanted.includes(kind)) { endLine = i; break; }
+  }
+  return lines.slice(startLine, endLine).join("\n").trim();
+}
+
+// ── Education ─────────────────────────────────────────────────────────
+// Parse the EDUCATION block into the structured EducationEntry[] shape
+// the apply form expects: { course, branch, startOfCourse, endOfCourse,
+// university, location }. Heuristics rather than ML — covers the
+// common Indian resume shapes (Bachelor / Master / Diploma / MBA / BCA
+// + a University/Institute/College name + a year range).
+type ExtractedEducation = {
+  course: string;
+  branch: string;
+  startOfCourse: string;
+  endOfCourse: string;
+  university: string;
+  location: string;
+};
+
+// Accept common misspellings — "Bachlor" (missing e) shows up on a
+// surprising number of real resumes. Same for "Bachelours" / "Masters".
+const DEGREE_PATTERNS = [
+  /\b(Bach(?:e?l|elo|elor)(?:o?u?r)?s?(?:'s)?(?:\s+of\s+[\w ]+?)?(?:\s+\([A-Z]+\))?)\b/i,
+  /\b(Mast(?:e?r|ers?)(?:'s)?(?:\s+of\s+[\w ]+?)?(?:\s+\([A-Z]+\))?)\b/i,
+  /\b(MBA|BBA|BCA|MCA|BSc|MSc|B\.?Sc|M\.?Sc|B\.?A|M\.?A|B\.?Com|M\.?Com|B\.?Tech|M\.?Tech|B\.?E|M\.?E|PhD|Doctorate|Diploma|HSC|SSC|XII|X|10\+2|12th|10th|Postgraduate|Undergraduate)\b/i,
+];
+
+// Heal pdfjs's fragmentation:
+//   • Collapse multiple spaces to one.
+//   • Re-glue split years: "202 3" → "2023" (single-digit run inside
+//     what should be a 4-digit year).
+//   • Re-glue lone-uppercase + lowercase tail: "B usiness" → "Business".
+//   • Strip the rogue half-space pdfjs inserts before "%": "84.6 %" → "84.6%".
+function healFragmentedText(s: string): string {
+  let out = s;
+  out = out.replace(/[ \t]+/g, " ");
+  // "B usiness" → "Business"  (single capital, space, lowercase word)
+  out = out.replace(/\b([A-Z]) ([a-z]{3,})\b/g, "$1$2");
+  // Years like "20 23", "202 3", or "2 023" → "2023". A year is
+  // exactly 4 digits with optional spaces between any of them; the
+  // (19|20) prefix anchors the match so this doesn't grab random
+  // 4-digit numeric runs.
+  out = out.replace(/\b(19|20)\s?(\d)\s?(\d)\b/g, "$1$2$3");
+  // Second pass: covers the variant where pdfjs split the prefix
+  // itself ("20 23" instead of "202 3").
+  out = out.replace(/\b(1|2)\s+(9|0)\s?(\d)\s?(\d)\b/g, "$1$2$3$4");
+  // "84.6 %" → "84.6%"
+  out = out.replace(/(\d)\s+%/g, "$1%");
+  return out;
+}
+
+function parseEducations(section: string): ExtractedEducation[] {
+  if (!section.trim()) return [];
+
+  // Step 1 — heal fragmentation PER LINE so newlines (which separate
+  // distinct entries inside the section) are preserved. An earlier
+  // attempt joined paragraphs with whitespace and ended up gluing
+  // three completely separate education entries into one merged
+  // university string. Only collapse intra-line spacing here.
+  const lines = section
+    .split(/\r?\n/)
+    .map((l) => healFragmentedText(l.trim()))
+    .filter(Boolean);
+
+  // Step 2 — group lines into entries. The robust signal is a
+  // UNIVERSITY/INSTITUTE/COLLEGE/SCHOOL line — that always starts a
+  // new entry. Degree lines (Bachelor / XII / X) belong to whichever
+  // university line came right before them, so they DON'T flush.
+  const entries: string[][] = [];
+  let cur: string[] = [];
+  const flush = () => { if (cur.length) { entries.push(cur); cur = []; } };
+  for (const line of lines) {
+    const hasUni = /\b(University|Institute|College|Polytechnic|Academy|School)\b/i.test(line);
+    if (hasUni && cur.length > 0) flush();
+    cur.push(line);
+  }
+  flush();
+
+  const results: ExtractedEducation[] = [];
+  for (const block of entries) {
+    const text = block.join(" ");
+
+    // ── Year range ────────────────────────────────────────────────
+    // Tolerant of healed-but-still-spaced variants: "2023 – 2026",
+    // "2023-2026", "Sept 2020 – May 2024" (years only).
+    let startOfCourse = "";
+    let endOfCourse   = "";
+    const yearRange = text.match(/(19|20)\d{2}\s*(?:[-–—]|to)\s*(?:(?:19|20)\d{2}|present|current)/i);
+    if (yearRange) {
+      const ys = yearRange[0].match(/(19|20)\d{2}/g) ?? [];
+      startOfCourse = ys[0] ?? "";
+      endOfCourse   = ys[1] ?? (/present|current/i.test(yearRange[0]) ? "Present" : "");
+    } else {
+      const single = text.match(/(19|20)\d{2}/);
+      if (single) endOfCourse = single[0];
+    }
+
+    // ── Degree / course ──────────────────────────────────────────
+    // Capture the degree keyword PLUS what follows "of" so we get the
+    // full phrase ("Bachelor of Business Administration"). Stop at
+    // " — ", "—", "-", "|" or "," — they typically separate the
+    // degree from CGPA / honors / institution.
+    let course = "";
+    let branch = "";
+    const courseMatch = text.match(/(Bach(?:e?l|elo|elor)(?:o?u?r)?s?|Mast(?:e?r|ers?))[A-Za-z'’ ]*?(?:\s+of\s+([A-Za-z& ]{3,80}?))?(?=\s*(?:—|–|-|\||,|CGPA|GPA|Percentage|$))/i);
+    if (courseMatch) {
+      course = courseMatch[0].trim();
+      if (courseMatch[2]) branch = courseMatch[2].trim();
+    }
+    if (!course) {
+      // Fall back to short-form abbreviations.
+      const abbrev = text.match(/\b(MBA|BBA|BCA|MCA|BSc|MSc|B\.?Tech|M\.?Tech|B\.?A|M\.?A|B\.?Com|M\.?Com|PhD|Diploma|XII|X|10\+2|12th|10th)\b/i);
+      if (abbrev) course = abbrev[0];
+    }
+
+    // ── University name ──────────────────────────────────────────
+    // The line containing the university keyword. Strip any trailing
+    // year range so we don't end up with "Lovely Prof Univ 2023 – 2026".
+    let university = "";
+    const uniLine = block.find((l) =>
+      /\b(University|Institute|College|Polytechnic|Academy|School)\b/i.test(l),
+    );
+    if (uniLine) {
+      university = uniLine
+        .replace(/\(?\s*(19|20)\d{2}\s*[-–—]\s*(?:(19|20)\d{2}|present|current)\s*\)?/i, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    // ── Location ─────────────────────────────────────────────────
+    // "Phagwara, Punjab" pattern at the end of the degree line. Look
+    // for "<City>, <State>" near the end; reject if it overlaps the
+    // CGPA fragment.
+    let location = "";
+    const locMatch = text.match(/([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)?,\s*[A-Z][a-zA-Z]+)\s*$/);
+    if (locMatch) location = locMatch[1].trim();
+
+    // Keep an entry only when we have *something* useful.
+    if (course || university) {
+      results.push({ course, branch, startOfCourse, endOfCourse, university, location });
+    }
+  }
+  return results.slice(0, 6);
+}
+
+// Last-resort fallback for resumes where pdfjs couldn't read the bold
+// degree line at all (font rendered as vector outlines). Scan the
+// whole document for university-name + year-range pairs and emit
+// minimal entries — better than the empty state.
+function scanEducationByUniversityYear(text: string): ExtractedEducation[] {
+  const lines = text.split(/\n/).map(l => healFragmentedText(l)).filter(l => l.trim());
+  const out: ExtractedEducation[] = [];
+  for (const line of lines) {
+    if (!/\b(University|Institute|College|Polytechnic|Academy)\b/i.test(line)) continue;
+    const yr = line.match(/(19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|present|current)/i);
+    if (!yr) continue;
+    const ys = yr[0].match(/(19|20)\d{2}/g) ?? [];
+    const startOfCourse = ys[0] ?? "";
+    const endOfCourse   = ys[1] ?? (/present|current/i.test(yr[0]) ? "Present" : "");
+    const university = line
+      .replace(/\(?\s*(19|20)\d{2}\s*[-–—]\s*(?:(19|20)\d{2}|present|current)\s*\)?/i, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    out.push({ course: "", branch: "", startOfCourse, endOfCourse, university, location: "" });
+  }
+  return out.slice(0, 6);
+}
+
+// ── Skills + Languages ────────────────────────────────────────────────
+// Take the SKILLS (and LANGUAGES) sections and flatten into a string[]
+// the apply form's chip input expects. Tolerant of every common bullet
+// style (•, ·, ▪, *, -, –, —) AND of bullet characters appearing
+// BETWEEN items on the same line ("Skill A • Skill B • Skill C").
+//
+// Aggressive filtering so we don't pollute the chip list with stray
+// sentences from the work-experience block that follows when the
+// SKILLS section's terminating heading isn't recognised:
+//   • Reject anything longer than 5 words (skills are short labels).
+//   • Reject items containing @ (emails), digits (years/phones),
+//     a phone-shaped run, or sentence-like punctuation (periods,
+//     except for "C++" / "C#" style trailing chars).
+//   • Reject items that LOOK like job titles ("Relationship Manager",
+//     "Software Engineer") — they're work history.
+//   • Reject 1-character tokens (cut-off email/phone fragments).
+//   • Hard cap at 20 to discourage runaway extraction.
+const JOB_TITLE_HINTS = /\b(Manager|Engineer|Officer|Analyst|Specialist|Associate|Consultant|Director|Executive|Lead|Head|Coordinator|Representative|Assistant|Intern)\b/i;
+
+// Language names that should NEVER appear under SKILLS — they're a
+// separate category and confuse HR when mixed in.
+const KNOWN_LANGUAGE_NAMES = new Set([
+  "english","hindi","punjabi","tamil","telugu","kannada","malayalam","marathi","gujarati",
+  "bengali","odia","assamese","sanskrit","urdu",
+  "spanish","french","german","italian","portuguese","russian","chinese","mandarin","cantonese",
+  "japanese","korean","arabic","dutch","swedish","norwegian","danish","polish","turkish",
+  "vietnamese","thai","indonesian","malay","hebrew","greek","czech","hungarian","finnish",
+]);
+
+function looksLikeSkill(s: string): boolean {
+  if (s.length < 2 || s.length > 40) return false;
+  const words = s.split(/\s+/);
+  if (words.length > 5) return false;            // sentences ≠ skills
+  if (/@/.test(s))                  return false; // emails
+  if (/\d{4,}/.test(s))             return false; // 4+ digit runs (years, IDs, phones)
+  if (/\+?\d[\d\s-]{6,}/.test(s))   return false; // phone-shaped
+  if (/[.!?]/.test(s))              return false; // sentence punctuation
+  if (JOB_TITLE_HINTS.test(s))      return false; // job titles slipped in
+  if (/^[a-z]{1,2}$/i.test(s))      return false; // single letters / "m"
+  if (/^(WORK|HISTORY|EXPERIENCE|EDUCATION|PROFILE|CONTACT|PROJECTS|HOBBIES|REFERENCES|TAGS|SUMMARY)$/i.test(s)) return false;
+  // Reject language names — they belong under LANGUAGES, not SKILLS.
+  if (KNOWN_LANGUAGE_NAMES.has(s.toLowerCase())) return false;
+  return true;
+}
+
+function parseSkills(text: string): string[] {
+  // SKILLS section ONLY — languages live in their own section and
+  // mixing them confuses HR. We additionally filter out any token
+  // that happens to be a recognised language name even when it
+  // appears inside the SKILLS section (defensive guard).
+  const sections = [
+    extractSection(text, ["skills", "technical skills", "core skills", "key skills", "expertise", "key competencies"]),
+  ];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const sec of sections) {
+    if (!sec.trim()) continue;
+    // Line-continuation pass: when a line ends with a connecting
+    // word ("and", "or", "of", "for", "with", "to", "&"), join the
+    // next non-empty line onto it. Many resumes wrap a single skill
+    // across two visual lines (e.g. "Relationship building and /
+    // management" lands as two text-extraction items).
+    const rawLines = sec.split(/\r?\n/);
+    const merged: string[] = [];
+    for (const ln of rawLines) {
+      const t = ln.trim();
+      if (!t) { merged.push(""); continue; }
+      const prev = merged[merged.length - 1];
+      if (prev && /\b(and|or|of|for|with|to|&)$/i.test(prev)) {
+        merged[merged.length - 1] = prev + " " + t;
+      } else {
+        merged.push(t);
+      }
+    }
+    const tokens = merged
+      // Strip leading bullet markers AND split on inline bullets so
+      // "Skill A • Skill B" becomes two items rather than one item
+      // with a "• Skill B" tail.
+      .flatMap((l) => l.split(/[•·▪►★]/))
+      .map((l) => l.replace(/^[\s*\-–—]+/, "").trim())
+      .flatMap((l) => l.split(/[,|;/]/))
+      .map((t) => t.trim())
+      .filter(Boolean);
+    for (const t of tokens) {
+      const cleaned = t.replace(/[:.;]+$/, "").replace(/\s+/g, " ").trim();
+      if (!looksLikeSkill(cleaned)) continue;
+      const key = cleaned.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(cleaned);
+    }
+  }
+  return out.slice(0, 20);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
@@ -251,15 +588,44 @@ export async function POST(req: NextRequest) {
       else   { phone = phoneRaw; }
     }
 
+    // URL extraction needs to look at two different views of the text.
+    // (1) `text` — the line-broken version that preserves layout (used
+    // by the heading/section detection above).
+    // (2) `compact` — all whitespace stripped. pdfjs frequently shreds
+    // URLs into one-glyph-per-item (each ".", "/", "https", "com"
+    // landing on its own line in `text`). Joining without separators
+    // recovers the URL string so the regexes can match it. We insert
+    // a space BEFORE each `https://` / `http://` so consecutive URLs
+    // (e.g. LinkedIn followed by GitHub) terminate cleanly — otherwise
+    // they'd glue into one super-string and the handle regex would
+    // over-match into the next URL's scheme.
+    const compact = text.replace(/\s+/g, "").replace(/(https?:\/\/)/gi, " $1");
+
     // LinkedIn URL: linkedin.com/in/<handle>
-    const linkedinMatch = text.match(/(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/[A-Za-z0-9_-]+\/?/i);
+    const linkedinMatch =
+      text.match(/(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/[A-Za-z0-9_-]+\/?/i) ||
+      compact.match(/(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/[A-Za-z0-9_-]+\/?/i);
     const linkedinUrl = linkedinMatch?.[0]
       ? (linkedinMatch[0].startsWith("http") ? linkedinMatch[0] : "https://" + linkedinMatch[0])
       : null;
 
-    // Portfolio URL — first non-LinkedIn http(s) link.
-    const urlMatch = text.match(/https?:\/\/[^\s,;)]+/gi) || [];
-    const portfolioUrl = urlMatch
+    // GitHub URL — common on developer resumes; treat as the portfolio
+    // when nothing else is around.
+    const githubMatch =
+      text.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/[A-Za-z0-9_-]+\/?/i) ||
+      compact.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/[A-Za-z0-9_-]+\/?/i);
+    const githubUrl = githubMatch?.[0]
+      ? (githubMatch[0].startsWith("http") ? githubMatch[0] : "https://" + githubMatch[0])
+      : null;
+
+    // Portfolio URL — first non-LinkedIn http(s) link. Prefer the
+    // GitHub URL when we have one, since dev resumes usually want
+    // that surfaced first.
+    const allUrls = [
+      ...(text.match(/https?:\/\/[^\s,;)]+/gi) || []),
+      ...(compact.match(/https?:\/\/[^\s,;)]+/gi) || []),
+    ];
+    const portfolioUrl = githubUrl ?? allUrls
       .filter(u => !/linkedin\.com/i.test(u))
       .filter(u => !u.endsWith(".pdf") && !u.endsWith(".doc") && !u.endsWith(".docx"))[0] ?? null;
 
@@ -273,6 +639,22 @@ export async function POST(req: NextRequest) {
     const yearsMatch = text.match(/(\d{1,2})\+?\s*(?:yrs?|years?)\s+(?:of\s+)?experience/i);
     const experienceYears = yearsMatch ? Math.min(60, parseInt(yearsMatch[1], 10)) : null;
 
+    // Education + skills — best-effort structured extraction so the
+    // candidate doesn't have to retype what's already on their CV.
+    const educationSection = extractSection(text, ["education", "academic", "qualifications", "academics"]);
+    let educations = parseEducations(educationSection);
+    // Fallback: many resumes render their bold section headings + the
+    // degree name as VECTOR OUTLINES instead of selectable text, so
+    // pdfjs returns the text content with "EDUCATION" and "Bachelor
+    // of …" completely missing. The university-name + year-range line
+    // is usually plain-weight text and DOES come through. Scan the
+    // whole document for that pattern when the structured extractor
+    // came up empty, so candidates still get an entry.
+    if (educations.length === 0) {
+      educations = scanEducationByUniversityYear(text);
+    }
+    const skills     = parseSkills(text);
+
     return NextResponse.json({
       parsed: {
         firstName:  first  || null,
@@ -285,6 +667,8 @@ export async function POST(req: NextRequest) {
         linkedinUrl,
         portfolioUrl,
         experienceYears,
+        educations,
+        skills,
       },
     });
   } catch (e: any) {
