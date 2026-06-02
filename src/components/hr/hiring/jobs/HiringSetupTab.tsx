@@ -5,10 +5,10 @@
 // is fully built; the others stub a friendly placeholder so HR can
 // see what's coming.
 
-import { useState } from "react";
 import { FileText, Users, Workflow, ClipboardList } from "lucide-react";
 import ApplicationFormPanel from "./ApplicationFormPanel";
 import StubTab from "./StubTab";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 
 type SetupTabKey = "form" | "team" | "flow" | "scorecard";
 
@@ -18,9 +18,11 @@ const SUB_TABS: { key: SetupTabKey; label: string; Icon: any }[] = [
   { key: "flow",      label: "Hiring Flow",      Icon: Workflow      },
   { key: "scorecard", label: "Scorecard",        Icon: ClipboardList },
 ];
+const SUB_KEYS = SUB_TABS.map((t) => t.key) as readonly SetupTabKey[];
 
 export default function HiringSetupTab({ jobId }: { jobId: number }) {
-  const [sub, setSub] = useState<SetupTabKey>("form");
+  // URL-synced via "setup" param — distinct from outer "tab" param.
+  const [sub, setSub] = useUrlTab<SetupTabKey>("setup", "form", SUB_KEYS);
   return (
     <div className="space-y-5">
       {/* Sub-tab pills */}

@@ -8,6 +8,7 @@ import {
     type YoutubeDashUserLike,
 } from "@/lib/youtube-dashboard-access";
 import ChannelQuarterAnalysisSection from "./channel-quarter-modal";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import {
     Bar,
     BarChart,
@@ -183,7 +184,7 @@ export default function YoutubeDashboardPage() {
     const { data: session } = useSession();
     const sessionUser = session?.user as YoutubeDashUserLike | undefined;
     const showDeveloperTab = userCanAccessYoutubeDeveloperAnalytics(sessionUser);
-    const [viewMode, setViewMode] = useState<"production" | "developer">("production");
+    const [viewMode, setViewMode] = useUrlTab<"production" | "developer">("view", "production", ["production", "developer"] as const);
 
     const chartTheme = useChartTheme();
     const now = useMemo(() => new Date(), []);
