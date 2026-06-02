@@ -231,13 +231,68 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         const patch: Record<string, any> = {};
         if (!row.linkedinUrl  && ext.linkedinUrl)        { patch.linkedinUrl  = ext.linkedinUrl;  row.linkedinUrl  = ext.linkedinUrl; }
         if (!row.portfolioUrl && ext.portfolioUrl)       { patch.portfolioUrl = ext.portfolioUrl; row.portfolioUrl = ext.portfolioUrl; }
-        if (ext.skills.length > 0 && (!row.skills || existingSkillsHasLangs)) {
-          const joined = ext.skills.join(", ");
-          patch.skills = joined; row.skills = joined;
+
+        // Skills strategy:
+        //  • Empty column → just write the extracted list.
+        //  • Polluted with language names → wipe + rewrite (the
+        //    older parser dumped Hindi/English here by mistake).
+        //  • Otherwise MERGE manual + resume-extracted, case-
+        //    insensitive dedupe, manual entries first. Manual
+        //    entries on the apply form (or HR's hand-typed tags)
+        //    are kept; the resume's additional skills get appended.
+        if (ext.skills.length > 0) {
+          if (!row.skills) {
+            const joined = ext.skills.join(", ");
+            patch.skills = joined; row.skills = joined;
+          } else if (existingSkillsHasLangs) {
+            const joined = ext.skills.join(", ");
+            patch.skills = joined; row.skills = joined;
+          } else {
+            const current = String(row.skills)
+              .split(/,\s*/)
+              .map((s) => s.trim())
+              .filter(Boolean);
+            const seen = new Set(current.map((s) => s.toLowerCase()));
+            const merged = [...current];
+            for (const s of ext.skills) {
+              if (!seen.has(s.toLowerCase())) {
+                merged.push(s);
+                seen.add(s.toLowerCase());
+              }
+            }
+            // Only write if we actually have new ones — otherwise
+            // skip the UPDATE entirely so we don't churn the row.
+            if (merged.length > current.length) {
+              const joined = merged.join(", ");
+              patch.skills = joined; row.skills = joined;
+            }
+          }
         }
-        if (!row.educationDetails && ext.educations.length > 0) {
-          const json = JSON.stringify(ext.educations);
-          patch.educationDetails = json; row.educationDetails = json;
+
+        // Education strategy:
+        //  • Empty → write the extractor result.
+        //  • Existing rows all have empty `course` strings BUT the
+        //    new extractor surfaces a course → upgrade (typical for
+        //    legacy rows parsed before the OCR / letter-spacing fix).
+        //  • Otherwise leave alone — HR may have hand-edited.
+        if (ext.educations.length > 0) {
+          let shouldWriteEdu = false;
+          if (!row.educationDetails) {
+            shouldWriteEdu = true;
+          } else {
+            try {
+              const cur = JSON.parse(row.educationDetails);
+              if (Array.isArray(cur) && cur.length > 0) {
+                const allCourseless = cur.every((e: any) => !e?.course || String(e.course).trim() === "");
+                const newHasCourse  = ext.educations.some((e) => e.course && e.course.trim() !== "");
+                if (allCourseless && newHasCourse) shouldWriteEdu = true;
+              }
+            } catch { /* leave alone on parse error */ }
+          }
+          if (shouldWriteEdu) {
+            const json = JSON.stringify(ext.educations);
+            patch.educationDetails = json; row.educationDetails = json;
+          }
         }
         if (Object.keys(patch).length > 0) {
           const setClauses: string[] = [];

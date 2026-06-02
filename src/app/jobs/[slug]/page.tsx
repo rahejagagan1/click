@@ -228,9 +228,6 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
   const jdUrl = `/api/public/jd/${slug}?v=${jdRev}`;
 
   const brand = brandLabel(job.brand);
-  const publishedLabel = job.publishedAt
-    ? new Date(job.publishedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
-    : null;
   const closesLabel = job.closesAt
     ? new Date(job.closesAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
     : null;
@@ -386,9 +383,10 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
               )}
             </div>
 
-            {/* Tertiary row — Share + Posted date. On mobile this is
-                a separate row beneath the primary CTAs; on desktop it
-                inlines with them. */}
+            {/* Tertiary row — Share only. The posted-date chip was
+                dropped: a stale posted date can make a still-open
+                role look forgotten, and "Closes" already conveys
+                the urgency that matters to candidates. */}
             <div className="mt-3 sm:mt-3 flex flex-wrap items-center gap-2 sm:gap-3">
               <JobShareButton
                 title={job.title}
@@ -397,10 +395,9 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
               >
                 <Share2 size={13} /> Share
               </JobShareButton>
-              {publishedLabel && (
+              {closesLabel && (
                 <span className="text-[11.5px] sm:text-[12px] text-slate-500 inline-flex items-center gap-1.5">
-                  <Calendar size={12} /> Posted {publishedLabel}
-                  {closesLabel && <span className="hidden sm:inline"> · Closes {closesLabel}</span>}
+                  <Calendar size={12} /> Closes {closesLabel}
                 </span>
               )}
             </div>
@@ -484,30 +481,6 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
             </Reveal>
           </section>
         ) : null}
-
-        {/* About the role — short summary HR enters in the wizard.
-            Sits BELOW the full JD because once a candidate has read
-            the brief, this section serves as a quick distilled pitch
-            (and a place to surface HR's framing if the JD itself is
-            light). */}
-        <section className="">
-          <Reveal direction="up" className="w-full">
-            <Card>
-              <CardHeader title="About the role" eyebrow="The opportunity" />
-              <div className="px-5 sm:px-10 pb-7 sm:pb-10">
-                {job.description && job.description.trim() ? (
-                  <div className="text-[14px] sm:text-[15px] text-slate-700 leading-[1.8] whitespace-pre-wrap max-w-3xl break-words">
-                    {job.description}
-                  </div>
-                ) : (
-                  <div className="text-[13.5px] sm:text-[14px] text-slate-600 leading-[1.75] rounded-xl bg-slate-50 border border-slate-100 px-4 sm:px-5 py-4 max-w-3xl">
-                    Full role description is shared at the interview stage. If this opportunity excites you, apply and we'll send the brief along.
-                  </div>
-                )}
-              </div>
-            </Card>
-          </Reveal>
-        </section>
 
         {/* Bottom CTA — panel 6 */}
         <section className="">
@@ -801,6 +774,13 @@ type JdBlock =
   | { kind: "bullet-list"; items: string[] }
   | { kind: "numbered-list"; items: string[] };
 
+// Strip page-break artefacts left over from PDF-to-text conversion:
+//   "-- 1 of 2 --", "—— 1 of 2 ——", "Page 1 of 2", "Page 1", "1 of 2"
+// These appear when HR's source JD was a multi-page PDF and the
+// extractor inserted page-marker lines. They shouldn't render to
+// candidates.
+const PAGE_MARKER_RE = /^[\s\-–—]*(?:page\s+)?\d+(?:\s*(?:of|\/)\s*\d+)?[\s\-–—]*$/i;
+
 function parseJdBlocks(text: string): JdBlock[] {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   const out: JdBlock[] = [];
@@ -824,6 +804,7 @@ function parseJdBlocks(text: string): JdBlock[] {
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) { flushAll(); continue; }
+    if (PAGE_MARKER_RE.test(line)) { flushAll(); continue; }
 
     const bullet = line.match(/^[-*•]\s+(.*)$/);
     if (bullet) {
