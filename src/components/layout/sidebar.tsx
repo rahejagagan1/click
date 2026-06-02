@@ -365,6 +365,14 @@ export default function Sidebar() {
                         && !pathname.startsWith("/dashboard/hr/home")
                         && !pathname.startsWith("/dashboard/hr/admin")
                         && !pathname.startsWith("/dashboard/hr/assets")
+                        // Hiring lives under the Dashboard rail's
+                        // admin grouping — exclude here so the pinned
+                        // "Me" tile at the top of the rail doesn't
+                        // light up when HR is browsing the Hiring
+                        // console. (The sibling `isMeActive` at the
+                        // bottom of this file already excludes this;
+                        // both need to stay in sync.)
+                        && !pathname.startsWith("/dashboard/hr/hiring")
                         && pathname !== "/admin";
                     const homeActive = pathname === "/dashboard/hr/home" || pathname.startsWith("/dashboard/hr/home/");
                     const E = "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]";
