@@ -26,6 +26,7 @@ import {
 import { DateField } from "@/components/ui/date-field";
 import PopupPanel from "@/components/ui/PopupPanel";
 import ExitPipeline from "./ExitPipeline";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 
 type EmpProfile = {
   designation?: string | null;
@@ -50,7 +51,7 @@ export default function OffboardPage() {
   // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access.
   const canManage = isHRAdmin(me);
 
-  const [tab, setTab] = useState<"initiate" | "pipeline">("initiate");
+  const [tab, setTab] = useUrlTab<"initiate" | "pipeline">("tab", "initiate", ["initiate", "pipeline"] as const);
 
   if (!canManage) {
     return (

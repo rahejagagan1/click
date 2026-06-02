@@ -5,6 +5,7 @@ import { fetcher } from "@/lib/swr";
 import Link from "next/link";
 import { Target, Plus, ChevronDown, TrendingUp, AlertTriangle, Clock, CheckCircle2, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
 import SelectField from "@/components/ui/SelectField";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 
 const TOP_TABS = [
   { key: "home",        label: "HOME",              href: "/dashboard/hr/home"  },
@@ -238,7 +239,7 @@ function NewGoalModal({ cycles, onClose, onSave }: { cycles: any[]; onClose: () 
 }
 
 export default function GoalsPage() {
-  const [view, setView] = useState<"my" | "team" | "company">("my");
+  const [view, setView] = useUrlTab<"my" | "team" | "company">("view", "my", ["my", "team", "company"] as const);
   const [showNew, setShowNew] = useState(false);
   const [activeCycleId, setActiveCycleId] = useState<string>("");
 
