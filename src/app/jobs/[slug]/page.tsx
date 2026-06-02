@@ -513,25 +513,43 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
         <section className="">
           <Reveal direction="up" className="w-full">
             <Card>
-              <div className="px-6 sm:px-8 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <p className="text-[13.5px] font-semibold text-slate-900">Questions about this role?</p>
-                  <p className="text-[12.5px] text-slate-500 mt-0.5">We usually reply within a working day.</p>
+              <div className="px-6 sm:px-10 py-6 flex flex-col lg:flex-row lg:items-start gap-6 lg:gap-10">
+                <div className="lg:max-w-sm">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#3b82f6]">Talk to us</p>
+                  <p className="mt-1.5 text-[15px] font-semibold text-slate-900 leading-tight">
+                    Questions about this role?
+                  </p>
+                  <p className="mt-1 text-[12.5px] text-slate-500 leading-relaxed">
+                    Reach out to our hiring team — we usually reply within a working day.
+                  </p>
                 </div>
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  <a
-                    href="mailto:vanshika@nbmediaproductions.com"
-                    className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-900 text-[12.5px] font-semibold transition-colors"
-                  >
-                    <Mail size={13} /> vanshika@nbmediaproductions.com
-                  </a>
-                  <a
-                    href="mailto:tanvi@nbmediaproductions.com"
-                    className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-900 text-[12.5px] font-semibold transition-colors"
-                  >
-                    <Mail size={13} /> tanvi@nbmediaproductions.com
-                  </a>
-                </div>
+                <ul className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { name: "Vanshika", role: "HR Lead",    email: "vanshika@nbmediaproductions.com" },
+                    { name: "Tanvi",    role: "HR Manager", email: "tanvi@nbmediaproductions.com"    },
+                  ].map((c) => (
+                    <li key={c.email}>
+                      <a
+                        href={`mailto:${c.email}`}
+                        className="group flex items-center gap-3 rounded-xl border border-slate-200 hover:border-[#3b82f6]/40 hover:bg-blue-50/40 bg-white px-4 py-3 transition-colors"
+                      >
+                        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 text-[#3b82f6] ring-1 ring-blue-100 text-[12px] font-bold uppercase shrink-0">
+                          {c.name[0]}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[12.5px] font-semibold text-slate-900 leading-tight">
+                            {c.name}
+                            <span className="text-slate-400 font-medium"> · {c.role}</span>
+                          </p>
+                          <p className="text-[11.5px] text-slate-500 truncate group-hover:text-[#3b82f6] transition-colors">
+                            {c.email}
+                          </p>
+                        </div>
+                        <Mail size={13} className="text-slate-300 group-hover:text-[#3b82f6] transition-colors shrink-0" />
+                      </a>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </Card>
 
