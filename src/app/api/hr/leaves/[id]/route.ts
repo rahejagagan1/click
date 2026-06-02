@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
-import { notifyUsers } from "@/lib/notifications";
+import { notifyUsers, ceoRecipientIdForEmployee } from "@/lib/notifications";
 import { writeAuditLog } from "@/lib/audit-log";
 import { countWorkingDays } from "@/lib/hr/working-days";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
@@ -96,7 +96,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (data.fromDate || data.toDate) {
         const f = data.fromDate ?? new Date(application.fromDate);
         const t = data.toDate   ?? new Date(application.toDate);
-        data.totalDays = await countWorkingDays(f, t);
+        // Count against the leave subject's own shift calendar (mirrors the
+        // POST flow) so alternate-Saturday shifts re-count correctly when HR
+        // edits the dates. Falls back to Mon–Fri when no shift is assigned.
+        const subjectShift = await prisma.userShift.findUnique({
+          where: { userId: application.user!.id },
+          include: { shift: true },
+        });
+        data.totalDays = await countWorkingDays(f, t, subjectShift?.shift, subjectShift?.effectiveFrom);
       }
 
       const validStatuses = ["pending", "partially_approved", "approved", "rejected", "cancelled"];
@@ -279,25 +286,29 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       });
       if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
 
-      // Final approvers: CEO + Special Access + HR Manager (role).
-      // Drops orgLevel="hr_manager"-only members (e.g. HR-team folks
-      // whose role is "member") and role="admin" alone. Developer
-      // accounts gated by the "Notify developers" toggle.
+      // Final approvers: Special Access + HR Manager (role). Drops
+      // orgLevel="hr_manager"-only members (e.g. HR-team folks whose role
+      // is "member") and role="admin" alone. Developer accounts gated by
+      // the "Notify developers" toggle. The CEO is pinged for final
+      // approval only when the applicant is their OWN direct report
+      // (added below) — otherwise HR handles it.
       const finalApprovers = await prisma.user.findMany({
         where: {
           isActive: true,
+          orgLevel: { not: "ceo" },
           OR: [
-            { orgLevel: { in: ["ceo", "special_access"] } },
+            { orgLevel: "special_access" },
             { role: "hr_manager" },
             ...(await devEmailRecipientsClause()),
           ],
         },
         select: { id: true },
       });
+      const ceoFinalApprover = await ceoRecipientIdForEmployee(application.userId);
       const extras = application.notifyUserIds ?? [];
       await notifyUsers({
         actorId:  myId,
-        userIds:  [...finalApprovers.map((u) => u.id), ...extras],
+        userIds:  [...finalApprovers.map((u) => u.id), ...(ceoFinalApprover ? [ceoFinalApprover] : []), ...extras],
         type:     "leave",
         entityId: appId,
         title:    `${application.user?.name || "An employee"}'s ${application.leaveType?.name || "leave"} needs final approval`,

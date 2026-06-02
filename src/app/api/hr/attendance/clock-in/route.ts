@@ -4,7 +4,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { parseBody } from "@/lib/validate";
 import { stringifyAttLoc } from "@/lib/attendance-location";
-import { istTodayDateOnly, istHour } from "@/lib/ist-date";
+import { istTodayDateOnly, istMinutesOfDay } from "@/lib/ist-date";
 import { isMobileRequest } from "@/lib/is-mobile-device";
 import { hasDesktopBypassHeader } from "@/lib/desktop-bypass";
 import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
@@ -122,17 +122,29 @@ export async function POST(req: NextRequest) {
       prisma.wFHRequest.findFirst({ where: { userId, date: today, status: "approved" }, select: { id: true } }),
     ]);
 
+    // Late detection is per-shift: the cutoff is the shift's own startTime
+    // plus the grace window the shift defines. The admin shift form labels
+    // that field "Grace" and stores it in Shift.breakMinutes, so we read the
+    // grace from there (defaulting to 15 min if it's somehow unset).
+    //   • NB     (10:00 start, 15-min grace) → late after 10:15.
+    //   • YT Lab (11:00 start, 15-min grace) → late after 11:15, so a 10:30
+    //     punch is on time (it used to be wrongly flagged late by the old
+    //     hard-coded 10:00 AM rule).
+    // Users with NO assigned shift keep the legacy 10:00 AM IST cutoff.
+    // All comparisons are in IST minutes-of-day so the result is independent
+    // of the server's local timezone.
+    // Half-day penalty is no longer applied at clock-in — half_day status is
+    // a function of total accumulated minutes at clock-out time.
     let status = "present";
+    const nowMin = istMinutesOfDay(now);
     if (userShift?.shift) {
       const [sh, sm] = userShift.shift.startTime.split(":").map(Number);
-      const shiftStart = new Date(today);
-      shiftStart.setHours(sh, sm + 15, 0);
-      if (now > shiftStart) status = "late";
+      const grace = Number.isFinite(userShift.shift.breakMinutes) ? userShift.shift.breakMinutes : 15;
+      const lateCutoffMin = sh * 60 + sm + grace;
+      if (nowMin > lateCutoffMin) status = "late";
+    } else if (nowMin >= 10 * 60) {
+      status = "late"; // no shift assigned → legacy 10:00 AM IST cutoff
     }
-    // Hard 10:00 AM IST cutoff: first clock-in past 10 AM is flagged "late".
-    // Half-day penalty no longer applied at clock-in — half_day status is now
-    // a function of total accumulated minutes at clock-out time.
-    if (istHour(now) >= 10) status = "late";
 
     const wl = (profile?.workLocation || "office").toLowerCase();
     const isRemote = !!approvedWfh || wl === "remote" || wl === "hybrid";
