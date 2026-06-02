@@ -128,7 +128,10 @@ export default function JobsTab() {
   // names ("jobs" vs "pipeline") so the two toggles don't collide
   // when both apply (jobs index → click a job → drawer opens).
   const [view,         setView]         = useUrlTab<ViewMode>("jobs",     "grid",   ["grid", "list"] as const);
-  const [pipelineView, setPipelineView] = useUrlTab<"kanban" | "list">("pipeline", "kanban", ["kanban", "list"] as const);
+  // List is the default — HR sees every applicant in one scrollable
+  // table (including archived ones with the badge). Kanban is opt-in
+  // for HR who want the visual pipeline.
+  const [pipelineView, setPipelineView] = useUrlTab<"kanban" | "list">("pipeline", "list", ["kanban", "list"] as const);
   const [activeJob, setActiveJob]   = useState<Job | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
