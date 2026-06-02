@@ -12,7 +12,7 @@ import { useMemo, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import {
-  Mail, Phone, Briefcase, Star, Clock, ChevronUp, ChevronDown, FileText, Users,
+  Mail, Phone, Briefcase, Star, Clock, ChevronUp, ChevronDown, FileText, Users, Archive,
 } from "lucide-react";
 import CandidateDrawer from "./CandidateDrawer";
 
@@ -33,7 +33,18 @@ type Candidate = {
   jobOpeningId: number;
   roleTitle: string | null;
   createdAt: string;
+  /** Set by ArchiveCandidateModal — null until HR archives them. */
+  archivedAt:    string | null;
+  archiveReason: string | null;
 };
+
+// A candidate is "archived" when HR explicitly archived them OR the
+// stage they sit in is terminal-rejected. Either way, the list view
+// flags them with the badge so HR can see they're out of the
+// pipeline at a glance.
+function isArchived(c: Candidate): boolean {
+  return !!c.archivedAt || c.currentStage?.kind === "rejected";
+}
 
 type SortKey = "name" | "stage" | "applied" | "source";
 type SortDir = "asc" | "desc";
@@ -163,27 +174,43 @@ export default function JobApplicantList({ jobId }: { jobId: number }) {
               </tr>
             </thead>
             <tbody>
-              {sorted.map((c) => (
+              {sorted.map((c) => {
+                const archived = isArchived(c);
+                return (
                 <tr
                   key={c.id}
                   onClick={() => setSelectedId(c.id)}
                   className={`border-b border-slate-100 last:border-b-0 hover:bg-blue-50/40 cursor-pointer transition-colors ${
                     moving.has(c.id) ? "opacity-60" : ""
-                  }`}
+                  } ${archived ? "bg-slate-50/60" : ""}`}
                 >
                   {/* Applicant */}
                   <td className="px-4 py-3 align-middle">
                     <div className="flex items-center gap-3 min-w-0">
-                      <span className="h-9 w-9 shrink-0 rounded-full bg-[#008CFF]/10 text-[#008CFF] flex items-center justify-center text-[11.5px] font-bold">
+                      <span className={`h-9 w-9 shrink-0 rounded-full flex items-center justify-center text-[11.5px] font-bold ${
+                        archived
+                          ? "bg-slate-200 text-slate-500"
+                          : "bg-[#008CFF]/10 text-[#008CFF]"
+                      }`}>
                         {initials(c.fullName)}
                       </span>
                       <div className="min-w-0">
-                        <p className="font-semibold text-slate-900 truncate flex items-center gap-1.5">
+                        <p className={`font-semibold truncate flex items-center gap-1.5 ${
+                          archived ? "text-slate-500" : "text-slate-900"
+                        }`}>
                           {c.fullName}
                           {c.overallRating != null && (
                             <span className="inline-flex items-center gap-0.5 text-[10.5px] text-amber-600">
                               <Star size={10} fill="currentColor" />
                               {c.overallRating}
+                            </span>
+                          )}
+                          {archived && (
+                            <span
+                              title={c.archiveReason ?? "Archived"}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-600 text-[9.5px] font-bold uppercase tracking-wider ring-1 ring-slate-300"
+                            >
+                              <Archive size={9} /> Archived
                             </span>
                           )}
                         </p>
@@ -279,7 +306,7 @@ export default function JobApplicantList({ jobId }: { jobId: number }) {
                     )}
                   </td>
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table>
         </div>
