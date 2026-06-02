@@ -99,6 +99,11 @@ function paraBlank(): string {
 // Classify each line of HR's edited text so we can apply the right
 // paragraph style. Order matters — bullets before colon-heading
 // (so "- Domain:" is a bullet, not a heading).
+// Page-marker artefacts left over from PDF-to-text conversion:
+//   "-- 1 of 2 --", "Page 1 of 2", "1 of 2", "Page 1"
+// Skip them so the generated PDF doesn't reproduce them.
+const PAGE_MARKER_RE = /^[\s\-–—]*(?:page\s+)?\d+(?:\s*(?:of|\/)\s*\d+)?[\s\-–—]*$/i;
+
 function buildBodyXml(text: string): string {
   return text
     .replace(/\r\n/g, "\n")
@@ -106,6 +111,7 @@ function buildBodyXml(text: string): string {
     .map((raw) => {
       const line = raw.trimEnd();
       if (!line.trim()) return paraBlank();
+      if (PAGE_MARKER_RE.test(line.trim())) return "";
       const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
       if (bullet) return paraBullet(bullet[1]);
       const num = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
