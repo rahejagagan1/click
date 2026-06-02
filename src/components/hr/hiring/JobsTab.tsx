@@ -106,13 +106,6 @@ const STATUS_DOT: Record<JobStatus, string> = {
   on_hold:   "text-amber-500",
   closed:    "text-rose-400",
 };
-const STATUS_DOT_LABEL: Record<JobStatus, string> = {
-  draft:     "DRAFT",
-  published: "ONLINE",
-  on_hold:   "ON HOLD",
-  closed:    "CLOSED",
-};
-
 export default function JobsTab() {
   // ── Filters ─────────────────────────────────────────────────────
   const [brand, setBrand]    = useState("");
@@ -625,14 +618,6 @@ function JobCard({
   // matches Keka where the check goes green once hired === vacancies.
   const fullyFilled = job.vacancies > 0 && job.hiredCount >= job.vacancies;
 
-  // Status pill spec — coloured background + dot for each state.
-  const STATUS_PILL_STYLE: Record<JobStatus, string> = {
-    published: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/70",
-    draft:     "bg-slate-100 text-slate-600 ring-1 ring-slate-200",
-    on_hold:   "bg-amber-50 text-amber-700 ring-1 ring-amber-200/70",
-    closed:    "bg-rose-50 text-rose-700 ring-1 ring-rose-200/70",
-  };
-
   // Coloured left accent strip per status — adds identity without
   // shouting like a full coloured header would.
   const ACCENT_BAR: Record<JobStatus, string> = {
@@ -642,6 +627,17 @@ function JobCard({
     closed:    "bg-rose-500",
   };
 
+  // Status pill colour — light tint + dot per state. Used in the
+  // header so the chip reads as a real status badge rather than a
+  // bare uppercase label.
+  const STATUS_CHIP: Record<JobStatus, { wrap: string; dot: string; label: string }> = {
+    published: { wrap: "bg-emerald-50 text-emerald-700 ring-emerald-200/70",  dot: "bg-emerald-500", label: "Online" },
+    draft:     { wrap: "bg-slate-100 text-slate-600 ring-slate-200",          dot: "bg-slate-400",   label: "Draft"  },
+    on_hold:   { wrap: "bg-amber-50 text-amber-700 ring-amber-200/70",        dot: "bg-amber-500",   label: "On hold" },
+    closed:    { wrap: "bg-rose-50 text-rose-700 ring-rose-200/70",           dot: "bg-rose-500",    label: "Closed" },
+  };
+  const chip = STATUS_CHIP[st];
+
   return (
     <div
       onClick={onOpen}
@@ -650,7 +646,7 @@ function JobCard({
         bg-white rounded-2xl border border-slate-200
         shadow-[0_1px_3px_rgba(15,23,42,0.04)]
         transition-all duration-200
-        hover:-translate-y-0.5 hover:border-[#3b82f6]/60
+        hover:-translate-y-0.5 hover:border-[#3b82f6]/50
         hover:shadow-[0_8px_24px_-6px_rgba(15,23,42,0.10)]
       "
     >
@@ -659,54 +655,75 @@ function JobCard({
       <div aria-hidden="true" className={`w-[3px] flex-shrink-0 ${ACCENT_BAR[st]}`} />
 
       <div className="flex-1 flex flex-col min-w-0">
-        {/* ── Body ───────────────────────────────────────────── */}
-        <div className="relative p-4 pb-3.5 flex-1">
-          {/* Meta line: status text + job id, then star on the right */}
-          <div className="flex items-center justify-between gap-2 mb-2.5">
-            <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 flex items-center gap-1.5 min-w-0">
-              <span className={`${
-                st === "published" ? "text-emerald-600" :
-                st === "draft"     ? "text-slate-500"   :
-                st === "on_hold"   ? "text-amber-600"   :
-                                     "text-rose-600"
-              }`}>{STATUS_DOT_LABEL[st]}</span>
-              <span className="text-slate-300">·</span>
-              <span className="tabular-nums">#{job.id}</span>
-            </p>
+        {/* ── Header: status chip + id (left), actions (right) ── */}
+        <div className="flex items-start justify-between gap-2 px-4 pt-4 pb-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className={`inline-flex items-center gap-1.5 h-[22px] pl-2 pr-2.5 rounded-full ring-1 text-[10.5px] font-semibold tracking-[0.02em] ${chip.wrap}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${chip.dot}`} />
+              {chip.label}
+            </span>
+            <span className="text-[11px] font-medium tabular-nums text-slate-400">#{job.id}</span>
+          </div>
+          {/* Action cluster — star + ⋯, ALWAYS visible. Stops click
+              propagation so the card's onOpen doesn't fire when
+              hitting these. */}
+          <div
+            className="flex items-center gap-0.5 flex-shrink-0 -mr-1"
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
               onClick={(e) => { e.stopPropagation(); onPriorityToggle(); }}
               title={job.isPriority ? "Remove from priority" : "Mark as priority"}
-              className={`flex-shrink-0 h-6 w-6 inline-flex items-center justify-center rounded-full transition-all ${
+              className={`h-7 w-7 inline-flex items-center justify-center rounded-full transition-colors ${
                 job.isPriority
                   ? "bg-amber-400 text-white shadow-[0_2px_6px_rgba(251,191,36,0.35)] hover:bg-amber-500"
-                  : "text-slate-300 hover:text-amber-500"
+                  : "text-slate-300 hover:text-amber-500 hover:bg-slate-50"
               }`}
             >
               <Star size={13} strokeWidth={2} className={job.isPriority ? "fill-white" : ""} />
             </button>
+            <CardActionsMenu
+              job={job}
+              status={st}
+              busy={busy}
+              menuOpen={menuOpen}
+              onMenuToggle={onMenuToggle}
+              onTransition={onTransition}
+              onShare={onShare}
+              onDelete={onDelete}
+            />
           </div>
+        </div>
 
-          {/* Title — kept slate at rest so it reads cleanly. */}
-          <h3 className="text-[16px] font-semibold text-slate-900 group-hover:text-[#3b82f6] transition-colors tracking-[-0.012em] leading-tight line-clamp-1">
+        {/* ── Body ───────────────────────────────────────────── */}
+        <div className="px-4 pb-4 flex-1 min-w-0">
+          <h3 className="text-[15.5px] font-semibold text-slate-900 group-hover:text-[#3b82f6] transition-colors tracking-[-0.012em] leading-[1.3] line-clamp-2">
             {job.title}
           </h3>
-          <p className="text-[12px] text-slate-500 mt-1 truncate">
-            <span className="font-medium">{job.department || brandName}</span>
-            {job.location && <> <span className="text-slate-300 mx-1">·</span> <span>{job.location}</span></>}
+          <p className="text-[12px] text-slate-500 mt-1.5 truncate flex items-center gap-1.5">
+            <span className="font-medium text-slate-600">{job.department || brandName}</span>
+            {job.location && (
+              <>
+                <span className="h-[3px] w-[3px] rounded-full bg-slate-300" />
+                <span>{job.location}</span>
+              </>
+            )}
           </p>
 
-          {/* Stats — bare inline rows, no boxed pills. Reads like
-              an info ledger rather than a chunky toolbar. */}
-          <div className="mt-4 flex items-center gap-4 text-[12.5px]">
+          {/* Stats — inline metrics ledger. Consistent icon size +
+              tabular numerics for a tidy column read. */}
+          <div className="mt-3.5 flex items-center gap-x-4 gap-y-1.5 text-[12px] flex-wrap">
             <span className="inline-flex items-center gap-1.5 text-slate-700" title="Applicants">
               <Users size={13} className="text-slate-400" strokeWidth={2.25} />
               <span className="font-semibold tabular-nums">{job.applicationCount}</span>
+              <span className="text-slate-400">applicants</span>
             </span>
             <span className="inline-flex items-center gap-1.5" title={`${job.hiredCount} hired of ${job.vacancies} positions`}>
               <CheckCircle2 size={13} className={fullyFilled ? "text-emerald-500" : "text-slate-400"} strokeWidth={2.25} />
               <span className={`font-semibold tabular-nums ${fullyFilled ? "text-emerald-700" : "text-slate-700"}`}>
                 {job.hiredCount}/{job.vacancies}
               </span>
+              <span className="text-slate-400">hired</span>
             </span>
             {dateLabel && (
               <span className="inline-flex items-center gap-1.5" title={overdue ? "Past the close date" : "Closes on"}>
@@ -720,34 +737,20 @@ function JobCard({
         </div>
 
         {/* ── Footer ─────────────────────────────────────────── */}
-        <div className="relative border-t border-slate-100 px-4 py-2.5 flex items-center justify-between gap-2">
+        <div className="border-t border-slate-100 bg-slate-50/40 px-4 py-2.5 flex items-center justify-between gap-2">
           <p className="text-[10.5px] font-semibold tracking-[0.04em] text-slate-500">
-            <span className={`tabular-nums ${job.newCount > 0 ? "text-[#3b82f6] font-bold" : "text-slate-900"}`}>
+            <span className={`tabular-nums ${job.newCount > 0 ? "text-[#3b82f6] font-bold" : "text-slate-700"}`}>
               {job.newCount}
             </span>
             <span className="ml-1 uppercase">new</span>
             <span className="mx-1.5 text-slate-300">·</span>
-            <span className="text-slate-900 tabular-nums">{job.rejectedCount}</span>
+            <span className="text-slate-700 tabular-nums">{job.rejectedCount}</span>
             <span className="ml-1 uppercase">archived</span>
           </p>
-          <p className="text-[10.5px] font-medium text-slate-400">
+          <p className="text-[10.5px] font-medium text-slate-400 tabular-nums">
             {job.vacancies > 1 ? `${job.vacancies} positions` : "1 position"}
           </p>
         </div>
-      </div>
-
-      {/* Hover overflow menu — top-right, slides in on hover */}
-      <div className="absolute right-2 top-9 opacity-0 group-hover:opacity-100 translate-x-1 group-hover:translate-x-0 transition-all duration-200 z-10">
-        <CardActionsMenu
-          job={job}
-          status={st}
-          busy={busy}
-          menuOpen={menuOpen}
-          onMenuToggle={onMenuToggle}
-          onTransition={onTransition}
-          onShare={onShare}
-          onDelete={onDelete}
-        />
       </div>
     </div>
   );
