@@ -1029,6 +1029,21 @@ model EmployeeProfile {
   // ── Statutory IDs beyond PAN / Aadhaar ──
   pfNumber          String?
   uanNumber         String?
+  // ── Statutory: Provident Fund (PF) extras — drive the "Edit Statutory
+  //    Information" modal (Keka parity). Establishment IDs are company-level
+  //    EPF/PT registrations; stored per-employee so payroll knows which one
+  //    each employee is filed under. ──
+  pfEstablishmentId String?
+  /// Employee is a member of EPS — contribution split across EPF & EPS.
+  pfEpsMember       Boolean  @default(true)
+  /// HR ticked "PF details not available / employee not eligible for PF".
+  pfNotEligible     Boolean  @default(false)
+  /// PF registration date (distinct from `joiningDate`).
+  pfJoinDate        DateTime?
+  /// Name on the PF account (may differ from the bank account holder).
+  pfAccountName     String?
+  // ── Statutory: Professional Tax (PT) ──
+  ptEstablishmentId String?
   // ── Biometric (IN-specific Keka field) ──
   /// Free-text since some employees have a numeric biometric ID, others
   /// have none ("Not Available") or a multi-part code.
@@ -1100,6 +1115,16 @@ model Shift {
   endTime         String    // "18:00"
   breakMinutes    Int       @default(60)
   workDays        Json      @db.JsonB  // ["Mon","Tue","Wed","Thu","Fri"]
+  // Saturday handling when "Sat" is in workDays:
+  //   "all"       — every Saturday works (default, back-compat).
+  //   "alternate" — every OTHER Saturday, anchored at each user's
+  //                 UserShift.effectiveFrom: the apply-week Saturday works,
+  //                 the next is off, then works, … continuously (ignores
+  //                 month boundaries / 5-Saturday months).
+  //   "weeks"     — only the week-of-month ordinals in saturdayWeeks
+  //                 (ceil(dayOfMonth/7) ∈ 1..5; e.g. [1,3] = 1st & 3rd).
+  saturdayPolicy  String    @default("all")
+  saturdayWeeks   Int[]     @default([])
   createdAt       DateTime  @default(now())
 
   userShifts      UserShift[]
@@ -1124,7 +1149,7 @@ model Attendance {
   clockIn         DateTime?
   clockOut        DateTime?
   totalMinutes    Int       @default(0)
-  status          String    @default("absent")  // present | absent | late | half_day | on_leave | weekend | holiday
+  status          String    @default("absent")  // present | absent | late | half_day | on_leave | weekend | holiday | lop | missed_clock_out
   overtimeMinutes Int       @default(0)
   ipAddress       String?
   location        String?
