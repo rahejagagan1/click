@@ -7,7 +7,8 @@
 //
 // Click a card → opens the CandidateDrawer for that candidate.
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useUrlState } from "@/lib/hooks/useUrlState";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { Star, Clock, Mail, Phone, Briefcase, ExternalLink, MessageSquare, ChevronDown } from "lucide-react";
@@ -77,7 +78,15 @@ export default function KanbanBoard({ jobId }: { jobId: number }) {
   }, [stages, candidates]);
 
   const [dragOver, setDragOver] = useState<number | null>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  // selectedId is URL-derived (`?candidate=<id>`) so reload reopens
+  // the same drawer. Shared key with JobApplicantList — switching
+  // Kanban <-> List preserves the open drawer.
+  const [selectedIdUrl, setSelectedIdUrl] = useUrlState("candidate");
+  const selectedId = selectedIdUrl ? Number(selectedIdUrl) : null;
+  const setSelectedId = useCallback(
+    (n: number | null) => setSelectedIdUrl(n != null ? String(n) : null),
+    [setSelectedIdUrl],
+  );
   const [moving, setMoving] = useState<Set<number>>(new Set());
 
   const onDrop = async (stageId: number, e: React.DragEvent) => {

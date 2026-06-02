@@ -2197,6 +2197,12 @@ model JobOpening {
   /// candidates see a "Download JD" link on the apply form.
   jdFileUrl     String?
   jdFileName    String?
+  /// Extracted/edited plain-text version of the JD. Populated when
+  /// HR uses the inline preview-and-edit UI in the wizard: the file
+  /// is parsed (mammoth/pdf-parse), HR tweaks the text, and the
+  /// edited copy lands here. Independent of jdFileUrl so the
+  /// original file remains downloadable too.
+  jdText        String?    @db.Text
 
   // Hiring team — who is responsible for this requisition.
   recruiterId       Int?
