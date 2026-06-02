@@ -22,6 +22,7 @@ import { DateField } from "@/components/ui/date-field";
 import { isHRAdmin as canViewAsHRAdmin, canViewSalary } from "@/lib/access";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
 import EmployeeFinancesPanel from "@/components/hr/EmployeeFinancesPanel";
+import EmployeeLeavePanel from "@/components/hr/EmployeeLeavePanel";
 import SelectField from "@/components/ui/SelectField";
 import HandoffSection from "@/components/hr/HandoffSection";
 import type { PickerUser } from "@/components/hr/EmployeePicker";
@@ -145,6 +146,9 @@ export default function EmployeeDetailPage() {
   const userId = Number(id);
   const { data: user, isLoading } = useSWR(`/api/hr/people/${id}`, fetcher);
   const [activeTab, setActiveTab] = useState<Tab>("About");
+  // Sub-view inside the Attendance tab: the employee's clock-in/log panel,
+  // or a read-only mirror of their personal Leave page (balances + history).
+  const [attendanceView, setAttendanceView] = useState<"attendance" | "leave">("attendance");
   const [teamQuery, setTeamQuery] = useState("");
   // Header kebab popover (HR-admin only). "Initiate Offboarding" pushes
   // to the offboard page with this user pre-selected; "Apply Leave"
@@ -334,6 +338,10 @@ export default function EmployeeDetailPage() {
                             // for. The slight delay lets the tab content
                             // mount before we toggle the modal.
                             setActiveTab("Attendance");
+                            // The on-behalf leave modal lives in EmployeeTimePanel,
+                            // which only mounts in the "attendance" sub-view — make
+                            // sure we're there before dispatching the event.
+                            setAttendanceView("attendance");
                             setTimeout(() => {
                               window.dispatchEvent(new CustomEvent("hr:apply-leave-on-behalf"));
                             }, 50);
@@ -780,16 +788,41 @@ export default function EmployeeDetailPage() {
 
             {activeTab === "Attendance" && (showAttendanceTab ? (
               <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
-                <EmployeeTimePanel
-                  userId={userId}
-                  userName={user.name}
-                  isHRAdmin={isHRAdmin}
-                  meDbId={Number(me?.dbId) || null}
-                  joiningDate={p?.joiningDate ?? null}
-                  workLocation={p?.workLocation ?? null}
-                  targetOrgLevel={user.orgLevel ?? null}
-                  targetIsDeveloper={user.isDeveloper === true}
-                />
+                {/* Attendance | Leave sub-view toggle — HR-admin only. Leave
+                    shows the same balances + history the employee sees on
+                    their own leave page, read-only. Non-HR viewers (the
+                    employee themselves, their direct manager) only get the
+                    Attendance panel. */}
+                {isHRAdmin && (
+                  <div className="mb-5 inline-flex rounded-lg border border-slate-200 overflow-hidden">
+                    {(["attendance", "leave"] as const).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setAttendanceView(v)}
+                        className={`h-8 px-4 text-[12.5px] font-semibold transition-colors ${
+                          attendanceView === v ? "bg-[#008CFF] text-white" : "text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        {v === "attendance" ? "Attendance" : "Leave"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {isHRAdmin && attendanceView === "leave" ? (
+                  <EmployeeLeavePanel userId={userId} userName={user.name} />
+                ) : (
+                  <EmployeeTimePanel
+                    userId={userId}
+                    userName={user.name}
+                    isHRAdmin={isHRAdmin}
+                    meDbId={Number(me?.dbId) || null}
+                    joiningDate={p?.joiningDate ?? null}
+                    workLocation={p?.workLocation ?? null}
+                    targetOrgLevel={user.orgLevel ?? null}
+                    targetIsDeveloper={user.isDeveloper === true}
+                  />
+                )}
               </section>
             ) : (
               <section className="rounded-xl border border-slate-200 bg-white p-12 text-center shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
@@ -2213,8 +2246,9 @@ function EmployeeTimePanel({
   const resetHandoff = () => { setHandoffPoc([]); setHandoffWorkStatus(""); setHandoffUnavailability(""); setHandoffPocNa(false); };
   const [leaveTypes,  setLeaveTypes]    = useState<{ id: number; name: string }[]>([]);
   // Per-type available balance for the target user, keyed by leaveTypeId.
-  // available = totalDays - usedDays - pendingDays. Refetched each time the
-  // modal opens so a stale draft doesn't show outdated numbers.
+  // available = totalDays - usedDays (pending is NOT subtracted — pending
+  // leaves don't reduce the number shown when applying). Refetched each time
+  // the modal opens so a stale draft doesn't show outdated numbers.
   const [targetBalances, setTargetBalances] = useState<Record<number, number>>({});
   useEffect(() => {
     if (!isHRAdmin) return;
@@ -2242,8 +2276,7 @@ function EmployeeTimePanel({
         for (const b of rows) {
           const total   = parseFloat(b.totalDays   ?? "0");
           const used    = parseFloat(b.usedDays    ?? "0");
-          const pending = parseFloat(b.pendingDays ?? "0");
-          map[b.leaveTypeId] = total - used - pending;
+          map[b.leaveTypeId] = total - used;
         }
         setTargetBalances(map);
       })

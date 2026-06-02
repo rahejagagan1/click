@@ -17,6 +17,7 @@ import LeavePoliciesPanel from "@/components/hr/LeavePoliciesPanel";
 import PayrollAdminPanel from "@/components/hr/PayrollAdminPanel";
 import RegularizationBalancePanel from "@/components/hr/RegularizationBalancePanel";
 import SalaryStructuresList from "@/components/hr/SalaryStructuresList";
+import EmployeePicker, { type PickerUser } from "@/components/hr/EmployeePicker";
 import { RunPayrollPanel } from "@/app/dashboard/hr/payroll/run/page";
 import { DateField } from "@/components/ui/date-field";
 import {
@@ -225,7 +226,30 @@ export default function HRAdminPage() {
   // Shift form
   const [showShiftForm, setShowShiftForm] = useState(false);
   const [editShift, setEditShift] = useState<any>(null);
-  const [shiftForm, setShiftForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", gracePeriodMinutes: "15", workingDays: [1,2,3,4,5] });
+  const [shiftForm, setShiftForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", gracePeriodMinutes: "15", workingDays: [1,2,3,4,5], saturdayPolicy: "all", saturdayWeeks: [] as number[] });
+  // Apply-shift-to-employees modal state.
+  const [applyShift, setApplyShift] = useState<any>(null);
+  const [applyScope, setApplyScope] = useState<"all" | "nb_media" | "yt_labs" | "specific">("all");
+  const [applyUsers, setApplyUsers] = useState<PickerUser[]>([]);
+  const [applyBusy, setApplyBusy] = useState(false);
+
+  const submitApply = async () => {
+    if (!applyShift) return;
+    setApplyBusy(true);
+    try {
+      const res = await fetch(`/api/hr/admin/shifts/${applyShift.id}/apply`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scope: applyScope,
+          userIds: applyScope === "specific" ? applyUsers.map((u) => u.id) : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || "Failed to apply shift"); return; }
+      alert(`Applied "${applyShift.name}" to ${data.applied} employee(s) — ${data.created} new, ${data.reassigned} reassigned.`);
+      setApplyShift(null); setApplyUsers([]); setApplyScope("all");
+    } finally { setApplyBusy(false); }
+  };
 
   const openLeaveEdit = (lt: any) => {
     setEditLeave(lt);
@@ -244,7 +268,25 @@ export default function HRAdminPage() {
 
   const openShiftEdit = (s: any) => {
     setEditShift(s);
-    setShiftForm({ name: s.name, startTime: s.startTime, endTime: s.endTime, gracePeriodMinutes: String(s.gracePeriodMinutes), workingDays: s.workingDays });
+    // Server returns workDays as string labels ("Mon","Tue",…) and
+    // breakMinutes as Int. The form state uses numeric day indices and
+    // a string-typed grace input, so map both directions here. Defensive
+    // against legacy rows that stored numeric indices in workDays.
+    const rawDays: unknown[] = Array.isArray(s.workDays) ? s.workDays
+      : Array.isArray(s.workingDays) ? s.workingDays : [];
+    const workingDays = rawDays
+      .map((d) => typeof d === "number" ? d : DAYS_LABEL.indexOf(String(d)))
+      .filter((n): n is number => n >= 0);
+    const breakRaw = s.breakMinutes ?? s.gracePeriodMinutes ?? 15;
+    setShiftForm({
+      name: s.name,
+      startTime: s.startTime,
+      endTime: s.endTime,
+      gracePeriodMinutes: String(breakRaw),
+      workingDays,
+      saturdayPolicy: s.saturdayPolicy ?? "all",
+      saturdayWeeks: Array.isArray(s.saturdayWeeks) ? s.saturdayWeeks : [],
+    });
     setShowShiftForm(true);
   };
 
@@ -260,7 +302,24 @@ export default function HRAdminPage() {
 
   const saveShift = async () => {
     const method = editShift ? "PUT" : "POST";
-    const body = editShift ? { ...shiftForm, id: editShift.id } : shiftForm;
+    // Convert numeric day indices → string labels so the Shift.workDays
+    // JSON column stays in the canonical "Mon"/"Tue"/… form that
+    // auto-lop and the rest of the codebase expect.
+    const workDays = shiftForm.workingDays
+      .map((i) => DAYS_LABEL[i])
+      .filter(Boolean);
+    // Saturday rule only matters when Saturday is actually a working day.
+    const satSelected = shiftForm.workingDays.includes(6);
+    const payload = {
+      name: shiftForm.name,
+      startTime: shiftForm.startTime,
+      endTime: shiftForm.endTime,
+      breakMinutes: shiftForm.gracePeriodMinutes,
+      workDays,
+      saturdayPolicy: satSelected ? shiftForm.saturdayPolicy : "all",
+      saturdayWeeks: satSelected && shiftForm.saturdayPolicy === "weeks" ? shiftForm.saturdayWeeks : [],
+    };
+    const body = editShift ? { ...payload, id: editShift.id } : payload;
     const res = await fetch("/api/hr/admin/shifts", {
       method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
@@ -269,10 +328,18 @@ export default function HRAdminPage() {
   };
 
   const toggleDay = (d: number) => {
-    setShiftForm(f => ({
-      ...f,
-      workingDays: f.workingDays.includes(d) ? f.workingDays.filter(x => x !== d) : [...f.workingDays, d].sort(),
-    }));
+    setShiftForm(f => {
+      const removing = f.workingDays.includes(d);
+      const workingDays = removing ? f.workingDays.filter(x => x !== d) : [...f.workingDays, d].sort();
+      // Clear the Saturday rule when Saturday is de-selected so a re-add starts fresh.
+      const satGone = d === 6 && removing;
+      return {
+        ...f,
+        workingDays,
+        saturdayPolicy: satGone ? "all" : f.saturdayPolicy,
+        saturdayWeeks:  satGone ? []    : f.saturdayWeeks,
+      };
+    });
   };
 
   // Company tab scope — splits Department Breakdown into NB Media vs
@@ -568,7 +635,7 @@ export default function HRAdminPage() {
             <>
               <div className="flex items-center justify-between">
                 <h2 className="text-[14px] font-bold text-slate-800 dark:text-white">Shift Templates</h2>
-                <button onClick={() => { setEditShift(null); setShiftForm({ name:"",startTime:"09:00",endTime:"18:00",gracePeriodMinutes:"15",workingDays:[1,2,3,4,5] }); setShowShiftForm(true); }}
+                <button onClick={() => { setEditShift(null); setShiftForm({ name:"",startTime:"09:00",endTime:"18:00",gracePeriodMinutes:"15",workingDays:[1,2,3,4,5],saturdayPolicy:"all",saturdayWeeks:[] }); setShowShiftForm(true); }}
                   className="flex items-center gap-1.5 h-8 px-4 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded-lg text-[12px] font-semibold">
                   <Plus className="w-3.5 h-3.5" />Add Shift
                 </button>
@@ -582,15 +649,24 @@ export default function HRAdminPage() {
                         <p className="text-[13px] font-semibold text-slate-800 dark:text-white">{s.name}</p>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                           {s.startTime} – {s.endTime}
-                          {" · "}Grace: {s.gracePeriodMinutes}min
-                          {" · "}{(s.workingDays as number[]).map(d => DAYS_LABEL[d]).join(", ")}
+                          {" · "}Grace: {s.breakMinutes ?? s.gracePeriodMinutes ?? 0}min
+                          {" · "}{(Array.isArray(s.workDays) ? s.workDays : [])
+                            .map((d: unknown) => typeof d === "number" ? DAYS_LABEL[d] : String(d))
+                            .filter(Boolean)
+                            .join(", ")}
                         </p>
                       </div>
                     </div>
-                    <button onClick={() => openShiftEdit(s)}
-                      className="flex items-center gap-1 h-7 px-3 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 rounded-lg text-[11px] font-medium">
-                      <Pencil className="w-3 h-3" />Edit
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => { setApplyShift(s); setApplyScope("all"); setApplyUsers([]); }}
+                        className="flex items-center gap-1 h-7 px-3 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded-lg text-[11px] font-semibold">
+                        Apply
+                      </button>
+                      <button onClick={() => openShiftEdit(s)}
+                        className="flex items-center gap-1 h-7 px-3 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 rounded-lg text-[11px] font-medium">
+                        <Pencil className="w-3 h-3" />Edit
+                      </button>
+                    </div>
                   </div>
                 ))}
                 {shifts.length === 0 && (
@@ -1089,12 +1165,91 @@ export default function HRAdminPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Saturday rule — only when Saturday is a working day */}
+              {shiftForm.workingDays.includes(6) && (
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2 block">Saturday Working</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { key: "all",       label: "Every Saturday",            policy: "all",       weeks: [] as number[] },
+                      { key: "alternate", label: "Alternate (1 on / 1 off)",  policy: "alternate", weeks: [] as number[] },
+                      { key: "1_3",       label: "1st & 3rd",                 policy: "weeks",     weeks: [1, 3] },
+                      { key: "2_4",       label: "2nd & 4th",                 policy: "weeks",     weeks: [2, 4] },
+                    ] as const).map((opt) => {
+                      const active =
+                        opt.policy === "all"       ? shiftForm.saturdayPolicy === "all"
+                        : opt.policy === "alternate" ? shiftForm.saturdayPolicy === "alternate"
+                        : shiftForm.saturdayPolicy === "weeks" &&
+                          JSON.stringify([...shiftForm.saturdayWeeks].sort()) === JSON.stringify([...opt.weeks].sort());
+                      return (
+                        <button key={opt.key} type="button"
+                          onClick={() => setShiftForm(f => ({ ...f, saturdayPolicy: opt.policy, saturdayWeeks: [...opt.weeks] }))}
+                          className={`h-9 rounded-lg text-[12px] font-semibold border transition-colors ${
+                            active
+                              ? "border-[#008CFF] bg-[#008CFF]/10 text-[#008CFF]"
+                              : "border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:border-[#008CFF]/40"
+                          }`}>{opt.label}</button>
+                      );
+                    })}
+                  </div>
+                  {shiftForm.saturdayPolicy === "alternate" && (
+                    <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                      Every other Saturday, counted from the date you apply this shift — the apply-week Saturday works, the next is off, then on, and so on.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
             <div className="flex gap-3 mt-5">
               <button onClick={() => setShowShiftForm(false)}
                 className="flex-1 h-9 border border-slate-200 dark:border-white/10 rounded-lg text-[13px] text-slate-600 dark:text-slate-300">Cancel</button>
               <button onClick={saveShift}
                 className="flex-1 h-9 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded-lg text-[13px] font-semibold">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Apply shift to employees ── */}
+      {applyShift && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-[#001529] rounded-xl shadow-2xl p-6 w-[440px]">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-[14px] font-bold text-slate-800 dark:text-white">Apply &quot;{applyShift.name}&quot;</h3>
+              <button onClick={() => setApplyShift(null)}><X className="w-4 h-4 text-slate-400" /></button>
+            </div>
+            <p className="text-[12px] text-slate-500 dark:text-slate-400 mb-3">Assign this shift to:</p>
+            <div className="space-y-2">
+              {([
+                { key: "all",      label: "All active employees" },
+                { key: "nb_media", label: "NB Media" },
+                { key: "yt_labs",  label: "YT Labs" },
+                { key: "specific", label: "Specific employees" },
+              ] as const).map((opt) => (
+                <button key={opt.key} type="button" onClick={() => setApplyScope(opt.key)}
+                  className={`w-full flex items-center gap-2.5 h-10 px-3 rounded-lg border text-[13px] font-medium transition-colors ${
+                    applyScope === opt.key
+                      ? "border-[#008CFF] bg-[#008CFF]/10 text-[#008CFF]"
+                      : "border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:border-[#008CFF]/40"
+                  }`}>
+                  <span className={`w-3.5 h-3.5 rounded-full border-2 ${applyScope === opt.key ? "border-[#008CFF] bg-[#008CFF]" : "border-slate-300 dark:border-white/20"}`} />
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {applyScope === "specific" && (
+              <div className="mt-3">
+                <EmployeePicker selected={applyUsers} onChange={setApplyUsers} placeholder="Search employees…" />
+              </div>
+            )}
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setApplyShift(null)}
+                className="flex-1 h-9 border border-slate-200 dark:border-white/10 rounded-lg text-[13px] text-slate-600 dark:text-slate-300">Cancel</button>
+              <button onClick={submitApply} disabled={applyBusy || (applyScope === "specific" && applyUsers.length === 0)}
+                className="flex-1 h-9 bg-[#008CFF] hover:bg-[#0077dd] disabled:opacity-50 text-white rounded-lg text-[13px] font-semibold">
+                {applyBusy ? "Applying…" : "Apply Shift"}
+              </button>
             </div>
           </div>
         </div>

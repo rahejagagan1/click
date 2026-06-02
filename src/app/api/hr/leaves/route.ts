@@ -20,9 +20,16 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const isAdmin = isHRAdmin(self);
     const view = searchParams.get("view") || "my";
+    const userIdParam = searchParams.get("userId");
+    const targetUserId = Number(userIdParam);
 
     let where: any = {};
-    if (view === "all") {
+    if (isAdmin && userIdParam && Number.isFinite(targetUserId)) {
+      // HR-admin viewing ONE employee's applications — powers the read-only
+      // leave view on the employee profile (Attendance → Leave). Guarded so a
+      // malformed ?userId= falls through instead of throwing on NaN.
+      where.userId = targetUserId;
+    } else if (view === "all") {
       // HR-admin only — full org-wide view used by the admin Leaves panel.
       if (!isAdmin) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -46,6 +53,7 @@ export async function GET(req: NextRequest) {
         leaveType: true,
         user: { select: { id: true, name: true, email: true, profilePictureUrl: true } },
         approver: { select: { id: true, name: true } },
+        finalApprover: { select: { id: true, name: true } },
       },
       // Admin view loads the full history; per-user view stays paginated at 100.
       orderBy: { appliedAt: "desc" },
@@ -148,6 +156,18 @@ export async function POST(req: NextRequest) {
     // grant any type to any user; the balance check below is the canonical
     // "do you have enough days" guard. Policy only drives monthly accrual.
 
+    // Count leave days against the SUBJECT's own shift calendar, not a flat
+    // Mon–Fri week. This is what makes alternate-Saturday shifts behave
+    // correctly: an NB employee whose shift works that Saturday gets the day
+    // counted (and debited), while a 5-day YT employee still has every
+    // Saturday treated as non-working. effectiveFrom anchors the
+    // alternate-Saturday phase; both fall back to Mon–Fri when no shift is
+    // assigned.
+    const subjectShift = await prisma.userShift.findUnique({
+      where: { userId: subjectUserId },
+      include: { shift: true },
+    });
+
     // Half-day requests carry a marker in the reason field — the apply form
     // adds `[Half Day]`, `[First Half]`, or `[Second Half]` so the API
     // doesn't need a separate column. When present, the request only ever
@@ -155,8 +175,8 @@ export async function POST(req: NextRequest) {
     const isHalfDay = /^\s*\[(Half Day|First Half|Second Half)\]/i.test(String(reason ?? ""));
     let totalDays = isHalfDay
       ? 0.5
-      : await countWorkingDays(from, to);
-    if (totalDays === 0) return NextResponse.json({ error: "Selected dates are all weekends/holidays" }, { status: 400 });
+      : await countWorkingDays(from, to, subjectShift?.shift, subjectShift?.effectiveFrom);
+    if (totalDays === 0) return NextResponse.json({ error: "Selected dates are all non-working days / holidays for this shift" }, { status: 400 });
 
     const year = from.getFullYear();
     // Look up the subject's balance for the chosen type. May be missing

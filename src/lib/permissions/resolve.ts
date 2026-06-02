@@ -1,5 +1,5 @@
 import prisma from "@/lib/prisma";
-import { TAB_CATALOG, TabKey, defaultTabPermissions } from "./tabs";
+import { TAB_CATALOG, TabKey, defaultTabPermissions, HR_MANAGER_FORCED_TABS } from "./tabs";
 
 /**
  * Always-on override. These roles/flags are NEVER blocked by tab
@@ -100,6 +100,18 @@ export async function tabPermissionsForUser(userId: number): Promise<Record<TabK
   for (const r of rows) {
     if (r.tabKey in out) out[r.tabKey as TabKey] = r.enabled;
   }
+
+  // The *actual* HR Manager (role="hr_manager") owns HR policy config and
+  // always sees Leave Types / Leave Policies / Shift Templates / Payroll —
+  // forced on AFTER explicit rows so a stale seeded "false" (from
+  // onboarding before this rule) can't hide them. Scoped to the role, so
+  // the broader orgLevel="hr_manager" HR tier is unaffected — which keeps
+  // the salary-visibility policy intact for Payroll. The harder gate in
+  // the HR Admin page (canViewSalary) still applies on top of this.
+  if (user?.role === "hr_manager") {
+    for (const k of HR_MANAGER_FORCED_TABS) out[k] = true;
+  }
+
   return out;
 }
 

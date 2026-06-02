@@ -150,7 +150,7 @@ export async function sendHrLateClockInSummary(): Promise<number> {
     prisma.user.findMany({
       where: { isActive: true },
       select: {
-        id: true, name: true, email: true,
+        id: true, name: true, email: true, managerId: true,
         employeeProfile: { select: { department: true } },
       },
     }),
@@ -177,6 +177,7 @@ export async function sendHrLateClockInSummary(): Promise<number> {
   const policies = await getPoliciesByUser(users.map((u) => u.id));
 
   type Row = {
+    userId: number; managerId: number | null;
     name: string; department: string | null; status: "absent" | "late";
     clockIn: Date | null;
   };
@@ -189,11 +190,11 @@ export async function sendHrLateClockInSummary(): Promise<number> {
     if (policies.get(u.id)?.attendanceEnabled === false) continue;
     const rec = attByUser.get(u.id);
     if (!rec?.clockIn) {
-      absent.push({ name: u.name, department: u.employeeProfile?.department ?? null, status: "absent", clockIn: null });
+      absent.push({ userId: u.id, managerId: u.managerId, name: u.name, department: u.employeeProfile?.department ?? null, status: "absent", clockIn: null });
       continue;
     }
     if (rec.clockIn.getTime() > tenAmIst.getTime()) {
-      late.push({ name: u.name, department: u.employeeProfile?.department ?? null, status: "late", clockIn: rec.clockIn });
+      late.push({ userId: u.id, managerId: u.managerId, name: u.name, department: u.employeeProfile?.department ?? null, status: "late", clockIn: rec.clockIn });
     }
   }
 
@@ -202,26 +203,24 @@ export async function sendHrLateClockInSummary(): Promise<number> {
   absent.sort((a, b) => a.name.localeCompare(b.name));
   late.sort((a, b) => (a.clockIn!.getTime() - b.clockIn!.getTime()));
 
-  // Recipients: CEO + Special Access + HR Manager (role).
-  // EXCLUDED: role=admin alone, orgLevel="hr_manager" alone (HR-team
-  // members are role=member; they shouldn't get admin pings).
-  // Developer accounts are conditional on the "Notify developers"
-  // toggle in Admin → Emails Automation.
+  // Recipients: Special Access + HR Manager (role).
+  // EXCLUDED: the CEO (top-level NOT — the CEO/owner account also carries
+  // role="admin"), who instead gets a separate digest of ONLY their own
+  // direct reports below. Also excluded: role=admin alone, orgLevel=
+  // "hr_manager" alone (HR-team members are role=member). Developer
+  // accounts are conditional on the "Notify developers" toggle.
   const recipients = await prisma.user.findMany({
     where: {
       isActive: true,
+      orgLevel: { not: "ceo" },
       OR: [
-        { orgLevel: { in: ["ceo", "special_access"] } },
+        { orgLevel: "special_access" },
         { role:     "hr_manager" },
         ...(await devEmailRecipientsClause()),
       ],
     },
     select: { email: true, name: true },
   });
-  if (recipients.length === 0) {
-    console.warn("[hr-late-summary] No HR-admin recipients found — nothing sent.");
-    return 0;
-  }
 
   // Headcount totals for the footer. WFH/OD are now folded into present/
   // late/absent based on whether they actually clocked in, so the only
@@ -249,6 +248,41 @@ export async function sendHrLateClockInSummary(): Promise<number> {
     } catch (e) {
       console.error(`[hr-late-summary] ${r.email}:`, e);
     }
+  }
+
+  // CEO digest — the full org list goes to HR / Special Access above; the
+  // CEO is shown ONLY their own direct reports, and only when at least one
+  // of them is absent/late (no email about an all-present team).
+  const ceos = await prisma.user.findMany({
+    where:  { isActive: true, orgLevel: "ceo" },
+    select: { id: true, email: true },
+  });
+  for (const ceo of ceos) {
+    if (!ceo.email) continue;
+    const ceoAbsent = absent.filter((r) => r.managerId === ceo.id);
+    const ceoLate   = late.filter((r) => r.managerId === ceo.id);
+    if (ceoAbsent.length === 0 && ceoLate.length === 0) continue;
+    const ceoCandidates = users.filter((u) =>
+      u.managerId === ceo.id && !!u.email && !excluded.has(u.email!.toLowerCase()) && !onLeaveIds.has(u.id),
+    ).length;
+    const ceoOnLeave = users.filter((u) => u.managerId === ceo.id && onLeaveIds.has(u.id)).length;
+    const ceoOnTime  = Math.max(0, ceoCandidates - ceoAbsent.length - ceoLate.length);
+    const ceoContent = hrLateSummaryEmail({
+      today,
+      absent: ceoAbsent,
+      late:   ceoLate,
+      totals: { absent: ceoAbsent.length, late: ceoLate.length, onTime: ceoOnTime, onLeave: ceoOnLeave },
+    });
+    try {
+      await sendEmail({ to: ceo.email, content: ceoContent });
+      sent++;
+    } catch (e) {
+      console.error(`[hr-late-summary] CEO ${ceo.email}:`, e);
+    }
+  }
+
+  if (recipients.length === 0 && ceos.length === 0) {
+    console.warn("[hr-late-summary] No recipients found — nothing sent.");
   }
   return sent > 0 ? 1 : 0;
 }
