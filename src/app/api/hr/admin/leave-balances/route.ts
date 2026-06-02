@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
-import { accrueLeavesForEveryone } from "@/lib/leave-accrual";
+import { accrueLeavesForEveryone, ymKey } from "@/lib/leave-accrual";
 import { istTodayDateOnly } from "@/lib/ist-date";
 
 export const dynamic = "force-dynamic";
@@ -141,6 +141,20 @@ export async function PUT(req: NextRequest) {
       },
       update: updateData,
     });
+
+    // Initialise the accrual marker on freshly-created (or any legacy
+    // null-stamped) row so monthly accrual never skips an HR-edited balance.
+    // A null marker makes monthsBetween() === 0, which would otherwise leave
+    // the row permanently invisible to accrual. We stamp the current month —
+    // no retroactive credit, first accrual lands next month, matching the
+    // seeding rule in accrueLeavesForUser. Only touches rows where the marker
+    // is still null, so an existing stamp is never overwritten. Raw SQL keeps
+    // this independent of the generated Prisma client's column awareness.
+    await prisma.$executeRawUnsafe(
+      `UPDATE "LeaveBalance" SET "lastAccrualMonth" = $1
+         WHERE id = $2 AND "lastAccrualMonth" IS NULL`,
+      ymKey(new Date()), row.id,
+    );
 
     return NextResponse.json({
       id: row.id,

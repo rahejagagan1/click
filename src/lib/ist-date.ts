@@ -30,6 +30,19 @@ export function istHour(instant: Date): number {
 }
 
 /**
+ * Minutes since midnight (0..1439) in IST for the given instant.
+ * Used for shift-relative comparisons (e.g. late = past shift start + grace)
+ * without depending on the server's local timezone.
+ */
+export function istMinutesOfDay(instant: Date): number {
+  const hm = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).format(instant); // "HH:MM"
+  const [h, m] = hm.split(":").map((n) => parseInt(n, 10));
+  return h * 60 + m;
+}
+
+/**
  * First and last UTC-midnight dates (inclusive) of the IST calendar month
  * containing `dateOnly` — suitable for a Prisma `gte / lte` range on a
  * `@db.Date` column. Keys like `date` in `AttendanceRegularization` are

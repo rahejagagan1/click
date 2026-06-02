@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { canViewSalary } from "@/lib/access";
+import { DateField } from "@/components/ui/date-field";
 import {
   ChevronLeft, ChevronRight, Calendar,
   CheckCircle2, PlayCircle, UserPlus, Wallet, ShieldCheck, Lock,
@@ -512,7 +513,12 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
 
       {/* Pre-Payroll Check side panel */}
       {preCheckOpen && selected?.run && (
-        <PreCheckPanel runId={selected.run.id} monthLabel={monthLabelShort} onClose={() => setPreCheckOpen(false)} />
+        <PreCheckPanel
+          runId={selected.run.id}
+          monthLabel={monthLabelShort}
+          runStatus={selected.run.status ?? null}
+          onClose={() => setPreCheckOpen(false)}
+        />
       )}
 
       {/* Step 1 — Leave, Attendance & Payable Units side panel */}
@@ -871,13 +877,19 @@ function RailCard({ title, children }: { title: string; children: React.ReactNod
 // Slides in from the right showing every payslip for the selected run with
 // gross / deductions / net so HR can sanity-check before lock. Read-only.
 
-function PreCheckPanel({ runId, monthLabel, onClose }: { runId: number; monthLabel: string; onClose: () => void }) {
+function PreCheckPanel({ runId, monthLabel, runStatus, onClose }: { runId: number; monthLabel: string; runStatus: string | null; onClose: () => void }) {
   // Pull payslips for the run. The /api/hr/payroll/payslips route already
   // supports a runId filter via query string.
   const { data: payslips = [] } = useSWR<any[]>(`/api/hr/payroll/payslips?runId=${runId}`, fetcher);
   const totalGross = payslips.reduce((s, p) => s + parseFloat(p.grossEarnings || 0), 0);
   const totalNet   = payslips.reduce((s, p) => s + parseFloat(p.netPay || 0), 0);
   const totalDed   = payslips.reduce((s, p) => s + parseFloat(p.totalDeductions || 0), 0);
+
+  // Statutory + bank exports are gated until the run is locked or paid.
+  // Showing them earlier risks HR emailing the bank a draft batch that
+  // gets revised; the 409 from the API would protect us either way, but
+  // disabling the buttons is the cleaner UX.
+  const downloadsEnabled = runStatus === "locked" || runStatus === "paid";
 
   return (
     <>
@@ -896,6 +908,8 @@ function PreCheckPanel({ runId, monthLabel, onClose }: { runId: number; monthLab
           <StatBlock label="Deductions" value={fmtInr(totalDed)}   small />
           <StatBlock label="Net Pay"    value={fmtInr(totalNet)}   small />
         </div>
+
+        <DownloadBar runId={runId} enabled={downloadsEnabled} runStatus={runStatus} />
 
         <div className="flex-1 overflow-y-auto">
           {payslips.length === 0 ? (
@@ -925,6 +939,90 @@ function PreCheckPanel({ runId, monthLabel, onClose }: { runId: number; monthLab
         </div>
       </aside>
     </>
+  );
+}
+
+// ─── Post-lock download bar ────────────────────────────────────────────────
+// Four downloads that finance / banks / EPFO actually consume:
+//   • BatchPayment_Monthly_Statement — per-bank transfer file
+//   • PT Monthly Statement           — Professional Tax filing
+//   • EmployerECR                    — EPFO Electronic Challan-cum-Return
+//   • Keka PayRegister               — master pay register
+// Buttons stay disabled while the run is draft / generated / processing so
+// HR can't email a half-finalised batch to the bank.
+type ExportDef = { key: string; label: string; sub: string };
+const PAYROLL_EXPORTS: ExportDef[] = [
+  { key: "batch-payment", label: "Batch Payment", sub: "Per-bank transfer file" },
+  { key: "pt-statement",  label: "PT Statement",  sub: "Professional Tax filing" },
+  { key: "employer-ecr",  label: "Employer ECR",  sub: "EPFO upload (PF)" },
+  { key: "pay-register",  label: "Pay Register",  sub: "Master register (Keka format)" },
+];
+
+function DownloadBar({ runId, enabled, runStatus }: { runId: number; enabled: boolean; runStatus: string | null }) {
+  const [busy, setBusy] = useState<string | null>(null);
+
+  // Fetch the file as a blob first so 4xx errors (e.g. 422 "missing bank
+  // info") surface as an alert with the JSON message instead of the
+  // browser saving a JSON file with an xlsx extension.
+  async function download(key: string) {
+    setBusy(key);
+    try {
+      const res = await fetch(`/api/hr/payroll/runs/${runId}/exports/${key}`);
+      if (!res.ok) {
+        const ct = res.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          const j = await res.json().catch(() => ({}));
+          const extra = Array.isArray(j.missing) && j.missing.length > 0
+            ? `\n\nMissing for:\n${j.missing.slice(0, 8).map((m: any) => `• ${m.name}${m.employeeId ? ` (${m.employeeId})` : ""}`).join("\n")}${j.missing.length > 8 ? `\n…and ${j.missing.length - 8} more` : ""}`
+            : "";
+          alert(`${j.error || res.statusText}${extra}`);
+        } else {
+          alert(`Download failed: ${res.statusText}`);
+        }
+        return;
+      }
+      // Parse filename from Content-Disposition or fall back to the key.
+      const cd = res.headers.get("content-disposition") || "";
+      const m = cd.match(/filename="([^"]+)"/);
+      const filename = m?.[1] || `${key}.xlsx`;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Statutory & Bank Files</p>
+        {!enabled && (
+          <span className="text-[11px] text-slate-400">
+            Lock the run to enable downloads{runStatus ? ` (current: ${runStatus})` : ""}
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {PAYROLL_EXPORTS.map(e => (
+          <button key={e.key}
+            disabled={!enabled || busy !== null}
+            onClick={() => download(e.key)}
+            className="flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-left hover:border-[#6f42c1] hover:bg-[#6f42c1]/5 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+            <span className="text-[12.5px] font-semibold text-slate-800">
+              {busy === e.key ? "Preparing…" : e.label}
+            </span>
+            <span className="text-[10.5px] text-slate-500">{e.sub}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1497,9 +1595,9 @@ function AddBonusModal({ year, month0, monthLabel, onClose, onAdded }: {
               </div>
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Effective Date</label>
-                <input
-                  type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)}
-                  className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+                <DateField
+                  value={effectiveDate} onChange={(v) => setEffectiveDate(v)}
+                  className="mt-1 w-full"
                 />
               </div>
             </div>
