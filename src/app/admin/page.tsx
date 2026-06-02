@@ -11,6 +11,7 @@ import RegularizationPolicyCard from "@/components/admin/RegularizationPolicyCar
 import UnlimitedRegularizationPolicyCard from "@/components/admin/UnlimitedRegularizationPolicyCard";
 import EmailsAutomationPanel from "@/components/admin/EmailsAutomationPanel";
 import UserAvatar from "@/components/ui/user-avatar";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import {
     type TeamCapsuleCatalog,
     teamCapsuleSelectionKeyToName,
@@ -124,7 +125,7 @@ export default function AdminPage() {
     const [ytFetching, setYtFetching] = useState(false);
     const [ytVideos, setYtVideos] = useState<any[]>([]);
     const [ytError, setYtError] = useState<string | null>(null);
-    const [userView, setUserView] = useState<"tree" | "table">("tree");
+    const [userView, setUserView] = useUrlTab<"tree" | "table">("userView", "tree", ["tree", "table"] as const);
     // Free-text search across the Users table — matches name, email,
     // and orgLevel/role so admins can quickly jump to a user.
     const [userSearch, setUserSearch] = useState("");

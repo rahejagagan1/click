@@ -9,14 +9,14 @@
 // to PDF works via the browser's native print dialog on the rendered
 // preview, so no PDF library dependency is needed.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   FileText, Plus, Send, Check, X as XIcon, Ban, Download,
   Calendar, IndianRupee, AlertCircle, Mail, Sparkles, Printer, Eye, Pencil,
 } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 import { offerLetterEmail } from "@/lib/email/hr-templates";
-import { buildOfferLetter, buildOfferLetterHTML, computePayBreakdown } from "@/lib/offer-letter";
+import { buildOfferLetterHTML, computePayBreakdown } from "@/lib/offer-letter";
 
 type Offer = {
   id: number;
@@ -71,6 +71,10 @@ export default function OfferTab({
     jobSalaryRange?: string | null;
     /** From JobOpening.salaryUnit — disambiguates "5" as 5 LPA vs ₹5/month. */
     jobSalaryUnit?:  string | null;
+    /** JobApplication.createdAt — the candidate's application date.
+     *  Threaded through to the offer letter's "application dated X"
+     *  line so the body fills with a real date instead of "—". */
+    createdAt?: string | null;
   };
   offers: Offer[];
   onMutated: () => void;
@@ -84,11 +88,29 @@ export default function OfferTab({
     try {
       let extra: any = {};
       if (action === "send") {
-        const tpl = offerLetterEmail({
-          candidateName: candidate.fullName,
-          jobRole: candidate.roleTitle ?? "the role",
-        });
-        extra = { emailSubject: tpl.subject, emailBody: tpl.body.replace(/\n/g, "<br/>") };
+        // Short cover note — full offer letter goes as PDF attachment
+        // (server auto-generates it from the stored OfferLetter row).
+        const firstName = candidate.fullName.split(" ")[0] ?? candidate.fullName;
+        const role      = candidate.roleTitle ?? "the role";
+        const cover = `Dear ${firstName},
+
+Greetings from NB Media!
+
+We are pleased to extend an offer of employment to you for the position of "${role}". Your formal offer letter is attached to this email.
+
+Kindly review the attached document, sign it, and confirm your acceptance by the deadline specified in the letter. Failure to accept by the deadline will render this offer null and void automatically.
+
+For any questions, feel free to reach out to the HR Department.
+
+Warms Regards,
+HR Department
+NB-Media`;
+        extra = {
+          emailSubject:    `Congratulations on Your Selection as "${role}" at NB Media`,
+          emailBody:       cover.replace(/\n/g, "<br/>"),
+          autoGeneratePdf: true,
+          jobRole:         role,
+        };
       }
       const res = await fetch(`/api/hr/hiring/offers/${offerId}`, {
         method: "PATCH",
@@ -250,6 +272,7 @@ function NewOfferModal({
   candidate: {
     id: number; fullName: string; email: string; roleTitle: string | null;
     jobSalaryRange?: string | null; jobSalaryUnit?: string | null;
+    createdAt?: string | null;
   };
   onClose: () => void;
   onCreated: () => void;
@@ -274,48 +297,74 @@ function NewOfferModal({
   const [jobRole,     setJobRole]     = useState<string>(candidate.roleTitle ?? "");
   const [ctcAnnual,   setCtcAnnual]   = useState<string>(initialCtc);
   const [joiningDate, setJoiningDate] = useState<string>(inDays(14));
-  const [expiresAt,   setExpiresAt]   = useState<string>(inDays(7));
+  // Acceptance deadline — defaults to today + 5 days to match clause 24
+  // of NB Media's offer letter T&C ("on or before five days of issuance
+  // of this letter, failing which this employee agreement shall stand
+  // automatically withdrawn"). Always strictly before joining so the
+  // candidate must accept BEFORE they're due to start.
+  const [expiresAt,   setExpiresAt]   = useState<string>(inDays(5));
   const [body,        setBody]        = useState<string>("");
   const [file,        setFile]        = useState<{ name: string; mime: string; base64: string; size: number } | null>(null);
   const [sendNow,     setSendNow]     = useState(false);
+  /** Comma- or space-separated additional recipients. Validated +
+   *  split into a clean string[] inside save(). HR uses this to loop
+   *  in the candidate's manager, finance, founders, etc. */
+  const [ccRaw,       setCcRaw]       = useState<string>("");
   const [saving,      setSaving]      = useState(false);
   const [error,       setError]       = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  // ── Generate offer letter from template ─────────────────────────
-  // Pure function — uses the verbatim NB Media offer letter template
-  // (src/lib/offer-letter.ts, transcribed from the HR-supplied PDF)
-  // and substitutes the candidate name, role, dates, and CTC. No side
-  // effects so it can also be called from the preview button without
-  // committing to state.
-  const buildLetter = (): string | null => {
-    if (!jobRole.trim()) return null;
-    const r = buildOfferLetter({
-      candidateName: candidate.fullName,
-      jobRole: jobRole.trim(),
-      annualCtcINR: ctcAnnual ? Number(ctcAnnual) : null,
-      joiningDate: joiningDate || null,
-      acceptanceDeadline: expiresAt || null,
-    });
-    return r.body;
-  };
-
-  const generate = () => {
+  // ── Generate offer letter from the .docx template ───────────────
+  // Calls the server-side template-preview endpoint, which fills the
+  // actual NB Media offer-letter .docx via XML find/replace and
+  // returns the resulting body text. The PDF the candidate receives
+  // is rendered from the SAME .docx with the SAME substitutions, so
+  // what HR sees in the textarea matches the final PDF.
+  const [generating, setGenerating] = useState(false);
+  const generate = async () => {
     setError(null);
-    const merged = buildLetter();
-    if (!merged) { setError("Set the Job Role before generating."); return; }
-    setBody(merged);
+    if (!jobRole.trim()) { setError("Set the Job Role before generating."); return; }
+    setGenerating(true);
+    try {
+      const res = await fetch("/api/hr/hiring/offers/template-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidateName:      candidate.fullName,
+          jobRole:            jobRole.trim(),
+          annualCtcINR:       ctcAnnual ? Number(ctcAnnual) : null,
+          joiningDate:        joiningDate        || null,
+          acceptanceDeadline: expiresAt          || null,
+          // "Application dated X" → candidate's createdAt, so the
+          // letter body reads with the real date instead of "—".
+          applicationDate:    candidate.createdAt ?? null,
+          // Letter date defaults to "today" server-side when omitted.
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || `Couldn't render template (${res.status})`);
+      }
+      const j = await res.json();
+      if (typeof j?.text !== "string") throw new Error("Unexpected response shape");
+      setBody(j.text);
+    } catch (e: any) {
+      setError(e?.message ?? "Couldn't generate from template");
+    } finally {
+      setGenerating(false);
+    }
   };
 
-  // Preview always works — uses HR's edited body when present,
-  // otherwise renders the template on the fly. Doesn't mutate state
-  // so HR can close without committing.
-  const openPreview = () => {
+  // Preview shows the body HR has generated. If nothing's been
+  // generated yet, openPreview triggers a generate first so the
+  // preview never opens empty.
+  const openPreview = async () => {
     setError(null);
     if (!jobRole.trim()) { setError("Set the Job Role before previewing."); return; }
+    if (!body) await generate();
     setPreviewOpen(true);
   };
-  const previewBody = body || buildLetter() || "";
+  const previewBody = body || "";
 
   const handleFile = (f: File) => {
     if (f.size > 4 * 1024 * 1024) {
@@ -343,22 +392,57 @@ function NewOfferModal({
     if (ctcAnnual && !Number.isFinite(Number(ctcAnnual))) {
       setError("Annual CTC must be a number."); return;
     }
+    // Parse the CC field — accept comma OR whitespace separation.
+    // Surface bad addresses so HR can't silently mistype.
+    const ccList = parseEmails(ccRaw);
+    if (ccRaw.trim() && ccList === null) {
+      setError("One or more CC emails look invalid. Use comma- or space-separated valid emails."); return;
+    }
     setSaving(true);
     try {
       let extra: any = {};
       if (sendNow) {
-        const subject = `Congratulations on Your Selection as "${jobRole}" at NB Media`;
-        const bodyForEmail = body
-          ? body.replace(/\n/g, "<br/>")
-          : (() => {
-              const tpl = offerLetterEmail({
-                candidateName: candidate.fullName, jobRole: jobRole.trim() || "the role",
-                joiningDate: joiningDate ? fmtDate(joiningDate) : undefined,
-                responseDeadline: expiresAt ? fmtDate(expiresAt) : undefined,
-              });
-              return tpl.body.replace(/\n/g, "<br/>");
-            })();
-        extra = { emailSubject: subject, emailBody: bodyForEmail };
+        // Short cover email — the full offer letter rides as a PDF
+        // attachment, NOT as the email body. The server auto-renders
+        // the PDF from buildOfferLetterHTML when autoGeneratePdf=true
+        // and HR didn't upload a pre-made one.
+        const firstName  = candidate.fullName.split(" ")[0] ?? candidate.fullName;
+        const subject    = `Congratulations on Your Selection as "${jobRole}" at NB Media`;
+        const deadlineFmt = expiresAt ? fmtDate(expiresAt) : "the deadline below";
+        const coverText = `Dear ${firstName},
+
+Greetings from NB Media!
+
+We are pleased to extend an offer of employment to you for the position of "${jobRole}". Your formal offer letter (Word document) is attached to this email.
+
+Kindly review the attached document, sign it, and confirm your acceptance by ${deadlineFmt}. Failure to accept by the deadline will render this offer null and void automatically.
+
+For any questions, feel free to reach out to the HR Department.
+
+Warms Regards,
+HR Department
+NB-Media`;
+        extra = {
+          emailSubject:    subject,
+          // Email body (the short cover) IS HTML — keep the <br/> for
+          // line breaks. SMTP clients render this directly.
+          emailBody:       coverText.replace(/\n/g, "<br/>"),
+          // CC — additional recipients HR added (manager, finance,
+          // founders, etc.). Empty array is safe: sender treats it
+          // the same as omitting CC entirely.
+          emailCc:         ccList ?? [],
+          // Tell the server to render the offer letter HTML to PDF
+          // and attach it. The server skips this when HR uploaded a
+          // pre-made PDF (that one wins).
+          autoGeneratePdf: true,
+          jobRole,
+          applicationDate: candidate.createdAt ?? null,
+          // offerBody is PLAIN TEXT — the PDF renderer wraps it in a
+          // <div class="body"> with white-space: pre-wrap, so \n
+          // becomes a real line break. Don't convert to <br/> here or
+          // the tags get escaped and shown as literal text in the PDF.
+          offerBody:       body || null,
+        };
       }
       const res = await fetch(`/api/hr/hiring/candidates/${candidate.id}/offers`, {
         method: "POST",
@@ -367,7 +451,11 @@ function NewOfferModal({
           ctcAnnual:          ctcAnnual ? Number(ctcAnnual) : null,
           joiningDate:        joiningDate || null,
           expiresAt:          expiresAt   || null,
-          bodyHtml:           body ? body.replace(/\n/g, "<br/>") : null,
+          // Stored as plain text in OfferLetter.bodyHtml (the column
+          // name predates this refactor). The serve flow reads it and
+          // passes straight to the PDF renderer; same rendering rule
+          // as offerBody above.
+          bodyHtml:           body || null,
           attachmentFileName: file?.name,
           attachmentMime:     file?.mime,
           attachmentBase64:   file?.base64,
@@ -453,9 +541,13 @@ function NewOfferModal({
                 </FieldLabel>
                 <FieldLabel label="Joining date">
                   <DateField value={joiningDate} onChange={setJoiningDate} />
+                  <p className="mt-1 text-[10px] text-slate-400">When the candidate is expected to start.</p>
                 </FieldLabel>
-                <FieldLabel label="Expires on">
+                <FieldLabel label="Acceptance deadline">
                   <DateField value={expiresAt} onChange={setExpiresAt} />
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    Last day the candidate can sign &amp; accept. Per offer T&amp;C clause 24, default is 5 days from today — always before joining.
+                  </p>
                 </FieldLabel>
               </div>
 
@@ -485,11 +577,13 @@ function NewOfferModal({
               <div className="flex items-center gap-2">
                 <button
                   onClick={generate}
-                  className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-semibold shadow-sm"
-                ><Sparkles size={13} /> Generate</button>
+                  disabled={generating}
+                  className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-[12px] font-semibold shadow-sm"
+                ><Sparkles size={13} /> {generating ? "Generating…" : "Generate"}</button>
                 <button
                   onClick={openPreview}
-                  className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[12px] font-semibold shadow-sm"
+                  disabled={generating}
+                  className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-blue-400 text-white text-[12px] font-semibold shadow-sm"
                 ><Eye size={13} /> Preview</button>
               </div>
             }
@@ -574,6 +668,24 @@ function NewOfferModal({
                 </p>
               </div>
             </label>
+
+            {/* CC — only meaningful when actually sending now. Stays
+                rendered but disabled until sendNow is on so HR
+                discovers it. */}
+            <div className={`mt-3 transition-opacity ${sendNow ? "opacity-100" : "opacity-60"}`}>
+              <FieldLabel label="CC (optional)">
+                <input
+                  value={ccRaw}
+                  onChange={(e) => setCcRaw(e.target.value)}
+                  disabled={!sendNow}
+                  placeholder="manager@nbmediaproductions.com, finance@nbmediaproductions.com"
+                  className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-white text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6] disabled:bg-slate-50 disabled:cursor-not-allowed"
+                />
+                <p className="mt-1 text-[10.5px] text-slate-400">
+                  Comma- or space-separated. Loop in manager, finance, founders — they&apos;ll receive the offer + PDF too.
+                </p>
+              </FieldLabel>
+            </div>
           </SectionCard>
 
           {error && (
@@ -611,6 +723,7 @@ function NewOfferModal({
           annualCtcINR={ctcAnnual ? Number(ctcAnnual) : null}
           joiningDate={joiningDate || null}
           acceptanceDeadline={expiresAt || null}
+          applicationDate={candidate.createdAt ?? null}
           onUseDraft={() => { setBody(previewBody); setPreviewOpen(false); }}
           dirty={body !== "" && body !== previewBody}
           onClose={() => setPreviewOpen(false)}
@@ -620,55 +733,98 @@ function NewOfferModal({
   );
 }
 
-// ── Offer preview — document-style render of the offer letter +
-// "Use this draft" / "Print / Save PDF" actions. Browser's print
-// dialog handles PDF export — no library dependency.
+// ── Offer preview — embeds the ACTUAL PDF (rendered from the .docx
+// template via Word/LO) inside an iframe so HR sees the same file
+// the candidate receives. No HTML approximation, no overlay tricks.
 function OfferPreviewModal({
-  body, candidateName, jobRole, annualCtcINR, joiningDate, acceptanceDeadline,
-  dirty, onUseDraft, onClose,
+  candidateName, jobRole, annualCtcINR, joiningDate, acceptanceDeadline,
+  applicationDate, onClose,
 }: {
-  body: string;
+  body?: string;     // kept for API compat — no longer used
   candidateName: string;
   jobRole: string;
   annualCtcINR: number | null;
   joiningDate: string | null;
   acceptanceDeadline: string | null;
-  /** True when HR has edited the inline textarea — show a hint that
-   *  "Use this draft" will overwrite their edits if clicked. */
-  dirty: boolean;
-  onUseDraft: () => void;
+  applicationDate?: string | null;
+  dirty?: boolean;     // kept for API compat — no longer used
+  onUseDraft?: () => void; // kept for API compat — no longer used
   onClose: () => void;
 }) {
-  // Live pay-breakdown preview so HR sees the Annexure A numbers
-  // before printing. Re-renders if CTC changes.
-  const breakdown = computePayBreakdown(annualCtcINR);
-  const print = () => {
-    // Build the full multi-page offer letter (letterhead + page 1 +
-    // T&Cs + Acceptance + Annexure A + Annexure B). The (possibly
-    // HR-edited) body flows in as `editedBody` so any tweaks make it
-    // into the PDF. Opened via Blob URL — no document.write().
-    const html = buildOfferLetterHTML({
-      candidateName, jobRole,
-      annualCtcINR, joiningDate, acceptanceDeadline,
-      editedBody: body,
-    });
-    const blob = new Blob([html], { type: "text/html" });
-    const url  = URL.createObjectURL(blob);
-    const w    = window.open(url, "_blank", "noopener,noreferrer,width=900,height=1000");
-    // Release the blob after the new tab has navigated to it. 60s is
-    // generous; browsers keep the doc alive after the URL is revoked.
-    if (w) setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState<string | null>(null);
+  // Drives the staged loading card — each step takes ~600ms before
+  // advancing so HR sees forward motion even when the server is fast.
+  const [step, setStep] = useState(0);
+
+  // Fetch the actual PDF (same one the candidate gets) and create a
+  // blob URL for the iframe to point at. Revoke on unmount so we
+  // don't leak the blob.
+  useEffect(() => {
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    setStep(0);
+    const stepTimer = setInterval(() => {
+      setStep((s) => (s < 2 ? s + 1 : s));
+    }, 650);
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch("/api/hr/hiring/offers/template-preview?format=pdf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            candidateName,
+            jobRole,
+            annualCtcINR,
+            joiningDate,
+            acceptanceDeadline,
+            applicationDate,
+          }),
+        });
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(txt || `Render failed (${res.status})`);
+        }
+        const blob = await res.blob();
+        if (cancelled) return;
+        createdUrl = URL.createObjectURL(blob);
+        setPdfUrl(createdUrl);
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message ?? "Couldn't render the preview PDF");
+      } finally {
+        if (!cancelled) setLoading(false);
+        clearInterval(stepTimer);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      clearInterval(stepTimer);
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [candidateName, jobRole, annualCtcINR, joiningDate, acceptanceDeadline, applicationDate]);
+
+  const download = () => {
+    if (!pdfUrl) return;
+    const a = document.createElement("a");
+    a.href = pdfUrl;
+    a.download = `Offer Letter - ${candidateName || "Candidate"}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 max-h-[92vh] flex flex-col">
+        className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-200 max-h-[94vh] flex flex-col">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-[15px] font-semibold text-slate-900">Offer letter preview</h3>
             <p className="text-[11px] text-slate-500">
-              This is exactly how the offer letter will read. Edit inline first if anything looks off — your changes flow through to email + PDF.
+              Rendered from the NB Media template — this is the EXACT PDF the candidate will receive.
             </p>
           </div>
           <button onClick={onClose} className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100">
@@ -676,79 +832,32 @@ function OfferPreviewModal({
           </button>
         </div>
 
-        {/* Document-style page surface — paper background, comfortable
-            margins, serif-ish leading so it reads like a real letter
-            instead of a UI textarea. */}
-        <div className="flex-1 overflow-y-auto bg-slate-100 p-6 sm:p-8">
-          <div className="mx-auto max-w-[680px] bg-white rounded-md ring-1 ring-slate-200 shadow-md">
-            <div className="px-8 py-6 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-rose-600">NB Media</p>
-                <h2 className="mt-1 text-[15px] font-semibold text-slate-900">Offer Letter — {jobRole || "Role"}</h2>
-              </div>
-              <p className="text-[10.5px] text-slate-500">For {candidateName}</p>
+        <div className="flex-1 overflow-hidden bg-slate-100 p-3">
+          {loading ? (
+            <OfferPreviewLoading step={step} candidateName={candidateName} jobRole={jobRole} />
+          ) : error ? (
+            <div className="h-full flex flex-col items-center justify-center text-rose-600 px-6 text-center">
+              <p className="text-[13px] font-semibold">Couldn't render the preview PDF</p>
+              <p className="mt-1 text-[11.5px] text-slate-600">{error}</p>
+              <p className="mt-3 text-[10.5px] text-slate-500 max-w-md">
+                On the VPS this needs LibreOffice installed (<span className="font-mono">apt install libreoffice --no-install-recommends</span>). Locally it uses Microsoft Word if available.
+              </p>
             </div>
-            <div className="px-8 py-7">
-              <pre className="whitespace-pre-wrap font-sans text-[13.5px] leading-[1.75] text-slate-800">{body}</pre>
-            </div>
-          </div>
-
-          {/* Annexure A — pay breakdown preview. Renders below the
-              letter as a separate "page" so HR sees the auto-computed
-              numbers before printing. Numbers update live with CTC. */}
-          {breakdown && (
-            <div className="mx-auto max-w-[680px] mt-6 bg-white rounded-md ring-1 ring-slate-200 shadow-md">
-              <div className="px-8 py-6 border-b border-slate-100">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-rose-600">Annexure "A"</p>
-                <h2 className="mt-1 text-[15px] font-semibold text-slate-900">Compensation Structure</h2>
-                <p className="mt-2 text-[12.5px] text-slate-700">
-                  Annual fixed compensation of <strong>Rs. {breakdown.annualLPA} LPA</strong>, divided per the following monthly break-up:
-                </p>
-              </div>
-              <div className="px-8 py-6">
-                <table className="w-full text-[12.5px] border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50">
-                      <th className="border border-slate-300 px-3 py-2 text-left font-bold uppercase tracking-wider text-[10.5px]">Pay Component</th>
-                      <th className="border border-slate-300 px-3 py-2 text-right font-bold uppercase tracking-wider text-[10.5px]">Monthly</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <PayRow label="Basic Pay"            value={breakdown.basic} />
-                    <PayRow label="House Rent Allowance" value={breakdown.hra} />
-                    <PayRow label="Dearness Allowance"   value={breakdown.da} />
-                    <PayRow label="Conveyance Allowance" value={breakdown.conveyance} />
-                    <PayRow label="Medical Allowance"    value={breakdown.medical} />
-                    <PayRow label="Special Allowance"    value={breakdown.special} />
-                    <tr className="bg-slate-50">
-                      <td className="border border-slate-300 px-3 py-2 font-bold">TOTAL MONTHLY CTC</td>
-                      <td className="border border-slate-300 px-3 py-2 text-right font-bold">Rs. {fmtINR(breakdown.totalMonthly)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-                <p className="mt-3 text-[10.5px] text-slate-500 leading-[1.6]">
-                  Auto-computed from the entered annual CTC. Override individual lines by editing the printable PDF directly if needed.
-                </p>
-              </div>
-            </div>
-          )}
+          ) : pdfUrl ? (
+            <iframe
+              src={pdfUrl}
+              title="Offer Letter Preview"
+              className="w-full h-full bg-white rounded-md border border-slate-200 shadow-sm"
+              style={{ minHeight: "70vh" }}
+            />
+          ) : null}
         </div>
 
-        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex items-center justify-between gap-2 flex-wrap">
-          <p className="text-[10.5px] text-slate-500 max-w-md">
-            {dirty
-              ? "⚠ You have edits in the textarea — clicking ‘Use this draft’ will overwrite them with the freshly-generated version."
-              : "Tip: ‘Use this draft’ pastes the previewed letter into the editor so you can fine-tune it before saving."}
-          </p>
-          <div className="flex items-center gap-2">
-            <button onClick={onClose} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white">Close</button>
-            <button onClick={onUseDraft}
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[12.5px] font-semibold shadow-sm"
-            ><Pencil size={13} /> Use this draft</button>
-            <button onClick={print}
-              className="inline-flex items-center gap-1.5 h-9 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[12.5px] font-semibold shadow-sm"
-            ><Printer size={13} /> Save as PDF</button>
-          </div>
+        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex items-center justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white">Close</button>
+          <button onClick={download} disabled={!pdfUrl}
+            className="inline-flex items-center gap-1.5 h-9 px-5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-slate-300 text-white text-[12.5px] font-semibold shadow-sm"
+          ><Printer size={13} /> Download PDF</button>
         </div>
       </div>
     </div>
@@ -757,13 +866,67 @@ function OfferPreviewModal({
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-function PayRow({ label, value }: { label: string; value: number }) {
+// Step-numbered section card — gives the New Offer modal the
+// "1 → 2 → 3 → 4" flow without screaming wizard-style. Title + hint
+// on the left, optional action buttons on the right.
+function SectionCard({
+  num, title, hint, action, children,
+}: {
+  num: number;
+  title: string;
+  hint?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <tr>
-      <td className="border border-slate-300 px-3 py-2 font-semibold">{label}</td>
-      <td className="border border-slate-300 px-3 py-2 text-right">Rs. {fmtINR(value)}</td>
-    </tr>
+    <section className="rounded-xl bg-white border border-slate-200 shadow-[0_1px_2px_rgba(15,23,42,0.04)] overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-slate-100 flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5 min-w-0">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-50 text-[#1d4ed8] text-[11px] font-bold ring-1 ring-blue-100 shrink-0">
+            {num}
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-[13.5px] font-semibold text-slate-900">{title}</h3>
+            {hint && <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{hint}</p>}
+          </div>
+        </div>
+        {action && <div className="shrink-0">{action}</div>}
+      </div>
+      <div className="px-5 py-4">{children}</div>
+    </section>
   );
+}
+
+// Label wrapper for form fields — consistent label-on-top styling.
+function FieldLabel({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-[11.5px] font-semibold text-slate-600 mb-1.5">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+
+// Parse a free-text CC field into a clean string[]. Returns `null`
+// when ANY token doesn't look like an email so the caller can surface
+// the error to HR instead of silently dropping bad addresses. Empty
+// or whitespace-only input returns an empty array — no error.
+function parseEmails(raw: string): string[] | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  const tokens = trimmed.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+  const valid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+  for (const t of tokens) if (!valid.test(t)) return null;
+  // Dedupe (case-insensitive) so a typo "a@x.com, A@X.com" doesn't double-send.
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of tokens) {
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key); out.push(t);
+  }
+  return out;
 }
 
 function fmtINR(n: number): string {
@@ -772,4 +935,144 @@ function fmtINR(n: number): string {
 }
 function fmtDate(d: string | Date): string {
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+// ── Preview loading card ─────────────────────────────────────────
+// Branded loading state with a document-skeleton placeholder on the
+// left and three checkable status steps on the right. `step` is
+// driven by the modal — 0 = filling, 1 = converting, 2 = preparing —
+// and is mapped to step.icon + text. Steps below `step` show a ✓.
+function OfferPreviewLoading({
+  step, candidateName, jobRole,
+}: { step: number; candidateName: string; jobRole: string }) {
+  const steps = [
+    { label: "Filling template",  detail: "Merging name, role, dates & CTC into the NB Media .docx" },
+    { label: "Rendering PDF",     detail: "Converting via Word / LibreOffice with original formatting" },
+    { label: "Preparing preview", detail: "Wrapping up — final layout pass" },
+  ];
+
+  return (
+    <div className="h-full flex items-center justify-center px-4 py-6">
+      <div className="w-full max-w-2xl rounded-2xl bg-white border border-slate-200 shadow-[0_8px_28px_rgba(15,23,42,0.08)] overflow-hidden">
+        <div className="px-6 py-4 bg-gradient-to-br from-[#1d4ed8] to-[#3b82f6] text-white flex items-center gap-3">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 backdrop-blur-sm font-bold tracking-tight text-[14px]">
+            nb
+          </span>
+          <div className="min-w-0">
+            <p className="text-[13.5px] font-semibold leading-tight">Generating Offer Letter</p>
+            <p className="text-[11px] text-white/80 truncate">
+              {candidateName || "Candidate"} · {jobRole || "Role"}
+            </p>
+          </div>
+          <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/15 text-[10.5px] font-semibold uppercase tracking-wide">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 animate-pulse" />
+            Working
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.05fr] gap-0">
+          {/* Document skeleton — hints at the multi-page letter
+              layout while it's being rendered. Pure CSS, no SVG. */}
+          <div className="p-5 bg-slate-50/60 border-b sm:border-b-0 sm:border-r border-slate-100">
+            <div className="mx-auto w-full max-w-[220px] aspect-[1/1.32] rounded-lg bg-white border border-slate-200 shadow-sm p-4 relative overflow-hidden">
+              {/* Letterhead band */}
+              <div className="flex items-start gap-2">
+                <div className="h-2 flex-1 rounded-full bg-slate-200 animate-pulse" />
+                <div className="h-5 w-5 rounded bg-rose-200 animate-pulse" />
+              </div>
+              <div className="mt-1.5 h-1.5 w-3/4 rounded-full bg-slate-200 animate-pulse" />
+              <div className="mt-0.5 h-1.5 w-2/3 rounded-full bg-slate-200 animate-pulse" />
+
+              {/* Title */}
+              <div className="mt-4 mx-auto h-2.5 w-1/2 rounded-full bg-slate-300 animate-pulse" />
+
+              {/* Body lines */}
+              <div className="mt-4 space-y-1.5">
+                {[100, 96, 88, 100, 92, 70, 100, 84].map((w, i) => (
+                  <div
+                    key={i}
+                    className="h-1.5 rounded-full bg-slate-200 animate-pulse"
+                    style={{ width: `${w}%`, animationDelay: `${i * 80}ms` }}
+                  />
+                ))}
+              </div>
+
+              {/* Signature block */}
+              <div className="mt-4">
+                <div className="h-2 w-20 rounded-full bg-slate-300 animate-pulse" />
+                <div className="mt-1 h-1.5 w-14 rounded-full bg-slate-200 animate-pulse" />
+              </div>
+
+              {/* Sweep shimmer */}
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent -translate-x-full animate-[shimmer_2s_ease-in-out_infinite]" />
+            </div>
+            <p className="mt-3 text-center text-[10.5px] text-slate-500 font-medium">
+              Page 1 of 5 · NB Media offer letter template
+            </p>
+          </div>
+
+          {/* Step checklist */}
+          <div className="p-5 flex flex-col justify-center">
+            <p className="text-[10.5px] font-semibold uppercase tracking-wider text-slate-400">
+              Progress
+            </p>
+            <ol className="mt-2.5 space-y-2.5">
+              {steps.map((s, i) => {
+                const done    = i <  step;
+                const active  = i === step;
+                return (
+                  <li key={s.label} className="flex items-start gap-3">
+                    <span className={`mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold shrink-0 transition-colors ${
+                      done   ? "bg-emerald-500 text-white" :
+                      active ? "bg-[#3b82f6] text-white shadow-[0_0_0_4px_rgba(59,130,246,0.18)]" :
+                               "bg-slate-100 text-slate-400 ring-1 ring-slate-200"
+                    }`}>
+                      {done ? (
+                        <Check size={13} strokeWidth={3} />
+                      ) : active ? (
+                        <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
+                      ) : (
+                        i + 1
+                      )}
+                    </span>
+                    <div className="min-w-0">
+                      <p className={`text-[12.5px] font-semibold ${
+                        done ? "text-slate-500 line-through decoration-slate-300" :
+                        active ? "text-slate-900" :
+                        "text-slate-500"
+                      }`}>
+                        {s.label}
+                      </p>
+                      <p className="text-[10.5px] text-slate-400 leading-snug">{s.detail}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+
+            {/* Indeterminate progress bar */}
+            <div className="mt-5 h-1 w-full rounded-full bg-slate-100 overflow-hidden">
+              <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-[#3b82f6] to-[#1d4ed8] animate-[indeterminate_1.4s_ease-in-out_infinite]" />
+            </div>
+            <p className="mt-2 text-[10px] text-slate-400">
+              Usually completes in 2–4 seconds.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Keyframes for the skeleton shimmer + progress bar */}
+      <style jsx>{`
+        @keyframes shimmer {
+          0%   { transform: translateX(-100%); }
+          50%  { transform: translateX(100%); }
+          100% { transform: translateX(100%); }
+        }
+        @keyframes indeterminate {
+          0%   { transform: translateX(-100%); }
+          100% { transform: translateX(400%); }
+        }
+      `}</style>
+    </div>
+  );
 }

@@ -210,8 +210,16 @@ export default function OnboardEmployeePage() {
     phone?: string;
   } | null>(null);
   // Banner shown when the form was prefilled from a hiring candidate
-  // via ?fromCandidate=<id>. Stays put until HR dismisses it.
-  const [prefilledFrom, setPrefilledFrom] = useState<{ candidateId: number; name: string } | null>(null);
+  // via ?fromCandidate=<id>. Stays put until HR dismisses it. Carries
+  // the candidate's resume info so HR can view it while filling out
+  // the rest of the form — no need to re-upload, the file lives in
+  // JobApplication.resumeBlob and is served via the hiring API.
+  const [prefilledFrom, setPrefilledFrom] = useState<{
+    candidateId:    number;
+    name:           string;
+    resumeUrl:      string | null;
+    resumeFileName: string | null;
+  } | null>(null);
 
   // Keka import state — modal visibility + a small banner telling HR
   // which row was just pulled in. The set of HRM IDs already onboarded
@@ -258,7 +266,12 @@ export default function OnboardEmployeePage() {
           mobileNumber,
           jobTitle: a.roleTitle ?? f.jobTitle,
         }));
-        setPrefilledFrom({ candidateId: Number(candidateId), name: full || `candidate #${candidateId}` });
+        setPrefilledFrom({
+          candidateId:    Number(candidateId),
+          name:           full || `candidate #${candidateId}`,
+          resumeUrl:      typeof a.resumeUrl === "string" ? a.resumeUrl : null,
+          resumeFileName: typeof a.resumeFileName === "string" ? a.resumeFileName : null,
+        });
       } catch { /* silent — prefill is best-effort */ }
     })();
     return () => { cancelled = true; };
@@ -839,7 +852,7 @@ export default function OnboardEmployeePage() {
 
       {/* ── Banners ── */}
       {prefilledFrom && (
-        <div className="px-6 pt-4">
+        <div className="px-6 pt-4 space-y-2">
           <div className="flex items-start gap-2 px-4 py-2.5 rounded-lg bg-emerald-50 text-emerald-700 text-[12.5px] ring-1 ring-emerald-200">
             <Check className="w-4 h-4 shrink-0 mt-0.5" />
             <span className="flex-1">
@@ -850,6 +863,33 @@ export default function OnboardEmployeePage() {
               className="text-emerald-600 hover:text-emerald-900 text-[12px] font-semibold"
             >Dismiss</button>
           </div>
+
+          {/* Resume carried over from the application — HR doesn't need
+              to re-upload. View opens in a new tab (auth-gated via the
+              hiring resume endpoint); the file lives on the
+              JobApplication row, not on the employee record. */}
+          {prefilledFrom.resumeUrl && (
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg bg-blue-50/60 ring-1 ring-blue-200/70 text-[12.5px] text-slate-700">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-white ring-1 ring-blue-200 text-[#1d4ed8] shrink-0">
+                  📄
+                </span>
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-800 truncate">
+                    Resume on file: <span className="font-mono text-[11.5px] text-slate-600">{prefilledFrom.resumeFileName ?? "Resume"}</span>
+                  </p>
+                  <p className="text-[11px] text-slate-500">Already uploaded during the application — no need to attach again.</p>
+                </div>
+              </div>
+              <a
+                href={prefilledFrom.resumeUrl}
+                target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[11.5px] font-semibold shrink-0"
+              >
+                View resume
+              </a>
+            </div>
+          )}
         </div>
       )}
       {error && (

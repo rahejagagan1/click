@@ -6,6 +6,7 @@ import SelectField from "@/components/ui/SelectField";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { isAdmin as isAdminUser } from "@/lib/access";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 
 const TOP_TABS = [
   { key: "home",       label: "HOME",       href: "/dashboard/hr/home"  },
@@ -27,7 +28,7 @@ export default function TicketsPage() {
   const { data: session } = useSession();
   const user = session?.user as any;
   const isAdmin = isAdminUser(user);
-  const [subTab, setSubTab] = useState<"my" | "following">("my");
+  const [subTab, setSubTab] = useUrlTab<"my" | "following">("view", "my", ["my", "following"] as const);
   const [showNew, setShowNew] = useState(false);
   const [search, setSearch] = useState("");
   const [timeFilter] = useState("Last 3 months");
