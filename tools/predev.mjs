@@ -89,19 +89,39 @@ function runPrisma(...args) {
 function killStaleDevProcesses() {
   if (!isWin) return 0;
   try {
-    // List Node processes (other than ours) whose command line points
-    // at this project's next/tsx invocations. The match is done
-    // entirely inside the PowerShell script — no JS-side interpolation
-    // of process metadata into the script body. Only our own PID is
-    // passed in, and only as a literal integer.
+    // List Node processes (other than ours) that look like project
+    // dev / test invocations. We deliberately CAST A WIDER NET than
+    // a strict `nb_dashboard`-path match: tsx scripts launched with
+    // a relative path don't carry the project folder in their
+    // command line, but they still hold the Prisma DLL open.
+    //
+    // Match criteria (any of):
+    //   • cmdline contains `next` → a previous `next dev` server
+    //   • cmdline contains `tsx`  → a previous tsx script (esp.
+    //                                anything under scripts/)
+    //   • cmdline contains `prisma` → a previous prisma CLI run
+    //   • cmdline ends with `scripts/...ts(x)?` → diag scripts run
+    //                                              via npx tsx
+    //
+    // EXCLUDE anything that looks like an MCP server (`mcp`) so we
+    // don't kill the user's IDE / Claude Code MCP processes. Also
+    // exclude our own PID and any direct child of ours (the
+    // prisma-generate node process we just spawned).
     const ps = `
       $self = ${Number(process.pid)};
+      $parent = (Get-CimInstance Win32_Process -Filter "ProcessId=$self").ParentProcessId;
       Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
         Where-Object {
           $_.ProcessId -ne $self -and
+          $_.ProcessId -ne $parent -and
           $_.CommandLine -and
-          $_.CommandLine -match 'nb_dashboard' -and
-          ($_.CommandLine -match 'next' -or $_.CommandLine -match 'tsx')
+          $_.CommandLine -notmatch 'mcp' -and
+          (
+            $_.CommandLine -match 'next' -or
+            $_.CommandLine -match 'tsx' -or
+            $_.CommandLine -match 'prisma' -or
+            $_.CommandLine -match 'scripts[/\\\\]'
+          )
         } |
         Select-Object -ExpandProperty ProcessId
     `;
@@ -156,9 +176,11 @@ function run() {
     log("prisma generate failed — checking for stale dev processes holding the client DLL.");
     const killed = killStaleDevProcesses();
     if (killed > 0) {
-      // Brief wait for the OS to release the file handles after the
-      // forced terminations — Windows is sometimes lazy here.
-      const until = Date.now() + 1500;
+      // Wait for the OS to release the file handles after the forced
+      // terminations — Windows is sometimes lazy here. 2.5s is enough
+      // for the kernel to flush even when several processes had the
+      // engine DLL mapped at once.
+      const until = Date.now() + 2500;
       while (Date.now() < until) { /* spin */ }
       log("retrying prisma generate…");
       gen = runPrisma("generate");
