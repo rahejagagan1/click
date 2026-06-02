@@ -869,15 +869,28 @@ function CardActionsMenu({
 
   // Recompute the menu position whenever it opens — anchored to the
   // trigger button's bounding rect so the panel always lands flush
-  // below it, even if the user scrolls or resizes mid-open.
+  // below it, even if the user scrolls or resizes mid-open. When the
+  // trigger sits near the bottom of the viewport (last card in the
+  // grid, scrolled-to-end list view), opening downward would clip
+  // the lower menu items — we flip the anchor to ABOVE the trigger
+  // in that case. The max-height + overflow-y rule on the panel
+  // itself catches the residual case where even flipping isn't
+  // enough (tiny viewports / very long menus).
+  const ESTIMATED_MENU_HEIGHT = 320;
   useLayoutEffect(() => {
     if (!menuOpen) { setPos(null); return; }
     const place = () => {
       const r = triggerRef.current?.getBoundingClientRect();
       if (!r) return;
+      const vh = window.innerHeight;
+      const spaceBelow = vh - r.bottom;
+      const spaceAbove = r.top;
+      const openUp = spaceBelow < ESTIMATED_MENU_HEIGHT && spaceAbove > spaceBelow;
       setPos({
-        top:   r.bottom + 4,            // 4-px gap below the ⋯ button
-        right: window.innerWidth - r.right, // anchor to the right edge
+        top:   openUp
+          ? Math.max(8, r.top - ESTIMATED_MENU_HEIGHT - 4)
+          : r.bottom + 4,
+        right: window.innerWidth - r.right,
       });
     };
     place();
@@ -934,8 +947,8 @@ function CardActionsMenu({
             onClick={(e) => { e.stopPropagation(); onMenuToggle(); }}
           />
           <div
-            className="fixed z-[201] w-48 rounded-lg border border-slate-200 bg-white shadow-lg py-1.5"
-            style={{ top: pos.top, right: pos.right }}
+            className="fixed z-[201] w-48 rounded-lg border border-slate-200 bg-white shadow-lg py-1.5 overflow-y-auto"
+            style={{ top: pos.top, right: pos.right, maxHeight: "calc(100vh - 16px)" }}
             onClick={(e) => e.stopPropagation()}
           >
             <a
