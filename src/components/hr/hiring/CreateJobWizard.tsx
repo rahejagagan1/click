@@ -29,6 +29,77 @@ import { JOB_TITLES_YT_LABS }   from "@/lib/job-titles-yt-labs";
 import { DEPARTMENTS }          from "@/lib/departments";
 import { DEPARTMENTS_YT_LABS }  from "@/lib/departments-yt-labs";
 import { DateField }            from "@/components/ui/date-field";
+import dynamic from "next/dynamic";
+import "react-quill-new/dist/quill.snow.css";
+
+// Same dynamically-imported Quill as the Replace-JD modal — kept
+// here as well so HR gets the WYSIWYG toolbar (bold / italic /
+// underline / size / headings / lists / alignment) when creating
+// a brand-new job, not just when replacing an existing JD.
+const ReactQuill = dynamic(
+  async () => (await import("react-quill-new")).default,
+  { ssr: false, loading: () => <div className="px-5 py-4 text-[12.5px] text-slate-400">Loading editor…</div> },
+);
+
+const JD_QUILL_MODULES = {
+  toolbar: [
+    [{ header: [1, 2, 3, false] }],
+    [{ size: ["small", false, "large", "huge"] }],
+    ["bold", "italic", "underline", "strike"],
+    [{ list: "ordered" }, { list: "bullet" }],
+    [{ align: [] }],
+    ["clean"],
+  ],
+};
+const JD_QUILL_FORMATS = [
+  "header", "size", "bold", "italic", "underline", "strike",
+  "list", "bullet", "align",
+];
+
+/** Plain-text (extractor output) → Quill HTML. Same heuristic as
+ *  the Replace-JD modal so the two editors behave identically:
+ *  lines ending in ":" → <h3>, "- " / "* " / "• " → <ul>,
+ *  "1." → <ol>, the rest → <p>. Already-HTML input passes through. */
+function plainTextToQuillHtml(input: string): string {
+  if (!input) return "";
+  const trimmed = input.trim();
+  if (trimmed.startsWith("<")) return input;
+  const lines = input.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  let bulletBuf: string[] = [];
+  let numberedBuf: string[] = [];
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const flushB = () => {
+    if (bulletBuf.length) {
+      out.push(`<ul>${bulletBuf.map((b) => `<li>${escape(b)}</li>`).join("")}</ul>`);
+      bulletBuf = [];
+    }
+  };
+  const flushN = () => {
+    if (numberedBuf.length) {
+      out.push(`<ol>${numberedBuf.map((b) => `<li>${escape(b)}</li>`).join("")}</ol>`);
+      numberedBuf = [];
+    }
+  };
+  const flushAll = () => { flushB(); flushN(); };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { flushAll(); out.push("<p><br></p>"); continue; }
+    const bullet = line.match(/^[-*•]\s+(.*)$/);
+    if (bullet) { flushN(); bulletBuf.push(bullet[1]); continue; }
+    const num = line.match(/^\d+[.)]\s+(.*)$/);
+    if (num) { flushB(); numberedBuf.push(num[1]); continue; }
+    flushAll();
+    if (/:\s*$/.test(line) && line.length <= 60) {
+      out.push(`<h3>${escape(line.replace(/:\s*$/, ""))}</h3>`);
+    } else {
+      out.push(`<p>${escape(line)}</p>`);
+    }
+  }
+  flushAll();
+  return out.join("");
+}
 
 const LOCATIONS = ["Mohali", "Remote"];
 const EMPLOYMENT_TYPES = ["Full-time", "Remote", "Internship"];
@@ -476,16 +547,14 @@ function Step1Description({
         </Field>
       </FormGrid>
 
-      <Field label="Description">
-        <textarea
-          value={form.description}
-          onChange={(e) => setField("description", e.target.value)}
-          rows={6}
-          placeholder="What the role entails — outcomes, responsibilities, what success looks like."
-          style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
-          className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[14px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
-        />
-      </Field>
+      {/* "Description" field removed from the wizard — the JD
+          (uploaded + edited inline below) is the single canonical
+          body for a role. The earlier short-summary description
+          was duplicative on the careers page (which now renders
+          only the JD) and HR couldn't tell which one would show
+          up where. Existing JobOpening.description values in the
+          DB are left untouched; this just stops collecting new
+          ones via the wizard. */}
 
       <Field label="Internal notes (not shown on careers page)">
         <textarea
@@ -546,7 +615,11 @@ function JdPreviewEditor({
   const fp = `${file.name}-${file.size}-${file.lastModified}`;
   const dirtied = useRef<boolean>(false);
   const hasUnsavedChanges = value.trim() !== savedValue.trim();
-  const canSave = !extracting && value.trim().length > 0 && hasUnsavedChanges;
+  // canSave needs the body to be non-empty AFTER tag-stripping —
+  // Quill emits "<p><br></p>" for an "empty" editor, which is
+  // non-empty by string length but visually blank to the user.
+  const stripped = value.replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;/g, " ").trim();
+  const canSave  = !extracting && stripped.length > 0 && hasUnsavedChanges;
 
   useEffect(() => {
     let cancelled = false;
@@ -570,13 +643,18 @@ function JdPreviewEditor({
         if (cancelled) return;
         if (!res.ok) throw new Error(j?.error || `Couldn't read the file (HTTP ${res.status})`);
         const text = String(j?.text ?? "").trim();
+        // Convert plain-text extractor output → Quill HTML so the
+        // editor opens with light auto-formatting (headings + lists)
+        // that HR can refine via the toolbar. Already-HTML values
+        // pass through untouched.
+        const html = plainTextToQuillHtml(text);
         // Don't clobber HR's manual edits. Only auto-fill when the
-        // textarea is empty / untouched for the current file.
+        // editor is empty / untouched for the current file.
         if (!dirtied.current || !value.trim()) {
-          onChange(text);
+          onChange(html);
           // Seed the saved-snapshot so HR doesn't see "unsaved
           // changes" the moment extraction completes.
-          setSavedValue(text);
+          setSavedValue(html);
         }
       } catch (e: any) {
         if (cancelled) return;
@@ -605,7 +683,10 @@ function JdPreviewEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fp]);
 
-  const wordCount = value.trim() ? value.trim().split(/\s+/).length : 0;
+  // Strip HTML tags before counting words — Quill emits "<p>hello</p>"
+  // and HR wants a real body-text count, not markup tokens.
+  const plain     = value.replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;/g, " ").trim();
+  const wordCount = plain ? plain.split(/\s+/).length : 0;
 
   // When `expanded` is on, the editor pops out into a fixed fullscreen
   // overlay (with backdrop) so HR has the whole viewport to edit long
@@ -655,28 +736,31 @@ function JdPreviewEditor({
           )}
         </div>
       ) : null}
-      <textarea
-        value={value}
-        onChange={(e) => { dirtied.current = true; onChange(e.target.value); }}
-        rows={expanded ? 32 : 14}
-        placeholder={
-          extracting
-            ? "Reading file content…"
-            : error
-              ? "Couldn't extract the file's text — paste or type the JD here."
-              : "Edit the extracted JD here — remove lines, fix typos, polish phrasing."
-        }
-        // Only block while the server is actively reading. If
-        // extraction failed, HR can still type the JD in by hand —
-        // the error message above tells them what went wrong.
-        disabled={extracting}
-        // Times New Roman matches the rendered PDF's typography so
-        // what HR types in the editor reads the same as the final
-        // document. Slightly larger size + relaxed leading for
-        // long-form editing comfort.
+      {/* Full WYSIWYG editor — toolbar gives HR Bold / Italic /
+          Underline / font size / headings / lists / alignment.
+          The NB Media letterhead + watermark live in the DOCX
+          template; toolbar actions here only affect the body
+          region of the generated PDF. */}
+      <div
+        className={`jd-quill-wrap bg-white ${expanded ? "flex-1 overflow-auto" : ""} ${extracting ? "opacity-60 pointer-events-none" : ""}`}
         style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
-        className={`w-full px-5 py-4 text-[14.5px] leading-[1.7] text-slate-800 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[#3b82f6]/15 disabled:bg-slate-50/60 ${expanded ? "flex-1 resize-none" : ""}`}
-      />
+      >
+        <ReactQuill
+          theme="snow"
+          value={value}
+          onChange={(html) => { dirtied.current = true; onChange(html); }}
+          modules={JD_QUILL_MODULES}
+          formats={JD_QUILL_FORMATS}
+          placeholder={
+            extracting
+              ? "Reading file content…"
+              : error
+                ? "Couldn't extract the file's text — paste or type the JD here."
+                : "Edit the extracted JD here — use the toolbar to bold, resize, or list items."
+          }
+          readOnly={extracting}
+        />
+      </div>
       <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 flex-wrap">
         <div className="text-[10.5px] text-slate-500 flex items-center gap-2 min-w-0 flex-wrap">
           {extracting ? (
