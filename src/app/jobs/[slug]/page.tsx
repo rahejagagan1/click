@@ -10,8 +10,8 @@ import type { Metadata } from "next";
 import prisma from "@/lib/prisma";
 import {
   MapPin, Briefcase, Clock, IndianRupee, Users, ArrowRight,
-  Share2, ChevronLeft, Rocket, Heart, TrendingUp,
-  Globe, Mail, Calendar, ChevronRight, Download, FileText,
+  Share2, ChevronLeft,
+  Mail, Calendar, ChevronRight, Download, FileText,
   ChevronDown,
 } from "lucide-react";
 import JobShareButton from "./JobShareButton";
@@ -40,6 +40,14 @@ type PublicJob = {
   closesAt: Date | null;
   jdFileUrl: string | null;
   jdFileName: string | null;
+  /** Plain-text version of the JD, populated by HR's inline editor.
+   *  When set, we render it as styled HTML sections on the page
+   *  (so candidates see real headings + bullets, not a flat PDF
+   *  iframe). Fallback to the iframe preview when jdText is null. */
+  jdText: string | null;
+  /** Used as a cache-buster on the public JD URL so a replaced
+   *  file invalidates any in-flight browser cache immediately. */
+  updatedAt: Date | null;
 };
 
 // Append the configured unit suffix to a free-text compensation
@@ -61,6 +69,71 @@ function fmtCompensation(range: string | null | undefined, unit: string | null |
   return `${trimmed} ${suffix}`;
 }
 
+// Extract plain text from a JD file on disk — used to auto-backfill
+// jdText for legacy jobs so the HTML view kicks in everywhere. PDF
+// goes through pdf-parse v2 (PDFParse class); .docx through mammoth.
+// Returns null on failure so the caller can fall back gracefully.
+async function tryExtractJdText(jdFileUrl: string): Promise<string | null> {
+  try {
+    // jdFileUrl is "/uploads/jds/<file>" — resolve relative to /public.
+    if (!jdFileUrl.startsWith("/uploads/")) return null;
+    const { readFile, realpath } = await import("node:fs/promises");
+    const { resolve, extname, sep } = await import("node:path");
+    // Resolve the public root through realpath() so any parent
+    // symlink in the deployment doesn't fool the prefix check.
+    const publicRoot = await realpath(resolve(process.cwd(), "public"));
+    const candidate  = resolve(publicRoot, "." + jdFileUrl);
+    // realpath() on the candidate catches two attack shapes:
+    //   1. Symlink under /public/uploads pointing outside the root.
+    //      Without realpath, the symlink's path lives inside public/
+    //      and passes the prefix check, but readFile() follows it.
+    //   2. A file that doesn't exist — realpath throws ENOENT here,
+    //      we treat that the same as a denial.
+    let filePath: string;
+    try {
+      filePath = await realpath(candidate);
+    } catch {
+      return null;
+    }
+    // Trailing path-separator on the root prevents a sibling-dir
+    // bypass — e.g. "/var/www/public-attacker" would otherwise start
+    // with "/var/www/public" and pass.
+    const rootPrefix = publicRoot.endsWith(sep) ? publicRoot : publicRoot + sep;
+    if (filePath !== publicRoot && !filePath.startsWith(rootPrefix)) return null;
+    const buf = await readFile(filePath);
+    const ext = extname(filePath).toLowerCase();
+
+    let text = "";
+    if (ext === ".pdf") {
+      const mod = await import("pdf-parse") as unknown as {
+        PDFParse: new (opts: { data: Uint8Array }) => {
+          getText: () => Promise<{ text: string }>;
+          destroy: () => Promise<void>;
+        };
+      };
+      const parser = new mod.PDFParse({ data: new Uint8Array(buf) });
+      try {
+        const r = await parser.getText();
+        text = String(r?.text ?? "");
+      } finally {
+        try { await parser.destroy(); } catch { /* noop */ }
+      }
+    } else if (ext === ".docx" || ext === ".doc") {
+      const mammoth = (await import("mammoth")).default;
+      const r = await mammoth.extractRawText({ buffer: buf });
+      text = String(r?.value ?? "");
+    } else if (ext === ".txt" || ext === ".rtf") {
+      text = buf.toString("utf8");
+    }
+
+    text = text.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+    return text || null;
+  } catch (e: any) {
+    console.error("[jobs/[slug]] auto-backfill jdText failed:", e?.message ?? e);
+    return null;
+  }
+}
+
 async function loadJob(slug: string): Promise<PublicJob | null> {
   try {
     try {
@@ -68,7 +141,7 @@ async function loadJob(slug: string): Promise<PublicJob | null> {
         `SELECT id, title, "publicSlug" AS slug, department, location, brand,
                 "employmentType", "experienceLevel", "salaryRange", "salaryUnit",
                 description, vacancies, "publishedAt", "closesAt",
-                "jdFileUrl", "jdFileName"
+                "jdFileUrl", "jdFileName", "jdText", "updatedAt"
            FROM "JobOpening"
           WHERE "publicSlug" = $1
             AND "status" = 'published'
@@ -76,7 +149,25 @@ async function loadJob(slug: string): Promise<PublicJob | null> {
           LIMIT 1`,
         slug,
       );
-      return (rows[0] ?? null) as PublicJob | null;
+      const row = rows[0] ?? null;
+      // Auto-backfill jdText for legacy jobs (created before the
+      // inline-edit feature was added). Extract once from the
+      // existing PDF, save back to the DB so subsequent renders are
+      // instant and the HTML view kicks in. Failures stay silent —
+      // the iframe fallback still renders the file.
+      if (row && !row.jdText && row.jdFileUrl) {
+        const extracted = await tryExtractJdText(row.jdFileUrl);
+        if (extracted) {
+          row.jdText = extracted;
+          try {
+            await prisma.$executeRawUnsafe(
+              `UPDATE "JobOpening" SET "jdText" = $1 WHERE "id" = $2`,
+              extracted, row.id,
+            );
+          } catch { /* non-fatal */ }
+        }
+      }
+      return row as PublicJob | null;
     } catch (e: any) {
       const code = e?.meta?.code || e?.code;
       if (code !== "42703" && !/does not exist/i.test(String(e?.message))) throw e;
@@ -86,7 +177,9 @@ async function loadJob(slug: string): Promise<PublicJob | null> {
                 "employmentType", "experienceLevel", "salaryRange",
                 NULL AS "salaryUnit",
                 description, vacancies, "publishedAt", "closesAt",
-                NULL AS "jdFileUrl", NULL AS "jdFileName"
+                NULL AS "jdFileUrl", NULL AS "jdFileName",
+                NULL::text AS "jdText",
+                "updatedAt"
            FROM "JobOpening"
           WHERE "publicSlug" = $1
             AND "status" = 'published'
@@ -125,6 +218,14 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
   const { slug } = await params;
   const job = await loadJob(slug);
   if (!job) notFound();
+
+  // Cache-buster for the JD URL — derived from JobOpening.updatedAt so
+  // that swapping the file (HR clicks "Replace file") invalidates any
+  // browser / CDN cache instantly. Without this, the iframe + open/
+  // download links served the previous PDF for up to whatever the
+  // intermediate cache TTL allowed.
+  const jdRev = job.updatedAt ? new Date(job.updatedAt).getTime() : 0;
+  const jdUrl = `/api/public/jd/${slug}?v=${jdRev}`;
 
   const brand = brandLabel(job.brand);
   const publishedLabel = job.publishedAt
@@ -310,56 +411,85 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
 
       {/* ── Body ────────────────────────────────────────────── */}
       <main className="max-w-5xl mx-auto px-4 sm:px-8 py-10 sm:py-16 space-y-6 sm:space-y-8">
-        {/* At a glance — Each Fact cell staggers in. */}
-        <section className="">
-          <Reveal direction="up" className="w-full">
-            <Card>
-              <CardHeader title="At a glance" eyebrow="Quick summary" />
-              <dl className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-slate-100 border-t border-slate-100">
-                {(() => {
-                  // "Posted" intentionally NOT in the Quick Summary —
-                  // the candidate already sees it under the hero CTAs.
-                  // No need to duplicate it in the at-a-glance card.
-                  const facts: Array<[string, string]> = [];
-                  if (job.department)      facts.push(["Department",     job.department]);
-                  if (job.location)        facts.push(["Location",        job.location]);
-                  if (job.employmentType)  facts.push(["Employment",      job.employmentType]);
-                  if (job.experienceLevel) facts.push(["Experience",      job.experienceLevel]);
-                  const comp = fmtCompensation(job.salaryRange, job.salaryUnit);
-                  if (comp)                facts.push(["Compensation",    comp]);
-                  if (job.vacancies > 1)   facts.push(["Openings",        `${job.vacancies} positions`]);
-                  if (closesLabel)         facts.push(["Closes",          closesLabel]);
-                  return facts.map(([label, value], i) => (
-                    <Reveal key={label} direction="up" delay={80 * i}>
-                      <Fact label={label} value={value} />
-                    </Reveal>
-                  ));
-                })()}
-              </dl>
-              {job.jdFileUrl && (
-                <div className="border-t border-slate-100 px-5 sm:px-8 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 ring-1 ring-blue-100 text-[#3b82f6] flex-shrink-0">
-                      <FileText size={15} />
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#3b82f6]">Job description PDF</p>
-                      <p className="text-[12.5px] font-medium text-slate-700 truncate">{job.jdFileName || "Job description"}</p>
+        {/* Job description — rendered as HTML sections from the
+            edited jdText. Falls back to the PDF iframe when jdText
+            isn't populated (legacy rows). Same NB Media branding as
+            the printed PDF: logo at top, watermark behind content.
+            Sits ABOVE "About the role" because the full JD is the
+            content candidates actually came to read. */}
+        {(job.jdText && job.jdText.trim()) ? (
+          <section id="job-description">
+            <Reveal direction="up" className="w-full">
+              <Card>
+                <CardHeader title="Full job description" eyebrow="Read the brief" />
+                <div className="px-4 sm:px-8 pb-6 sm:pb-8">
+                  <JdHtmlPanel
+                    text={job.jdText}
+                    downloadUrl={job.jdFileUrl ? jdUrl : null}
+                    downloadName={job.jdFileName}
+                  />
+                </div>
+              </Card>
+            </Reveal>
+          </section>
+        ) : job.jdFileUrl && /\.pdf(\?|$)/i.test(job.jdFileUrl) ? (
+          <section id="job-description">
+            <Reveal direction="up" className="w-full">
+              <Card>
+                <CardHeader title="Full job description" eyebrow="Read the brief" />
+                <div className="px-4 sm:px-8 pb-6 sm:pb-8">
+                  {/* Legacy fallback: jobs created before the inline-
+                      edit feature have no jdText yet. Show the
+                      embedded PDF iframe so candidates can still read
+                      the brief. */}
+                  <div className="rounded-xl sm:rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 sm:px-5 py-3 bg-gradient-to-r from-[#eff6ff] via-white to-white border-b border-slate-200/80">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#3b82f6] text-white shadow-sm shadow-blue-200 flex-shrink-0">
+                          <FileText size={16} strokeWidth={2.2} />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-[#3b82f6]">
+                            Job description · PDF preview
+                          </p>
+                          <p className="text-[13px] font-semibold text-slate-800 truncate leading-tight mt-0.5">
+                            {job.jdFileName || "Job description"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <a
+                          href={jdUrl}
+                          target="_blank" rel="noopener noreferrer"
+                          className="inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 h-9 px-3 rounded-lg border border-slate-200 bg-white hover:border-[#3b82f6] hover:text-[#3b82f6] text-slate-700 text-[12px] font-semibold transition-colors"
+                        >Open</a>
+                        <a
+                          href={jdUrl}
+                          download={job.jdFileName || undefined}
+                          className="inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 h-9 px-3 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[12px] font-semibold transition-colors shadow-sm shadow-blue-200"
+                        ><Download size={12} /> Download</a>
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 p-1.5 sm:p-4">
+                      <iframe
+                        src={`${jdUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                        title={job.jdFileName || "Job description"}
+                        className="w-full block rounded-md sm:rounded-lg bg-white shadow-sm h-[60vh] min-h-[420px] sm:h-[820px]"
+                        style={{ border: 0 }}
+                      />
                     </div>
                   </div>
-                  <a
-                    href={job.jdFileUrl}
-                    download={job.jdFileName || undefined}
-                    target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg bg-[#60a5fa] hover:bg-[#3b82f6] text-white text-[12px] font-semibold transition-colors w-full sm:w-auto"
-                  ><Download size={12} /> Download JD</a>
                 </div>
-              )}
-            </Card>
-          </Reveal>
-        </section>
+              </Card>
+            </Reveal>
+          </section>
+        ) : null}
 
-        {/* About the role — panel 3 */}
+        {/* About the role — short summary HR enters in the wizard.
+            Sits BELOW the full JD because once a candidate has read
+            the brief, this section serves as a quick distilled pitch
+            (and a place to surface HR's framing if the JD itself is
+            light). */}
         <section className="">
           <Reveal direction="up" className="w-full">
             <Card>
@@ -379,126 +509,6 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
           </Reveal>
         </section>
 
-        {/* Job description PDF — embedded preview so applicants can
-            read the full brief without downloading. PDFs render via
-            <object>; if the browser can't display it, the same
-            element falls back to a "Open in new tab" card. */}
-        {job.jdFileUrl && /\.pdf(\?|$)/i.test(job.jdFileUrl) && (
-          <section id="job-description">
-            <Reveal direction="up" className="w-full">
-              <Card>
-                <CardHeader title="Full job description" eyebrow="Read the brief" />
-                <div className="px-4 sm:px-8 pb-6 sm:pb-8">
-                  {/* Branded document frame — looks like a polished
-                      preview card instead of the raw browser PDF
-                      viewer. The PDF itself is rendered chromeless
-                      (toolbar=0) and our own header strip lives above
-                      it so the page's design owns the visuals end-to-
-                      end. */}
-                  <div className="rounded-xl sm:rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
-                    {/* Top action strip — stacks vertically on phones
-                        so the title and CTAs each get a full row,
-                        side-by-side on tablet/desktop. */}
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 sm:px-5 py-3 bg-gradient-to-r from-[#eff6ff] via-white to-white border-b border-slate-200/80">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#3b82f6] text-white shadow-sm shadow-blue-200 flex-shrink-0">
-                          <FileText size={16} strokeWidth={2.2} />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-[#3b82f6]">
-                            Job description · PDF preview
-                          </p>
-                          <p className="text-[13px] font-semibold text-slate-800 truncate leading-tight mt-0.5">
-                            {job.jdFileName || "Job description"}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 w-full sm:w-auto">
-                        <a
-                          href={`/api/public/jd/${slug}`}
-                          target="_blank" rel="noopener noreferrer"
-                          className="inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 h-9 px-3 rounded-lg border border-slate-200 bg-white hover:border-[#3b82f6] hover:text-[#3b82f6] text-slate-700 text-[12px] font-semibold transition-colors"
-                        >Open</a>
-                        <a
-                          href={`/api/public/jd/${slug}`}
-                          download={job.jdFileName || undefined}
-                          className="inline-flex flex-1 sm:flex-none items-center justify-center gap-1.5 h-9 px-3 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[12px] font-semibold transition-colors shadow-sm shadow-blue-200"
-                        ><Download size={12} /> Download</a>
-                      </div>
-                    </div>
-
-                    {/* PDF surface — responsive height: ~60vh on
-                        phones, 820px on tablets+ so the document
-                        feels like a previewable card rather than a
-                        forced 820px column. */}
-                    <div
-                      className="bg-slate-50 p-1.5 sm:p-4"
-                      style={{ boxShadow: "inset 0 1px 0 rgba(15,23,42,0.03)" }}
-                    >
-                      <iframe
-                        src={`/api/public/jd/${slug}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
-                        title={job.jdFileName || "Job description"}
-                        className="w-full block rounded-md sm:rounded-lg bg-white shadow-sm h-[60vh] min-h-[420px] sm:h-[820px]"
-                        style={{ border: 0 }}
-                      />
-                    </div>
-                  </div>
-
-                  <p className="mt-3 text-[10.5px] text-slate-400 text-center px-2">
-                    Trouble viewing?{" "}
-                    <a href={`/api/public/jd/${slug}`} target="_blank" rel="noopener noreferrer" className="text-[#3b82f6] hover:underline font-medium">
-                      Open the PDF in a new tab
-                    </a>
-                    {" "}or{" "}
-                    <a href={`/api/public/jd/${slug}`} download={job.jdFileName || undefined} className="text-[#3b82f6] hover:underline font-medium">
-                      download it
-                    </a>.
-                  </p>
-                </div>
-              </Card>
-            </Reveal>
-          </section>
-        )}
-
-        {/* Why join — panel 4 */}
-        <section className="">
-          <Reveal direction="up" className="w-full">
-            <Card>
-              <CardHeader title={`Why join ${brand}`} eyebrow="Why us" />
-              <div className="px-6 sm:px-8 pb-7 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <Reveal direction="up" delay={120}>
-                  <PerkCard tone="orange"  icon={Rocket}     title="Real impact, fast" body="Ship work that goes live on channels you watch. Your output is visible from week one — no holding pattern." />
-                </Reveal>
-                <Reveal direction="up" delay={240}>
-                  <PerkCard tone="rose"    icon={Heart}      title="A team that ships" body="Hybrid from Mohali. Async docs, regular reviews, zero busywork. People who care about the craft." />
-                </Reveal>
-                <Reveal direction="up" delay={360}>
-                  <PerkCard tone="emerald" icon={TrendingUp} title="Growth, honestly" body="Quarterly reviews, transparent KPI tracking, and clear paths to lead or senior — earned, not given." />
-                </Reveal>
-              </div>
-            </Card>
-          </Reveal>
-        </section>
-
-        {/* About company — panel 5 */}
-        <section className="">
-          <Reveal direction="up" className="w-full">
-            <Card className="relative overflow-hidden">
-              <div aria-hidden="true" className="absolute -top-12 -right-12 h-44 w-44 rounded-full bg-[#3b82f6]/[0.06] blur-3xl pointer-events-none" />
-              <div className="relative">
-                <CardHeader title={`About ${brand}`} eyebrow="Who we are" />
-                <div className="px-5 sm:px-10 pb-7 sm:pb-10">
-                  <p className="text-[14px] sm:text-[15px] text-slate-700 leading-[1.8] max-w-3xl">
-                    {brand === "YT Labs"
-                      ? "YT Labs is the strategy, research, and creative engine behind some of India's most-watched YouTube channels. We work end-to-end with creators — from idea to thumbnail to upload — and the team behind the scenes is small, sharp, and unusually obsessed with detail."
-                      : "NB Media Productions is an end-to-end content studio shipping work for India's biggest creators and brands. From scripts to edits to release, every part of the pipeline runs in-house. You'll see your work go live on the channels you watch within weeks of joining."}
-                  </p>
-                </div>
-              </div>
-            </Card>
-          </Reveal>
-        </section>
-
         {/* Bottom CTA — panel 6 */}
         <section className="">
           <Reveal direction="up" className="w-full">
@@ -509,10 +519,10 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
                   <p className="text-[12.5px] text-slate-500 mt-0.5">We usually reply within a working day.</p>
                 </div>
                 <a
-                  href="mailto:careers@nbmediaproductions.com"
+                  href="mailto:vanshika@nbmediaproductions.com"
                   className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-900 text-[12.5px] font-semibold transition-colors"
                 >
-                  <Mail size={13} /> careers@nbmediaproductions.com
+                  <Mail size={13} /> vanshika@nbmediaproductions.com
                 </a>
               </div>
             </Card>
@@ -579,7 +589,6 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
           <div className="flex items-center gap-5">
             <Link href="/jobs" className="hover:text-slate-700 transition-colors">All openings</Link>
             <a href="mailto:careers@nbmediaproductions.com" className="hover:text-slate-700 transition-colors inline-flex items-center gap-1"><Mail size={11} /> careers</a>
-            <a href="https://nbmediaproductions.com" target="_blank" rel="noreferrer" className="hover:text-slate-700 transition-colors inline-flex items-center gap-1"><Globe size={11} /> Website</a>
           </div>
         </footer>
       </main>
@@ -623,46 +632,185 @@ function Chip({ icon: Icon, label }: { icon: any; label: string }) {
   );
 }
 
-type PerkTone = "orange" | "rose" | "emerald";
+// JdHtmlPanel — render HR's edited JD text as a designed document
+// on the careers page. Mirrors the printed PDF's visual signature
+// (NB Media logo top-right + faded watermark behind the body) so
+// candidates see the same branding whether they read it inline or
+// download the file. The body text is auto-classified into headings
+// (lines ending with `:`), bulleted lists, numbered lists, or plain
+// paragraphs — just like the PDF renderer.
+function JdHtmlPanel({
+  text, downloadUrl, downloadName,
+}: {
+  text: string;
+  downloadUrl: string | null;
+  downloadName: string | null;
+}) {
+  const blocks = parseJdBlocks(text);
 
-const PERK_TONE: Record<PerkTone, { bg: string; shadow: string }> = {
-  orange:  {
-    bg:     "linear-gradient(135deg, #fb923c 0%, #f97316 50%, #ea580c 100%)",
-    shadow: "0 6px 20px -6px rgba(249,115,22,0.55), inset 0 1px 0 rgba(255,255,255,0.35)",
-  },
-  rose: {
-    bg:     "linear-gradient(135deg, #fb7185 0%, #f43f5e 50%, #e11d48 100%)",
-    shadow: "0 6px 20px -6px rgba(244,63,94,0.55), inset 0 1px 0 rgba(255,255,255,0.35)",
-  },
-  emerald: {
-    bg:     "linear-gradient(135deg, #34d399 0%, #10b981 50%, #059669 100%)",
-    shadow: "0 6px 20px -6px rgba(16,185,129,0.55), inset 0 1px 0 rgba(255,255,255,0.35)",
-  },
-};
-
-function PerkCard({
-  icon: Icon, title, body, tone = "orange",
-}: { icon: any; title: string; body: string; tone?: PerkTone }) {
-  const t = PERK_TONE[tone];
   return (
-    <div className="group relative rounded-xl bg-[#eef2f7] border border-slate-200/70 p-5 hover:bg-[#f8fafc] hover:border-slate-300 hover:shadow-[0_4px_18px_rgba(15,23,42,0.05)] hover:-translate-y-0.5 transition-all">
-      <div
-        className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-white mb-3 group-hover:scale-[1.06] transition-transform"
-        style={{ background: t.bg, boxShadow: t.shadow }}
-      >
-        <Icon size={17} />
+    <div className="relative rounded-xl sm:rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
+      {/* ── Top strip: brand block on left, logo on right ──── */}
+      <div className="relative flex items-start justify-between gap-4 px-5 sm:px-8 pt-5 sm:pt-7 pb-3 border-b border-slate-100 bg-gradient-to-b from-white to-slate-50/40">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#3b82f6]">
+            NB Media
+          </p>
+          <p className="mt-1 text-[12px] sm:text-[13px] text-slate-600 leading-snug">
+            YT Money Productions Pvt. Ltd.
+          </p>
+          <p className="text-[10.5px] sm:text-[11.5px] text-slate-400 leading-snug">
+            HRD@nbmediaproductions.com · +91&nbsp;81468&nbsp;91380
+          </p>
+        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo.png"
+          alt="NB Media"
+          className="h-10 sm:h-12 w-auto shrink-0"
+        />
       </div>
-      <p className="text-[14.5px] font-semibold text-slate-900 tracking-tight">{title}</p>
-      <p className="text-[13px] text-slate-600 mt-1.5 leading-[1.65]">{body}</p>
+
+      {/* ── Body wrapped over a faded watermark ──────────────── */}
+      <div className="relative">
+        {/* Watermark — large faded logo behind the prose. Pointer-
+            events: none so candidates can still select + copy the
+            body text without the image interfering. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none select-none absolute inset-0 flex items-center justify-center overflow-hidden"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo.png"
+            alt=""
+            className="w-[60%] max-w-[460px] opacity-[0.05] sm:opacity-[0.06]"
+            style={{ filter: "grayscale(20%)" }}
+          />
+        </div>
+
+        <div className="relative px-5 sm:px-10 py-6 sm:py-8">
+          <div
+            className="max-w-3xl mx-auto text-slate-800"
+            style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
+          >
+            {blocks.map((block, i) => {
+              if (block.kind === "heading") {
+                return (
+                  <h3
+                    key={i}
+                    className="mt-6 first:mt-0 mb-2 text-[15.5px] sm:text-[16.5px] font-bold text-slate-900"
+                  >
+                    {block.text}
+                  </h3>
+                );
+              }
+              if (block.kind === "bullet-list") {
+                return (
+                  <ul key={i} className="my-2 pl-6 space-y-1.5 list-disc marker:text-slate-400">
+                    {block.items.map((it, j) => (
+                      <li key={j} className="text-[14.5px] leading-[1.7]">{it}</li>
+                    ))}
+                  </ul>
+                );
+              }
+              if (block.kind === "numbered-list") {
+                return (
+                  <ol key={i} className="my-2 pl-6 space-y-1.5 list-decimal marker:text-slate-500 marker:font-semibold">
+                    {block.items.map((it, j) => (
+                      <li key={j} className="text-[14.5px] leading-[1.7]">{it}</li>
+                    ))}
+                  </ol>
+                );
+              }
+              return (
+                <p key={i} className="my-2 text-[14.5px] leading-[1.8] text-slate-700">
+                  {block.text}
+                </p>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Footer: download CTA (when a PDF is available) ──── */}
+      {downloadUrl && (
+        <div className="relative border-t border-slate-100 bg-slate-50/60 px-5 sm:px-8 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-[11px] text-slate-500">
+            Prefer to read offline? Grab a copy.
+          </span>
+          <a
+            href={downloadUrl}
+            download={downloadName || undefined}
+            className="inline-flex items-center justify-center gap-1.5 h-9 px-3.5 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[12px] font-semibold transition-colors shadow-sm shadow-blue-200"
+          >
+            <Download size={12} /> Download JD
+          </a>
+        </div>
+      )}
     </div>
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="px-5 py-4">
-      <p className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-slate-400">{label}</p>
-      <p className="mt-1.5 text-[13.5px] font-semibold text-slate-900 break-words">{value}</p>
-    </div>
-  );
+// parseJdBlocks — group raw lines into renderable blocks. Consecutive
+// bullet lines collapse into a single <ul>; consecutive "1. 2. 3."
+// lines collapse into a single <ol>; everything else is a heading or
+// paragraph. Mirrors the auto-format logic in
+// src/lib/jd-doc-from-text.ts so the inline HTML and the saved PDF
+// stay visually in sync.
+type JdBlock =
+  | { kind: "heading"; text: string }
+  | { kind: "paragraph"; text: string }
+  | { kind: "bullet-list"; items: string[] }
+  | { kind: "numbered-list"; items: string[] };
+
+function parseJdBlocks(text: string): JdBlock[] {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const out: JdBlock[] = [];
+  let bulletBuf: string[]   = [];
+  let numberedBuf: string[] = [];
+
+  const flushBullets = () => {
+    if (bulletBuf.length) {
+      out.push({ kind: "bullet-list", items: bulletBuf });
+      bulletBuf = [];
+    }
+  };
+  const flushNumbered = () => {
+    if (numberedBuf.length) {
+      out.push({ kind: "numbered-list", items: numberedBuf });
+      numberedBuf = [];
+    }
+  };
+  const flushAll = () => { flushBullets(); flushNumbered(); };
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { flushAll(); continue; }
+
+    const bullet = line.match(/^[-*•]\s+(.*)$/);
+    if (bullet) {
+      flushNumbered();
+      bulletBuf.push(bullet[1]);
+      continue;
+    }
+    const num = line.match(/^\d+[.)]\s+(.*)$/);
+    if (num) {
+      flushBullets();
+      numberedBuf.push(num[1]);
+      continue;
+    }
+
+    flushAll();
+
+    // Heading heuristic: short line ending with ":" (≤60 chars).
+    if (/:\s*$/.test(line) && line.length <= 60) {
+      out.push({ kind: "heading", text: line.replace(/:\s*$/, "") + ":" });
+      continue;
+    }
+    out.push({ kind: "paragraph", text: line });
+  }
+  flushAll();
+  return out;
 }
+

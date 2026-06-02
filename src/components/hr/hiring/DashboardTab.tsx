@@ -5,9 +5,10 @@
 // Below: Departments breakdown (left) + Offers tabbed list (right).
 // Everything fetched in one round-trip via /api/hr/hiring/dashboard.
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import { Info } from "lucide-react";
 
 type OfferLite = {
@@ -38,7 +39,11 @@ export default function DashboardTab() {
   const { data, isLoading } = useSWR<any>("/api/hr/hiring/dashboard", fetcher, {
     revalidateOnFocus: false,
   });
-  const [offerTab, setOfferTab] = useState<"pending" | "accepted" | "rejected" | "newHires">("pending");
+  // URL-synced — refreshing on Accepted/Rejected stays put.
+  const [offerTab, setOfferTab] = useUrlTab<"pending" | "accepted" | "rejected" | "newHires">(
+    "offers", "pending",
+    ["pending", "accepted", "rejected", "newHires"] as const,
+  );
 
   if (isLoading || !data) {
     return (

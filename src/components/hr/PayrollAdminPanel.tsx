@@ -13,6 +13,7 @@ import { useMemo, useState } from "react";
 import useSWR, { mutate } from "swr";
 import Link from "next/link";
 import { fetcher } from "@/lib/swr";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import SelectField from "@/components/ui/SelectField";
 import { DateField } from "@/components/ui/date-field";
 import {
@@ -46,7 +47,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function PayrollAdminPanel() {
-  const [adminTab, setAdminTab] = useState<"runs" | "structures">("runs");
+  const [adminTab, setAdminTab] = useUrlTab<"runs" | "structures">("payroll", "runs", ["runs", "structures"] as const);
   const [showNewRun, setShowNewRun] = useState(false);
   const [showNewStructure, setShowNewStructure] = useState(false);
   const [generating, setGenerating] = useState<number | null>(null);

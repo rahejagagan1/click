@@ -8,6 +8,7 @@ import SelectField from "@/components/ui/SelectField";
 import { Receipt, Plus, Plane, Utensils, Monitor, Phone, Car, Package, X, CheckCircle2, XCircle, Clock, IndianRupee } from "lucide-react";
 import { isHRAdmin } from "@/lib/access";
 import { DateField } from "@/components/ui/date-field";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 
 const TOP_TABS = [
   { key: "home",        label: "HOME",              href: "/dashboard/hr/home"  },
@@ -170,8 +171,8 @@ export default function ExpensesPage() {
   // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access + role=admin.
   const isAdmin = isHRAdmin(user);
 
-  const [view, setView] = useState<"my" | "team">("my");
-  const [mainTab, setMainTab] = useState<"expenses" | "travel">("expenses");
+  const [view, setView]       = useUrlTab<"my" | "team">("view", "my", ["my", "team"] as const);
+  const [mainTab, setMainTab] = useUrlTab<"expenses" | "travel">("kind", "expenses", ["expenses", "travel"] as const);
   const [showNew, setShowNew] = useState(false);
   const [showNewTravel, setShowNewTravel] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");

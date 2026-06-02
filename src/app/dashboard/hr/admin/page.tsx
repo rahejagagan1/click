@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote, ClipboardCheck, FileSpreadsheet } from "lucide-react";
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import { DEPARTMENTS } from "@/lib/departments";
@@ -134,7 +135,11 @@ export default function HRAdminPage() {
   const showManageKpisRail = isFullAdmin; // KPI uploads — admin-only
   const showMasterSheetRail = isFullAdmin; // Excel exports — admin-only
 
-  const [tab, setTab] = useState("attendance-dashboard");
+  // URL-synced — refresh stays on the same admin section.
+  // Untyped allowed-values list because ADMIN_TABS may be filtered
+  // for hr_manager-only viewers; we still want the URL value
+  // honoured if it's a valid key for the current viewer.
+  const [tab, setTab] = useUrlTab<string>("tab", "attendance-dashboard");
 
   // If the current tab isn't visible (because tier-curation OR a
   // per-user revoke removed it), snap to the first visible tab. We
@@ -324,7 +329,7 @@ export default function HRAdminPage() {
     .sort((a: { reports: any[] }, b: { reports: any[] }) => b.reports.length - a.reports.length);
 
   // Sub-tab inside Departments: "By Department" vs "By Manager".
-  const [deptView, setDeptView] = useState<"dept" | "manager">("dept");
+  const [deptView, setDeptView] = useUrlTab<"dept" | "manager">("deptView", "dept", ["dept", "manager"] as const);
 
   if (!isAdmin) return (
     <div className="flex items-center justify-center h-64">
