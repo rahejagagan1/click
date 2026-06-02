@@ -27,6 +27,7 @@ import useSWR, { mutate as globalMutate } from "swr";
 import { useSession } from "next-auth/react";
 import { isHRAdmin } from "@/lib/access";
 import { fetcher } from "@/lib/swr";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import {
   X, Mail, Phone, ExternalLink, FileText, Calendar, ChevronDown,
   ChevronLeft, ChevronRight, Globe,
@@ -167,7 +168,12 @@ export default function CandidateDrawer({
   const stages = stagesData?.stages ?? [];
   const candidates = listData?.candidates ?? [];
 
-  const [tab, setTab]               = useState<"profile" | "feedback" | "documents" | "activity" | "offer">("profile");
+  // URL-synced so reload (or shared link) returns to the same drawer tab.
+  // Key "pane" to avoid colliding with the outer hiring "tab" param.
+  const [tab, setTab] = useUrlTab<"profile" | "feedback" | "documents" | "activity" | "offer">(
+    "pane", "profile",
+    ["profile", "feedback", "documents", "activity", "offer"] as const,
+  );
   const [scheduleMode, setScheduleMode] = useState<"online" | "face_to_face" | "self_schedule" | null>(null);
   const [archiveOpen, setArchiveOpen]   = useState(false);
   const [scheduleMenuOpen, setScheduleMenuOpen] = useState(false);
@@ -446,6 +452,9 @@ export default function CandidateDrawer({
                 // optional, server-side joined fields).
                 jobSalaryRange: (c as any).jobSalaryRange ?? null,
                 jobSalaryUnit:  (c as any).jobSalaryUnit  ?? null,
+                // Application date — feeds the offer letter's
+                // "application dated X" line so it isn't a literal "—".
+                createdAt:      c.createdAt ?? null,
               }}
               offers={offers}
               onMutated={() => mutate()}
@@ -528,9 +537,22 @@ function MoreMenuItem({ label, onClick, disabled }: { label: string; onClick: ()
 
 function ProfileTab({ c }: { c: Candidate }) {
   const resumeHref = safeUrl(c.resumeUrl);
-  // We only attempt to inline-preview PDFs. DOC/DOCX render is best
-  // handled by the user opening in a new tab.
-  const isPdf = !!(resumeHref && /\.pdf(\?|$)/i.test(resumeHref));
+  // Inline-preview eligibility:
+  //   1. The new in-DB resume API (`/api/hr/hiring/resumes/<id>`)
+  //      ALWAYS responds with a PDF — the endpoint auto-converts .doc
+  //      / .docx via LibreOffice (or Word COM on Windows dev) before
+  //      sending the bytes back. So if the URL points there, trust it
+  //      and render the iframe regardless of the original filename
+  //      extension.
+  //   2. Legacy /uploads/resumes/<uuid>.pdf static URLs predate the
+  //      conversion path — keep the extension-based heuristic there.
+  const isPdf = !!(
+    resumeHref && (
+      /^\/api\/hr\/hiring\/resumes\//i.test(resumeHref) ||
+      /\.pdf(\?|$)/i.test(resumeHref) ||
+      /\.pdf$/i.test(c.resumeFileName ?? "")
+    )
+  );
   const [note, setNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
 
@@ -726,20 +748,36 @@ function ProfileTab({ c }: { c: Candidate }) {
           ) : isPdf ? (
             // <iframe> is more reliable than <object> for PDF previews
             // — Chrome / Brave routinely fall through <object> to its
-            // children even when the resource is fetchable, which is
-            // why HR was seeing the "Click to open in new tab"
-            // placeholder. The iframe pins toolbar=0 so the chrome of
-            // the browser-native PDF viewer doesn't fight the card
-            // design. The /uploads path gets a same-origin X-Frame-
-            // Options override in next.config.mjs so the embed isn't
-            // blocked by the global DENY rule.
-            <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
-              <iframe
-                src={`${resumeHref}#toolbar=0&navpanes=0&view=FitH`}
-                title={c.resumeFileName || "Resume"}
-                className="w-full bg-white block"
-                style={{ height: 600, border: 0 }}
-              />
+            // children even when the resource is fetchable. The
+            // iframe pins toolbar=0 so the browser's PDF chrome
+            // doesn't fight the card design.
+            //
+            // Sizing: container uses A4 portrait aspect (1 : 1.414)
+            // capped at 80vh so the resume looks like a document
+            // rather than a stretched textbox, on any screen. The
+            // PDF URL hint `zoom=page-width` makes Chrome's viewer
+            // fit the page width to the iframe — keeps the rendering
+            // consistent across narrow and wide columns.
+            <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50 shadow-sm">
+              <div
+                className="relative w-full mx-auto bg-white"
+                style={{
+                  aspectRatio: "1 / 1.414",
+                  maxHeight: "80vh",
+                  // When the height is clamped by maxHeight on tall
+                  // viewports, calc the matching width so the page
+                  // stays centred and proportional rather than left-
+                  // anchored with empty bands.
+                  maxWidth: "min(100%, calc(80vh / 1.414))",
+                }}
+              >
+                <iframe
+                  src={`${resumeHref}#toolbar=0&navpanes=0&scrollbar=1&view=FitH&zoom=page-width`}
+                  title={c.resumeFileName || "Resume"}
+                  className="absolute inset-0 w-full h-full bg-white block"
+                  style={{ border: 0 }}
+                />
+              </div>
               <noscript>
                 <ResumeFallbackCard href={resumeHref} name={c.resumeFileName} />
               </noscript>
