@@ -27,6 +27,7 @@ import useSWR, { mutate as globalMutate } from "swr";
 import { useSession } from "next-auth/react";
 import { isHRAdmin } from "@/lib/access";
 import { fetcher } from "@/lib/swr";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import {
   X, Mail, Phone, ExternalLink, FileText, Calendar, ChevronDown,
   ChevronLeft, ChevronRight, Globe,
@@ -167,7 +168,12 @@ export default function CandidateDrawer({
   const stages = stagesData?.stages ?? [];
   const candidates = listData?.candidates ?? [];
 
-  const [tab, setTab]               = useState<"profile" | "feedback" | "documents" | "activity" | "offer">("profile");
+  // URL-synced so reload (or shared link) returns to the same drawer tab.
+  // Key "pane" to avoid colliding with the outer hiring "tab" param.
+  const [tab, setTab] = useUrlTab<"profile" | "feedback" | "documents" | "activity" | "offer">(
+    "pane", "profile",
+    ["profile", "feedback", "documents", "activity", "offer"] as const,
+  );
   const [scheduleMode, setScheduleMode] = useState<"online" | "face_to_face" | "self_schedule" | null>(null);
   const [archiveOpen, setArchiveOpen]   = useState(false);
   const [scheduleMenuOpen, setScheduleMenuOpen] = useState(false);
