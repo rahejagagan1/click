@@ -263,6 +263,16 @@ ${candidateSign}`,
 }
 
 // ── 7. Final Interview Round ─────────────────────────────────────────
+// Mirrors the Technical Round body structure paragraph-for-paragraph
+// so the two rounds read as siblings of the same template family.
+// Only the round-specific wording changes:
+//   • "initial stages"  → "all the previous rounds"
+//   • "showcase your technical abilities + discuss experience"
+//     → "meet key members of our team + discuss responsibilities
+//        of the {jobRole} position"
+//   • "productive and insightful technical discussion"
+//     → "meeting with you for the final interview"
+// Onsite mode swaps in the office address line.
 export function finalRoundEmail(args: {
   candidateName: string;
   jobRole: string;
@@ -272,9 +282,9 @@ export function finalRoundEmail(args: {
   mode?: "online" | "onsite";
 }): HRTemplate {
   const { candidateName, jobRole, interviewDateTime, meetingLink, officeAddress, mode = "online" } = args;
-  const locationLine = mode === "onsite"
-    ? `The next step in our selection process is the Final Interview Round. The location of the interview will be the ${officeAddress ?? TOKEN.officeAddr}. Please come prepared to engage in discussions about your experiences, skills, and how you envision contributing to our team.`
-    : `The next step in our selection process is the Final Interview Round. It will be conducted virtually via Google Meet where you will have the opportunity to showcase your technical abilities and discuss your experience with our team. Please come prepared to engage in discussions about your experiences, skills, and how you envision contributing to our team.`;
+  const venueLine = mode === "onsite"
+    ? `The next step in our selection process is the Final Interview Round. The interview will be held at ${officeAddress ?? TOKEN.officeAddr}, where you will meet key members of our team and discuss the specific responsibilities of the ${jobRole} position. Please come prepared to engage in discussions about your experiences, skills, and how you envision contributing to our team.`
+    : `The next step in our selection process is the Final Interview Round. The interview will be conducted virtually via Google Meet where you will have the opportunity to meet key members of our team and discuss the specific responsibilities of the ${jobRole} position. Please come prepared to engage in discussions about your experiences, skills, and how you envision contributing to our team.`;
   return {
     subject: `Invitation for Final Interview Round for ${jobRole} at NB Media`,
     body:
@@ -282,13 +292,11 @@ export function finalRoundEmail(args: {
 
 Greetings from NB Media!
 
-We want to extend our congratulations as you have successfully cleared all the previous rounds of our interview process.
+We would like to express our appreciation for your participation in the previous rounds of our interview process. After careful consideration, we are pleased to inform you that you have successfully cleared all the previous rounds of the Selection Process.
 
-Your achievements thus far have been impressive, and we are excited to invite you to the final round of interviews. This round will provide you with an opportunity to meet key members of our team, discuss the specific responsibilities of the ${jobRole} position, and gain further insights into our company culture.
+Congratulations on your accomplishment!
 
-The Final Interview Round is scheduled for ${interviewDateTime ?? TOKEN.interview}.
-
-${locationLine}
+${venueLine}
 
 Meeting Link:
 ${interviewDateTime ?? TOKEN.interview}
@@ -296,7 +304,7 @@ Video call link: ${meetingLink ?? TOKEN.meetLink}
 
 Should you have any questions or require further information about the Final Interview Round, please feel free to contact the undersigned.
 
-Congratulations once again on reaching this stage, and we look forward to meeting with you for the final interview.
+Once again, congratulations on your progress, and we look forward to meeting with you for the final interview.
 
 ${candidateSign}`,
   };
