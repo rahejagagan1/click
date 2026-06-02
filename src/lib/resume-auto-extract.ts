@@ -171,11 +171,28 @@ function extractUrls(text: string): { linkedinUrl: string | null; portfolioUrl: 
 }
 
 // ── Education ─────────────────────────────────────────────────────
+// Tolerant of misspellings + OCR drift:
+//   "Bachelor"  — canonical
+//   "Bachlor"   — common typo (missing e)
+//   "Bachleor"  — common OCR drift (Tesseract reading custom fonts)
+//   "Bachelour" — UK spelling
+//   "Bachelours" / "Bachlors" / "Bachelors" — plurals
+// The pattern is: "Bach" + 1-4 mid letters + "o" or "ou" + "r" + optional "s".
 const DEGREE_PATTERNS = [
-  /\b(Bach(?:e?l|elo|elor)(?:o?u?r)?s?(?:'s)?(?:\s+of\s+[\w ]+?)?(?:\s+\([A-Z]+\))?)\b/i,
-  /\b(Mast(?:e?r|ers?)(?:'s)?(?:\s+of\s+[\w ]+?)?(?:\s+\([A-Z]+\))?)\b/i,
+  /\b(Bach[a-zA-Z]{1,4}(?:o|ou)rs?(?:'s)?(?:\s+of\s+[\w ]+?)?(?:\s+\([A-Z]+\))?)\b/i,
+  /\b(Mast[a-zA-Z]{1,3}(?:o|ou)?rs?(?:'s)?(?:\s+of\s+[\w ]+?)?(?:\s+\([A-Z]+\))?)\b/i,
   /\b(MBA|BBA|BCA|MCA|BSc|MSc|B\.?Sc|M\.?Sc|B\.?A|M\.?A|B\.?Com|M\.?Com|B\.?Tech|M\.?Tech|B\.?E|M\.?E|PhD|Doctorate|Diploma|HSC|SSC|XII|X|10\+2|12th|10th|Postgraduate|Undergraduate)\b/i,
 ];
+
+// Canonicalize the degree word: "Bachleor" / "Bachlor" /
+// "Bachelours" / "Mastrs" → "Bachelor" / "Master". The OCR + typo
+// variants are useful for *finding* the line, but the candidate
+// drawer should display the conventional spelling.
+function canonicalizeDegree(s: string): string {
+  if (/^bach/i.test(s)) return "Bachelor";
+  if (/^mast/i.test(s)) return "Master";
+  return s;
+}
 
 function parseEducations(section: string): ExtractedEducation[] {
   if (!section.trim()) return [];
@@ -212,10 +229,28 @@ function parseEducations(section: string): ExtractedEducation[] {
 
     let course = "";
     let branch = "";
-    const courseMatch = text.match(/(Bach(?:e?l|elo|elor)(?:o?u?r)?s?|Mast(?:e?r|ers?))[A-Za-z'’ ]*?(?:\s+of\s+([A-Za-z& ]{3,80}?))?(?=\s*(?:—|–|-|\||,|CGPA|GPA|Percentage|$))/i);
-    if (courseMatch) {
-      course = courseMatch[0].trim();
-      if (courseMatch[2]) branch = courseMatch[2].trim();
+    // Pass 1: per-line scan. Resumes typically put the degree on
+    // its own line ("Bachelor Of Computer Application"), so `$`
+    // gives us a clean terminator and the branch capture doesn't
+    // bleed into the university name on the next line.
+    const degreeLineRe = /^(Bach[a-zA-Z]{1,4}(?:o|ou)rs?|Mast[a-zA-Z]{1,3}(?:o|ou)?rs?)(?:\s+of\s+([A-Za-z'’& ]+?))?\s*(?:[\(,|]|$)/i;
+    for (const ln of block) {
+      const m = ln.match(degreeLineRe);
+      if (m) {
+        course = canonicalizeDegree(m[1].trim());
+        if (m[2]) branch = m[2].trim();
+        break;
+      }
+    }
+    // Pass 2 (fallback): degree + branch on the SAME line as the
+    // university — accept University / College / Institute as a
+    // terminator alongside the usual punctuation.
+    if (!course) {
+      const courseMatch = text.match(/(Bach[a-zA-Z]{1,4}(?:o|ou)rs?|Mast[a-zA-Z]{1,3}(?:o|ou)?rs?)[A-Za-z'’ ]*?(?:\s+of\s+([A-Za-z'’& ]{3,80}?))?(?=\s*(?:—|–|-|\||,|\(|\d{4}|University|Institute|College|Polytechnic|Academy|School|CGPA|GPA|Percentage|$))/i);
+      if (courseMatch) {
+        course = canonicalizeDegree(courseMatch[1].trim());
+        if (courseMatch[2]) branch = courseMatch[2].trim();
+      }
     }
     if (!course) {
       const abbrev = text.match(/\b(MBA|BBA|BCA|MCA|BSc|MSc|B\.?Tech|M\.?Tech|B\.?A|M\.?A|B\.?Com|M\.?Com|PhD|Diploma|XII|X|10\+2|12th|10th)\b/i);
@@ -246,8 +281,16 @@ function parseEducations(section: string): ExtractedEducation[] {
 
 function scanEducationByUniversityYear(text: string): ExtractedEducation[] {
   const lines = text.split(/\n/).map(l => healFragmentedText(l)).filter(l => l.trim());
+  // Per-line scan: works for resume templates whose EDUCATION
+  // heading is letter-spaced ("E D U C A T I O N") or doubled-up
+  // with another heading on the same row, so extractSection can't
+  // pick out a clean section. We still want to surface the course
+  // when it sits immediately above the university line.
+  const degreeLineRe = /^(Bach[a-zA-Z]{1,4}(?:o|ou)rs?|Mast[a-zA-Z]{1,3}(?:o|ou)?rs?)(?:\s+of\s+([A-Za-z'’& ]+?))?\s*(?:[\(,|]|$)/i;
+  const abbrevLineRe = /^\s*(MBA|BBA|BCA|MCA|BSc|MSc|B\.?Sc|M\.?Sc|B\.?Tech|M\.?Tech|B\.?A|M\.?A|B\.?Com|M\.?Com|PhD|Doctorate|Diploma|XII|10\+2|12th|10th)\b(?:\s+in\s+([A-Za-z'’& ]+?))?\s*(?:[\(,|]|$)/i;
   const out: ExtractedEducation[] = [];
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (!/\b(University|Institute|College|Polytechnic|Academy)\b/i.test(line)) continue;
     const yr = line.match(/(19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|present|current)/i);
     if (!yr) continue;
@@ -256,7 +299,23 @@ function scanEducationByUniversityYear(text: string): ExtractedEducation[] {
       .replace(/\(?\s*(19|20)\d{2}\s*[-–—]\s*(?:(19|20)\d{2}|present|current)\s*\)?/i, "")
       .replace(/\s+/g, " ")
       .trim();
-    out.push({ course: "", branch: "", startOfCourse: ys[0] ?? "", endOfCourse: ys[1] ?? "", university, location: "" });
+
+    // Course often lives on the line right above / below the
+    // university line in two-column layouts. Probe ±2 lines.
+    let course = "";
+    let branch = "";
+    for (const j of [i - 1, i - 2, i + 1, i + 2]) {
+      if (j < 0 || j >= lines.length) continue;
+      const probe = lines[j].trim();
+      const m = probe.match(degreeLineRe) || probe.match(abbrevLineRe);
+      if (m) {
+        course = canonicalizeDegree(m[1].trim());
+        if (m[2]) branch = m[2].trim();
+        break;
+      }
+    }
+
+    out.push({ course, branch, startOfCourse: ys[0] ?? "", endOfCourse: ys[1] ?? "", university, location: "" });
   }
   return out.slice(0, 6);
 }
@@ -380,11 +439,27 @@ export async function extractResumeData(buf: Buffer, fileName: string): Promise<
   let text = await extractText(buf, fileName);
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
 
-  // OCR only kicks in for PDFs (the .docx path via mammoth is
-  // already comprehensive) and only when the text extractor came
-  // back sparse. Soft-fails the whole way down: any error in OCR
-  // setup leaves the text-only result intact.
-  if (wordCount < TEXT_SPARSE_WORDCOUNT && /\.pdf$/i.test(fileName)) {
+  // OCR only kicks in for PDFs (.docx via mammoth is already
+  // comprehensive). Soft-fails the whole way down: any error in
+  // OCR setup leaves the text-only result intact.
+  //
+  // Two trigger paths:
+  //   (a) Total word count is sparse — the whole file is image-
+  //       only (a scanned resume).
+  //   (b) An EDUCATION-style section is named in the text but NO
+  //       degree keyword is visible. Templates like Piyush's render
+  //       the course name ("Bachlor Of Computer Application") as a
+  //       vector outline rather than selectable text, so pdfjs sees
+  //       the surrounding labels + the university name but never
+  //       the degree itself. (a) alone misses these because the
+  //       rest of the document supplies enough text to push the
+  //       word count over the threshold.
+  const hasDegreeText = /\b(Bach[a-z]{1,5}(?:o|ou)rs?|Mast[a-z]{1,3}rs?|MBA|BBA|BCA|MCA|BSc|MSc|B\.?Tech|M\.?Tech|B\.?A|M\.?A|B\.?Com|M\.?Com|PhD|Doctorate|Diploma|HSC|SSC|XII|10\+2|12th)\b/i.test(text);
+  const hasEducationContext = /\b(education|academic|qualifications|university|college|institute|polytechnic)\b/i.test(text);
+  const triggerOcr =
+    /\.pdf$/i.test(fileName) &&
+    (wordCount < TEXT_SPARSE_WORDCOUNT || (hasEducationContext && !hasDegreeText));
+  if (triggerOcr) {
     try {
       const { isOcrAvailable, ocrPdf } = await import("./ocr-pdf");
       if (await isOcrAvailable()) {
