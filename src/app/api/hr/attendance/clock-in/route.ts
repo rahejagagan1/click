@@ -106,9 +106,13 @@ export async function POST(req: NextRequest) {
     const today = istTodayDateOnly();
 
     // Derive status + location up-front so the write step is one DB call.
+    // `businessUnit` drives the brand-aware geofence — YT Labs employees
+    // are checked against the YT Labs office coords instead of the NB
+    // Media default, so they don't get flagged as "off-site" while
+    // sitting at the YT Labs building.
     const [userShift, profile, approvedWfh] = await Promise.all([
       prisma.userShift.findUnique({ where: { userId }, include: { shift: true } }),
-      prisma.employeeProfile.findUnique({ where: { userId }, select: { workLocation: true } }),
+      prisma.employeeProfile.findUnique({ where: { userId }, select: { workLocation: true, businessUnit: true } }),
       prisma.wFHRequest.findFirst({ where: { userId, date: today, status: "approved" }, select: { id: true } }),
     ]);
 
@@ -128,10 +132,13 @@ export async function POST(req: NextRequest) {
     const isRemote = !!approvedWfh || wl === "remote" || wl === "hybrid";
     // Office geofence — compute distance + atOffice flag now so the
     // attendance dashboard can render a reliable "At Office" badge
-    // independent of Nominatim's address text. Returns undefined
-    // fields when the office isn't configured (OFFICE_LAT / OFFICE_LNG
-    // missing), in which case we silently store nothing.
-    const geofence = evaluateOfficeGeofence(bodyLat, bodyLng);
+    // independent of Nominatim's address text. Brand-aware: YT Labs
+    // employees are evaluated against the YT Labs office, everyone
+    // else against the NB Media default. Returns undefined fields
+    // when the office isn't configured (no OFFICE_LAT / OFFICE_LNG
+    // for the resolved brand), in which case we silently store
+    // nothing.
+    const geofence = evaluateOfficeGeofence(bodyLat, bodyLng, profile?.businessUnit);
     const location = stringifyAttLoc({
       mode: isRemote ? "remote" : "office",
       lat: bodyLat, lng: bodyLng, address: bodyAddr,
