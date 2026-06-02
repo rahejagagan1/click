@@ -524,26 +524,17 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
                   </p>
                 </div>
                 <ul className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {(() => {
-                    // Pre-fill the subject + body so when the candidate's
-                    // mail client opens, they're not greeted with an
-                    // empty compose window. Encoded inline so unusual
-                    // characters in the job title don't break the URL.
-                    const subject = encodeURIComponent(`Question about ${job.title} role at ${brand}`);
-                    const body    = encodeURIComponent(
-                      `Hi {{NAME}},\n\nI saw the ${job.title} role at ${brand} and had a question:\n\n[Type your question here]\n\nThanks!`,
-                    );
-                    return [
-                      { name: "Vanshika", role: "HR Lead",    email: "vanshika@nbmediaproductions.com" },
-                      { name: "Tanvi",    role: "HR Manager", email: "tanvi@nbmediaproductions.com"    },
-                    ].map((c) => {
-                      // Personalise the body's greeting per recipient.
-                      const personalisedBody = body.replace("%7B%7BNAME%7D%7D", encodeURIComponent(c.name));
-                      const href = `mailto:${c.email}?subject=${subject}&body=${personalisedBody}`;
-                      return (
+                  {[
+                    { name: "Vanshika", role: "HR Lead",    email: "vanshika@nbmediaproductions.com" },
+                    { name: "Tanvi",    role: "HR Manager", email: "tanvi@nbmediaproductions.com"    },
+                  ].map((c) => (
                     <li key={c.email}>
+                      {/* Plain mailto: opens the candidate's default
+                          mail client with only the To: field filled —
+                          no auto-subject or auto-body so they get a
+                          clean compose window. */}
                       <a
-                        href={href}
+                        href={`mailto:${c.email}`}
                         className="group flex items-center gap-3 rounded-xl border border-slate-200 hover:border-[#3b82f6]/40 hover:bg-blue-50/40 bg-white px-4 py-3 transition-colors"
                       >
                         <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 text-[#3b82f6] ring-1 ring-blue-100 text-[12px] font-bold uppercase shrink-0">
@@ -561,9 +552,7 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
                         <Mail size={13} className="text-slate-300 group-hover:text-[#3b82f6] transition-colors shrink-0" />
                       </a>
                     </li>
-                      );
-                    });
-                  })()}
+                  ))}
                 </ul>
               </div>
             </Card>
