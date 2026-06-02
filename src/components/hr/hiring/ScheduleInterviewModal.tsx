@@ -74,29 +74,33 @@ export default function ScheduleInterviewModal({
   const [title, setTitle]       = useState(`${kind === "online" ? "Online" : kind === "face_to_face" ? "On-site" : "Self-schedule"} Interview`);
   const [location, setLocation] = useState("");
   const [meetingLink, setMeetingLink] = useState("");
-  const initial = useMemo(
+  // Synchronously-derived defaults — recomputed on every render so
+  // the values are always fresh when EmailComposer remounts (the
+  // EmailComposer is keyed on round+kind, so it remounts whenever
+  // either changes). Earlier we kept subject + body in useState
+  // and updated them in a useEffect, but that meant the new
+  // EmailComposer mounted BEFORE the effect ran — reading STALE
+  // (previous-round) values. Symptom: clicking "Technical Round"
+  // produced an email whose subject/body still said "Final Round".
+  // The memo dependency list keeps the result fresh without
+  // wasting renders.
+  const defaults = useMemo(
     () => defaultBody(candidate, kind, round, date, time, duration),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [candidate, kind, round, date, time, duration],
   );
-  const [subject, setSubject]   = useState(initial.subject);
-  const [body, setBody]         = useState(initial.body);
+
   const [paneTab, setPaneTab]   = useState<"email" | "note">("email");
   const [noteToPanel, setNoteToPanel] = useState("");
   const [saving, setSaving]     = useState(false);
 
-  // Refresh title + subject + body whenever kind OR round changes so HR
-  // sees the right defaults from the HR template doc without retyping.
+  // Refresh the title chip when kind OR round changes — keeps the
+  // visible string in sync with the active toggles.
   useEffect(() => {
     setTitle(
       `${round === "technical" ? "Technical" : "Final"} Interview — ${
         kind === "online" ? "Online" : kind === "face_to_face" ? "On-site" : "Self-schedule"
       }`,
     );
-    const next = defaultBody(candidate, kind, round, date, time, duration);
-    setSubject(next.subject);
-    setBody(next.body);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, round]);
 
   // ?all=true → include regular employees in the panel picker.
@@ -234,8 +238,8 @@ export default function ScheduleInterviewModal({
         {/* Round + Kind toggles */}
         <div className="px-5 pt-4 flex flex-wrap items-center gap-3">
           <div className="inline-flex p-1 rounded-lg border border-slate-200 bg-slate-50">
-            <KindButton active={round === "final"}     onClick={() => setRound("final")}     Icon={Check}    label="Final Round" />
             <KindButton active={round === "technical"} onClick={() => setRound("technical")} Icon={FileText} label="Technical Round" />
+            <KindButton active={round === "final"}     onClick={() => setRound("final")}     Icon={Check}    label="Final Round" />
           </div>
           <div className="inline-flex p-1 rounded-lg border border-slate-200 bg-slate-50">
             <KindButton active={kind === "online"}       onClick={() => setKind("online")}       Icon={Video}   label="Online" />
@@ -362,8 +366,8 @@ export default function ScheduleInterviewModal({
                   candidateName={candidate.fullName}
                   jobRole={candidate.roleTitle ?? "your application"}
                   defaultTo={candidate.email}
-                  initialSubject={subject}
-                  initialBody={body}
+                  initialSubject={defaults.subject}
+                  initialBody={defaults.body}
                   showTemplatePicker={false}
                   context="interview"
                   submitLabel="Schedule & send"
