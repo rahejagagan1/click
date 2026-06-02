@@ -14,12 +14,64 @@ import {
   Mail, Calendar, ChevronRight, Download, FileText,
   ChevronDown,
 } from "lucide-react";
+import sanitizeHtml from "sanitize-html";
 import JobShareButton from "./JobShareButton";
 import Reveal from "./Reveal";
 import Magnetic from "./Magnetic";
 import ScrollProgress from "./ScrollProgress";
 import WordReveal from "./WordReveal";
 import PlayBadges from "./PlayBadges";
+
+// JDs authored via the new Quill-based editor are stored as HTML;
+// older JDs are plain text. Detect by looking for a leading `<`
+// or any block-level tag. When HR uses Bold / Italic / lists /
+// alignment / font-size in the editor, the resulting markup needs
+// to be preserved on the public render — but only the safe inline
+// + block tags that Quill emits.
+function isHtmlJd(s: string | null | undefined): boolean {
+  if (!s) return false;
+  const trimmed = s.trim();
+  if (!trimmed.startsWith("<")) return false;
+  return /<\/?(p|h[1-6]|ul|ol|li|strong|em|u|s|span|br|div)\b/i.test(trimmed);
+}
+
+// Sanitiser config tuned to the exact tag set Quill produces with
+// the JD toolbar. Tags / classes outside this set are stripped so
+// pasted HTML can't inject scripts or arbitrary styling. The
+// `class` attribute is allowed only on inline elements for Quill's
+// alignment classes (ql-align-center, ql-align-right, ql-align-
+// justify); the `style` attribute is allowed only for inline
+// font-size variants Quill emits when HR picks Small / Large /
+// Huge from the size dropdown.
+const JD_SANITIZE: sanitizeHtml.IOptions = {
+  allowedTags: [
+    "p", "br", "div", "span",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li",
+    "strong", "b", "em", "i", "u", "s", "strike",
+    "blockquote",
+  ],
+  allowedAttributes: {
+    "*":    ["class", "style"],
+  },
+  allowedClasses: {
+    "*": [
+      "ql-align-center", "ql-align-right", "ql-align-justify",
+      "ql-size-small",   "ql-size-large", "ql-size-huge",
+    ],
+  },
+  allowedStyles: {
+    "*": {
+      "font-size":  [/^\d+(?:px|em|%)$/],
+      "text-align": [/^(left|right|center|justify)$/],
+    },
+  },
+  transformTags: {
+    // Quill emits its own classes for alignment; some browsers /
+    // pastes use inline style="text-align:…" instead. Both pass
+    // through the sanitiser cleanly.
+  },
+};
 
 export const dynamic = "force-dynamic";
 
@@ -709,7 +761,15 @@ function JdHtmlPanel({
   downloadUrl: string | null;
   downloadName: string | null;
 }) {
-  const blocks = parseJdBlocks(text);
+  // Two render paths:
+  //   • HTML (Quill-authored)     → sanitise + dangerouslySetInnerHTML
+  //   • Plain text (legacy JDs)   → parseJdBlocks → typed JSX
+  // The branch is invisible to the candidate — both produce the
+  // same Times New Roman prose under the NB Media letterhead +
+  // watermark frame.
+  const html       = isHtmlJd(text);
+  const sanitised  = html ? sanitizeHtml(text, JD_SANITIZE) : "";
+  const blocks     = html ? [] : parseJdBlocks(text);
 
   return (
     <div className="relative rounded-xl sm:rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
@@ -757,41 +817,54 @@ function JdHtmlPanel({
             className="max-w-3xl mx-auto text-slate-800"
             style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
           >
-            {blocks.map((block, i) => {
-              if (block.kind === "heading") {
+            {html ? (
+              // HTML render path (Quill-authored JDs). Already
+              // sanitised above through sanitize-html with a tight
+              // allowlist. `jd-prose` typography rules live in
+              // globals.css so the sanitised tags pick up the same
+              // heading sizes / list markers / alignment as the
+              // legacy plain-text path.
+              <div
+                className="jd-prose"
+                dangerouslySetInnerHTML={{ __html: sanitised }}
+              />
+            ) : (
+              blocks.map((block, i) => {
+                if (block.kind === "heading") {
+                  return (
+                    <h3
+                      key={i}
+                      className="mt-6 first:mt-0 mb-2 text-[15.5px] sm:text-[16.5px] font-bold text-slate-900"
+                    >
+                      {block.text}
+                    </h3>
+                  );
+                }
+                if (block.kind === "bullet-list") {
+                  return (
+                    <ul key={i} className="my-2 pl-6 space-y-1.5 list-disc marker:text-slate-400">
+                      {block.items.map((it, j) => (
+                        <li key={j} className="text-[14.5px] leading-[1.7]">{it}</li>
+                      ))}
+                    </ul>
+                  );
+                }
+                if (block.kind === "numbered-list") {
+                  return (
+                    <ol key={i} className="my-2 pl-6 space-y-1.5 list-decimal marker:text-slate-500 marker:font-semibold">
+                      {block.items.map((it, j) => (
+                        <li key={j} className="text-[14.5px] leading-[1.7]">{it}</li>
+                      ))}
+                    </ol>
+                  );
+                }
                 return (
-                  <h3
-                    key={i}
-                    className="mt-6 first:mt-0 mb-2 text-[15.5px] sm:text-[16.5px] font-bold text-slate-900"
-                  >
+                  <p key={i} className="my-2 text-[14.5px] leading-[1.8] text-slate-700">
                     {block.text}
-                  </h3>
+                  </p>
                 );
-              }
-              if (block.kind === "bullet-list") {
-                return (
-                  <ul key={i} className="my-2 pl-6 space-y-1.5 list-disc marker:text-slate-400">
-                    {block.items.map((it, j) => (
-                      <li key={j} className="text-[14.5px] leading-[1.7]">{it}</li>
-                    ))}
-                  </ul>
-                );
-              }
-              if (block.kind === "numbered-list") {
-                return (
-                  <ol key={i} className="my-2 pl-6 space-y-1.5 list-decimal marker:text-slate-500 marker:font-semibold">
-                    {block.items.map((it, j) => (
-                      <li key={j} className="text-[14.5px] leading-[1.7]">{it}</li>
-                    ))}
-                  </ol>
-                );
-              }
-              return (
-                <p key={i} className="my-2 text-[14.5px] leading-[1.8] text-slate-700">
-                  {block.text}
-                </p>
-              );
-            })}
+              })
+            )}
           </div>
         </div>
       </div>
