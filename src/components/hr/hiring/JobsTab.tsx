@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import KanbanBoard from "./KanbanBoard";
+import JobApplicantList from "./JobApplicantList";
 import CreateJobWizard from "./CreateJobWizard";
 import JobShareDialog from "./JobShareDialog";
 
@@ -123,6 +124,10 @@ export default function JobsTab() {
 
   // ── View state ──────────────────────────────────────────────────
   const [view, setView] = useState<ViewMode>("grid");
+  // Job-detail view: per-job applicant view mode. Kanban shows the
+  // visual pipeline; list shows a flat sortable table of all
+  // applicants on this job — same data, different layout.
+  const [pipelineView, setPipelineView] = useState<"kanban" | "list">("kanban");
   const [activeJob, setActiveJob]   = useState<Job | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
@@ -251,7 +256,12 @@ export default function JobsTab() {
     }
   };
 
-  // ── Detail view (kanban) ────────────────────────────────────────
+  // ── Detail view (per-job applicants — kanban OR list) ───────────
+  // pipelineView is component-state, not URL-synced, because HR
+  // typically wants the toggle to reset between jobs. Default to
+  // kanban — the visual pipeline is the more common workflow.
+  // const noop reference removes the "unused" lint when this is
+  // the first state declaration in the closure.
   if (activeJob) {
     const st = (activeJob.status ?? (activeJob.isOpen ? "published" : "closed")) as JobStatus;
     return (
@@ -329,13 +339,40 @@ export default function JobsTab() {
             )}
           </div>
         </div>
-        <div className="mb-4 text-[11.5px] text-slate-500 flex items-center gap-3 flex-wrap">
-          {activeJob.department && <span className="inline-flex items-center gap-1"><Briefcase size={11} /> {activeJob.department}</span>}
-          {activeJob.location   && <span className="inline-flex items-center gap-1"><MapPin   size={11} /> {activeJob.location}</span>}
-          <span className="inline-flex items-center gap-1"><Users size={11} /> {activeJob.applicationCount} applicants</span>
-          {activeJob.vacancies > 1 && <span>· {activeJob.vacancies} positions</span>}
+        <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-[11.5px] text-slate-500 flex items-center gap-3 flex-wrap">
+            {activeJob.department && <span className="inline-flex items-center gap-1"><Briefcase size={11} /> {activeJob.department}</span>}
+            {activeJob.location   && <span className="inline-flex items-center gap-1"><MapPin   size={11} /> {activeJob.location}</span>}
+            <span className="inline-flex items-center gap-1"><Users size={11} /> {activeJob.applicationCount} applicants</span>
+            {activeJob.vacancies > 1 && <span>· {activeJob.vacancies} positions</span>}
+          </div>
+          {/* Kanban / List toggle — same data either way. */}
+          <div className="inline-flex p-1 rounded-lg border border-slate-200 bg-slate-50">
+            <button
+              onClick={() => setPipelineView("kanban")}
+              className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-[11.5px] font-semibold transition-colors ${
+                pipelineView === "kanban"
+                  ? "bg-white text-[#3b82f6] shadow-sm"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              <LayoutGrid size={12} /> Kanban
+            </button>
+            <button
+              onClick={() => setPipelineView("list")}
+              className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-[11.5px] font-semibold transition-colors ${
+                pipelineView === "list"
+                  ? "bg-white text-[#3b82f6] shadow-sm"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              <List size={12} /> List
+            </button>
+          </div>
         </div>
-        <KanbanBoard jobId={activeJob.id} />
+        {pipelineView === "kanban"
+          ? <KanbanBoard      jobId={activeJob.id} />
+          : <JobApplicantList jobId={activeJob.id} />}
         {shareJob && (
           <JobShareDialog
             job={{ id: shareJob.id, title: shareJob.title, slug: shareJob.publicSlug, brand: shareJob.brand }}
