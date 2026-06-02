@@ -872,29 +872,46 @@ function CardActionsMenu({
 
   // Recompute the menu position whenever it opens — anchored to the
   // trigger button's bounding rect so the panel always lands flush
-  // below it, even if the user scrolls or resizes mid-open. When the
+  // against it, regardless of the menu's actual height. When the
   // trigger sits near the bottom of the viewport (last card in the
   // grid, scrolled-to-end list view), opening downward would clip
-  // the lower menu items — we flip the anchor to ABOVE the trigger
-  // in that case. The max-height + overflow-y rule on the panel
-  // itself catches the residual case where even flipping isn't
-  // enough (tiny viewports / very long menus).
-  const ESTIMATED_MENU_HEIGHT = 320;
+  // the lower menu items — we flip to opening UPWARD in that case.
+  //
+  // To handle both cases without measuring the menu height, we use
+  // CSS bottom-anchoring on the upward open: the panel's bottom edge
+  // sits 4px above the trigger, so however tall it ends up it
+  // remains visually attached. (The earlier estimate-based approach
+  // floated the menu ~80px above the trigger because the estimate
+  // overshot the real height.)
+  const [menuPos, setMenuPos] = useState<
+    | { mode: "down"; top: number; right: number }
+    | { mode: "up";   bottom: number; right: number }
+    | null
+  >(null);
+  // 240px is a conservative "this menu won't fit below" threshold —
+  // tight enough to flip when really needed, loose enough to NOT
+  // flip when there's plenty of room (avoids unnecessary flipping
+  // mid-card-grid).
+  const FLIP_THRESHOLD = 240;
   useLayoutEffect(() => {
-    if (!menuOpen) { setPos(null); return; }
+    if (!menuOpen) { setMenuPos(null); setPos(null); return; }
     const place = () => {
       const r = triggerRef.current?.getBoundingClientRect();
       if (!r) return;
       const vh = window.innerHeight;
       const spaceBelow = vh - r.bottom;
       const spaceAbove = r.top;
-      const openUp = spaceBelow < ESTIMATED_MENU_HEIGHT && spaceAbove > spaceBelow;
-      setPos({
-        top:   openUp
-          ? Math.max(8, r.top - ESTIMATED_MENU_HEIGHT - 4)
-          : r.bottom + 4,
-        right: window.innerWidth - r.right,
-      });
+      const openUp = spaceBelow < FLIP_THRESHOLD && spaceAbove > spaceBelow;
+      const right = window.innerWidth - r.right;
+      if (openUp) {
+        setMenuPos({ mode: "up", bottom: vh - r.top + 4, right });
+      } else {
+        setMenuPos({ mode: "down", top: r.bottom + 4, right });
+      }
+      // Keep the legacy `pos` boolean so the existing render path
+      // (which checks `pos` truthiness before rendering the portal)
+      // continues to work — its actual values are no longer read.
+      setPos({ top: 0, right });
     };
     place();
     window.addEventListener("scroll", place, true);
@@ -950,16 +967,20 @@ function CardActionsMenu({
             onClick={(e) => { e.stopPropagation(); onMenuToggle(); }}
           />
           <div
-            className="fixed z-[201] w-48 rounded-lg border border-slate-200 bg-white shadow-lg py-1.5 overflow-y-auto"
-            style={{ top: pos.top, right: pos.right, maxHeight: "calc(100vh - 16px)" }}
+            className="fixed z-[201] w-48 rounded-lg border border-slate-200 bg-white shadow-lg py-0.5 overflow-y-auto"
+            style={
+              menuPos?.mode === "up"
+                ? { bottom: menuPos.bottom, right: menuPos.right, maxHeight: "calc(100vh - 16px)" }
+                : { top: menuPos?.top ?? pos.top, right: menuPos?.right ?? pos.right, maxHeight: "calc(100vh - 16px)" }
+            }
             onClick={(e) => e.stopPropagation()}
           >
             <a
               href={editHref}
-              className="flex items-center gap-2 px-3 py-1.5 text-[12px] text-slate-700 hover:bg-slate-50"
+              className="flex items-center gap-2.5 px-3 h-7 text-[12px] text-slate-700 hover:bg-slate-50"
               onClick={(e) => e.stopPropagation()}
-            ><Pencil size={12} className="text-slate-400" /> Edit details</a>
-            <div className="my-1 h-px bg-slate-100" />
+            ><Pencil size={12} strokeWidth={2} className="text-slate-400" /> Edit details</a>
+            <div className="my-0.5 h-px bg-slate-100" />
             {status !== "published" && (
               <MenuItem icon={Send}        label="Publish"        onClick={() => onTransition("publish")} />
             )}
@@ -978,7 +999,7 @@ function CardActionsMenu({
                 href={`/jobs/${job.publicSlug}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 px-3 py-1.5 text-[12px] text-slate-700 hover:bg-slate-50"
+                className="flex items-center gap-2.5 px-3 h-7 text-[12px] text-slate-700 hover:bg-slate-50"
                 onClick={(e) => e.stopPropagation()}
               ><ExternalLink size={12} className="text-slate-400" /> View role page</a>
             )}
@@ -989,10 +1010,10 @@ function CardActionsMenu({
               href="/jobs"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 px-3 py-1.5 text-[12px] text-slate-700 hover:bg-slate-50"
+              className="flex items-center gap-2.5 px-3 h-7 text-[12px] text-slate-700 hover:bg-slate-50"
               onClick={(e) => e.stopPropagation()}
             ><ExternalLink size={12} className="text-slate-400" /> View careers page</a>
-            <div className="my-1 h-px bg-slate-100" />
+            <div className="my-0.5 h-px bg-slate-100" />
             <MenuItem icon={Trash2} label="Delete job" onClick={onDelete} danger />
           </div>
         </>,
@@ -1343,10 +1364,10 @@ function MenuItem({
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-2 px-3 py-1.5 text-[12px] hover:bg-slate-50 ${
+      className={`w-full flex items-center gap-2.5 px-3 h-7 text-[12px] hover:bg-slate-50 ${
         danger ? "text-rose-600" : "text-slate-700"
       }`}
-    ><Icon size={12} className={danger ? "text-rose-400" : "text-slate-400"} /> {label}</button>
+    ><Icon size={12} strokeWidth={2} className={danger ? "text-rose-400" : "text-slate-400"} /> {label}</button>
   );
 }
 
