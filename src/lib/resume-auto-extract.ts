@@ -108,11 +108,43 @@ const SECTION_HEADINGS = [
   "responsibilities","key responsibilities",
 ];
 
+// Compact letter-spaced headings: "S K I L L S" → "SKILLS",
+// "E D U C A T I O N  L A N G U A G E S" → "EDUCATION LANGUAGES".
+// Resume templates (especially Canva ones) often render section
+// labels with each letter as its own glyph + a kerning gap, so
+// pdfjs returns them with literal spaces between every character.
+function compactLetterSpaced(s: string): string {
+  // Split on 2+ spaces so doubled-up headings stay separated.
+  const segments = s.split(/\s{2,}/);
+  const out = segments.map((seg) => {
+    const tokens = seg.trim().split(/\s+/);
+    if (tokens.length < 3) return seg;
+    const singles = tokens.filter((t) => /^[A-Za-z]$/.test(t)).length;
+    if (singles >= tokens.length * 0.8) {
+      return tokens.filter((t) => /^[A-Za-z]$/.test(t)).join("");
+    }
+    return seg;
+  });
+  return out.join(" ");
+}
+
 function isHeadingLine(line: string): string | null {
-  const t = line.trim().replace(/[:•·\-_=*]+$/g, "").trim();
+  let t = line.trim().replace(/[:•·\-_=*]+$/g, "").trim();
+  // Compact "S K I L L S"-style first so the length cap doesn't
+  // reject letter-spaced headings (each space-padded letter inflates
+  // the line length past 40 chars).
+  t = compactLetterSpaced(t);
   if (t.length < 3 || t.length > 40) return null;
   const norm = t.toLowerCase().replace(/[^\w\s]/g, "").trim();
-  return SECTION_HEADINGS.includes(norm) ? norm : null;
+  if (SECTION_HEADINGS.includes(norm)) return norm;
+  // Doubled-up headings on a single visual row ("EDUCATION LANGUAGES",
+  // "SKILLS CONTACT") — return the first recognised word so the slice
+  // starts at the right place. The unwanted half ends up inside the
+  // section body and is filtered out downstream by the per-section
+  // validators.
+  const words = norm.split(/\s+/);
+  for (const w of words) if (SECTION_HEADINGS.includes(w)) return w;
+  return null;
 }
 
 function extractSection(text: string, wanted: string[]): string {
@@ -201,13 +233,29 @@ function parseEducations(section: string): ExtractedEducation[] {
     .map((l) => healFragmentedText(l.trim()))
     .filter(Boolean);
 
+  // Group lines into per-entry blocks. The University line is the
+  // boundary marker: degree + years usually appear ABOVE it (Canva
+  // / Influenshah templates) or together on the same line (classic
+  // resumes). We push the university into the current block first
+  // then flush, so the resulting block contains "degree + year +
+  // university" together — not split across two adjacent blocks
+  // (which happened with flush-BEFORE-push and produced rows like
+  // {course: MBA, university: ""} followed by {course: "",
+  // university: "Chandigarh University"}). When a block already
+  // has a university and we see a SECOND one without a flush in
+  // between (rare), we still split to avoid merging two entries.
   const entries: string[][] = [];
   let cur: string[] = [];
-  const flush = () => { if (cur.length) { entries.push(cur); cur = []; } };
+  let curHasUni = false;
+  const uniRe = /\b(University|Institute|College|Polytechnic|Academy|School)\b/i;
+  const flush = () => {
+    if (cur.length) { entries.push(cur); cur = []; curHasUni = false; }
+  };
   for (const line of lines) {
-    const hasUni = /\b(University|Institute|College|Polytechnic|Academy|School)\b/i.test(line);
-    if (hasUni && cur.length > 0) flush();
+    const hasUni = uniRe.test(line);
+    if (hasUni && curHasUni) flush();        // second uni in a row → new entry
     cur.push(line);
+    if (hasUni) { curHasUni = true; flush(); } // close on the uni line
   }
   flush();
 
@@ -230,15 +278,19 @@ function parseEducations(section: string): ExtractedEducation[] {
     let course = "";
     let branch = "";
     // Pass 1: per-line scan. Resumes typically put the degree on
-    // its own line ("Bachelor Of Computer Application"), so `$`
-    // gives us a clean terminator and the branch capture doesn't
-    // bleed into the university name on the next line.
+    // its own line ("Bachelor Of Computer Application", "MBA- HR"),
+    // so `$` gives us a clean terminator and the branch capture
+    // doesn't bleed into the university name on the next line.
     const degreeLineRe = /^(Bach[a-zA-Z]{1,4}(?:o|ou)rs?|Mast[a-zA-Z]{1,3}(?:o|ou)?rs?)(?:\s+of\s+([A-Za-z'’& ]+?))?\s*(?:[\(,|]|$)/i;
+    // Abbreviation form ("MBA", "B.Com", "MBA- HR/Marketing",
+    // "B.Tech in CSE"). Accepts hyphen / colon / "in" / nothing as
+    // the separator before the branch.
+    const abbrevLineRe = /^\s*(MBA|BBA|BCA|MCA|BSc|MSc|B\.?Sc|M\.?Sc|B\.?Tech|M\.?Tech|B\.?A|M\.?A|B\.?Com|M\.?Com|PhD|Doctorate|Diploma|XII|10\+2|12th|10th)\b\s*(?:[-–:]\s*|\s+in\s+)?([A-Za-z'’&/ \-]*?)?\s*$/i;
     for (const ln of block) {
-      const m = ln.match(degreeLineRe);
+      const m = ln.match(degreeLineRe) || ln.match(abbrevLineRe);
       if (m) {
         course = canonicalizeDegree(m[1].trim());
-        if (m[2]) branch = m[2].trim();
+        if (m[2]) branch = m[2].trim().replace(/[\s\-]+$/, "");
         break;
       }
     }
@@ -287,30 +339,47 @@ function scanEducationByUniversityYear(text: string): ExtractedEducation[] {
   // pick out a clean section. We still want to surface the course
   // when it sits immediately above the university line.
   const degreeLineRe = /^(Bach[a-zA-Z]{1,4}(?:o|ou)rs?|Mast[a-zA-Z]{1,3}(?:o|ou)?rs?)(?:\s+of\s+([A-Za-z'’& ]+?))?\s*(?:[\(,|]|$)/i;
-  const abbrevLineRe = /^\s*(MBA|BBA|BCA|MCA|BSc|MSc|B\.?Sc|M\.?Sc|B\.?Tech|M\.?Tech|B\.?A|M\.?A|B\.?Com|M\.?Com|PhD|Doctorate|Diploma|XII|10\+2|12th|10th)\b(?:\s+in\s+([A-Za-z'’& ]+?))?\s*(?:[\(,|]|$)/i;
+  // Accept hyphen / colon / "in" / no-separator between the degree
+  // abbreviation and its branch — covers "MBA- HR/Marketing",
+  // "MBA in HR", "B.com" (no branch), "B.Tech: CSE".
+  const abbrevLineRe = /^\s*(MBA|BBA|BCA|MCA|BSc|MSc|B\.?Sc|M\.?Sc|B\.?Tech|M\.?Tech|B\.?A|M\.?A|B\.?Com|M\.?Com|PhD|Doctorate|Diploma|XII|10\+2|12th|10th)\b\s*(?:[-–:]\s*|\s+in\s+)?([A-Za-z'’&/ \-]*?)?\s*$/i;
+  const yearRangeRe = /(19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|present|current)/i;
   const out: ExtractedEducation[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!/\b(University|Institute|College|Polytechnic|Academy)\b/i.test(line)) continue;
-    const yr = line.match(/(19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|present|current)/i);
-    if (!yr) continue;
-    const ys = yr[0].match(/(19|20)\d{2}/g) ?? [];
+
+    // Year range can sit on the same line OR on a nearby line
+    // ("2022 - 2024 :" above the university, common in two-column
+    // designs where each column lists year-degree-school).
+    let yrMatch: RegExpMatchArray | null = null;
+    let yrLineIdx = i;
+    for (const j of [i, i - 1, i + 1, i - 2, i + 2, i - 3, i + 3]) {
+      if (j < 0 || j >= lines.length) continue;
+      const m = lines[j].match(yearRangeRe);
+      if (m) { yrMatch = m; yrLineIdx = j; break; }
+    }
+    if (!yrMatch) continue; // skip — no year context, probably not education
+
+    const ys = yrMatch[0].match(/(19|20)\d{2}/g) ?? [];
+    // Strip year text out of the university line so we don't leave
+    // a "(2022 - 2024)" tail behind.
     const university = line
       .replace(/\(?\s*(19|20)\d{2}\s*[-–—]\s*(?:(19|20)\d{2}|present|current)\s*\)?/i, "")
       .replace(/\s+/g, " ")
       .trim();
 
-    // Course often lives on the line right above / below the
-    // university line in two-column layouts. Probe ±2 lines.
+    // Course probe: ±3 lines around the university line, skipping
+    // the year line itself.
     let course = "";
     let branch = "";
-    for (const j of [i - 1, i - 2, i + 1, i + 2]) {
-      if (j < 0 || j >= lines.length) continue;
+    for (const j of [i - 1, i - 2, i - 3, i + 1, i + 2, i + 3]) {
+      if (j < 0 || j >= lines.length || j === yrLineIdx) continue;
       const probe = lines[j].trim();
       const m = probe.match(degreeLineRe) || probe.match(abbrevLineRe);
       if (m) {
         course = canonicalizeDegree(m[1].trim());
-        if (m[2]) branch = m[2].trim();
+        if (m[2]) branch = m[2].trim().replace(/[\s\-]+$/, "");
         break;
       }
     }

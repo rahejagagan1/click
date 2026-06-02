@@ -482,30 +482,6 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
           </section>
         ) : null}
 
-        {/* About the role — short summary HR enters in the wizard.
-            Sits BELOW the full JD because once a candidate has read
-            the brief, this section serves as a quick distilled pitch
-            (and a place to surface HR's framing if the JD itself is
-            light). */}
-        <section className="">
-          <Reveal direction="up" className="w-full">
-            <Card>
-              <CardHeader title="About the role" eyebrow="The opportunity" />
-              <div className="px-5 sm:px-10 pb-7 sm:pb-10">
-                {job.description && job.description.trim() ? (
-                  <div className="text-[14px] sm:text-[15px] text-slate-700 leading-[1.8] whitespace-pre-wrap max-w-3xl break-words">
-                    {job.description}
-                  </div>
-                ) : (
-                  <div className="text-[13.5px] sm:text-[14px] text-slate-600 leading-[1.75] rounded-xl bg-slate-50 border border-slate-100 px-4 sm:px-5 py-4 max-w-3xl">
-                    Full role description is shared at the interview stage. If this opportunity excites you, apply and we'll send the brief along.
-                  </div>
-                )}
-              </div>
-            </Card>
-          </Reveal>
-        </section>
-
         {/* Bottom CTA — panel 6 */}
         <section className="">
           <Reveal direction="up" className="w-full">
