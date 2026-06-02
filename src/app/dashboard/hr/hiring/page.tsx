@@ -18,9 +18,9 @@
 // independently. Drag-and-drop on the kanban uses native HTML5 DnD
 // — no new dependency added.
 
-import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { isHRAdmin } from "@/lib/access";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import { Briefcase, Settings, BarChart3, LayoutDashboard, UserPlus } from "lucide-react";
 
 import DashboardTab    from "@/components/hr/hiring/DashboardTab";
@@ -38,12 +38,14 @@ const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: "settings",    label: "Settings",     Icon: Settings        },
   { key: "reports",     label: "Reports",      Icon: BarChart3       },
 ];
+const TAB_KEYS = TABS.map((t) => t.key) as readonly TabKey[];
 
 export default function HiringPage() {
   const { data: session } = useSession();
   const me = session?.user as any;
   const canManage = isHRAdmin(me);
-  const [tab, setTab] = useState<TabKey>("dashboard");
+  // URL-synced so refresh / share-link returns to the same tab.
+  const [tab, setTab] = useUrlTab<TabKey>("tab", "dashboard", TAB_KEYS);
 
   if (!canManage) {
     return (
