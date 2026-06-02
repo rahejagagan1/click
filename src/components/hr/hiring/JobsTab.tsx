@@ -1312,8 +1312,12 @@ function JdReplaceModal({
 
   return (
     <div
+      // Backdrop click DOES NOT close the modal — HR can edit a long
+      // JD for several minutes and accidental outside-clicks were
+      // wiping the work. The close button (X) in the header + the
+      // Cancel button at the bottom + Esc are the explicit dismiss
+      // paths.
       className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
-      onClick={saving ? undefined : onCancel}
     >
       <div
         onClick={(e) => e.stopPropagation()}
