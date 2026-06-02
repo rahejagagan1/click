@@ -34,6 +34,85 @@ import CreateJobWizard from "./CreateJobWizard";
 import JobShareDialog from "./JobShareDialog";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import { useUrlState } from "@/lib/hooks/useUrlState";
+import dynamic from "next/dynamic";
+import "react-quill-new/dist/quill.snow.css";
+
+// ReactQuill must be dynamically imported with ssr:false — its
+// constructor accesses `window` at import time.
+const ReactQuill = dynamic(
+  async () => (await import("react-quill-new")).default,
+  { ssr: false, loading: () => <div className="px-5 py-4 text-[12.5px] text-slate-400">Loading editor…</div> },
+);
+
+// Full-featured Quill toolbar — gives HR Bold / Italic / Underline /
+// font size / headings / lists / alignment, the MS-Word feature set
+// most JD authors actually use. The NB Media letterhead + watermark
+// in the rendered PDF come from the DOCX template (not the editor
+// content), so any toolbar action affects ONLY the body text — the
+// branded chrome stays intact across edits.
+const JD_QUILL_MODULES = {
+  toolbar: [
+    [{ header: [1, 2, 3, false] }],
+    [{ size: ["small", false, "large", "huge"] }],
+    ["bold", "italic", "underline", "strike"],
+    [{ list: "ordered" }, { list: "bullet" }],
+    [{ align: [] }],
+    ["clean"],
+  ],
+};
+const JD_QUILL_FORMATS = [
+  "header", "size", "bold", "italic", "underline", "strike",
+  "list", "bullet", "align",
+];
+
+/** Convert plain text (as extracted from an uploaded PDF / DOCX)
+ *  into Quill-compatible HTML — preserves line breaks and applies
+ *  light auto-formatting:
+ *    • Lines ending with ":" (≤60 chars) → <h3>
+ *    • Lines starting with "-", "*", "•" → <li> wrapped in <ul>
+ *    • Lines starting with "1.", "2." …  → <li> wrapped in <ol>
+ *    • Everything else                   → <p>
+ *  Lines that already look like HTML (start with "<") pass through. */
+function plainTextToQuillHtml(input: string): string {
+  if (!input) return "";
+  const trimmed = input.trim();
+  if (trimmed.startsWith("<")) return input;  // already HTML — likely re-edit
+  const lines = input.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  let bulletBuf: string[] = [];
+  let numberedBuf: string[] = [];
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const flushB = () => {
+    if (bulletBuf.length) {
+      out.push(`<ul>${bulletBuf.map((b) => `<li>${escape(b)}</li>`).join("")}</ul>`);
+      bulletBuf = [];
+    }
+  };
+  const flushN = () => {
+    if (numberedBuf.length) {
+      out.push(`<ol>${numberedBuf.map((b) => `<li>${escape(b)}</li>`).join("")}</ol>`);
+      numberedBuf = [];
+    }
+  };
+  const flushAll = () => { flushB(); flushN(); };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { flushAll(); out.push("<p><br></p>"); continue; }
+    const bullet = line.match(/^[-*•]\s+(.*)$/);
+    if (bullet) { flushN(); bulletBuf.push(bullet[1]); continue; }
+    const num = line.match(/^\d+[.)]\s+(.*)$/);
+    if (num) { flushB(); numberedBuf.push(num[1]); continue; }
+    flushAll();
+    if (/:\s*$/.test(line) && line.length <= 60) {
+      out.push(`<h3>${escape(line.replace(/:\s*$/, ""))}</h3>`);
+    } else {
+      out.push(`<p>${escape(line)}</p>`);
+    }
+  }
+  flushAll();
+  return out.join("");
+}
 
 type JobStatus = "draft" | "published" | "on_hold" | "closed";
 type ViewMode  = "grid" | "list";
@@ -1189,7 +1268,10 @@ function JdReplaceModal({
         const j = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (!res.ok) throw new Error(j?.error || `Couldn't read the file (HTTP ${res.status})`);
-        setText(String(j?.text ?? "").trim());
+        // Extractor returns plain text — Quill needs HTML. Apply the
+        // light auto-formatting so the first paint already shows
+        // headings / lists, then HR can refine with the toolbar.
+        setText(plainTextToQuillHtml(String(j?.text ?? "").trim()));
       } catch (e: any) {
         if (cancelled || e?.name === "AbortError") return;
         setError(e?.message ?? "Couldn't read the file");
@@ -1201,7 +1283,10 @@ function JdReplaceModal({
     return () => { cancelled = true; window.clearTimeout(timeoutId); ctrl.abort(); };
   }, [file]);
 
-  const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+  // Strip HTML tags before counting words — Quill emits "<p>hello</p>"
+  // and we want a real human-readable count of body text, not markup.
+  const plainText = text.replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;/g, " ").trim();
+  const wordCount = plainText ? plainText.split(/\s+/).length : 0;
 
   const showPreview = async () => {
     if (!text.trim()) return;
@@ -1268,25 +1353,33 @@ function JdReplaceModal({
           </div>
         )}
 
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={expanded ? 32 : 16}
-          disabled={extracting || saving}
-          placeholder={
-            extracting
-              ? "Reading file content…"
-              : error
-                ? "Couldn't extract the file's text — paste or type the JD here."
-                : "Edit the extracted JD here — remove lines, fix typos, polish phrasing."
-          }
-          // Times New Roman to match the rendered PDF's typography so
-          // what HR types in the editor reads the same as the final
-          // document. Slightly larger size + relaxed leading for
-          // long-form editing comfort.
+        {/* Full WYSIWYG editor. Times New Roman matches the PDF
+            output so what HR sees in the editor reads exactly the
+            same as the final document. The NB Media letterhead +
+            watermark live in the DOCX template (public/templates/
+            jd-template.docx), NOT in this content — formatting
+            applied here only affects the body region of the
+            generated PDF. */}
+        <div
+          className={`jd-quill-wrap flex-1 overflow-auto bg-white ${extracting || saving ? "opacity-60 pointer-events-none" : ""}`}
           style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
-          className="w-full flex-1 px-5 py-4 text-[14.5px] leading-[1.7] focus:outline-none disabled:bg-slate-50/60 resize-none text-slate-800"
-        />
+        >
+          <ReactQuill
+            theme="snow"
+            value={text}
+            onChange={setText}
+            modules={JD_QUILL_MODULES}
+            formats={JD_QUILL_FORMATS}
+            placeholder={
+              extracting
+                ? "Reading file content…"
+                : error
+                  ? "Couldn't extract the file's text — paste or type the JD here."
+                  : "Edit the extracted JD here — use the toolbar to bold, resize, or list items."
+            }
+            readOnly={extracting || saving}
+          />
+        </div>
 
         <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 flex-wrap">
           <span className="text-[11px] text-slate-500">
