@@ -49,6 +49,7 @@ export async function GET(req: NextRequest) {
            a."source", a."overallRating", a."status",
            a."currentStageId", a."enteredStageAt", a."createdAt", a."updatedAt",
            a."jobOpeningId",
+           a."archivedAt", a."archiveReason",
            o."title" AS "roleTitle",
            s."id"   AS "s_id",
            s."key"  AS "s_key",
@@ -74,6 +75,7 @@ export async function GET(req: NextRequest) {
              a."source", a."overallRating", a."status",
              NULL AS "currentStageId", NULL AS "enteredStageAt",
              a."createdAt", a."updatedAt", a."jobOpeningId",
+             NULL::timestamp AS "archivedAt", NULL::text AS "archiveReason",
              o."title" AS "roleTitle",
              NULL AS "s_id", NULL AS "s_key", NULL AS "s_label",
              NULL AS "s_kind", NULL AS "s_color"
@@ -148,6 +150,11 @@ export async function GET(req: NextRequest) {
       updatedAt: r.updatedAt,
       jobOpeningId: r.jobOpeningId,
       roleTitle: r.roleTitle,
+      // Archived state — set when HR moved them to a rejected/closed
+      // stage with a reason. Drives the "Archived" badge in the list
+      // view so HR can see at a glance who's out of the pipeline.
+      archivedAt:    r.archivedAt ?? null,
+      archiveReason: r.archiveReason ?? null,
       tags: tagsById.get(Number(r.id)) ?? [],
       recruiterOwnerId: ownerById.get(Number(r.id))?.id ?? null,
       ownerName:        ownerById.get(Number(r.id))?.name ?? null,
