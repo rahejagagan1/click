@@ -137,6 +137,14 @@ function isHeadingLine(line: string): string | null {
   if (t.length < 3 || t.length > 40) return null;
   const norm = t.toLowerCase().replace(/[^\w\s]/g, "").trim();
   if (SECTION_HEADINGS.includes(norm)) return norm;
+  // Spaceless variant. When the compactor merges a heading like
+  // "K E Y  C O M P E T E N C I E S" → "KEYCOMPETENCIES" because
+  // every letter was separated by a single space (not the expected
+  // 2+), the joined form has no word break. Map back by comparing
+  // each known heading with whitespace stripped.
+  for (const h of SECTION_HEADINGS) {
+    if (h.replace(/\s+/g, "") === norm) return h;
+  }
   // Doubled-up headings on a single visual row ("EDUCATION LANGUAGES",
   // "SKILLS CONTACT") — return the first recognised word so the slice
   // starts at the right place. The unwanted half ends up inside the
@@ -403,6 +411,16 @@ function looksLikeSkill(s: string): boolean {
   if (JOB_TITLE_HINTS.test(s))      return false;
   if (/^[a-z]{1,2}$/i.test(s))      return false;
   if (/^(WORK|HISTORY|EXPERIENCE|EDUCATION|PROFILE|CONTACT|PROJECTS|HOBBIES|REFERENCES|TAGS|SUMMARY)$/i.test(s)) return false;
+  // URL fragments — the skills tokeniser splits on "/" which shreds
+  // any LinkedIn / GitHub / portfolio URL the section body might
+  // include (this happens whenever the section is at the bottom of
+  // the page and the tail of the document carries the candidate's
+  // links). Reject the obvious URL pieces so they don't become
+  // chips. Covers "https", "http", "www", "linkedin.com", "github.com",
+  // bare TLDs ("com", "in", "io"), and protocol prefixes with the
+  // colon stripped.
+  if (/^(https?|www|com|in|io|org|net|co|me)$/i.test(s)) return false;
+  if (/\b(linkedin|github|gitlab|bitbucket|behance|dribbble|figma|notion|medium)\.com\b/i.test(s)) return false;
   return true;
 }
 
