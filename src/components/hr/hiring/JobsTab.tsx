@@ -32,6 +32,7 @@ import KanbanBoard from "./KanbanBoard";
 import JobApplicantList from "./JobApplicantList";
 import CreateJobWizard from "./CreateJobWizard";
 import JobShareDialog from "./JobShareDialog";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 
 type JobStatus = "draft" | "published" | "on_hold" | "closed";
 type ViewMode  = "grid" | "list";
@@ -123,11 +124,11 @@ export default function JobsTab() {
   const [showPriorityOnly, setShowPriorityOnly] = useState(false);
 
   // ── View state ──────────────────────────────────────────────────
-  const [view, setView] = useState<ViewMode>("grid");
-  // Job-detail view: per-job applicant view mode. Kanban shows the
-  // visual pipeline; list shows a flat sortable table of all
-  // applicants on this job — same data, different layout.
-  const [pipelineView, setPipelineView] = useState<"kanban" | "list">("kanban");
+  // URL-synced so refresh returns to the same view. Distinct param
+  // names ("jobs" vs "pipeline") so the two toggles don't collide
+  // when both apply (jobs index → click a job → drawer opens).
+  const [view,         setView]         = useUrlTab<ViewMode>("jobs",     "grid",   ["grid", "list"] as const);
+  const [pipelineView, setPipelineView] = useUrlTab<"kanban" | "list">("pipeline", "kanban", ["kanban", "list"] as const);
   const [activeJob, setActiveJob]   = useState<Job | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
