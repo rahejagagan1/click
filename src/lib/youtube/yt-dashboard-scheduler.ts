@@ -8,7 +8,7 @@ import {
   sendMissedClockOutReminders,
   sendHrLateClockInSummary,
 } from "@/lib/hr/missed-attendance-emails";
-// import { maybeRunSickLeaveAccrual } from "@/lib/hr/leave-accrual"; // DISABLED — see scheduler tick
+import { maybeRunMonthlyLeaveAccrual } from "@/lib/leave-accrual";
 
 const TICK_MS    = 60_000;
 const HOUR_MS    = 60 * 60 * 1000;
@@ -222,16 +222,12 @@ export function startInternalCronScheduler(): void {
                 .catch((e) => logSchedulerError("hr-clock-out", e));
         }
 
-        // ── HR: monthly sick-leave accrual ─────────────────────────
-        // DISABLED — this legacy SL-only system double-credited every
-        // employee because the policy-driven `accrueLeavesForUser`
-        // (src/lib/leave-accrual.ts) was added later with SL set to
-        // monthlyAccrual=1. Both fired on the 1st of each month and
-        // each added +1 SL day → users got +2 SL instead of +1.
-        // The policy-driven system is now the single source of truth
-        // for every leave type, SL included. Do not re-enable.
-        //
-        // maybeRunSickLeaveAccrual()
-        //     .catch((e) => logSchedulerError("hr-sick-leave-accrual", e));
+        // ── HR: monthly leave accrual (policy-driven: Sick + Casual + any
+        // other leave type with monthlyAccrual > 0) ──
+        // Single accrual path for ALL leave types. Idempotent on calendar
+        // month; the helper persists its own last-run key in SyncConfig so
+        // it fires once per month even across restarts.
+        maybeRunMonthlyLeaveAccrual()
+            .catch((e) => logSchedulerError("hr-leave-accrual", e));
     }, TICK_MS);
 }

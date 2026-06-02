@@ -6,6 +6,7 @@ import { parseBody } from "@/lib/validate";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { istTodayDateOnly } from "@/lib/ist-date";
 import { isMobileRequest } from "@/lib/is-mobile-device";
+import { hasDesktopBypassHeader } from "@/lib/desktop-bypass";
 import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
 
 // Same shape as the clock-in body. Optional here because legacy
@@ -34,8 +35,12 @@ export async function POST(req: NextRequest) {
     // Mobile guard, mirrors clock-in: blocked by default, allowed when
     // ANY non-dismissed On-Duty record covers today. Pending counts —
     // a user already off-site shouldn't be locked out of clock-out
-    // just because HR hasn't clicked Approve yet.
-    if (isMobileRequest(req.headers)) {
+    // just because HR hasn't clicked Approve yet. Same two bypasses as
+    // clock-in: developers and the `?desktop=1` override (forwarded as
+    // the x-desktop-bypass header) skip the block entirely.
+    const mobileBypass =
+      user?.isDeveloper === true || hasDesktopBypassHeader(req.headers);
+    if (isMobileRequest(req.headers) && !mobileBypass) {
       const today = istTodayDateOnly();
       const odForToday = await prisma.onDutyRequest.findFirst({
         where: {

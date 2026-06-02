@@ -257,6 +257,7 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
   // but isn't surfaced/edited here anymore.
   const [work, setWork] = useState({
     leavePolicyId:           user.leavePolicyId ?? "",
+    shiftId:                 user.shift?.id ? String(user.shift.id) : "",
     holidayList:             p.holidayList ?? "Default Holiday List",
     weeklyOff:               p.weeklyOff ?? "Standard Weekly Off",
     attendanceNumber:        p.attendanceNumber ?? "",
@@ -268,6 +269,11 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
   const workHook = useSaveSection(userId);
   const { data: leavePolicies = [] } = useSWR<Array<{ id: number; name: string; isActive: boolean }>>(
     "/api/hr/admin/leave-policies",
+    fetcher,
+  );
+  // Shift templates — drive the "Week Days & Time Shift" dropdown below.
+  const { data: shifts = [] } = useSWR<Array<{ id: number; name: string; startTime: string; endTime: string }>>(
+    "/api/hr/admin/shifts",
     fetcher,
   );
 
@@ -357,6 +363,7 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
     });
     setWork({
       leavePolicyId:           user.leavePolicyId ?? "",
+      shiftId:                 user.shift?.id ? String(user.shift.id) : "",
       holidayList:             p.holidayList ?? "Default Holiday List",
       weeklyOff:               p.weeklyOff ?? "Standard Weekly Off",
       attendanceNumber:        p.attendanceNumber ?? "",
@@ -965,6 +972,8 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
         savedAt={workHook.savedAt}
         onSave={() => workHook.save({
           leavePolicyId:           work.leavePolicyId === "" ? null : Number(work.leavePolicyId),
+          // Week Days & Time Shift → assigns the user's UserShift.
+          shiftId:                 work.shiftId === "" ? null : Number(work.shiftId),
           holidayList:             work.holidayList.trim()        || null,
           weeklyOff:               work.weeklyOff.trim()          || null,
           attendanceNumber:        work.attendanceNumber.trim()   || null,
@@ -1004,13 +1013,19 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
             />
           </div>
           <div>
-            <label className={cls.label}>Weekly Off</label>
-            <CustomSelect
-              listKey="weeklyOff"
-              defaults={["Standard Weekly Off", "Saturday + Sunday", "Sunday Only", "Custom"]}
-              value={work.weeklyOff}
-              onChange={(v) => setWork({ ...work, weeklyOff: v })}
-            />
+            <label className={cls.label}>Week Days &amp; Time Shift</label>
+            <select
+              value={work.shiftId}
+              onChange={(e) => setWork({ ...work, shiftId: e.target.value })}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/30"
+            >
+              <option value="">— No shift assigned —</option>
+              {shifts.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ""}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className={cls.label}>Attendance Number</label>

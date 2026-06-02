@@ -196,8 +196,12 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
     // HR Dashboard sub-tabs the curated whitelist (HR_MANAGER_ALLOWED_TABS
     // in src/lib/access.ts) currently allows for HR Manager + HR Member:
     // attendance, approvals (recently granted), leaves, holidays, assets,
-    // departments. Leave Types / Leave Policies / Shift Templates default
-    // OFF — admins can flip them on per-user.
+    // departments. These orgLevel defaults govern the broader HR-staff
+    // tier (orgLevel="hr_manager"). The *actual* HR Manager
+    // (role="hr_manager") additionally always sees Leave Types / Leave
+    // Policies / Shift Templates / Payroll — see HR_MANAGER_FORCED_TABS
+    // below, forced on at resolution time and scoped to the role so the
+    // HR tier (and the Payroll salary policy) is unaffected.
     hr_admin_attendance:true, hr_admin_approvals:true, hr_admin_leaves:true,
     hr_admin_holidays:true, hr_admin_assets:true, hr_admin_departments:true,
     // HR-Manager also gets the new HR feature pages.
@@ -214,6 +218,30 @@ const ROLE_TAB_OVERRIDES: Partial<Record<OrgLevel, Partial<Record<TabKey, boolea
   },
   // leads / sub-leads / production team / members use the base 4-tab defaults.
 };
+
+/**
+ * HR-admin sub-tabs the *actual* HR Manager (role="hr_manager", NOT the
+ * broader orgLevel="hr_manager" HR-staff tier) must always see — they own
+ * HR policy configuration. These are exactly the sections the orgLevel
+ * defaults leave OFF for the general HR tier:
+ *   • Leave Types     (hr_admin_leave_types)
+ *   • Leave Policies  (hr_admin_leave_policies)
+ *   • Shift Templates (hr_admin_shifts)
+ *   • Payroll         (hr_admin_payroll)
+ *
+ * Forced on at resolution time (see tabPermissionsForUser in
+ * ./resolve.ts) so a stale seeded "false" row from before this rule can't
+ * hide them. Scoped to the role, never the orgLevel tier — plain HR
+ * Members stay out, and for Payroll that preserves the salary-visibility
+ * policy (HR Manager / CEO / dev only). The harder gate in the HR Admin
+ * page (canViewSalary for Payroll) still applies on top.
+ */
+export const HR_MANAGER_FORCED_TABS: TabKey[] = [
+  "hr_admin_leave_types",
+  "hr_admin_leave_policies",
+  "hr_admin_shifts",
+  "hr_admin_payroll",
+];
 
 export function defaultTabPermissions(orgLevel?: OrgLevel | string | null): Record<TabKey, boolean> {
   const base = Object.fromEntries(

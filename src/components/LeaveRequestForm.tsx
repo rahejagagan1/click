@@ -9,6 +9,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import EmployeePicker, { type PickerUser } from "@/components/hr/EmployeePicker";
 import HandoffSection from "@/components/hr/HandoffSection";
 import { leaveMinDate } from "@/lib/hr/leave-date-rules";
+import { isWorkingDay, type ShiftWorkRule } from "@/lib/hr/shift-working-days";
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 export type LeaveRequestKind = "wfh" | "on_duty" | "half_day" | "leave" | "regularize";
@@ -45,7 +46,9 @@ function LeaveTypePicker({
   const balanceByTypeId = useMemo(() => {
     const map = new Map<number, number>();
     for (const b of Array.isArray(balances) ? balances : []) {
-      const available = parseFloat(b.totalDays ?? "0") - parseFloat(b.usedDays ?? "0") - parseFloat(b.pendingDays ?? "0");
+      // Remaining balance shown when applying = total − used. Pending (not-yet-
+      // approved) leaves are deliberately NOT subtracted here.
+      const available = parseFloat(b.totalDays ?? "0") - parseFloat(b.usedDays ?? "0");
       if (b.leaveTypeId) map.set(b.leaveTypeId, available);
     }
     return map;
@@ -151,6 +154,12 @@ export default function LeaveRequestForm({
   const today = prefillDate || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const { data: session } = useSession();
   const me = session?.user as any;
+  // The caller's own shift rule + anchor, so the day-count preview below
+  // matches the server's countWorkingDays() (alternate-Saturday aware).
+  // Undefined while loading / null when no shift → Mon–Fri fallback.
+  const { data: myShift } = useSWR<{ shift: ShiftWorkRule; effectiveFrom: string | null }>(
+    "/api/hr/me/shift", fetcher,
+  );
   // Restricted-admin tier (CEO / hr_manager / dev) can back-date; everyone
   // else gets clamped to today + future via the date picker's minDate prop.
   const minDate = leaveMinDate(me);
@@ -188,25 +197,29 @@ export default function LeaveRequestForm({
   const [workStatus, setWorkStatus] = useState("");
   const [unavailability, setUnavailability] = useState("");
 
-  // Working-day preview: walk from→to and count weekdays only. Mirrors the
-  // server-side `countWorkingDays()` (which also subtracts holidays); the
-  // server is still the source of truth for the actual leave deduction,
-  // this is just an immediate preview for the user.
+  // Working-day preview: walk from→to and count the user's working days.
+  // Shift-aware via the shared `isWorkingDay`, so it matches the server's
+  // `countWorkingDays()` — an NB alternate-Saturday employee sees a worked
+  // Saturday count as 1, a 5-day (YT) employee still sees Saturdays as 0,
+  // and users with no shift fall back to Mon–Fri. Holidays are still only
+  // subtracted server-side (the source of truth for the actual deduction),
+  // so the preview can differ by any holidays in the range — same as before.
   const days = useMemo(() => {
     if (!fromDate || !toDate) return 0;
     if (isHalfLeave) return 0.5;
     const a = new Date(`${fromDate}T00:00:00Z`);
     const b = new Date(`${toDate}T00:00:00Z`);
     if (isNaN(a.getTime()) || isNaN(b.getTime()) || a > b) return 0;
+    const shift = (myShift?.shift ?? null) as ShiftWorkRule;
+    const anchor = myShift?.effectiveFrom ? new Date(myShift.effectiveFrom) : null;
     let count = 0;
     const cur = new Date(a.getTime());
     while (cur.getTime() <= b.getTime()) {
-      const dow = cur.getUTCDay(); // 0 = Sun, 6 = Sat
-      if (dow !== 0 && dow !== 6) count++;
+      if (isWorkingDay(cur, shift, anchor)) count++;
       cur.setUTCDate(cur.getUTCDate() + 1);
     }
     return count;
-  }, [fromDate, toDate, isHalfLeave]);
+  }, [fromDate, toDate, isHalfLeave, myShift]);
 
   const submit = async () => {
     setErr("");
