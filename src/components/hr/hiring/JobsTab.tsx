@@ -22,7 +22,7 @@ import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import {
   Plus, Briefcase, MapPin, Users, Search,
-  Share2, Send, Pause, CheckCircle2, FileEdit, MoreHorizontal,
+  Share2, Send, Pause, CheckCircle2, FileEdit, Pencil, MoreHorizontal,
   ExternalLink, Star, LayoutGrid, List, Calendar, Filter,
   ChevronDown, ChevronLeft, Circle, BriefcaseBusiness,
   FileText, Trash2, Settings2, Eye, Upload, X, Maximize2, Minimize2,
@@ -858,6 +858,9 @@ function CardActionsMenu({
   onShare: () => void;
   onDelete: () => void;
 }) {
+  // ?edit=1 deep-link tells the job detail page to auto-open the
+  // edit modal so HR doesn't have to click twice.
+  const editHref = `/dashboard/hr/hiring/jobs/${job.id}?edit=1`;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -935,6 +938,12 @@ function CardActionsMenu({
             style={{ top: pos.top, right: pos.right }}
             onClick={(e) => e.stopPropagation()}
           >
+            <a
+              href={editHref}
+              className="flex items-center gap-2 px-3 py-1.5 text-[12px] text-slate-700 hover:bg-slate-50"
+              onClick={(e) => e.stopPropagation()}
+            ><Pencil size={12} className="text-slate-400" /> Edit details</a>
+            <div className="my-1 h-px bg-slate-100" />
             {status !== "published" && (
               <MenuItem icon={Send}        label="Publish"        onClick={() => onTransition("publish")} />
             )}
