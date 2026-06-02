@@ -13,8 +13,10 @@
 import { useState } from "react";
 import {
   Star, MessageSquare, ThumbsUp, ThumbsDown, Calendar, MapPin, X,
-  Save, AlertCircle, CheckCircle2, Pencil,
+  Save, AlertCircle, CheckCircle2, Pencil, CalendarClock, Ban,
+  AlertTriangle, Users, Clock, Video, Mail,
 } from "lucide-react";
+import { DateField } from "@/components/ui/date-field";
 
 type Scorecard = {
   id: number;
@@ -72,7 +74,9 @@ export default function FeedbackTab({
   /** Called after a scorecard is saved so the parent refetches. */
   onMutated: () => void;
 }) {
-  const [editing, setEditing] = useState<{ interviewId: number; existing?: Scorecard; targetUserId?: number } | null>(null);
+  const [editing,        setEditing]        = useState<{ interviewId: number; existing?: Scorecard; targetUserId?: number } | null>(null);
+  const [rescheduling,   setRescheduling]   = useState<Interview | null>(null);
+  const [cancelling,     setCancelling]     = useState<Interview | null>(null);
 
   if (interviews.length === 0) {
     return (
@@ -132,14 +136,34 @@ export default function FeedbackTab({
                   )}
                 </div>
               </div>
-              {(onPanel || isHRAdmin) && (
-                <button
-                  onClick={() => setEditing({ interviewId: iv.id, existing: myCard, targetUserId: currentUserId ?? undefined })}
-                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[11.5px] font-semibold shadow-sm"
-                >
-                  {myCard ? <><Pencil size={12} /> Edit my feedback</> : <><Save size={12} /> Add my feedback</>}
-                </button>
-              )}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {isHRAdmin && iv.status === "scheduled" && (
+                  <>
+                    <button
+                      onClick={() => setRescheduling(iv)}
+                      title="Reschedule"
+                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[11.5px] font-semibold"
+                    >
+                      <CalendarClock size={12} /> Reschedule
+                    </button>
+                    <button
+                      onClick={() => setCancelling(iv)}
+                      title="Cancel interview"
+                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-rose-700 text-[11.5px] font-semibold"
+                    >
+                      <Ban size={12} /> Cancel
+                    </button>
+                  </>
+                )}
+                {(onPanel || isHRAdmin) && (
+                  <button
+                    onClick={() => setEditing({ interviewId: iv.id, existing: myCard, targetUserId: currentUserId ?? undefined })}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[11.5px] font-semibold shadow-sm"
+                  >
+                    {myCard ? <><Pencil size={12} /> Edit my feedback</> : <><Save size={12} /> Add my feedback</>}
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Panel chips */}
@@ -196,6 +220,308 @@ export default function FeedbackTab({
           onSaved={() => { setEditing(null); onMutated(); }}
         />
       )}
+
+      {rescheduling && (
+        <RescheduleModal
+          interview={rescheduling}
+          onClose={() => setRescheduling(null)}
+          onDone={() => { setRescheduling(null); onMutated(); }}
+        />
+      )}
+
+      {cancelling && (
+        <CancelModal
+          interview={cancelling}
+          onClose={() => setCancelling(null)}
+          onDone={() => { setCancelling(null); onMutated(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Reschedule modal ────────────────────────────────────────────
+// Pre-fills with the current schedule; HR tweaks date/time/duration
+// and we PATCH the interview row + Google Calendar event.
+function RescheduleModal({
+  interview, onClose, onDone,
+}: {
+  interview: Interview;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const initial = interview.scheduledAt ? new Date(interview.scheduledAt) : new Date();
+  const [date, setDate]         = useState(initial.toISOString().slice(0, 10));
+  const [time, setTime]         = useState(
+    initial.toTimeString().slice(0, 5),
+  );
+  const [duration, setDuration] = useState(interview.durationMinutes);
+  const [title, setTitle]       = useState(interview.title);
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState<string | null>(null);
+
+  const save = async () => {
+    setError(null);
+    if (!date || !time) return setError("Date and time required");
+    const scheduledAt = new Date(`${date}T${time}`);
+    if (isNaN(scheduledAt.getTime())) return setError("Invalid date/time");
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/hr/hiring/interviews/${interview.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reschedule",
+          scheduledAt: scheduledAt.toISOString(),
+          durationMinutes: duration,
+          title: title.trim() || interview.title,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Reschedule failed");
+      }
+      onDone();
+    } catch (e: any) {
+      setError(e?.message ?? "Failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-[14.5px] font-semibold text-slate-900">Reschedule interview</h3>
+            <p className="text-[11px] text-slate-500 mt-0.5 truncate">{interview.title}</p>
+          </div>
+          <button onClick={onClose} className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100">
+            <X size={15} />
+          </button>
+        </div>
+        <div className="p-5 space-y-3">
+          <FieldLabel label="Title">
+            <input value={title} onChange={(e) => setTitle(e.target.value)}
+              className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
+          </FieldLabel>
+          <div className="grid grid-cols-12 gap-3">
+            <div className="col-span-5">
+              <FieldLabel label="Date">
+                <DateField value={date} onChange={setDate} />
+              </FieldLabel>
+            </div>
+            <div className="col-span-4">
+              <FieldLabel label="Time">
+                <input type="time" value={time} onChange={(e) => setTime(e.target.value)}
+                  className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
+              </FieldLabel>
+            </div>
+            <div className="col-span-3">
+              <FieldLabel label="Mins">
+                <input type="number" min={5} step={5} value={duration}
+                  onChange={(e) => setDuration(Math.max(5, Number(e.target.value) || 45))}
+                  className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
+              </FieldLabel>
+            </div>
+          </div>
+          {interview.location && /^https?:/.test(interview.location) && (
+            <p className="text-[10.5px] text-slate-500 inline-flex items-center gap-1.5">
+              <CheckCircle2 size={11} className="text-emerald-600" />
+              The Google Meet link is preserved — only the time is updated.
+            </p>
+          )}
+          {error && (
+            <div className="text-[12px] text-rose-600 inline-flex items-center gap-1">
+              <AlertCircle size={12} /> {error}
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl flex items-center justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white">Cancel</button>
+          <button onClick={save} disabled={saving}
+            className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-slate-300 text-white text-[12.5px] font-semibold">
+            <CalendarClock size={13} /> {saving ? "Saving…" : "Reschedule"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Cancel confirm ──────────────────────────────────────────────
+// Deliberate 2-step: HR clicks Cancel on the card → this modal makes
+// them confirm. Soft-deletes (status='cancelled') so the panel +
+// scorecards stay accessible for audit.
+function CancelModal({
+  interview, onClose, onDone,
+}: {
+  interview: Interview;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState<string | null>(null);
+
+  const confirm = async () => {
+    setError(null);
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/hr/hiring/interviews/${interview.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Cancel failed");
+      }
+      onDone();
+    } catch (e: any) {
+      setError(e?.message ?? "Failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const when = interview.scheduledAt ? new Date(interview.scheduledAt) : null;
+  const isOnline = interview.location ? /^https?:/.test(interview.location) : false;
+  const hasFeedback = interview.scorecards.length > 0;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+
+        {/* ── Hero strip with warning icon ─────────────────── */}
+        <div className="relative px-6 pt-7 pb-5 bg-gradient-to-br from-rose-50 via-white to-white border-b border-rose-100/60">
+          {/* Decorative blob */}
+          <div className="absolute -top-12 -right-12 h-40 w-40 rounded-full bg-rose-100/50 blur-2xl pointer-events-none" />
+
+          <button onClick={onClose}
+            className="absolute top-3 right-3 h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-white/80 transition-colors">
+            <X size={15} />
+          </button>
+
+          <div className="relative flex items-start gap-4">
+            <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-rose-100 ring-4 ring-white shadow-sm">
+              <AlertTriangle size={22} className="text-rose-600" />
+            </span>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <h3 className="text-[16px] font-semibold text-slate-900 leading-tight">
+                Cancel this interview?
+              </h3>
+              <p className="mt-1 text-[12.5px] text-slate-500 leading-snug">
+                This action notifies the candidate and panel. The interview stays on file as <span className="font-semibold text-slate-700">cancelled</span> — you won&apos;t lose any data.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Interview snapshot ───────────────────────────── */}
+        <div className="px-6 py-4 bg-white">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+            <div className="flex items-start gap-3">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 shrink-0">
+                {isOnline ? <Video size={15} /> : <Calendar size={15} />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-semibold text-slate-900 truncate">{interview.title}</p>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-slate-500">
+                  {when && (
+                    <span className="inline-flex items-center gap-1">
+                      <Clock size={11} className="text-slate-400" />
+                      {when.toLocaleString("en-IN", {
+                        weekday: "short", day: "2-digit", month: "short",
+                        hour: "numeric", minute: "2-digit", hour12: true,
+                      })}
+                      <span className="text-slate-400">· {interview.durationMinutes}m</span>
+                    </span>
+                  )}
+                  {interview.panel.length > 0 && (
+                    <span className="inline-flex items-center gap-1">
+                      <Users size={11} className="text-slate-400" />
+                      {interview.panel.length} panelist{interview.panel.length === 1 ? "" : "s"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Consequence checklist ──────────────────────── */}
+          <ul className="mt-4 space-y-2">
+            <ConsequenceLine
+              icon={<Mail size={12} />}
+              text={<>Google Calendar invite to <span className="font-semibold text-slate-700">{isOnline ? "candidate + panel" : "candidate"}</span> will be removed.</>}
+              tone="info"
+            />
+            {hasFeedback && (
+              <ConsequenceLine
+                icon={<CheckCircle2 size={12} />}
+                text={<><span className="font-semibold text-slate-700">{interview.scorecards.length} scorecard{interview.scorecards.length === 1 ? "" : "s"}</span> already submitted stay on file for audit.</>}
+                tone="success"
+              />
+            )}
+            <ConsequenceLine
+              icon={<AlertCircle size={12} />}
+              text="If you change your mind later, you'll need to schedule a new round."
+              tone="warn"
+            />
+          </ul>
+
+          {error && (
+            <div className="mt-4 rounded-lg bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-[12px] text-rose-700 inline-flex items-center gap-1.5">
+              <AlertCircle size={13} /> {error}
+            </div>
+          )}
+        </div>
+
+        {/* ── Footer ──────────────────────────────────────── */}
+        <div className="px-6 py-3.5 border-t border-slate-100 bg-slate-50/40 flex items-center justify-between gap-2">
+          <p className="text-[10.5px] text-slate-400 hidden sm:block">
+            Press <kbd className="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono text-[9.5px]">Esc</kbd> to dismiss
+          </p>
+          <div className="flex items-center gap-2 ml-auto">
+            <button onClick={onClose}
+              className="h-9 px-4 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:bg-white border border-transparent hover:border-slate-200 transition-colors">
+              Keep interview
+            </button>
+            <button onClick={confirm} disabled={saving}
+              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white text-[12.5px] font-semibold shadow-sm shadow-rose-600/20 transition-colors">
+              <Ban size={13} /> {saving ? "Cancelling…" : "Yes, cancel"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Single line in the consequence checklist — bullet + colored icon
+// + body text. Tone drives the icon colour so HR can scan info /
+// success / warning at a glance.
+function ConsequenceLine({
+  icon, text, tone,
+}: { icon: React.ReactNode; text: React.ReactNode; tone: "info" | "success" | "warn" }) {
+  const tones = {
+    info:    { bg: "bg-blue-50",    fg: "text-blue-600",    ring: "ring-blue-100" },
+    success: { bg: "bg-emerald-50", fg: "text-emerald-600", ring: "ring-emerald-100" },
+    warn:    { bg: "bg-amber-50",   fg: "text-amber-600",   ring: "ring-amber-100" },
+  }[tone];
+  return (
+    <li className="flex items-start gap-2.5">
+      <span className={`inline-flex h-5 w-5 items-center justify-center rounded-md ${tones.bg} ${tones.fg} ring-1 ${tones.ring} shrink-0 mt-0.5`}>
+        {icon}
+      </span>
+      <span className="text-[12px] text-slate-600 leading-snug">{text}</span>
+    </li>
+  );
+}
+
+function FieldLabel({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-[11.5px] font-semibold text-slate-600 mb-1.5">{label}</label>
+      {children}
     </div>
   );
 }

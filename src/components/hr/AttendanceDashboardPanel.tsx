@@ -7,6 +7,7 @@ import { useSession } from "next-auth/react";
 import { fetcher } from "@/lib/swr";
 import { Users, CalendarOff, CheckCircle2, Home, Search, CircleUser, Clock, ChevronLeft, ChevronRight, ChevronDown, MapPin } from "lucide-react";
 import FilterDropdown, { FilterOption } from "@/components/hr/FilterDropdown";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 
 type Row = {
   id: number; name: string; email: string; role: string; orgLevel: string;
@@ -475,7 +476,10 @@ export default function AttendanceDashboardPanel() {
     { refreshInterval: 60_000 }
   );
 
-  const [tab, setTab] = useState<"all" | "office" | "remote" | "hybrid" | "wfh" | "on_leave" | "absent">("all");
+  const [tab, setTab] = useUrlTab<"all" | "office" | "remote" | "hybrid" | "wfh" | "on_leave" | "absent">(
+    "presence", "all",
+    ["all", "office", "remote", "hybrid", "wfh", "on_leave", "absent"] as const,
+  );
   const [search, setSearch] = useState("");
   const [fDept, setFDept] = useState<Set<string>>(new Set());
 
@@ -506,7 +510,7 @@ export default function AttendanceDashboardPanel() {
   const [selYear,  setSelYear]  = useState(now.getFullYear());
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
   const monthKey = `${selYear}-${String(selMonth).padStart(2, "0")}`;
-  const [tableView, setTableView] = useState<"today" | "month">("today");
+  const [tableView, setTableView] = useUrlTab<"today" | "month">("table", "today", ["today", "month"] as const);
 
   const { data: monthData, isLoading: monthLoading } = useSWR<{ month: string; rows: MonthSummaryRow[] }>(
     tableView === "month" ? `/api/hr/admin/attendance-month-summary?month=${monthKey}` : null,

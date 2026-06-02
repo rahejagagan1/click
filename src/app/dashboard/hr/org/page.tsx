@@ -5,6 +5,7 @@ import { fetcher } from "@/lib/swr";
 import Link from "next/link";
 import { Users, ChevronDown, ChevronRight, Search } from "lucide-react";
 import { getUserRoleLabel } from "@/lib/user-role-options";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 
 function Avatar({ name, url, size = 40 }: { name: string; url?: string | null; size?: number }) {
   const initials = name.split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase();
@@ -81,7 +82,7 @@ function OrgCard({ node, depth = 0 }: { node: any; depth?: number }) {
 export default function OrgChartPage() {
   const { data, isLoading } = useSWR("/api/hr/org", fetcher);
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"tree"|"list">("tree");
+  const [view, setView] = useUrlTab<"tree" | "list">("view", "tree", ["tree", "list"] as const);
 
   const flat: any[] = data?.flat || [];
   const tree: any[] = data?.tree || [];
