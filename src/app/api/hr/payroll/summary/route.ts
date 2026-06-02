@@ -5,7 +5,7 @@ import { decryptPII } from "@/lib/pii-crypto";
 
 // Columns that are encrypted at rest. Decrypt on the way out so the
 // frontend always sees plaintext, while a DB dump only shows ciphertext.
-const PII_COLUMNS = ["bankAccountNumber", "bankIfsc", "panNumber", "aadhaarNumber", "aadhaarEnrollment"] as const;
+const PII_COLUMNS = ["bankAccountNumber", "bankIfsc", "panNumber", "aadhaarNumber", "aadhaarEnrollment", "uanNumber"] as const;
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +42,10 @@ export async function GET(req: NextRequest) {
          p."dateOfBirth", p."gender",
          p."address", p."city", p."state",
          p."bankName", p."bankAccountNumber", p."bankIfsc", p."bankBranch", p."accountHolderName",
-         p."panNumber", p."parentName", p."aadhaarNumber", p."aadhaarEnrollment"
+         p."panNumber", p."parentName", p."aadhaarNumber", p."aadhaarEnrollment",
+         p."pfNumber", p."uanNumber",
+         p."pfEstablishmentId", p."pfEpsMember", p."pfNotEligible",
+         p."pfJoinDate", p."pfAccountName", p."ptEstablishmentId"
        FROM "User" u
        LEFT JOIN "EmployeeProfile" p ON p."userId" = u."id"
        WHERE u."id" = $1
