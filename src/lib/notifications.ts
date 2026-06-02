@@ -253,28 +253,61 @@ async function dispatchEmails(
 }
 
 /**
+ * Policy: the CEO is emailed only about their OWN direct reports — every
+ * other employee's admin-broadcast notification routes to HR (+ Special
+ * Access) instead. Given a subject employee's id, returns the CEO's user
+ * id IFF the CEO is that employee's *direct* manager, else null.
+ *
+ * Every blanket-recipient fan-out should (a) exclude the CEO from its
+ * standing admin lookup and (b) add this id back for the direct-report
+ * case. Note: dropping "ceo" from an `orgLevel: { in: [...] }` list is NOT
+ * enough on its own — the CEO/owner account also carries role="admin" and
+ * may sit on DEVELOPER_EMAILS, either of which re-adds it — so the lookup
+ * needs a top-level `orgLevel: { not: "ceo" }` guard.
+ */
+export async function ceoRecipientIdForEmployee(
+  employeeId: number | null | undefined,
+): Promise<number | null> {
+  if (!employeeId) return null;
+  const emp = await prisma.user.findUnique({
+    where:  { id: employeeId },
+    select: { manager: { select: { id: true, orgLevel: true, isActive: true } } },
+  });
+  const mgr = emp?.manager;
+  return mgr && mgr.isActive && mgr.orgLevel === "ceo" ? mgr.id : null;
+}
+
+/**
  * Resolve the set of users who should be notified when `actorId` submits a
- * request that needs approval: their direct manager + every active CEO / HR
- * manager / developer / admin. The actor themselves is excluded so
+ * request that needs approval: their direct manager + every active HR
+ * manager / Special Access / developer. The actor themselves is excluded so
  * self-approvers don't ping their own inbox.
+ *
+ * The CEO is NOT a blanket recipient — they're only pinged when they're the
+ * actor's *direct* manager, which the `actor.managerId` line below already
+ * covers. See {@link ceoRecipientIdForEmployee}.
  */
 export async function approverIdsForUser(actorId: number): Promise<number[]> {
-  // Approver chain: the actor's direct manager + every active CEO /
-  // Special Access / HR Manager. Developer accounts (DEVELOPER_EMAILS
-  // env) are conditionally included: the "Notify developers" toggle in
-  // Admin → Emails Automation controls whether they're copied on the
-  // fan-out. Default ON for backwards compatibility.
+  // Approver chain: the actor's direct manager + every active Special
+  // Access / HR Manager. Developer accounts (DEVELOPER_EMAILS env) are
+  // conditionally included: the "Notify developers" toggle in Admin →
+  // Emails Automation controls whether they're copied on the fan-out.
+  // Default ON for backwards compatibility.
   const devClause = await devEmailRecipientsClause();
   const [actor, admins] = await Promise.all([
     prisma.user.findUnique({ where: { id: actorId }, select: { managerId: true } }),
     prisma.user.findMany({
       where: {
         isActive: true,
+        // CEO excluded from the blanket fan-out — only re-added below when
+        // they're the actor's direct manager. Top-level NOT because the
+        // CEO/owner account also carries role="admin" / may be a dev email.
+        orgLevel: { not: "ceo" },
         OR: [
-          // CEO + Special Access + HR Manager (role).
+          // Special Access + HR Manager (role).
           // EXCLUDES role=admin alone and orgLevel="hr_manager"-only
           // members (HR-team folks like Vanshika are role=member).
-          { orgLevel: { in: ["ceo", "special_access"] } },
+          { orgLevel: "special_access" },
           { role: "hr_manager" },
           ...devClause,
         ],
@@ -283,6 +316,8 @@ export async function approverIdsForUser(actorId: number): Promise<number[]> {
     }),
   ]);
   const ids = new Set<number>(admins.map((u) => u.id));
+  // The actor's direct manager — which IS how the CEO gets added for their
+  // own direct reports (and only them).
   if (actor?.managerId) ids.add(actor.managerId);
   ids.delete(actorId);
   return Array.from(ids);

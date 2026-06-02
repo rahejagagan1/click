@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
-import { notifyUsers } from "@/lib/notifications";
+import { notifyUsers, ceoRecipientIdForEmployee } from "@/lib/notifications";
 import { writeSnapshot as writeReportTeamSnapshot } from "@/lib/reports/team-snapshot";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
 
@@ -155,29 +155,35 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
         if (shouldLock) {
             try {
                 const devClause = await devEmailRecipientsClause();
-                const [manager, recipients] = await Promise.all([
+                const [manager, recipients, ceoRecipient] = await Promise.all([
                     prisma.user.findUnique({ where: { id: managerId }, select: { name: true } }),
                     prisma.user.findMany({
                         where: {
                             isActive: true,
+                            // CEO excluded from the blanket fan-out — only re-added
+                            // below when the submitting manager is their OWN direct
+                            // report. Top-level NOT because the CEO/owner account
+                            // also carries role="admin" / may be a dev email.
+                            orgLevel: { not: "ceo" },
                             OR: [
-                                // CEO + Special Access + HR Manager (role).
+                                // Special Access + HR Manager (role).
                                 // Drops orgLevel="hr_manager"-only members and role=admin alone.
                                 // Developer accounts gated by the "Notify developers" toggle.
-                                { orgLevel: { in: ["ceo", "special_access"] } },
+                                { orgLevel: "special_access" },
                                 { role: "hr_manager" },
                                 ...devClause,
                             ],
                         },
                         select: { id: true },
                     }),
+                    ceoRecipientIdForEmployee(managerId),
                 ]);
                 const periodLabel = `Week ${week}, ${month}/${year}`;
                 const link        = `/dashboard/reports/${managerId}/weekly/${week}?month=${month}&year=${year}`;
                 const managerName = manager?.name || "A manager";
                 await notifyUsers({
                     actorId:  managerId,
-                    userIds:  recipients.map((u) => u.id),
+                    userIds:  [...recipients.map((u) => u.id), ...(ceoRecipient ? [ceoRecipient] : [])],
                     type:     "report",
                     entityId: report.id,
                     title:    `${managerName} submitted weekly report — ${periodLabel}`,
