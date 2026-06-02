@@ -7,6 +7,7 @@ import Link from "next/link";
 import AddEmployeeWizard from "@/components/hr/add-employee-wizard";
 import OrgTreeView from "@/components/hr/OrgTreeView";
 import FilterDropdown from "@/components/hr/FilterDropdown";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import {
   deriveBusinessUnit,
   deriveCostCenter,
@@ -34,7 +35,7 @@ export default function PeoplePage() {
   const { data: session } = useSession();
   const user = session?.user as any;
   const isAdmin = isHRAdmin(user);
-  const [subTab, setSubTab] = useState<"directory" | "tree">("directory");
+  const [subTab, setSubTab] = useUrlTab<"directory" | "tree">("view", "directory", ["directory", "tree"] as const);
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
 
