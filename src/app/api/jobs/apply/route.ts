@@ -14,6 +14,7 @@ import { extname } from "node:path";
 import prisma from "@/lib/prisma";
 import { notifyUsers } from "@/lib/notifications";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
+import { enqueueResumeBackfill } from "@/lib/resume-backfill";
 
 export const dynamic = "force-dynamic";
 // File uploads need the Node runtime (Edge can't do fs).
@@ -324,6 +325,15 @@ export async function POST(req: NextRequest) {
             WHERE "id" = $4`,
           resumeBlob, resumeMime, newUrl, applicationId,
         );
+        // Eager background extraction — pulls URLs, skills, education
+        // out of the resume so HR's first drawer open lands on a
+        // populated row instead of waiting on the lazy fallback. The
+        // job runs on the next tick after the response is sent (the
+        // PM2 worker stays alive past the HTTP flush) so the
+        // applicant doesn't pay the 1–2s OCR cost on submit. The
+        // candidates GET route still runs the same logic on first
+        // open as a fallback if this job dies before completing.
+        enqueueResumeBackfill(applicationId);
       } catch (e: any) {
         const code = e?.meta?.code || e?.code;
         const msg  = String(e?.meta?.message || e?.message || "");
