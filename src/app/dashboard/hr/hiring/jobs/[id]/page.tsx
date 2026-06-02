@@ -10,20 +10,21 @@
 // in place. Keep this file thin and let each tab live in its own
 // component for parallel iteration.
 
-import { useState, use } from "react";
+import { useState, use, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import useSWR from "swr";
+import { useRouter, useSearchParams } from "next/navigation";
+import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { isHRAdmin } from "@/lib/access";
 import {
   Briefcase, ArrowLeft, Users, FileText, Settings2,
-  Workflow, Globe, BarChart3, ExternalLink,
+  Workflow, Globe, BarChart3, ExternalLink, Pencil,
 } from "lucide-react";
 
 import JobInfoTab     from "@/components/hr/hiring/jobs/JobInfoTab";
 import HiringSetupTab from "@/components/hr/hiring/jobs/HiringSetupTab";
 import StubTab        from "@/components/hr/hiring/jobs/StubTab";
+import EditJobModal, { EditableJob } from "@/components/hr/hiring/EditJobModal";
 
 type TabKey = "info" | "setup" | "candidates" | "workflow" | "publish" | "analytics";
 
@@ -41,6 +42,7 @@ interface JobDetail {
   status: string; publicSlug: string | null; isPriority: boolean;
   brand: string | null; employmentType: string | null; experienceLevel: string | null;
   salaryRange: string | null; vacancies: number;
+  description: string | null; internalNotes: string | null; closesAt: string | null;
 }
 
 export default function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -49,13 +51,25 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   const { data: session } = useSession();
   const canManage = isHRAdmin(session?.user as any);
 
-  const { data, isLoading } = useSWR<{ job: JobDetail }>(
-    canManage ? `/api/hr/hiring/jobs/${id}` : null,
-    fetcher,
-  );
+  const jobKey = canManage ? `/api/hr/hiring/jobs/${id}` : null;
+  const { data, isLoading, mutate } = useSWR<{ job: JobDetail }>(jobKey, fetcher);
   const job = data?.job;
 
   const [tab, setTab] = useState<TabKey>("setup");
+  const [editOpen, setEditOpen] = useState(false);
+
+  // `?edit=1` deep-link from the Jobs-list dropdown opens the edit
+  // modal automatically. Strips the param so a page-refresh doesn't
+  // re-open it after the modal is closed.
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    if (searchParams?.get("edit") === "1") {
+      setEditOpen(true);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("edit");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [searchParams]);
 
   if (!canManage) {
     return (
@@ -97,16 +111,24 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                   {job.vacancies > 0 && <span>· {job.vacancies} position{job.vacancies === 1 ? "" : "s"}</span>}
                 </div>
               </div>
-              {job.publicSlug && (
-                <a
-                  href={`/jobs/${job.publicSlug}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-200 bg-white hover:border-[#3b82f6] text-slate-700 text-[12px] font-semibold"
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setEditOpen(true)}
+                  className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-200 bg-white hover:border-[#3b82f6] hover:text-[#3b82f6] text-slate-700 text-[12px] font-semibold"
                 >
-                  View public page <ExternalLink size={12} />
-                </a>
-              )}
+                  <Pencil size={12} /> Edit details
+                </button>
+                {job.publicSlug && (
+                  <a
+                    href={`/jobs/${job.publicSlug}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-200 bg-white hover:border-[#3b82f6] text-slate-700 text-[12px] font-semibold"
+                  >
+                    View public page <ExternalLink size={12} />
+                  </a>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -148,6 +170,21 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
           </>
         )}
       </div>
+
+      {editOpen && job && (
+        <EditJobModal
+          job={job as unknown as EditableJob}
+          onClose={() => setEditOpen(false)}
+          onSaved={() => {
+            // Refresh both the page header (this SWR key) AND the
+            // JobInfoTab's separate fetch, plus the parent Jobs list
+            // cache so the row in the Hiring tab updates too.
+            mutate();
+            globalMutate(`/api/hr/hiring/jobs/${job.id}`);
+            globalMutate((key) => typeof key === "string" && key.startsWith("/api/hr/hiring/jobs"), undefined, { revalidate: true });
+          }}
+        />
+      )}
     </div>
   );
 }
