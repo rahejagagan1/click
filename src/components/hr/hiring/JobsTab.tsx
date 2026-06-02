@@ -16,21 +16,24 @@
 // Publish workflow is unchanged: status pill + Publish / Pause /
 // Close transitions route through /api/hr/hiring/jobs/[id]/publish.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import {
   Plus, Briefcase, MapPin, Users, Search,
-  Share2, Send, Pause, CheckCircle2, FileEdit, MoreHorizontal,
+  Share2, Send, Pause, CheckCircle2, FileEdit, Pencil, MoreHorizontal,
   ExternalLink, Star, LayoutGrid, List, Calendar, Filter,
   ChevronDown, ChevronLeft, Circle, BriefcaseBusiness,
-  FileText, Trash2, Settings2,
+  FileText, Trash2, Settings2, Eye, Upload, X, Maximize2, Minimize2,
 } from "lucide-react";
 import Link from "next/link";
 import KanbanBoard from "./KanbanBoard";
+import JobApplicantList from "./JobApplicantList";
 import CreateJobWizard from "./CreateJobWizard";
 import JobShareDialog from "./JobShareDialog";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
+import { useUrlState } from "@/lib/hooks/useUrlState";
 
 type JobStatus = "draft" | "published" | "on_hold" | "closed";
 type ViewMode  = "grid" | "list";
@@ -122,8 +125,19 @@ export default function JobsTab() {
   const [showPriorityOnly, setShowPriorityOnly] = useState(false);
 
   // ── View state ──────────────────────────────────────────────────
-  const [view, setView] = useState<ViewMode>("grid");
-  const [activeJob, setActiveJob]   = useState<Job | null>(null);
+  // URL-synced so refresh returns to the same view. Distinct param
+  // names ("jobs" vs "pipeline") so the two toggles don't collide
+  // when both apply (jobs index → click a job → drawer opens).
+  const [view,         setView]         = useUrlTab<ViewMode>("jobs",     "grid",   ["grid", "list"] as const);
+  // List is the default — HR sees every applicant in one scrollable
+  // table (including archived ones with the badge). Kanban is opt-in
+  // for HR who want the visual pipeline.
+  const [pipelineView, setPipelineView] = useUrlTab<"kanban" | "list">("pipeline", "list", ["kanban", "list"] as const);
+  // activeJob is URL-derived (`?job=<id>`) so reloading the page
+  // returns HR to the same job detail view. The setter accepts a
+  // Job object (or null to close) — internally we write only the
+  // id to the URL and re-derive the full Job from the jobs list.
+  const [activeJobIdUrl, setActiveJobIdUrl] = useUrlState("job");
   const [showCreate, setShowCreate] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [shareJob, setShareJob]     = useState<Job | null>(null);
@@ -137,6 +151,18 @@ export default function JobsTab() {
   const { data, isLoading } = useSWR<{ jobs: Job[] }>(url, fetcher);
   const jobs = data?.jobs ?? [];
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+
+  // Derive the full Job object from the URL-stored id, then wrap the
+  // setter so every existing call site (`setActiveJob(jobObj)` /
+  // `setActiveJob(null)`) keeps the same signature — internally we
+  // only write the id to the URL.
+  const activeJob = useMemo<Job | null>(
+    () => activeJobIdUrl ? (jobs.find((j) => String(j.id) === activeJobIdUrl) ?? null) : null,
+    [activeJobIdUrl, jobs],
+  );
+  const setActiveJob = useCallback((j: Job | null) => {
+    setActiveJobIdUrl(j ? String(j.id) : null);
+  }, [setActiveJobIdUrl]);
 
   // ── Filter options derived from the data ────────────────────────
   // We populate Department / HM / Recruiter / Location from what
@@ -251,7 +277,12 @@ export default function JobsTab() {
     }
   };
 
-  // ── Detail view (kanban) ────────────────────────────────────────
+  // ── Detail view (per-job applicants — kanban OR list) ───────────
+  // pipelineView is component-state, not URL-synced, because HR
+  // typically wants the toggle to reset between jobs. Default to
+  // kanban — the visual pipeline is the more common workflow.
+  // const noop reference removes the "unused" lint when this is
+  // the first state declaration in the closure.
   if (activeJob) {
     const st = (activeJob.status ?? (activeJob.isOpen ? "published" : "closed")) as JobStatus;
     return (
@@ -288,6 +319,7 @@ export default function JobsTab() {
             ><Settings2 size={12} /> Hiring Setup</Link>
             <JdButton
               jobId={activeJob.id}
+              jobTitle={activeJob.title}
               hasJd={!!(activeJob as any).jdFileUrl}
               jdName={(activeJob as any).jdFileName as string | null}
               onChange={async () => {
@@ -329,13 +361,40 @@ export default function JobsTab() {
             )}
           </div>
         </div>
-        <div className="mb-4 text-[11.5px] text-slate-500 flex items-center gap-3 flex-wrap">
-          {activeJob.department && <span className="inline-flex items-center gap-1"><Briefcase size={11} /> {activeJob.department}</span>}
-          {activeJob.location   && <span className="inline-flex items-center gap-1"><MapPin   size={11} /> {activeJob.location}</span>}
-          <span className="inline-flex items-center gap-1"><Users size={11} /> {activeJob.applicationCount} applicants</span>
-          {activeJob.vacancies > 1 && <span>· {activeJob.vacancies} positions</span>}
+        <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-[11.5px] text-slate-500 flex items-center gap-3 flex-wrap">
+            {activeJob.department && <span className="inline-flex items-center gap-1"><Briefcase size={11} /> {activeJob.department}</span>}
+            {activeJob.location   && <span className="inline-flex items-center gap-1"><MapPin   size={11} /> {activeJob.location}</span>}
+            <span className="inline-flex items-center gap-1"><Users size={11} /> {activeJob.applicationCount} applicants</span>
+            {activeJob.vacancies > 1 && <span>· {activeJob.vacancies} positions</span>}
+          </div>
+          {/* Kanban / List toggle — same data either way. */}
+          <div className="inline-flex p-1 rounded-lg border border-slate-200 bg-slate-50">
+            <button
+              onClick={() => setPipelineView("kanban")}
+              className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-[11.5px] font-semibold transition-colors ${
+                pipelineView === "kanban"
+                  ? "bg-white text-[#3b82f6] shadow-sm"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              <LayoutGrid size={12} /> Kanban
+            </button>
+            <button
+              onClick={() => setPipelineView("list")}
+              className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-[11.5px] font-semibold transition-colors ${
+                pipelineView === "list"
+                  ? "bg-white text-[#3b82f6] shadow-sm"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              <List size={12} /> List
+            </button>
+          </div>
         </div>
-        <KanbanBoard jobId={activeJob.id} />
+        {pipelineView === "kanban"
+          ? <KanbanBoard      jobId={activeJob.id} />
+          : <JobApplicantList jobId={activeJob.id} />}
         {shareJob && (
           <JobShareDialog
             job={{ id: shareJob.id, title: shareJob.title, slug: shareJob.publicSlug, brand: shareJob.brand }}
@@ -799,6 +858,9 @@ function CardActionsMenu({
   onShare: () => void;
   onDelete: () => void;
 }) {
+  // ?edit=1 deep-link tells the job detail page to auto-open the
+  // edit modal so HR doesn't have to click twice.
+  const editHref = `/dashboard/hr/hiring/jobs/${job.id}?edit=1`;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -876,6 +938,12 @@ function CardActionsMenu({
             style={{ top: pos.top, right: pos.right }}
             onClick={(e) => e.stopPropagation()}
           >
+            <a
+              href={editHref}
+              className="flex items-center gap-2 px-3 py-1.5 text-[12px] text-slate-700 hover:bg-slate-50"
+              onClick={(e) => e.stopPropagation()}
+            ><Pencil size={12} className="text-slate-400" /> Edit details</a>
+            <div className="my-1 h-px bg-slate-100" />
             {status !== "published" && (
               <MenuItem icon={Send}        label="Publish"        onClick={() => onTransition("publish")} />
             )}
@@ -922,9 +990,10 @@ function CardActionsMenu({
 // Opens a hidden file picker, uploads to /api/hr/hiring/jobs/[id]/jd,
 // then calls onChange so the parent can refresh the active job.
 function JdButton({
-  jobId, hasJd, jdName, onChange,
+  jobId, jobTitle, hasJd, jdName, onChange,
 }: {
   jobId: number;
+  jobTitle: string;
   hasJd: boolean;
   jdName: string | null;
   onChange: () => void;
@@ -932,23 +1001,11 @@ function JdButton({
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // File picked but not yet uploaded — held while HR previews + edits
+  // the extracted text inside the modal. Confirming the modal does
+  // the actual upload (with edited text), cancelling discards.
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
-  const upload = async (file: File) => {
-    setBusy(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch(`/api/hr/hiring/jobs/${jobId}/jd`, { method: "POST", body: fd });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        alert(j?.error || "JD upload failed");
-        return;
-      }
-      onChange();
-    } finally {
-      setBusy(false);
-    }
-  };
   const remove = async () => {
     setMenuOpen(false);
     setBusy(true);
@@ -956,6 +1013,25 @@ function JdButton({
       await fetch(`/api/hr/hiring/jobs/${jobId}/jd`, { method: "DELETE" });
       onChange();
     } finally { setBusy(false); }
+  };
+
+  const upload = async (file: File, jdText: string | null) => {
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (jdText && jdText.trim()) fd.append("jdText", jdText);
+      const res = await fetch(`/api/hr/hiring/jobs/${jobId}/jd`, { method: "POST", body: fd });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j?.error || "JD upload failed");
+        return false;
+      }
+      onChange();
+      return true;
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -967,7 +1043,9 @@ function JdButton({
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) upload(f);
+          // Open the preview modal instead of uploading directly.
+          // HR can extract + edit text, then confirm.
+          if (f) setPendingFile(f);
           if (ref.current) ref.current.value = "";
         }}
       />
@@ -1006,6 +1084,238 @@ function JdButton({
             </>
           )}
         </>
+      )}
+
+      {pendingFile && (
+        <JdReplaceModal
+          file={pendingFile}
+          jobTitle={jobTitle}
+          saving={busy}
+          onCancel={() => setPendingFile(null)}
+          onConfirm={async (edited) => {
+            const ok = await upload(pendingFile, edited);
+            if (ok) setPendingFile(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// JdReplaceModal — preview + edit the freshly picked JD before
+// committing the upload. Mirrors the wizard's inline JD editor, but
+// scoped to a single modal so HR can replace an existing JD without
+// leaving the job-detail page.
+function JdReplaceModal({
+  file, jobTitle, saving, onCancel, onConfirm,
+}: {
+  file: File;
+  jobTitle: string;
+  saving: boolean;
+  onCancel: () => void;
+  onConfirm: (jdText: string) => Promise<void>;
+}) {
+  const [text, setText]             = useState("");
+  const [extracting, setExtracting] = useState(true);
+  const [error, setError]           = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  // Maximised mode lets HR expand the modal to nearly fullscreen so
+  // long JDs are easier to scan + edit. Toggles via the header icon.
+  const [expanded, setExpanded]     = useState(false);
+
+  // Esc-to-close while not actively saving.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !saving) onCancel();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel, saving]);
+
+  // Extract text from the picked file on mount.
+  useEffect(() => {
+    let cancelled = false;
+    const ctrl = new AbortController();
+    const timeoutId = window.setTimeout(() => ctrl.abort(), 30_000);
+    setExtracting(true);
+    setError(null);
+    (async () => {
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/api/hr/hiring/jd-extract", {
+          method: "POST",
+          body: fd,
+          signal: ctrl.signal,
+        });
+        const j = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok) throw new Error(j?.error || `Couldn't read the file (HTTP ${res.status})`);
+        setText(String(j?.text ?? "").trim());
+      } catch (e: any) {
+        if (cancelled || e?.name === "AbortError") return;
+        setError(e?.message ?? "Couldn't read the file");
+      } finally {
+        window.clearTimeout(timeoutId);
+        if (!cancelled) setExtracting(false);
+      }
+    })();
+    return () => { cancelled = true; window.clearTimeout(timeoutId); ctrl.abort(); };
+  }, [file]);
+
+  const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+
+  const showPreview = async () => {
+    if (!text.trim()) return;
+    setPreviewing(true);
+    try {
+      const res = await fetch("/api/hr/hiring/jd-render-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: jobTitle || "Job Description", text }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j?.error || "Preview render failed");
+        return;
+      }
+      const blob = await res.blob();
+      if (blob.size === 0) { alert("Server returned an empty PDF"); return; }
+      setPreviewUrl(URL.createObjectURL(blob));
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+      onClick={saving ? undefined : onCancel}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`w-full bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden transition-all duration-150 ${
+          expanded ? "max-w-[96vw] h-[96vh]" : "max-w-3xl max-h-[92vh]"
+        }`}
+      >
+        <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-[15px] font-semibold text-slate-900">Replace Job Description</h3>
+            <p className="text-[11.5px] text-slate-500 truncate">
+              Reading <span className="font-semibold text-slate-700">{file.name}</span> — edit any line; the cleaned-up text is what gets saved as the new PDF.
+            </p>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              disabled={saving}
+              className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-50"
+              aria-label={expanded ? "Restore" : "Maximise"}
+              title={expanded ? "Restore size" : "Maximise"}
+            >
+              {expanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            </button>
+            <button
+              onClick={onCancel}
+              disabled={saving}
+              className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-50"
+              aria-label="Cancel"
+            ><X size={15} /></button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="px-5 py-2.5 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-200">
+            {error}
+          </div>
+        )}
+
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={expanded ? 32 : 16}
+          disabled={extracting || saving}
+          placeholder={
+            extracting
+              ? "Reading file content…"
+              : error
+                ? "Couldn't extract the file's text — paste or type the JD here."
+                : "Edit the extracted JD here — remove lines, fix typos, polish phrasing."
+          }
+          // Times New Roman to match the rendered PDF's typography so
+          // what HR types in the editor reads the same as the final
+          // document. Slightly larger size + relaxed leading for
+          // long-form editing comfort.
+          style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
+          className="w-full flex-1 px-5 py-4 text-[14.5px] leading-[1.7] focus:outline-none disabled:bg-slate-50/60 resize-none text-slate-800"
+        />
+
+        <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-[11px] text-slate-500">
+            {extracting ? "Reading file…" : `${wordCount} word${wordCount === 1 ? "" : "s"}`}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={showPreview}
+              disabled={extracting || previewing || saving || !text.trim()}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 hover:border-[#3b82f6] hover:text-[#3b82f6] text-slate-700 text-[11.5px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Eye size={12} /> {previewing ? "Rendering…" : "Preview"}
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={saving}
+              className="h-8 px-3 rounded-md text-[12px] font-semibold text-slate-600 hover:bg-white disabled:opacity-50"
+            >Cancel</button>
+            <button
+              type="button"
+              onClick={() => onConfirm(text)}
+              disabled={extracting || saving || !text.trim()}
+              className="inline-flex items-center gap-1.5 h-8 px-4 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-slate-300 text-white text-[12px] font-semibold shadow-sm"
+            >
+              <Upload size={12} /> {saving ? "Saving…" : "Replace JD"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {previewUrl && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm"
+          onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-4xl h-[92vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden"
+          >
+            <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
+              <h3 className="text-[14px] font-semibold text-slate-900">JD Preview</h3>
+              <div className="flex items-center gap-2">
+                <a
+                  href={previewUrl}
+                  download="jd-preview.pdf"
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 hover:border-[#3b82f6] hover:text-[#3b82f6] text-slate-700 text-[11.5px] font-semibold"
+                >Download</a>
+                <button
+                  onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100"
+                  aria-label="Close preview"
+                ><X size={15} /></button>
+              </div>
+            </div>
+            <div className="flex-1 bg-slate-100 p-2">
+              <iframe
+                src={previewUrl}
+                title="JD Preview"
+                className="w-full h-full bg-white rounded border border-slate-200"
+                style={{ border: 0 }}
+              />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
