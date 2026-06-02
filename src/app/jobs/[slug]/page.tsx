@@ -529,12 +529,19 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
                     { name: "Tanvi",    role: "HR Manager", email: "tanvi@nbmediaproductions.com"    },
                   ].map((c) => (
                     <li key={c.email}>
-                      {/* Plain mailto: opens the candidate's default
-                          mail client with only the To: field filled —
-                          no auto-subject or auto-body so they get a
-                          clean compose window. */}
+                      {/* Open Gmail's compose URL in a new tab — the
+                          previous mailto:// approach silently no-oped
+                          on browsers where no default mail client is
+                          configured (Chrome on Windows without an
+                          association set, etc.). Gmail compose works
+                          for anyone with a Google account, which
+                          covers the candidate pool. Right-click → copy
+                          email still works for users who prefer
+                          another client. */}
                       <a
-                        href={`mailto:${c.email}`}
+                        href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(c.email)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="group flex items-center gap-3 rounded-xl border border-slate-200 hover:border-[#3b82f6]/40 hover:bg-blue-50/40 bg-white px-4 py-3 transition-colors"
                       >
                         <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 text-[#3b82f6] ring-1 ring-blue-100 text-[12px] font-bold uppercase shrink-0">
