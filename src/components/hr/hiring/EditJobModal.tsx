@@ -1,8 +1,11 @@
 // Inline edit modal for the job detail page. Lets HR update the
 // freely-editable fields (title, brand, department, location,
 // employment type, experience level, salary range, vacancies,
-// description, internal notes, closes-at) without going back
-// through the full Create-Job wizard.
+// internal notes, closes-at) without going back through the full
+// Create-Job wizard. The `description` column intentionally is
+// NOT exposed — the public careers page no longer renders a short
+// "About the role" summary, so HR doesn't have a reason to edit it
+// inline. Existing description values stay untouched in the DB.
 //
 // PATCH /api/hr/hiring/jobs/[id] accepts each field independently
 // and only writes the keys that are present in the body, so we
@@ -32,7 +35,6 @@ const EXPERIENCE_LEVELS = [
 export interface EditableJob {
   id: number;
   title: string;
-  description: string | null;
   brand: string | null;
   department: string | null;
   location: string | null;
@@ -60,7 +62,6 @@ export default function EditJobModal({
     experienceLevel: job.experienceLevel ?? "",
     salaryRange:     job.salaryRange ?? "",
     vacancies:       String(job.vacancies ?? 1),
-    description:     job.description ?? "",
     internalNotes:   job.internalNotes ?? "",
     closesAt:        job.closesAt ? job.closesAt.slice(0, 10) : "",
   });
@@ -106,7 +107,6 @@ export default function EditJobModal({
           experienceLevel: form.experienceLevel || null,
           salaryRange:     form.salaryRange.trim() || null,
           internalNotes:   form.internalNotes.trim() || null,
-          description:     form.description.trim() || null,
           vacancies:       vac,
           closesAt:        form.closesAt || null,
         }),
@@ -224,16 +224,6 @@ export default function EditJobModal({
               />
             </Field>
           </div>
-
-          <Field label="Description">
-            <textarea
-              value={form.description}
-              onChange={(e) => update("description", e.target.value)}
-              rows={5}
-              className={`${INPUT} resize-y leading-relaxed`}
-              placeholder="Short pitch shown at the top of the careers page."
-            />
-          </Field>
 
           <Field label="Internal notes" hint="Only visible to HR — not shown to candidates">
             <textarea
