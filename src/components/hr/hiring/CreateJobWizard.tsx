@@ -22,6 +22,7 @@ import {
   Briefcase, Users, ListChecks, Globe, Calendar,
   AlertCircle, Check, Pencil, ArrowUp, ArrowDown,
   ClipboardList, Type, AlignLeft, ToggleRight, List, Hash, CalendarDays, Paperclip,
+  Save, Eye, Maximize2, Minimize2,
 } from "lucide-react";
 import { JOB_TITLES }           from "@/lib/job-titles";
 import { JOB_TITLES_YT_LABS }   from "@/lib/job-titles-yt-labs";
@@ -187,6 +188,12 @@ export default function CreateJobWizard({
     setForm((f) => ({ ...f, [k]: v }));
 
   const [jdFile, setJdFile] = useState<File | null>(null);
+  // Edited plain-text version of the JD. Populated when HR uploads
+  // a file (server extracts text via mammoth/pdf-parse) and tweaked
+  // freely in the inline editor before publishing. Sent alongside
+  // the file so the original blob and the curated text both land
+  // in the DB.
+  const [jdText, setJdText] = useState<string>("");
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape" && !busy) onClose(); }
@@ -281,6 +288,9 @@ export default function CreateJobWizard({
       if (jdFile && id) {
         const fd = new FormData();
         fd.append("file", jdFile);
+        // Send the (possibly edited) extracted text alongside the
+        // binary so HR's tweaks survive into the saved JD.
+        if (jdText.trim()) fd.append("jdText", jdText);
         await fetch(`/api/hr/hiring/jobs/${id}/jd`, { method: "POST", body: fd });
       }
       // Persist screening questions in the order they were authored.
@@ -365,7 +375,7 @@ export default function CreateJobWizard({
             </div>
           )}
 
-          {step === 0 && <Step1Description form={form} setField={setField} jdFile={jdFile} setJdFile={setJdFile} />}
+          {step === 0 && <Step1Description form={form} setField={setField} jdFile={jdFile} setJdFile={setJdFile} jdText={jdText} setJdText={setJdText} />}
           {step === 1 && <Step2Details      form={form} setField={setField} totalPositions={totalPositions} />}
           {step === 2 && <Step3HiringTeam  form={form} setField={setField} />}
           {step === 3 && <Step4Questions   form={form} setField={setField} />}
@@ -415,12 +425,14 @@ function StepIndicator({ current, onJump }: { current: number; onJump: (i: numbe
 // ── Step 1: Job Description ───────────────────────────────────────────
 
 function Step1Description({
-  form, setField, jdFile, setJdFile,
+  form, setField, jdFile, setJdFile, jdText, setJdText,
 }: {
   form: WizardForm;
   setField: <K extends keyof WizardForm>(k: K, v: WizardForm[K]) => void;
   jdFile: File | null;
   setJdFile: (f: File | null) => void;
+  jdText: string;
+  setJdText: (v: string) => void;
 }) {
   const titleOptions = useMemo(
     () => (form.brand === "yt_labs" ? JOB_TITLES_YT_LABS : JOB_TITLES),
@@ -487,7 +499,319 @@ function Step1Description({
       <Field label="Job Description file" required>
         <JdUploader file={jdFile} setFile={setJdFile} />
       </Field>
+
+      {/* Preview + inline edit of the uploaded JD. Appears only after
+          a file is picked. The textarea autocompletes from the file
+          (mammoth/pdf-parse on the server) and HR can tweak any line
+          before publishing. The edited copy lands in JobOpening.jdText. */}
+      {jdFile && (
+        <JdPreviewEditor file={jdFile} value={jdText} onChange={setJdText} jobTitle={form.title} />
+      )}
     </SectionCard>
+  );
+}
+
+// JdPreviewEditor — calls /api/hr/hiring/jd-extract to populate the
+// textarea from the uploaded file, then lets HR edit freely. Re-runs
+// extraction whenever the picked file changes (size + name + lastMod
+// fingerprint). Manual edits stay sticky — once HR types into the
+// textarea, we don't auto-overwrite on the next extraction.
+function JdPreviewEditor({
+  file, value, onChange, jobTitle,
+}: {
+  file: File;
+  value: string;
+  onChange: (v: string) => void;
+  jobTitle: string;
+}) {
+  const [extracting, setExtracting] = useState(false);
+  const [error,      setError]      = useState<string | null>(null);
+  // "Saved snapshot" — the value HR last clicked Save on. Used to
+  // tell HR when they have unsaved edits vs everything's locked in.
+  const [savedValue, setSavedValue] = useState<string>("");
+  const [previewing, setPreviewing] = useState(false);
+  // Preview modal state. Renders the freshly-built PDF as a blob
+  // URL inside an iframe — sidesteps popup-blocker issues that
+  // hit window.open() after an awaited fetch.
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  // Maximised mode pops the editor out into a fullscreen overlay
+  // so HR can comfortably edit long JDs without being squeezed
+  // inside the wizard's scrollable body.
+  const [expanded, setExpanded] = useState(false);
+  // Fingerprint so we re-extract when HR picks a different file but
+  // skip when the file object identity changes for unrelated reasons.
+  const fp = `${file.name}-${file.size}-${file.lastModified}`;
+  const dirtied = useRef<boolean>(false);
+  const hasUnsavedChanges = value.trim() !== savedValue.trim();
+  const canSave = !extracting && value.trim().length > 0 && hasUnsavedChanges;
+
+  useEffect(() => {
+    let cancelled = false;
+    // 30s timeout — if the server hangs (e.g. pdf-parse stuck on a
+    // weird PDF), abort the fetch so the UI stops spinning and the
+    // user sees a real error instead of "Reading file…" forever.
+    const ctrl = new AbortController();
+    const timeoutId = window.setTimeout(() => ctrl.abort(), 30_000);
+    setExtracting(true);
+    setError(null);
+    (async () => {
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/api/hr/hiring/jd-extract", {
+          method: "POST",
+          body: fd,
+          signal: ctrl.signal,
+        });
+        const j = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok) throw new Error(j?.error || `Couldn't read the file (HTTP ${res.status})`);
+        const text = String(j?.text ?? "").trim();
+        // Don't clobber HR's manual edits. Only auto-fill when the
+        // textarea is empty / untouched for the current file.
+        if (!dirtied.current || !value.trim()) {
+          onChange(text);
+          // Seed the saved-snapshot so HR doesn't see "unsaved
+          // changes" the moment extraction completes.
+          setSavedValue(text);
+        }
+      } catch (e: any) {
+        if (cancelled) return;
+        // AbortError fires in two cases:
+        //   1. The 30s timeout we set with setTimeout(…, 30_000).
+        //   2. StrictMode's dev-only double-invocation tearing down
+        //      the first effect run. The SECOND run will succeed —
+        //      so an AbortError during dev is usually a no-op and
+        //      shouldn't surface a scary error to HR.
+        if (e?.name === "AbortError") return;
+        const msg = e?.message ?? "Couldn't read the file";
+        setError(msg);
+        // Let HR still edit freely even when extraction failed — the
+        // textarea was the goal anyway, just empty as a starting point.
+        if (!dirtied.current) onChange("");
+      } finally {
+        window.clearTimeout(timeoutId);
+        if (!cancelled) setExtracting(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      ctrl.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fp]);
+
+  const wordCount = value.trim() ? value.trim().split(/\s+/).length : 0;
+
+  // When `expanded` is on, the editor pops out into a fixed fullscreen
+  // overlay (with backdrop) so HR has the whole viewport to edit long
+  // JDs. The inline-flow layout is recovered by toggling expanded off.
+  const outerClass = expanded
+    ? "fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+    : "mt-4";
+  const cardClass = expanded
+    ? "w-full max-w-[96vw] h-[96vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden"
+    : "rounded-xl border border-slate-200 bg-white overflow-hidden flex flex-col";
+
+  return (
+    <div className={outerClass}>
+      <div className={cardClass}>
+      <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3">
+        <div className="min-w-0 flex items-center gap-2">
+          <span className="inline-flex h-5 px-1.5 rounded bg-blue-100 text-[#1d4ed8] text-[10px] font-bold uppercase tracking-wider items-center">
+            Preview
+          </span>
+          <p className="text-[12px] text-slate-600 truncate">
+            Extracted from <span className="font-semibold text-slate-800">{file.name}</span>
+            {" — "}edit any line; the cleaned-up text is what gets saved.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[10.5px] text-slate-400 whitespace-nowrap">
+            {extracting ? "Reading file…" : `${wordCount} word${wordCount === 1 ? "" : "s"}`}
+          </span>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="h-7 w-7 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100"
+            aria-label={expanded ? "Restore" : "Maximise"}
+            title={expanded ? "Restore size" : "Maximise"}
+          >
+            {expanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          </button>
+        </div>
+      </div>
+      {error ? (
+        <div className="px-4 py-3 text-[12px] text-rose-700 bg-rose-50 border-b border-rose-200">
+          {error}
+          {/.doc$/i.test(file.name) && (
+            <span className="block mt-0.5 text-[11px] text-rose-600">
+              Legacy .doc files don&apos;t always parse. Convert to .docx or .pdf and re-upload.
+            </span>
+          )}
+        </div>
+      ) : null}
+      <textarea
+        value={value}
+        onChange={(e) => { dirtied.current = true; onChange(e.target.value); }}
+        rows={expanded ? 32 : 14}
+        placeholder={
+          extracting
+            ? "Reading file content…"
+            : error
+              ? "Couldn't extract the file's text — paste or type the JD here."
+              : "Edit the extracted JD here — remove lines, fix typos, polish phrasing."
+        }
+        // Only block while the server is actively reading. If
+        // extraction failed, HR can still type the JD in by hand —
+        // the error message above tells them what went wrong.
+        disabled={extracting}
+        // Times New Roman matches the rendered PDF's typography so
+        // what HR types in the editor reads the same as the final
+        // document. Slightly larger size + relaxed leading for
+        // long-form editing comfort.
+        style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
+        className={`w-full px-5 py-4 text-[14.5px] leading-[1.7] text-slate-800 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[#3b82f6]/15 disabled:bg-slate-50/60 ${expanded ? "flex-1 resize-none" : ""}`}
+      />
+      <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-[10.5px] text-slate-500 flex items-center gap-2 min-w-0 flex-wrap">
+          {extracting ? (
+            <span>Reading file content…</span>
+          ) : hasUnsavedChanges ? (
+            <span className="inline-flex items-center gap-1.5 text-amber-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              Unsaved changes
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-emerald-700">
+              <Check size={11} />
+              Saved — will be published as a PDF
+            </span>
+          )}
+          {previewError && (
+            <span className="inline-flex items-center gap-1.5 text-rose-700">
+              <AlertCircle size={11} /> {previewError}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              if (!value.trim()) return;
+              setPreviewing(true);
+              setPreviewError(null);
+              try {
+                const res = await fetch("/api/hr/hiring/jd-render-preview", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ title: jobTitle || "Job Description", text: value }),
+                });
+                if (!res.ok) {
+                  const j = await res.json().catch(() => ({}));
+                  setPreviewError(j?.error || `Preview render failed (HTTP ${res.status})`);
+                  return;
+                }
+                const blob = await res.blob();
+                if (blob.size === 0) {
+                  setPreviewError("Server returned an empty PDF");
+                  return;
+                }
+                // Open the modal — its iframe loads the blob URL.
+                // Sidesteps popup blockers entirely.
+                setPreviewUrl(URL.createObjectURL(blob));
+              } catch (e: any) {
+                setPreviewError(e?.message ?? "Couldn't render preview");
+              } finally {
+                setPreviewing(false);
+              }
+            }}
+            disabled={extracting || previewing || !value.trim()}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 hover:border-[#3b82f6] hover:text-[#3b82f6] text-slate-700 text-[11.5px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Eye size={12} /> {previewing ? "Rendering…" : "Preview as PDF"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSavedValue(value)}
+            disabled={!canSave}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[11.5px] font-semibold shadow-sm disabled:bg-slate-300 disabled:cursor-not-allowed"
+          >
+            <Save size={12} /> Save changes
+          </button>
+        </div>
+      </div>
+
+      {/* Preview modal — opens with the just-rendered PDF in an
+          iframe. No popup-blocker concerns since the iframe loads
+          a same-origin blob URL we control. */}
+      {previewUrl && (
+        <JdPreviewModal
+          url={previewUrl}
+          onClose={() => {
+            URL.revokeObjectURL(previewUrl);
+            setPreviewUrl(null);
+          }}
+        />
+      )}
+      </div>
+    </div>
+  );
+}
+
+function JdPreviewModal({ url, onClose }: { url: string; onClose: () => void }) {
+  // Esc-to-close keyboard handler.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-4xl h-[92vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden"
+      >
+        <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-[15px] font-semibold text-slate-900">JD Preview</h3>
+            <p className="text-[11px] text-slate-500">
+              This is exactly what candidates will see on the careers page.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <a
+              href={url}
+              download="jd-preview.pdf"
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 hover:border-[#3b82f6] hover:text-[#3b82f6] text-slate-700 text-[11.5px] font-semibold"
+            >
+              Download
+            </a>
+            <button
+              onClick={onClose}
+              className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100"
+              aria-label="Close preview"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 bg-slate-100 p-2">
+          <iframe
+            src={url}
+            title="JD Preview"
+            className="w-full h-full bg-white rounded border border-slate-200"
+            style={{ border: 0 }}
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 

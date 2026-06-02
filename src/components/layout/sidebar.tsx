@@ -658,9 +658,26 @@ export default function Sidebar() {
                     const meHandlers   = makeHrHandlers(setHrMeOpen,   setHrMeY,   hrMeTrigger,   hrMeTimer);
                     const teamHandlers = makeHrHandlers(setHrTeamOpen, setHrTeamY, hrTeamTrigger, hrTeamTimer);
 
-                    const isMeActive    = isHRPath && !pathname.startsWith("/dashboard/hr/my-team") && !pathname.startsWith("/dashboard/hr/inbox") && !pathname.startsWith("/dashboard/hr/people") && !pathname.startsWith("/dashboard/hr/org") && !pathname.startsWith("/dashboard/hr/engage") && !pathname.startsWith("/dashboard/hr/home") && !pathname.startsWith("/dashboard/hr/admin") && !pathname.startsWith("/dashboard/hr/assets") && pathname !== "/admin";
+                    const isMeActive    = isHRPath
+                        && !pathname.startsWith("/dashboard/hr/my-team")
+                        && !pathname.startsWith("/dashboard/hr/inbox")
+                        && !pathname.startsWith("/dashboard/hr/people")
+                        && !pathname.startsWith("/dashboard/hr/org")
+                        && !pathname.startsWith("/dashboard/hr/engage")
+                        && !pathname.startsWith("/dashboard/hr/home")
+                        && !pathname.startsWith("/dashboard/hr/admin")
+                        && !pathname.startsWith("/dashboard/hr/assets")
+                        // Hiring is an HR-admin function (Jobs / Dashboard /
+                        // Preboarding / Settings / Reports), not part of the
+                        // personal "Me" space. Excluded here so the Me rail
+                        // doesn't light up when HR navigates to it; HR
+                        // Dashboard rail picks it up via isAdminActive below.
+                        && !pathname.startsWith("/dashboard/hr/hiring")
+                        && pathname !== "/admin";
                     const isTeamActive  = pathname.startsWith("/dashboard/hr/my-team") || pathname.startsWith("/dashboard/hr/inbox");
-                    const isAdminActive = pathname.startsWith("/dashboard/hr/admin") || pathname.startsWith("/dashboard/hr/assets");
+                    const isAdminActive = pathname.startsWith("/dashboard/hr/admin")
+                        || pathname.startsWith("/dashboard/hr/assets")
+                        || pathname.startsWith("/dashboard/hr/hiring");
 
                     // Flyout link
                     const fl = (href: string, label: string, badge?: ReactNode) => {

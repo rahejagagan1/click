@@ -83,9 +83,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ slu
       // prompting a download. The fallback filename is for
       // ancient clients that don't understand filename*.
       "Content-Disposition": `inline; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`,
-      // Cache for an hour — the file content never changes (every
-      // upload mints a new UUID-prefixed name).
-      "Cache-Control": "public, max-age=3600",
+      // Don't cache — the URL is slug-stable but the underlying file
+      // changes whenever HR uploads a replacement. A previous version
+      // set max-age=3600 here, which meant the careers-page iframe
+      // (and any CDN in front of us) served the old PDF for up to
+      // an hour after HR clicked "Replace file". no-store keeps this
+      // simple; the JD is small and read from disk per request.
+      "Cache-Control": "no-store, must-revalidate",
       "X-Content-Type-Options": "nosniff",
       // Allow same-origin framing so /jobs/[slug] can <iframe> this
       // response. Setting these here (vs. only in next.config.mjs)

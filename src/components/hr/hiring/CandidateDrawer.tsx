@@ -537,16 +537,18 @@ function MoreMenuItem({ label, onClick, disabled }: { label: string; onClick: ()
 
 function ProfileTab({ c }: { c: Candidate }) {
   const resumeHref = safeUrl(c.resumeUrl);
-  // We only attempt to inline-preview PDFs. DOC/DOCX render is best
-  // handled by the user opening in a new tab.
-  //
-  // After the resume-in-DB migration the URL is an API path with no
-  // file extension (e.g. /api/hr/hiring/resumes/2), so the original
-  // URL-suffix check returned false and HR saw the "Click to open"
-  // fallback. Fall back to the candidate's stored filename when the
-  // URL doesn't carry an extension.
+  // Inline-preview eligibility:
+  //   1. The new in-DB resume API (`/api/hr/hiring/resumes/<id>`)
+  //      ALWAYS responds with a PDF — the endpoint auto-converts .doc
+  //      / .docx via LibreOffice (or Word COM on Windows dev) before
+  //      sending the bytes back. So if the URL points there, trust it
+  //      and render the iframe regardless of the original filename
+  //      extension.
+  //   2. Legacy /uploads/resumes/<uuid>.pdf static URLs predate the
+  //      conversion path — keep the extension-based heuristic there.
   const isPdf = !!(
     resumeHref && (
+      /^\/api\/hr\/hiring\/resumes\//i.test(resumeHref) ||
       /\.pdf(\?|$)/i.test(resumeHref) ||
       /\.pdf$/i.test(c.resumeFileName ?? "")
     )

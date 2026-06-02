@@ -8,7 +8,8 @@
 // inline via the stage select — same backend action as the kanban
 // drag-and-drop. Sortable by name, stage, applied-on, and source.
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useUrlState } from "@/lib/hooks/useUrlState";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import {
@@ -61,15 +62,18 @@ function daysSince(d: string | null): string {
   return `${Math.floor(days / 30)}mo ago`;
 }
 
-const STAGE_TONE: Record<string, string> = {
-  slate:   "bg-slate-100   text-slate-700",
-  blue:    "bg-blue-100    text-blue-700",
-  cyan:    "bg-cyan-100    text-cyan-700",
-  violet:  "bg-violet-100  text-violet-700",
-  amber:   "bg-amber-100   text-amber-700",
-  pink:    "bg-pink-100    text-pink-700",
-  emerald: "bg-emerald-100 text-emerald-700",
-  rose:    "bg-rose-100    text-rose-700",
+// Two-channel tone — the chip body (subtle bg + text) and the left
+// accent dot (saturated). Gives stages a distinct visual anchor
+// without screaming.
+const STAGE_TONE: Record<string, { chip: string; dot: string; ring: string }> = {
+  slate:   { chip: "bg-slate-50   text-slate-700",   dot: "bg-slate-400",   ring: "ring-slate-200"   },
+  blue:    { chip: "bg-blue-50    text-blue-700",    dot: "bg-blue-500",    ring: "ring-blue-200"    },
+  cyan:    { chip: "bg-cyan-50    text-cyan-700",    dot: "bg-cyan-500",    ring: "ring-cyan-200"    },
+  violet:  { chip: "bg-violet-50  text-violet-700",  dot: "bg-violet-500",  ring: "ring-violet-200"  },
+  amber:   { chip: "bg-amber-50   text-amber-700",   dot: "bg-amber-500",   ring: "ring-amber-200"   },
+  pink:    { chip: "bg-pink-50    text-pink-700",    dot: "bg-pink-500",    ring: "ring-pink-200"    },
+  emerald: { chip: "bg-emerald-50 text-emerald-700", dot: "bg-emerald-500", ring: "ring-emerald-200" },
+  rose:    { chip: "bg-rose-50    text-rose-700",    dot: "bg-rose-500",    ring: "ring-rose-200"    },
 };
 
 export default function JobApplicantList({ jobId }: { jobId: number }) {
@@ -83,7 +87,15 @@ export default function JobApplicantList({ jobId }: { jobId: number }) {
 
   const [sortKey, setSortKey] = useState<SortKey>("applied");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  // selectedId is URL-derived (`?candidate=<id>`) so a hard reload
+  // reopens the same candidate's drawer. Stored as string in the
+  // URL; we coerce to number at the React boundary.
+  const [selectedIdUrl, setSelectedIdUrl] = useUrlState("candidate");
+  const selectedId = selectedIdUrl ? Number(selectedIdUrl) : null;
+  const setSelectedId = useCallback(
+    (n: number | null) => setSelectedIdUrl(n != null ? String(n) : null),
+    [setSelectedIdUrl],
+  );
   const [moving, setMoving]         = useState<Set<number>>(new Set());
 
   const sorted = useMemo(() => {
@@ -158,12 +170,35 @@ export default function JobApplicantList({ jobId }: { jobId: number }) {
     );
   }
 
+  // Counts for the header strip — gives HR a glanceable "X active,
+  // Y archived" without scanning every row.
+  const archivedCount = candidates.filter(isArchived).length;
+  const activeCount   = candidates.length - archivedCount;
+
   return (
     <>
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        {/* Header strip — counts + an inline hint pointing at the
+            stage chip so HR knows it's interactive. Removes the
+            "is that a dropdown?" guesswork. */}
+        <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/60 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 text-[11.5px]">
+            <span className="font-semibold text-slate-700">{activeCount} active</span>
+            {archivedCount > 0 && (
+              <>
+                <span className="text-slate-300">·</span>
+                <span className="text-slate-500">{archivedCount} archived</span>
+              </>
+            )}
+          </div>
+          <p className="text-[11px] text-slate-500 inline-flex items-center gap-1.5">
+            <ChevronDown size={11} className="text-slate-400" />
+            Click the stage chip on any row to move a candidate
+          </p>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-[12.5px]">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-white border-b border-slate-200">
               <tr className="text-left text-slate-500">
                 <Th sortable onClick={() => toggleSort("name")} active={sortKey === "name"} dir={sortDir}>Applicant</Th>
                 <Th>Contact</Th>
@@ -227,49 +262,50 @@ export default function JobApplicantList({ jobId }: { jobId: number }) {
                       </div>
                     </div>
                   </td>
-                  {/* Contact */}
+                  {/* Contact — stacked email + phone, icons aligned
+                      in a fixed-width gutter so multi-row entries
+                      line up vertically. */}
                   <td className="px-4 py-3 align-middle">
-                    <div className="space-y-0.5 text-[11.5px] text-slate-600">
+                    <div className="flex flex-col gap-1 text-[11.5px] text-slate-600 min-w-0">
                       <a
                         href={`mailto:${c.email}`}
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1.5 hover:text-[#3b82f6] hover:underline truncate"
+                        className="flex items-center gap-2 hover:text-[#3b82f6] min-w-0 group"
+                        title={c.email}
                       >
-                        <Mail size={11} className="text-slate-400" /> {c.email}
+                        <Mail size={11} className="text-slate-400 shrink-0 group-hover:text-[#3b82f6]" />
+                        <span className="truncate group-hover:underline underline-offset-2">{c.email}</span>
                       </a>
                       {c.phone && (
                         <a
                           href={`tel:${c.phone}`}
                           onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center gap-1.5 hover:text-[#3b82f6] hover:underline"
+                          className="flex items-center gap-2 text-slate-500 hover:text-[#3b82f6] group"
+                          title={c.phone}
                         >
-                          <Phone size={11} className="text-slate-400" /> {c.phone}
+                          <Phone size={11} className="text-slate-400 shrink-0 group-hover:text-[#3b82f6]" />
+                          <span className="font-mono tabular-nums group-hover:underline underline-offset-2">{c.phone}</span>
                         </a>
                       )}
                     </div>
                   </td>
-                  {/* Stage select */}
+                  {/* Stage — visible chip + chevron makes it obviously
+                      clickable / interactive. Native <select> sits on
+                      top invisibly so HR gets the OS picker for free
+                      (works on mobile, accessible to screen readers). */}
                   <td className="px-4 py-3 align-middle">
                     {c.currentStage ? (
-                      <select
-                        value={c.currentStage.id}
-                        onChange={(e) => moveStage(c.id, Number(e.target.value))}
-                        onClick={(e) => e.stopPropagation()}
+                      <StageDropdown
+                        current={c.currentStage}
+                        stages={stages}
                         disabled={moving.has(c.id)}
-                        className={`appearance-none h-7 pl-2.5 pr-7 rounded-full text-[10.5px] font-bold uppercase tracking-wider border-0 cursor-pointer bg-[length:14px] bg-no-repeat bg-[position:right_6px_center] ${
-                          STAGE_TONE[c.currentStage.color] || STAGE_TONE.slate
-                        }`}
-                        style={{
-                          backgroundImage:
-                            "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='currentColor'><path d='M4.5 6L8 9.5 11.5 6z'/></svg>\")",
-                        }}
-                      >
-                        {stages.map((s) => (
-                          <option key={s.id} value={s.id}>{s.label}</option>
-                        ))}
-                      </select>
+                        onChange={(stageId) => moveStage(c.id, stageId)}
+                      />
                     ) : (
-                      <span className="text-[11px] text-amber-600">Unassigned</span>
+                      <span className="inline-flex items-center gap-1 h-6 px-2 rounded bg-amber-50 text-amber-700 ring-1 ring-amber-200 text-[10px] font-semibold uppercase tracking-wide">
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                        Unassigned
+                      </span>
                     )}
                   </td>
                   {/* Applied */}
@@ -324,6 +360,45 @@ export default function JobApplicantList({ jobId }: { jobId: number }) {
         />
       )}
     </>
+  );
+}
+
+// StageDropdown — visible chip with a dropdown chevron + colored
+// status dot. The native <select> sits on top with opacity 0 to
+// preserve the OS-native picker UX (mobile-friendly + accessible)
+// while we render our own styled surface underneath.
+function StageDropdown({
+  current, stages, disabled, onChange,
+}: {
+  current: Stage;
+  stages: Stage[];
+  disabled: boolean;
+  onChange: (stageId: number) => void;
+}) {
+  const tone = STAGE_TONE[current.color] || STAGE_TONE.slate;
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className={`relative inline-flex items-center gap-1 h-6 pl-1.5 pr-1 rounded ${tone.chip} ring-1 ${tone.ring} text-[10px] font-semibold uppercase tracking-wide transition-colors hover:brightness-95 ${
+        disabled ? "opacity-60 pointer-events-none" : "cursor-pointer"
+      }`}
+      title="Click to change stage"
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${tone.dot} shrink-0`} />
+      <span className="whitespace-nowrap leading-none">{current.label}</span>
+      <ChevronDown size={11} className="opacity-70 shrink-0 -mr-0.5" />
+      <select
+        value={current.id}
+        onChange={(e) => onChange(Number(e.target.value))}
+        disabled={disabled}
+        aria-label={`Move to stage (currently ${current.label})`}
+        className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
+      >
+        {stages.map((s) => (
+          <option key={s.id} value={s.id}>{s.label}</option>
+        ))}
+      </select>
+    </div>
   );
 }
 
