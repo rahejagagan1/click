@@ -11,7 +11,8 @@ export type CronJobId =
   | "users"
   | "ratings"
   | "all_sync"
-  | "violation_reminders";
+  | "violation_reminders"
+  | "auto_lop";
 
 export type CronJobDefinition = {
   id: CronJobId;
@@ -64,6 +65,13 @@ export const CRON_JOB_DEFINITIONS: CronJobDefinition[] = [
     description:
       "Emails HR / CEO / admins / special_access / developers about every violation that has been 'in progress' for 15+ days. Throttled per-violation via lastReminderAt — only nudges every 15 days.",
     // Run daily; the per-row 15-day throttle keeps the email volume sane.
+    defaultIntervalHours: 24,
+  },
+  {
+    id: "auto_lop",
+    name: "Auto-mark missing attendance as LOP",
+    description:
+      "For each working day in the last 7 days where the 48-hour grace has passed, mark active users as status=\"lop\" if they have no Attendance row AND no pending/approved leave, regularization, WFH, OD, or comp-off for that date. Skips holidays and days outside each user's shift workDays. Idempotent.",
     defaultIntervalHours: 24,
   },
 ];
