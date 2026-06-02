@@ -604,8 +604,8 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
               >
                 {t.label.toUpperCase()}
                 {count > 0 && (
-                  <span className={`ml-2 inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 rounded-full text-[10px] font-bold align-top ${
-                    active ? "bg-[#008CFF] text-white" : "bg-[#008CFF]/15 text-[#008CFF]"
+                  <span className={`ml-2 inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 rounded-full text-[10px] font-bold align-top text-white ${
+                    active ? "bg-[#008CFF]" : "bg-[#008CFF]"
                   }`}>
                     {count > 99 ? "99+" : count}
                   </span>
@@ -1169,9 +1169,9 @@ function BrandScopePills({
             }`}
           >
             <span>{label}</span>
-            <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
-              active ? "bg-white/20 text-white" : "bg-[#008CFF] text-white"
-            }`}>{count}</span>
+            <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold !text-white ${
+              active ? "bg-white/20" : "bg-[#008CFF]"
+            }`} style={{ color: "#fff" }}>{count}</span>
           </button>
         );
       })}
