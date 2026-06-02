@@ -126,6 +126,10 @@ export const authOptions: NextAuthOptions = {
                             teamCapsule: true,
                             name: true,
                             profilePictureUrl: true,
+                            // Department drives HR-department permissions (e.g. who
+                            // may back-date a leave) for staff whose orgLevel isn't
+                            // hr_manager but who sit in an HR department.
+                            employeeProfile: { select: { department: true } },
                         },
                     });
                     // Onboarding flag — fetched via raw SQL so this still works
@@ -148,6 +152,7 @@ export const authOptions: NextAuthOptions = {
                         (session.user as any).clickupUserId = dbUser.clickupUserId != null
                             ? dbUser.clickupUserId.toString()
                             : null;
+                        (session.user as any).department = (dbUser as any).employeeProfile?.department ?? null;
                     } else if (useDevLogin && session.user.email) {
                         // Dev credentials login: ensure a DB row exists so APIs (e.g. feedback) get dbId + orgLevel.
                         // No synthetic clickupUserId — it's nullable and will be backfilled by the ClickUp sync if/when
