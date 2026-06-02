@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, requireAdmin, resolveUserId, serverError } from "@/lib/api-auth";
+import { requireAuth, requireAdmin, resolveUserId, serverError, isHRAdmin } from "@/lib/api-auth";
 import { accrueLeavesForUser, ymKey } from "@/lib/leave-accrual";
 import { istTodayDateOnly } from "@/lib/ist-date";
 
@@ -12,8 +12,17 @@ export async function GET(req: NextRequest) {
     const myId = await resolveUserId(session);
     if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
     const { searchParams } = new URL(req.url);
-    const isAdmin = self.orgLevel === "ceo" || self.isDeveloper || self.orgLevel === "hr_manager";
-    const userId = isAdmin ? parseInt(searchParams.get("userId") || String(myId)) : myId;
+    // HR-admin tier (ceo / dev / special_access / role=admin / hr_manager) can
+    // read any employee's leave balance via ?userId= — matches the leaves-list
+    // API and powers the read-only Leave view on the employee profile. Leave
+    // balances are not salary, so this uses the broad HR-admin gate (not the
+    // narrower canViewSalary tier).
+    const isAdmin = isHRAdmin(self);
+    const userIdParam = searchParams.get("userId");
+    const requestedUserId = Number(userIdParam);
+    // Admins may target another employee via ?userId=; a missing or malformed
+    // param (and any non-admin caller) falls back to the caller's own id.
+    const userId = isAdmin && userIdParam && Number.isFinite(requestedUserId) ? requestedUserId : myId;
     const year = parseInt(searchParams.get("year") || String(istTodayDateOnly().getUTCFullYear()));
 
     // Interns don't accrue or use Casual Leave — per HR policy, the

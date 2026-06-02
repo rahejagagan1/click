@@ -6,6 +6,7 @@ import { parseBody } from "@/lib/validate";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { istTodayDateOnly, istHour } from "@/lib/ist-date";
 import { isMobileRequest } from "@/lib/is-mobile-device";
+import { hasDesktopBypassHeader } from "@/lib/desktop-bypass";
 import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
 import { evaluateOfficeGeofence } from "@/lib/office-geofence";
 
@@ -54,7 +55,16 @@ export async function POST(req: NextRequest) {
     // request, the employee is already de-facto on the road and
     // shouldn't be blocked from punching in while waiting for the
     // final approval click.
-    if (isMobileRequest(req.headers)) {
+    //
+    // Two bypasses skip the block entirely (mirrors the client UI gate in
+    // src/app/dashboard/hr/attendance/page.tsx): developers, and the
+    // `?desktop=1` emergency override which the client forwards as the
+    // `x-desktop-bypass: 1` header (see src/lib/desktop-bypass.ts). The
+    // header is intentionally not a secret — it's a soft override for when
+    // a laptop isn't available; pair with a regularization request if used.
+    const mobileBypass =
+      user?.isDeveloper === true || hasDesktopBypassHeader(req.headers);
+    if (isMobileRequest(req.headers) && !mobileBypass) {
       const today = istTodayDateOnly();
       const odForToday = await prisma.onDutyRequest.findFirst({
         where: {
