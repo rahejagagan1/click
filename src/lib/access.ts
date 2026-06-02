@@ -122,6 +122,12 @@ export function canSeeReports(user: ClientUser): boolean {
  * /api/hr/approvals already accepts orgLevel="hr_manager", so this was
  * just a client-side visibility flip.
  *
+ * Includes "payroll" so the HR Manager (orgLevel="hr_manager") sees the
+ * Payroll tab — the actual salary gate is the second-stage canViewSalary
+ * check in admin/page.tsx, which keeps HR Members without salary rights
+ * out. Listing it here just stops the first-stage filter from stripping
+ * it before that check runs.
+ *
  * Excludes (intentionally): Leave Types, Shift Templates, Tab
  * Permissions — those are policy / org-wide configuration and stay
  * admin-only.
@@ -133,6 +139,7 @@ export const HR_MANAGER_ALLOWED_TABS = new Set<string>([
   "holidays",
   "assets",
   "departments",
+  "payroll",
 ]);
 
 export const HR_MANAGER_ALLOWED_RAIL_LINKS = new Set<string>([

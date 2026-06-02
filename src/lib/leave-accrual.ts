@@ -85,6 +85,21 @@ export async function accrueLeavesForUser(userId: number): Promise<number> {
       continue; // first credit happens next month
     }
 
+    // A row with no accrual marker (e.g. one hand-created by HR through the
+    // admin balance editor or a Carry-Over entry, neither of which sets
+    // lastAccrualMonth) would otherwise be skipped forever, since
+    // monthsBetween(null, …) === 0 — it never credits AND never stamps, so
+    // the row stays invisible to accrual permanently. Seed its marker to the
+    // current month instead: no retroactive credit (same rule as a freshly
+    // inserted row above), but it starts accruing again next month.
+    if (existing[0].lastAccrualMonth == null) {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "LeaveBalance" SET "lastAccrualMonth" = $1, "updatedAt" = NOW() WHERE id = $2`,
+        currentYm, existing[0].id,
+      );
+      continue;
+    }
+
     const months = monthsBetween(existing[0].lastAccrualMonth, currentYm);
     if (months <= 0) continue;
     const add = months * perMonth;
@@ -118,6 +133,45 @@ export async function accrueLeavesForEveryone(): Promise<{ credited: number; use
     credited += n;
   }
   return { credited, usersTouched };
+}
+
+// SyncConfig key the scheduler uses to fire monthly accrual at most once
+// per calendar month. Mirrors the per-day gate pattern used elsewhere in
+// the scheduler.
+const MONTHLY_ACCRUAL_SYNC_KEY = "hr_leave_accrual";
+
+/**
+ * Scheduler entry point — the SINGLE automatic monthly accrual for every
+ * policy leave type (Sick Leave, Casual Leave, …). Runs
+ * {@link accrueLeavesForEveryone} at most once per calendar month, gated by
+ * a SyncConfig month-key so the 60s scheduler tick doesn't re-scan the whole
+ * user table every minute.
+ *
+ * Uses the same {@link ymKey} clock that {@link accrueLeavesForUser} stamps
+ * onto each LeaveBalance, so the gate month and the row stamp can never drift
+ * out of sync. accrueLeavesForEveryone is itself row-level idempotent
+ * (lastAccrualMonth), so even a double-fire can't over-credit — the gate is
+ * purely a cost optimisation.
+ *
+ * Replaces the old hardcoded SL-only scheduler hook (maybeRunSickLeaveAccrual),
+ * which ran alongside this one and caused Sick Leave to accrue twice.
+ */
+export async function maybeRunMonthlyLeaveAccrual(): Promise<void> {
+  const month = ymKey(new Date());
+  const row = await prisma.syncConfig.findUnique({ where: { key: MONTHLY_ACCRUAL_SYNC_KEY } });
+  const lastMonth = (row?.value as { lastMonth?: string } | null)?.lastMonth ?? null;
+  if (lastMonth === month) return;
+
+  const report = await accrueLeavesForEveryone();
+  await prisma.syncConfig.upsert({
+    where:  { key: MONTHLY_ACCRUAL_SYNC_KEY },
+    create: { key: MONTHLY_ACCRUAL_SYNC_KEY, value: { lastMonth: month } },
+    update: { value: { lastMonth: month } },
+  });
+  console.log(
+    `[leave-accrual] Month ${month}: credited ${report.credited} monthly accrual(s) ` +
+    `across ${report.usersTouched} user(s).`,
+  );
 }
 
 export { ymKey };

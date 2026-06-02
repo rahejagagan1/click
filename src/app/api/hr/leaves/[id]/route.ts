@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
-import { notifyUsers } from "@/lib/notifications";
+import { notifyUsers, ceoRecipientIdForEmployee } from "@/lib/notifications";
 import { writeAuditLog } from "@/lib/audit-log";
 import { countWorkingDays } from "@/lib/hr/working-days";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
@@ -96,7 +96,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (data.fromDate || data.toDate) {
         const f = data.fromDate ?? new Date(application.fromDate);
         const t = data.toDate   ?? new Date(application.toDate);
-        data.totalDays = await countWorkingDays(f, t);
+        // Count against the leave subject's own shift calendar (mirrors the
+        // POST flow) so alternate-Saturday shifts re-count correctly when HR
+        // edits the dates. Falls back to Mon–Fri when no shift is assigned.
+        const subjectShift = await prisma.userShift.findUnique({
+          where: { userId: application.user!.id },
+          include: { shift: true },
+        });
+        data.totalDays = await countWorkingDays(f, t, subjectShift?.shift, subjectShift?.effectiveFrom);
       }
 
       const validStatuses = ["pending", "partially_approved", "approved", "rejected", "cancelled"];
@@ -191,15 +198,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (application.status === "pending") {
       if (!isDirectManager && !isFinalApprover) return NextResponse.json({ error: "Not authorised" }, { status: 403 });
 
-      // CEO fast-path: when the L1 approver is the CEO (and they're the
-      // direct manager — i.e. the report-to chain ends at the CEO), the
-      // L2 stage is them too. Collapse both stages into a single click so
-      // the CEO doesn't approve, then have to come back and approve their
-      // own decision. Strictly orgLevel="ceo" — other final-approver roles
-      // (HR Manager, Special Access, Developer) still go through the
-      // normal two-step flow.
-      const isCeoAsDirectManager = self.orgLevel === "ceo" && isDirectManager;
-      if (isCeoAsDirectManager) {
+      // Final-approver fast-path: when the L1 approver is themselves
+      // the L2 approver (CEO or HR Manager), collapse both stages into
+      // a single click — there's no point making them approve, then come
+      // back and approve their own decision. Applies whether they are
+      // the direct manager or just stepping in at L1.
+      //
+      // Limited to CEO + HR Manager (the named final approvers in
+      // policy). Other final-approver tiers (special_access, role=admin,
+      // isDeveloper) still go through the normal two-step flow.
+      const isCeo = self.orgLevel === "ceo";
+      const isHrManager = self.orgLevel === "hr_manager" || self.role === "hr_manager";
+      const isFastPathFinalApprover = isCeo || isHrManager;
+      if (isFastPathFinalApprover) {
         const result = await prisma.$transaction(async (tx) => {
           const { count } = await tx.leaveApplication.updateMany({
             where: { id: appId, status: "pending" },
@@ -241,22 +252,24 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           cur.setUTCDate(cur.getUTCDate() + 1);
         }
 
+        const fastPathRole = isCeo ? "CEO" : "HR Manager";
         await writeAuditLog({
           req, actorId: myId, actorEmail: self?.email ?? null,
-          action: "leave.approve_ceo_direct", entityType: "LeaveApplication", entityId: appId,
+          action: isCeo ? "leave.approve_ceo_direct" : "leave.approve_hr_direct",
+          entityType: "LeaveApplication", entityId: appId,
           before: { status: "pending" }, after: { status: "approved", approvalNote },
         });
 
-        const extrasCeo = application.notifyUserIds ?? [];
+        const extrasFast = application.notifyUserIds ?? [];
         await notifyUsers({
           actorId:  myId,
-          userIds:  [application.userId, ...extrasCeo],
+          userIds:  [application.userId, ...extrasFast],
           type:     "leave",
           entityId: appId,
           title:    `${application.user?.name || "An employee"}'s ${application.leaveType?.name || "leave"} is approved`,
-          body:     `${rangeLabel} — approved directly by the CEO.${noteSuffix(approvalNote)}`,
+          body:     `${rangeLabel} — approved directly by the ${fastPathRole}.${noteSuffix(approvalNote)}`,
           linkUrl:  "/dashboard/hr/leaves",
-          emailData: { ...leaveEmailBase, approverName, stageLabel: "Approved by (CEO direct)", approvalNote: approvalNote ?? undefined },
+          emailData: { ...leaveEmailBase, approverName, stageLabel: `Approved by (${fastPathRole} direct)`, approvalNote: approvalNote ?? undefined },
         });
         return NextResponse.json({ success: true });
       }
@@ -273,25 +286,29 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       });
       if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
 
-      // Final approvers: CEO + Special Access + HR Manager (role).
-      // Drops orgLevel="hr_manager"-only members (e.g. HR-team folks
-      // whose role is "member") and role="admin" alone. Developer
-      // accounts gated by the "Notify developers" toggle.
+      // Final approvers: Special Access + HR Manager (role). Drops
+      // orgLevel="hr_manager"-only members (e.g. HR-team folks whose role
+      // is "member") and role="admin" alone. Developer accounts gated by
+      // the "Notify developers" toggle. The CEO is pinged for final
+      // approval only when the applicant is their OWN direct report
+      // (added below) — otherwise HR handles it.
       const finalApprovers = await prisma.user.findMany({
         where: {
           isActive: true,
+          orgLevel: { not: "ceo" },
           OR: [
-            { orgLevel: { in: ["ceo", "special_access"] } },
+            { orgLevel: "special_access" },
             { role: "hr_manager" },
             ...(await devEmailRecipientsClause()),
           ],
         },
         select: { id: true },
       });
+      const ceoFinalApprover = await ceoRecipientIdForEmployee(application.userId);
       const extras = application.notifyUserIds ?? [];
       await notifyUsers({
         actorId:  myId,
-        userIds:  [...finalApprovers.map((u) => u.id), ...extras],
+        userIds:  [...finalApprovers.map((u) => u.id), ...(ceoFinalApprover ? [ceoFinalApprover] : []), ...extras],
         type:     "leave",
         entityId: appId,
         title:    `${application.user?.name || "An employee"}'s ${application.leaveType?.name || "leave"} needs final approval`,

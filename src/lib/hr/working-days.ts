@@ -1,8 +1,14 @@
 import prisma from "@/lib/prisma";
+import { isWorkingDay, type ShiftWorkRule } from "@/lib/hr/shift-working-days";
 
 /**
  * Count the working days between `from` and `to` inclusive, excluding
- * Saturdays, Sundays, and any HolidayCalendar row in that window.
+ * non-working days and any HolidayCalendar row in that window.
+ *
+ * `shift` (optional) decides which days are working. When omitted/null the
+ * legacy Mon–Fri rule applies (every existing 2-arg caller keeps today's
+ * behaviour). When a shift is passed, its workDays + alternate-Saturday rule
+ * (saturdayWeeks) drive the count — see {@link isWorkingDay}.
  *
  * All arithmetic is UTC-based:
  *   • the leave form posts dates as "YYYY-MM-DD" → parsed as UTC midnight,
@@ -11,7 +17,7 @@ import prisma from "@/lib/prisma";
  *     gives the same answer either way and prevents off-by-one weekend
  *     bugs when crossing TZ boundaries.
  */
-export async function countWorkingDays(from: Date, to: Date): Promise<number> {
+export async function countWorkingDays(from: Date, to: Date, shift?: ShiftWorkRule, anchor?: Date | null): Promise<number> {
   const isoKey = (d: Date) =>
     `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 
@@ -25,8 +31,7 @@ export async function countWorkingDays(from: Date, to: Date): Promise<number> {
 
   let count = 0;
   while (cur.getTime() <= end) {
-    const dow = cur.getUTCDay(); // 0 = Sun, 6 = Sat
-    if (dow !== 0 && dow !== 6 && !holidaySet.has(isoKey(cur))) count++;
+    if (isWorkingDay(cur, shift ?? null, anchor ?? null) && !holidaySet.has(isoKey(cur))) count++;
     cur.setUTCDate(cur.getUTCDate() + 1);
   }
   return count;
