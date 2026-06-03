@@ -151,7 +151,7 @@ export async function sendHrLateClockInSummary(): Promise<number> {
       where: { isActive: true },
       select: {
         id: true, name: true, email: true, managerId: true,
-        employeeProfile: { select: { department: true } },
+        employeeProfile: { select: { department: true, businessUnit: true } },
       },
     }),
     prisma.attendance.findMany({
@@ -177,12 +177,16 @@ export async function sendHrLateClockInSummary(): Promise<number> {
   const policies = await getPoliciesByUser(users.map((u) => u.id));
 
   type Row = {
-    userId: number; managerId: number | null;
+    userId: number; managerId: number | null; businessUnit: string;
     name: string; department: string | null; status: "absent" | "late";
     clockIn: Date | null;
   };
   const absent: Row[] = [];
   const late:   Row[] = [];
+
+  // Bucket NULL businessUnit as NB Media — matches the parent-brand
+  // fallback used everywhere else.
+  const buOf = (u: typeof users[number]): string => u.employeeProfile?.businessUnit || "NB Media";
 
   for (const u of users) {
     if (!u.email || excluded.has(u.email.toLowerCase())) continue;
@@ -190,11 +194,11 @@ export async function sendHrLateClockInSummary(): Promise<number> {
     if (policies.get(u.id)?.attendanceEnabled === false) continue;
     const rec = attByUser.get(u.id);
     if (!rec?.clockIn) {
-      absent.push({ userId: u.id, managerId: u.managerId, name: u.name, department: u.employeeProfile?.department ?? null, status: "absent", clockIn: null });
+      absent.push({ userId: u.id, managerId: u.managerId, businessUnit: buOf(u), name: u.name, department: u.employeeProfile?.department ?? null, status: "absent", clockIn: null });
       continue;
     }
     if (rec.clockIn.getTime() > tenAmIst.getTime()) {
-      late.push({ userId: u.id, managerId: u.managerId, name: u.name, department: u.employeeProfile?.department ?? null, status: "late", clockIn: rec.clockIn });
+      late.push({ userId: u.id, managerId: u.managerId, businessUnit: buOf(u), name: u.name, department: u.employeeProfile?.department ?? null, status: "late", clockIn: rec.clockIn });
     }
   }
 
@@ -260,28 +264,33 @@ export async function sendHrLateClockInSummary(): Promise<number> {
     }
   }
 
-  // CEO digest — the full org list goes to HR / Special Access above; the
-  // CEO is shown ONLY their own direct reports, and only when at least one
-  // of them is absent/late (no email about an all-present team).
+  // CEO digest — brand-scoped: each CEO sees their full brand's
+  // late/absent roster (not just their direct reports). Kunal gets
+  // every YT Labs employee's status, Nikit gets every NB Media one.
+  // Still skipped when the brand's roster is all-present that day.
   //
-  // This loop is the DIRECT-REPORT exemption — always sent regardless of
-  // the per-role "ceo" toggle, because the toggle silences only the
-  // ORG-WIDE blanket fan-out. Each CEO here gets nothing but their own
-  // team's status, which is the exact case the exemption is designed to
-  // preserve.
+  // This loop is the DIRECT-MANAGER exemption equivalent — always
+  // sent regardless of the per-role "ceo" toggle, because the toggle
+  // silences only the ORG-WIDE blanket fan-out, not the brand-CEO's
+  // signal about their own brand.
   const ceos = await prisma.user.findMany({
     where:  { isActive: true, orgLevel: "ceo" },
-    select: { id: true, email: true },
+    select: {
+      id: true, email: true,
+      employeeProfile: { select: { businessUnit: true } },
+    },
   });
   for (const ceo of ceos) {
     if (!ceo.email) continue;
-    const ceoAbsent = absent.filter((r) => r.managerId === ceo.id);
-    const ceoLate   = late.filter((r) => r.managerId === ceo.id);
+    const ceoBrand = ceo.employeeProfile?.businessUnit || "NB Media";
+    const ceoAbsent = absent.filter((r) => r.businessUnit === ceoBrand);
+    const ceoLate   = late.filter((r) => r.businessUnit === ceoBrand);
     if (ceoAbsent.length === 0 && ceoLate.length === 0) continue;
+    // Per-brand denominators for the on-time / on-leave totals.
     const ceoCandidates = users.filter((u) =>
-      u.managerId === ceo.id && !!u.email && !excluded.has(u.email!.toLowerCase()) && !onLeaveIds.has(u.id),
+      buOf(u) === ceoBrand && !!u.email && !excluded.has(u.email!.toLowerCase()) && !onLeaveIds.has(u.id),
     ).length;
-    const ceoOnLeave = users.filter((u) => u.managerId === ceo.id && onLeaveIds.has(u.id)).length;
+    const ceoOnLeave = users.filter((u) => buOf(u) === ceoBrand && onLeaveIds.has(u.id)).length;
     const ceoOnTime  = Math.max(0, ceoCandidates - ceoAbsent.length - ceoLate.length);
     const ceoContent = hrLateSummaryEmail({
       today,
