@@ -344,9 +344,9 @@ export default function OrgTreeView() {
               }`}
             >
               <span>{opt === "all" ? "All" : opt}</span>
-              <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
-                active ? "bg-white/20 text-white" : "bg-[#008CFF] text-white"
-              }`}>{count}</span>
+              <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold !text-white ${
+                active ? "bg-white/20" : "bg-[#008CFF]"
+              }`} style={{ color: "#fff" }}>{count}</span>
             </button>
           );
         })}
