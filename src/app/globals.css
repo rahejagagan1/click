@@ -593,14 +593,27 @@ html:not(.dark) .glass {
 .jd-prose h4,
 .jd-prose h5,
 .jd-prose h6 {
-  /* `break-word` wraps at SPACES like normal English text and
-     only falls back to mid-string breaking when a single token
-     genuinely can't fit (long URLs, identifiers). The earlier
-     `anywhere` value treated every glyph as a break candidate,
-     so the browser broke "enhancing" → "enhan-cing" and "in" →
-     "i-n" mid-line. With break-word those words stay intact. */
+  /* A4-print behaviour: words ONLY wrap at spaces, NEVER mid-
+     letter. Both `anywhere` and `break-word` allowed the browser
+     to break "enhancing" → "enhan-cing" / "in" → "i-n" because
+     the line-break algorithm sometimes prefers a soft break over
+     a clean word-end. `normal` removes that permission entirely
+     — the cost is that an extremely long token (a URL, an
+     identifier) might overflow the panel, but those are rare in
+     HR-written JD body text and HR can edit them. Clean A4 read
+     is the priority. */
+  overflow-wrap: normal;
+  word-wrap:     normal;
+  word-break:    normal;
+  hyphens:       manual;
+}
+/* Long URLs / identifiers — opt-in break for tokens that would
+   genuinely overflow. Same rule applied to <a> and <code> only
+   so the regular body text stays untouched. */
+.jd-prose a,
+.jd-prose code {
   overflow-wrap: break-word;
-  word-wrap:     break-word;
+  word-break:    break-word;
 }
 .jd-prose h1, .jd-prose h2 {
   margin-top: 1.6rem;
