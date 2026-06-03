@@ -1248,16 +1248,29 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
   const menuBtnRef   = useRef<HTMLButtonElement | null>(null);
   const menuPanelRef = useRef<HTMLDivElement | null>(null);
 
-  // Inline like + comment state (mirrors /dashboard/hr/engage). Lets HR
-  // react / comment without bouncing into the full feed page.
-  const [localReacted,  setLocalReacted]  = useState(
-    Array.isArray(post.reactions) && post.reactions.some((r: any) => r.userId === sessionUserId),
-  );
+  // Inline reaction + comment state (mirrors /dashboard/hr/engage).
+  // Lets HR react / comment without bouncing into the full feed page.
+  // `myReactionEmoji` is the current user's emoji (null if they
+  // haven't reacted yet) — drives the React-button label so the
+  // user can see at a glance how they reacted.
+  const myCurrentReaction = Array.isArray(post.reactions)
+    ? (post.reactions.find((r: any) => r.userId === sessionUserId)?.emoji ?? null)
+    : null;
+  const [myReactionEmoji, setMyReactionEmoji] = useState<string | null>(myCurrentReaction);
   const [reactionCount, setReactionCount] = useState(post.reactions?.length ?? 0);
   const [showComments,  setShowComments]  = useState(false);
   const [commentText,   setCommentText]   = useState("");
   const [commentEmojiOpen, setCommentEmojiOpen] = useState(false);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
+  // Reaction picker popover (anchored to the React button).
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
+  const reactionTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const reactionPickerRef  = useRef<HTMLDivElement | null>(null);
+  // Reaction set — refreshed for expressiveness. The codepoints
+  // render via whichever emoji font the OS ships; on Android 14+
+  // these all come from the new animated/Material-You set.
+  //   Like · Love · Haha · Wow · Sad · Pray · Clap · Party · Cake · Fire
+  const REACTION_EMOJIS = ["👍", "❤️", "🤣", "😮", "😢", "🙏", "👏", "🎉", "🎂", "🔥"];
 
   // The home feed is rendered inside cards with their own clipping. Render
   // the dropdown via a body-level portal at fixed position so the parent
@@ -1333,19 +1346,58 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
     ? post.content
     : post.content.slice(0, COLLAPSE_AT).trimEnd() + "…";
 
-  // Optimistic like toggle — flips local state immediately, fires the
-  // API call in the background, then revalidates SWR so the canonical
-  // count from the server replaces the optimistic guess.
-  const toggleReact = async () => {
-    setLocalReacted((p: boolean) => !p);
-    setReactionCount((c: number) => (localReacted ? c - 1 : c + 1));
+  // Optimistic react — picks (or replaces, or removes) the user's
+  // reaction emoji. Three branches, mirroring the API:
+  //   • same emoji  → remove (count -1)
+  //   • new emoji   → replace (count unchanged)
+  //   • no prior    → add (count +1)
+  const pickReaction = async (emoji: string) => {
+    setReactionPickerOpen(false);
+    const prior = myReactionEmoji;
+    if (prior === emoji) {
+      setMyReactionEmoji(null);
+      setReactionCount((c: number) => Math.max(0, c - 1));
+    } else if (prior) {
+      setMyReactionEmoji(emoji); // replace; count unchanged
+    } else {
+      setMyReactionEmoji(emoji);
+      setReactionCount((c: number) => c + 1);
+    }
     try {
       await fetch(`/api/hr/engage/posts/${post.id}/react`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ emoji }),
       });
-    } catch { /* keep the optimistic UI even if the network blip — SWR revalidate corrects it. */ }
+    } catch { /* SWR revalidate corrects any drift. */ }
     revalidatePosts();
   };
+
+  // React button click: if the user already has a reaction, this
+  // button TOGGLES it off (matches the "click your reaction to
+  // unreact" pattern from Facebook). Otherwise it opens the emoji
+  // picker so the user can pick how they want to react.
+  const onReactButtonClick = () => {
+    if (myReactionEmoji) { pickReaction(myReactionEmoji); return; }
+    setReactionPickerOpen(true);
+  };
+
+  // Close the picker on Esc / click-outside.
+  useEffect(() => {
+    if (!reactionPickerOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setReactionPickerOpen(false); };
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Element | null;
+      if (!t) return;
+      if (reactionTriggerRef.current?.contains(t)) return;
+      if (reactionPickerRef.current?.contains(t))  return;
+      setReactionPickerOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDoc);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDoc);
+    };
+  }, [reactionPickerOpen]);
 
   const submitComment = async () => {
     const text = commentText.trim();
@@ -1381,6 +1433,87 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
   };
 
   const commentCount  = post.comments?.length  || 0;
+
+  // Pull reactor display names off the post payload — the /api/hr/
+  // engage/posts endpoint already includes `reactions.user.name`.
+  // The "most recent" reactor is approximated as the last id in
+  // the array; the schema has no createdAt on EngageReaction so
+  // ascending-id is the closest proxy.
+  const reactorNames: string[] = Array.isArray(post.reactions)
+    ? post.reactions.map((r: any) => r.user?.name).filter(Boolean)
+    : [];
+  const latestReactor = reactorNames.length > 0 ? reactorNames[reactorNames.length - 1] : null;
+  const otherReactors = reactorNames.length > 1 ? reactorNames.length - 1 : 0;
+  const initialsOf = (n: string) =>
+    n.split(/\s+/).map((w) => w[0] || "").join("").slice(0, 2).toUpperCase() || "?";
+  // Reactors popover — anchored just above the "+ N others" button.
+  // Portal'd to body so the card's overflow / z-index can't clip it,
+  // but positioned at fixed coordinates derived from the trigger's
+  // bounding rect rather than centered on the viewport.
+  const [reactorsOpen, setReactorsOpen] = useState(false);
+  const [reactorsAnchor, setReactorsAnchor] = useState<{ top: number; left: number } | null>(null);
+  const reactorsTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const reactorsPanelRef   = useRef<HTMLDivElement | null>(null);
+
+  const openReactorsPopover = () => {
+    const btn = reactorsTriggerRef.current;
+    if (!btn) { setReactorsOpen(true); return; }
+    const rect = btn.getBoundingClientRect();
+    const PANEL_W = 200;
+    const PANEL_H_GUESS = Math.min(260, 12 + reactorNames.length * 30);
+    const GAP = 6;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const above = rect.top - GAP - PANEL_H_GUESS;
+    const below = rect.bottom + GAP;
+    const top = above >= 8 ? above : Math.min(below, vh - PANEL_H_GUESS - 8);
+    let left = rect.right - PANEL_W;
+    if (left < 8) left = 8;
+    if (left + PANEL_W > vw - 8) left = vw - PANEL_W - 8;
+    setReactorsAnchor({ top, left });
+    setReactorsOpen(true);
+  };
+
+  // Close on Esc + click-outside. Reposition on scroll/resize so the
+  // popover follows the trigger if the page shifts while open.
+  useEffect(() => {
+    if (!reactorsOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setReactorsOpen(false); };
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Element | null;
+      if (!t) return;
+      if (reactorsTriggerRef.current?.contains(t)) return;
+      if (reactorsPanelRef.current?.contains(t))  return;
+      setReactorsOpen(false);
+    };
+    const onScroll = () => {
+      const btn = reactorsTriggerRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const PANEL_W = 200;
+      const PANEL_H_GUESS = Math.min(260, 12 + reactorNames.length * 30);
+      const GAP = 6;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const above = rect.top - GAP - PANEL_H_GUESS;
+      const below = rect.bottom + GAP;
+      const top = above >= 8 ? above : Math.min(below, vh - PANEL_H_GUESS - 8);
+      let left = rect.right - PANEL_W;
+      if (left < 8) left = 8;
+      if (left + PANEL_W > vw - 8) left = vw - PANEL_W - 8;
+      setReactorsAnchor({ top, left });
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [reactorsOpen, reactorNames.length]);
 
   return (
     // overflow-visible so the portal-fallback dropdown is never clipped
@@ -1499,15 +1632,49 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
           stay quick. */}
       <div className="flex items-center justify-between border-t border-[#eef2f6] px-2 sm:px-3 py-1.5">
         <div className="flex items-center">
-          <button
-            type="button"
-            onClick={toggleReact}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium transition-colors hover:bg-[#f5f7fb] ${
-              localReacted ? "text-[#008CFF]" : "text-[#5f7183]"
-            }`}
-          >
-            <ThumbsUp className={`h-4 w-4 ${localReacted ? "fill-current" : ""}`} />Like
-          </button>
+          <div className="relative">
+            <button
+              ref={reactionTriggerRef}
+              type="button"
+              onClick={onReactButtonClick}
+              title={myReactionEmoji ? "Click to remove" : "React"}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium transition-colors hover:bg-[#f5f7fb] ${
+                myReactionEmoji ? "text-[#008CFF]" : "text-[#5f7183]"
+              }`}
+            >
+              {myReactionEmoji ? (
+                <span className="text-[16px] leading-none">{myReactionEmoji}</span>
+              ) : (
+                <ThumbsUp className="h-4 w-4" />
+              )}
+              React
+            </button>
+            {/* Emoji picker — thin pill anchored above the React
+                button. Click any emoji to add / replace / remove.
+                Click-outside / Esc closes. */}
+            {reactionPickerOpen && (
+              <div
+                ref={reactionPickerRef}
+                role="dialog"
+                className="absolute bottom-full left-0 mb-1.5 z-50 flex items-center gap-0.5 px-1 py-1 rounded-full border border-slate-200 bg-white shadow-[0_6px_18px_-4px_rgba(15,23,42,0.18)] animate-in fade-in zoom-in-95 duration-100"
+              >
+                {REACTION_EMOJIS.map((e) => {
+                  const isMine = e === myReactionEmoji;
+                  return (
+                    <button
+                      key={e}
+                      type="button"
+                      onClick={() => pickReaction(e)}
+                      title={isMine ? "Click to remove" : "React"}
+                      className={`h-7 w-7 flex items-center justify-center rounded-full text-[16px] transition-transform hover:scale-110 ${isMine ? "bg-[#e6f3ff]" : "hover:bg-slate-50"}`}
+                    >
+                      {e}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => setShowComments((p) => !p)}
@@ -1520,9 +1687,23 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
         </div>
         <div className="flex items-center gap-1.5 pr-2 text-[12px] text-[#8393a3]">
           {reactionCount > 0 && (
+            // Compact reactor summary — Instagram-style. Shows just
+            // the most recent reactor inline; clicking "+ N others"
+            // opens the full list as a body-level modal. Quieter
+            // than the old hover card and works on touch devices.
             <span className="inline-flex items-center gap-1">
               <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-[#008CFF] text-white text-[10px] ring-2 ring-white">👍</span>
-              <span>{reactionCount} {reactionCount === 1 ? "reaction" : "reactions"}</span>
+              <span className="truncate max-w-[180px]" title={latestReactor || ""}>{latestReactor}</span>
+              {otherReactors > 0 && (
+                <button
+                  ref={reactorsTriggerRef}
+                  type="button"
+                  onClick={openReactorsPopover}
+                  className="font-semibold text-[#008CFF] hover:underline"
+                >
+                  and +{otherReactors} {otherReactors === 1 ? "other" : "others"}
+                </button>
+              )}
             </span>
           )}
           {commentCount > 0 && (
@@ -1600,6 +1781,27 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Reactors popover — minimal anchored card. No header, no
+          close button (click-outside / Esc); just the list. */}
+      {reactorsOpen && reactorsAnchor && typeof document !== "undefined" && createPortal(
+        <div
+          ref={reactorsPanelRef}
+          role="dialog"
+          aria-modal="false"
+          style={{ position: "fixed", top: reactorsAnchor.top, left: reactorsAnchor.left, width: 200, zIndex: 10000 }}
+          className="rounded-lg border border-slate-200 bg-white shadow-[0_6px_18px_-4px_rgba(15,23,42,0.15)] animate-in fade-in duration-100"
+        >
+          <ul className="max-h-[220px] overflow-y-auto py-1.5">
+            {reactorNames.map((name, i) => (
+              <li key={i} className="flex items-center gap-2 px-3 py-1">
+                <span className="truncate text-[12px] text-slate-700">{name}</span>
+              </li>
+            ))}
+          </ul>
+        </div>,
+        document.body,
       )}
     </article>
   );
