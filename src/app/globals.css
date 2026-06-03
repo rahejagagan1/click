@@ -585,6 +585,15 @@ html:not(.dark) .glass {
    edge. overflow-wrap:anywhere is the guaranteed fallback; the
    browser still prefers word boundaries when they exist. */
 .jd-prose,
+.jd-prose * {
+  /* Reset any inherited width / box-sizing rules so child elements
+     can never push past the prose container's right edge. Earlier
+     fixes only set wrap rules on block elements, leaving inline
+     children free to inherit a width that exceeded the panel. */
+  max-width:  100%;
+  box-sizing: border-box;
+}
+.jd-prose,
 .jd-prose p,
 .jd-prose li,
 .jd-prose h1,
@@ -593,27 +602,20 @@ html:not(.dark) .glass {
 .jd-prose h4,
 .jd-prose h5,
 .jd-prose h6 {
-  /* A4-print behaviour: words ONLY wrap at spaces, NEVER mid-
-     letter. Both `anywhere` and `break-word` allowed the browser
-     to break "enhancing" → "enhan-cing" / "in" → "i-n" because
-     the line-break algorithm sometimes prefers a soft break over
-     a clean word-end. `normal` removes that permission entirely
-     — the cost is that an extremely long token (a URL, an
-     identifier) might overflow the panel, but those are rare in
-     HR-written JD body text and HR can edit them. Clean A4 read
-     is the priority. */
-  overflow-wrap: normal;
-  word-wrap:     normal;
+  /* A4-print word wrap. Words wrap at SPACES first; only fall
+     back to mid-string breaking when a token literally cannot fit
+     (long URL, identifier). `break-word` (not `anywhere`) keeps
+     "enhancing" intact while still letting `https://very-long-
+     url` break to avoid panel overflow. */
+  overflow-wrap: break-word;
+  word-wrap:     break-word;
   word-break:    normal;
   hyphens:       manual;
-}
-/* Long URLs / identifiers — opt-in break for tokens that would
-   genuinely overflow. Same rule applied to <a> and <code> only
-   so the regular body text stays untouched. */
-.jd-prose a,
-.jd-prose code {
-  overflow-wrap: break-word;
-  word-break:    break-word;
+  /* `text-wrap: pretty` distributes line-break decisions across
+     the whole paragraph for a more balanced look — fewer rivers,
+     fewer one-word last lines. Falls back gracefully on older
+     browsers that don't support it. */
+  text-wrap:     pretty;
 }
 .jd-prose h1, .jd-prose h2 {
   margin-top: 1.6rem;
