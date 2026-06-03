@@ -579,6 +579,23 @@ html:not(.dark) .glass {
    Quill's classes for alignment + size are also styled inline below
    so HR's toolbar choices (Small / Large / Huge, centre / right /
    justify) flow through to the public render verbatim. */
+/* Word-wrap inside the prose. Long, unbreakable strings (URLs,
+   identifiers, glued tokens) used to overflow the JD card's
+   overflow:hidden clip — letters appeared chopped at the right
+   edge. overflow-wrap:anywhere is the guaranteed fallback; the
+   browser still prefers word boundaries when they exist. */
+.jd-prose,
+.jd-prose p,
+.jd-prose li,
+.jd-prose h1,
+.jd-prose h2,
+.jd-prose h3,
+.jd-prose h4,
+.jd-prose h5,
+.jd-prose h6 {
+  overflow-wrap: anywhere;
+  word-wrap:     break-word;
+}
 .jd-prose h1, .jd-prose h2 {
   margin-top: 1.6rem;
   margin-bottom: 0.5rem;
