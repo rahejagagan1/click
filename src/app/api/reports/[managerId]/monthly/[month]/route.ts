@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
-import { notifyUsers, ceoRecipientIdForEmployee } from "@/lib/notifications";
+import { notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
 import { getQualifiedCasesForRole } from "@/lib/ratings/data-resolver";
 import { getManagerReportFormat } from "@/lib/reports/manager-report-format";
@@ -444,7 +444,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
                         },
                         select: { id: true },
                     }),
-                    ceoRecipientIdForEmployee(managerId),
+                    brandCeoIdForEmployee(managerId),
                 ]);
                 // `month` is the 0-based index parsed from the URL (0=Jan,
                 // 11=Dec) — same convention as the client-side monthIndex
