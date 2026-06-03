@@ -129,7 +129,10 @@ export const authOptions: NextAuthOptions = {
                             // Department drives HR-department permissions (e.g. who
                             // may back-date a leave) for staff whose orgLevel isn't
                             // hr_manager but who sit in an HR department.
-                            employeeProfile: { select: { department: true } },
+                            // businessUnit is the brand membership (NB Media /
+                            // YT Labs) used by the sidebar to gate brand-specific
+                            // tiles (e.g. YouTube is NB Media-only).
+                            employeeProfile: { select: { department: true, businessUnit: true } },
                         },
                     });
                     // Onboarding flag — fetched via raw SQL so this still works
@@ -153,6 +156,7 @@ export const authOptions: NextAuthOptions = {
                             ? dbUser.clickupUserId.toString()
                             : null;
                         (session.user as any).department = (dbUser as any).employeeProfile?.department ?? null;
+                        (session.user as any).businessUnit = (dbUser as any).employeeProfile?.businessUnit ?? null;
                     } else if (useDevLogin && session.user.email) {
                         // Dev credentials login: ensure a DB row exists so APIs (e.g. feedback) get dbId + orgLevel.
                         // No synthetic clickupUserId — it's nullable and will be backfilled by the ClickUp sync if/when
