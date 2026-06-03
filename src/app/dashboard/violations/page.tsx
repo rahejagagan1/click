@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSession } from "next-auth/react";
+import useSWR from "swr";
+import { fetcher } from "@/lib/swr";
 import UserAvatar from "@/components/ui/user-avatar";
 import SearchableSelect from "@/components/ui/searchable-select";
 import { DateField } from "@/components/ui/date-field";
@@ -102,6 +104,31 @@ export default function ViolationsPage() {
     const [filterStatus, setFilterStatus] = useState<string>("");
     const [filterSeverity, setFilterSeverity] = useState<string>("");
     const [filterMonth, setFilterMonth] = useState<string>("");
+    // Brand scope — "" / "nb-media" / "yt-labs". Threads to the API
+    // as ?brand= so the offender's businessUnit narrows both the
+    // rows and the summary counts.
+    //
+    // Default seeded from the viewer's own businessUnit so a YT Labs
+    // HR Manager lands on YT Labs by default and an NB Media HR
+    // Manager lands on NB Media. CEO / developer (super-admins)
+    // straddle both brands → default "all". HR can still flip via
+    // the pills, and `brandTouched` keeps the auto-detect effect
+    // from clobbering a manual pick once the profile loads.
+    const [brand, setBrand] = useState<"" | "nb-media" | "yt-labs">("");
+    const [brandTouched, setBrandTouched] = useState<boolean>(false);
+    const { data: viewerProfile } = useSWR<any>(
+        sessionUser ? "/api/hr/profile" : null,
+        fetcher,
+        { revalidateOnFocus: false },
+    );
+    useEffect(() => {
+        if (brandTouched) return;
+        const isSuperAdmin = sessionUser?.orgLevel === "ceo" || sessionUser?.isDeveloper;
+        if (isSuperAdmin) { setBrand(""); return; }
+        const bu = viewerProfile?.employeeProfile?.businessUnit;
+        if (bu === "YT Labs") setBrand("yt-labs");
+        else if (bu === "NB Media" || bu == null) setBrand("nb-media");
+    }, [viewerProfile, sessionUser, brandTouched]);
     const [expandedId, setExpandedId] = useState<number | null>(null);
     const [showNewForm, setShowNewForm] = useState(false);
     const [users, setUsers] = useState<ViolationUser[]>([]);
@@ -179,6 +206,7 @@ export default function ViolationsPage() {
         setLoading(true);
         const params = new URLSearchParams();
         if (filterStatus) params.set("status", filterStatus);
+        if (brand) params.set("brand", brand);
         // Severity filter is applied client-side now so the L0-L3 tab
         // strip can show accurate per-tier counts without re-fetching.
         fetch(`/api/violations?${params}`)
@@ -189,7 +217,7 @@ export default function ViolationsPage() {
             })
             .catch(() => { })
             .finally(() => setLoading(false));
-    }, [filterStatus]);
+    }, [filterStatus, brand]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -413,8 +441,21 @@ export default function ViolationsPage() {
                         </svg>
                     </div>
                     <div>
-                        <h1 className="text-[22px] font-bold tracking-tight text-slate-800 dark:text-white">System Violation Log</h1>
-                        <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">Track and manage policy violations across the organization</p>
+                        <h1 className="text-[22px] font-bold tracking-tight text-slate-800 dark:text-white inline-flex items-center gap-2">
+                            System Violation Log
+                            {brand && (
+                                <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600">
+                                    {brand === "yt-labs" ? "YT Labs" : "NB Media"}
+                                </span>
+                            )}
+                        </h1>
+                        <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">
+                            {brand === "yt-labs"
+                                ? "YT Labs policy violations only"
+                                : brand === "nb-media"
+                                    ? "NB Media policy violations only"
+                                    : "Track and manage policy violations across the organization"}
+                        </p>
                     </div>
                 </div>
                 <button
@@ -426,6 +467,35 @@ export default function ViolationsPage() {
                     </svg>
                     Report Violation
                 </button>
+            </div>
+
+            {/* Brand scope — pill toggle strip mirroring the rest of
+                the HR Dashboard. "All" keeps the historical cross-brand
+                view; NB Media / YT Labs narrow both the row list and
+                the summary cards via the offender's businessUnit
+                (server-side filter). */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+                {([
+                    { key: "",         label: "All brands" },
+                    { key: "nb-media", label: "NB Media" },
+                    { key: "yt-labs",  label: "YT Labs" },
+                ] as const).map((opt) => {
+                    const active = brand === opt.key;
+                    return (
+                        <button
+                            key={opt.key || "all"}
+                            type="button"
+                            onClick={() => { setBrand(opt.key as "" | "nb-media" | "yt-labs"); setBrandTouched(true); }}
+                            className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
+                                active
+                                    ? "bg-rose-500 text-white shadow-sm"
+                                    : "bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10"
+                            }`}
+                        >
+                            {opt.label}
+                        </button>
+                    );
+                })}
             </div>
 
             {/* ── Summary Cards ── pastel tints + dark text, matches the

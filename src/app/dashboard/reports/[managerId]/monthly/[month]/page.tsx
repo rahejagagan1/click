@@ -2526,6 +2526,19 @@ export default function MonthlyReportPage() {
                         <h1 className="text-xl font-bold text-slate-900 dark:text-white">
                             Production Monthly Report — {monthName} {year}
                         </h1>
+                        {/* Top-right team-source pill: "Snapshot" (frozen at submit
+                            time) vs "Live" (fallback when no snapshot exists). */}
+                        {data?.teamSource && (
+                            data.teamSource === "snapshot" ? (
+                                <span title="Team list is frozen from the snapshot saved when this report was submitted" className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase tracking-wider">
+                                    <span className="h-1 w-1 rounded-full bg-emerald-500" /> Snapshot
+                                </span>
+                            ) : (
+                                <span title="No snapshot saved yet — showing current team. Admin can click Refresh to freeze." className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[9px] font-bold uppercase tracking-wider">
+                                    <span className="h-1 w-1 rounded-full bg-amber-500 animate-pulse" /> Live
+                                </span>
+                            )
+                        )}
                     </div>
                     <div className="mt-3 space-y-1 text-sm">
                         <div>
