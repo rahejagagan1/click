@@ -586,36 +586,41 @@ html:not(.dark) .glass {
    browser still prefers word boundaries when they exist. */
 .jd-prose,
 .jd-prose * {
-  /* Reset any inherited width / box-sizing rules so child elements
-     can never push past the prose container's right edge. Earlier
-     fixes only set wrap rules on block elements, leaving inline
-     children free to inherit a width that exceeded the panel. */
-  max-width:  100%;
-  box-sizing: border-box;
+  /* Words wrap at WORD BOUNDARIES ONLY. Never mid-letter, never
+     at char positions, no soft-hyphen insertion, no "balanced"
+     wrapping that sneaks character breaks in to even out line
+     lengths.
+     - overflow-wrap:normal  → only break at preserved whitespace.
+     - word-break:keep-all   → don't break within a word, period.
+     - hyphens:none          → no automatic hyphenation, no soft-
+                                hyphen rendering even if the markup
+                                contains &shy;.
+     - text-wrap:wrap        → cancel any inherited `pretty` /
+                                `balance` that Chrome 120+ now
+                                applies to <p>. (`pretty` was
+                                breaking "in" between i and n
+                                to balance the paragraph.)
+     - max-width:100% + box-sizing:border-box prevent any inline
+       child (Quill spans / sanitised classes) from pushing past
+       the prose container's right edge.
+
+     `!important` here so a stray inline style on a Quill span
+     can never override us. */
+  overflow-wrap: normal !important;
+  word-wrap:     normal !important;
+  word-break:    keep-all !important;
+  hyphens:       none !important;
+  text-wrap:     wrap !important;
+  white-space:   normal !important;
+  max-width:     100%;
+  box-sizing:    border-box;
 }
-.jd-prose,
-.jd-prose p,
-.jd-prose li,
-.jd-prose h1,
-.jd-prose h2,
-.jd-prose h3,
-.jd-prose h4,
-.jd-prose h5,
-.jd-prose h6 {
-  /* A4-print word wrap. Words wrap at SPACES first; only fall
-     back to mid-string breaking when a token literally cannot fit
-     (long URL, identifier). `break-word` (not `anywhere`) keeps
-     "enhancing" intact while still letting `https://very-long-
-     url` break to avoid panel overflow. */
-  overflow-wrap: break-word;
-  word-wrap:     break-word;
-  word-break:    normal;
-  hyphens:       manual;
-  /* `text-wrap: pretty` distributes line-break decisions across
-     the whole paragraph for a more balanced look — fewer rivers,
-     fewer one-word last lines. Falls back gracefully on older
-     browsers that don't support it. */
-  text-wrap:     pretty;
+/* Long URLs / code identifiers — opt-in break, scoped to <a> +
+   <code>. Body paragraphs still wrap only at spaces. */
+.jd-prose a,
+.jd-prose code {
+  overflow-wrap: anywhere !important;
+  word-break:    break-all !important;
 }
 .jd-prose h1, .jd-prose h2 {
   margin-top: 1.6rem;
