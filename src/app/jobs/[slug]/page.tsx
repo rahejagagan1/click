@@ -473,7 +473,11 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
       {/* Two-column layout (≥lg): JD on the left, sticky sidebar
           (Apply CTA + share + careers link) on the right. On
           mobile the columns stack — sidebar drops below the JD. */}
-      <main className="max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-16 grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 lg:gap-10 items-start">
+      {/* Sidebar (300px) only appears at xl (1280px+). Below that the
+          JD takes the full width — squeezing it into a narrow column
+          on a 1024-1279 laptop caused short words to overflow the
+          rounded card's right edge. */}
+      <main className="max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-16 grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-6 xl:gap-10 items-start">
         <div className="space-y-6 sm:space-y-8 min-w-0">
         {/* Job description — rendered as HTML sections from the
             edited jdText. Falls back to the PDF iframe when jdText
@@ -571,8 +575,8 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
             and made the sidebar scroll OFF the screen as soon as
             the JD scrolled past — fixed by separating the row
             stretch from the sticky wrapper. */}
-        <aside className="lg:self-stretch">
-          <div className="lg:sticky lg:top-24">
+        <aside className="xl:self-stretch">
+          <div className="xl:sticky xl:top-24">
             <Reveal direction="up" className="w-full">
             <div className="space-y-7">
               {/* ── Apply CTA ─────────────────────────────────
@@ -696,7 +700,7 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
         </aside>
 
         {/* Footer — spans both grid columns on lg+. */}
-        <footer className="lg:col-span-2 pt-6 pb-10 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11.5px] text-slate-400">
+        <footer className="xl:col-span-2 pt-6 pb-10 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11.5px] text-slate-400">
           <div className="flex items-center gap-2.5">
             <img src="/logo.png" alt="" className="h-5 w-5 opacity-70" />
             <span>© {new Date().getFullYear()} {brand}. All rights reserved.</span>
