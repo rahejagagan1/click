@@ -98,6 +98,40 @@ export async function emailsForUserIds(userIds: number[]): Promise<string[]> {
 }
 
 /**
+ * Resolve email addresses for a list of user ids, applying the per-role
+ * email-toggle filter (Admin → Emails Automation → "Recipients by role").
+ *
+ * Each recipient is mapped to the set of email-routing roles they carry
+ * (CEO / HR Manager / Special Access / Admin), then dropped if NONE of
+ * their roles has the per-role toggle ON for `kind`. Users who don't
+ * match any tracked role bypass the per-role filter entirely — they're
+ * always allowed through (the per-role gate is opt-in for HR-leadership
+ * accounts only).
+ *
+ * Single round-trip to the DB; the toggle state is also a single fetch
+ * (and cached by Prisma within a request). The filter is layered on top
+ * of the GLOBAL toggle which dispatchEmails already checks upstream.
+ */
+export async function emailsForUserIdsFiltered(
+  userIds: number[],
+  kind: import("./toggles").EmailKey,
+): Promise<string[]> {
+  if (userIds.length === 0) return [];
+  const { rolesForUser, isEmailEnabledForRoles } = await import("./toggles");
+  const rows = await prisma.user.findMany({
+    where:  { id: { in: userIds }, isActive: true },
+    select: { email: true, orgLevel: true, role: true },
+  });
+  const allowed: string[] = [];
+  for (const r of rows) {
+    if (!r.email) continue;
+    const roles = rolesForUser({ orgLevel: r.orgLevel, role: r.role });
+    if (await isEmailEnabledForRoles(kind, roles)) allowed.push(r.email);
+  }
+  return allowed;
+}
+
+/**
  * All active users — for org-wide blasts (announcements). Returns just
  * the email addresses.
  */
