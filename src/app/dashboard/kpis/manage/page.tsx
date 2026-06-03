@@ -57,11 +57,15 @@ export default function ManageKpisPage() {
   // Narrow the existing-docs table to only departments in scope. Docs
   // for departments outside the chosen brand are filtered out so the
   // YT Labs HR doesn't see NB Media KPI rows and vice versa.
+  // Each doc row now carries its own `brand` (after the schema
+  // migration). Filter on that directly instead of inferring brand
+  // from department-catalogue membership — handles the shared
+  // "HR Operations & TA" case correctly.
   const docs = useMemo(() => {
     if (brand === "all") return allDocs;
-    const set = new Set(deptOptions);
-    return allDocs.filter((d) => set.has(d.department));
-  }, [allDocs, deptOptions, brand]);
+    const wanted = brand === "yt-labs" ? "YT Labs" : "NB Media";
+    return allDocs.filter((d: any) => (d.brand ?? "NB Media") === wanted);
+  }, [allDocs, brand]);
 
   const [department, setDepartment] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -80,10 +84,16 @@ export default function ManageKpisPage() {
       const fd = new FormData();
       fd.append("department", department);
       fd.append("file", file);
+      // Brand goes into the FormData so the row is keyed by
+      // (brand, department). When "all" is selected (super-admin
+      // view), fall back to NB Media — same parent-brand default the
+      // server applies if the field is omitted.
+      const uploadBrand = brand === "all" ? "nb-media" : brand;
+      fd.append("brand", uploadBrand);
       const res  = await fetch("/api/kpis/documents", { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || "Upload failed");
-      setSuccess(`Uploaded KPI for ${department}.`);
+      setSuccess(`Uploaded ${brand === "yt-labs" ? "YT Labs" : "NB Media"} KPI for ${department}.`);
       setFile(null);
       if (fileRef.current) fileRef.current.value = "";
       mutate("/api/kpis/documents");
