@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
-import { notifyApprovers, notifyUsers } from "@/lib/notifications";
+import { notifyApprovers, notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
 import { istTimeOnDate, istDateOnlyFrom, istMonthRange } from "@/lib/ist-date";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
@@ -372,23 +372,29 @@ export async function PUT(req: NextRequest) {
       });
       if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
 
-      // CEO + Special Access + HR Manager (role). Developer accounts
-      // gated by the "Notify developers" toggle in Admin → Emails.
-      const finalApprovers = await prisma.user.findMany({
-        where: {
-          isActive: true,
-          OR: [
-            { orgLevel: { in: ["ceo", "special_access"] } },
-            { role: "hr_manager" },
-            ...(await devEmailRecipientsClause()),
-          ],
-        },
-        select: { id: true },
-      });
+      // Brand-CEO L2 routing: HR / Special Access pool (CEO excluded)
+      // + the applicant's brand CEO. Keeps Kunal off NB Media WFH
+      // approvals and vice versa. Developer accounts still flow
+      // through via the "Notify developers" toggle.
+      const [finalApprovers, brandCeoId] = await Promise.all([
+        prisma.user.findMany({
+          where: {
+            isActive: true,
+            orgLevel: { not: "ceo" },
+            OR: [
+              { orgLevel: "special_access" },
+              { role: "hr_manager" },
+              ...(await devEmailRecipientsClause()),
+            ],
+          },
+          select: { id: true },
+        }),
+        brandCeoIdForEmployee(record.userId),
+      ]);
       await Promise.all([
         notifyUsers({
           actorId:  myId,
-          userIds:  finalApprovers.map((u) => u.id),
+          userIds:  [...finalApprovers.map((u) => u.id), ...(brandCeoId ? [brandCeoId] : [])],
           type:     "wfh",
           entityId: record.id,
           title:    `${requesterName}'s WFH for ${dateLabel} needs final approval`,
