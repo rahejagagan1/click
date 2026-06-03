@@ -66,11 +66,32 @@ export async function GET(request: NextRequest) {
         const status = searchParams.get("status");
         const severity = searchParams.get("severity");
         const category = searchParams.get("category");
+        // Brand scope — filters by the offender's businessUnit so the
+        // YT Labs Violation Log only shows YT Labs employees' rows and
+        // vice versa. NULL businessUnit buckets to NB Media (parent-
+        // brand default, matches the rest of the app). Empty / "all"
+        // = no filter.
+        const brandRaw = (searchParams.get("brand") || "").toLowerCase();
+        const brand: "NB Media" | "YT Labs" | null =
+            brandRaw === "yt-labs" || brandRaw === "yt"   ? "YT Labs" :
+            brandRaw === "nb-media" || brandRaw === "nb"  ? "NB Media" :
+            null;
+        const brandUserClause: any = !brand ? {} :
+            brand === "YT Labs"
+                ? { user: { employeeProfile: { businessUnit: "YT Labs" } } }
+                : { user: { OR: [
+                    { employeeProfile: { businessUnit: "NB Media" } },
+                    { employeeProfile: { businessUnit: null } },
+                    { employeeProfile: null },
+                ] } };
 
-        const where: any = {};
+        const where: any = { ...brandUserClause };
         if (status) where.status = status;
         if (severity) where.severity = severity;
         if (category) where.category = category;
+        // Counts use the same brand-clause so the summary cards stay
+        // in sync with the rows below them.
+        const countBase = brand ? brandUserClause : {};
 
         const [violationsRaw, summary] = await Promise.all([
             // Explicit `select` — keeps the multi-MB BYTEA blobs out of
@@ -119,13 +140,13 @@ export async function GET(request: NextRequest) {
                 },
                 orderBy: { createdAt: "desc" },
             }),
-            // Summary counts
+            // Summary counts — same brand scope as the row query above.
             Promise.all([
-                prisma.violation.count(),
-                prisma.violation.count({ where: { status: "open" } }),
-                prisma.violation.count({ where: { status: "in_progress" } }),
-                prisma.violation.count({ where: { status: "closed" } }),
-                prisma.violation.count({ where: { severity: { in: ["high", "critical"] } } }),
+                prisma.violation.count({ where: countBase }),
+                prisma.violation.count({ where: { ...countBase, status: "open" } }),
+                prisma.violation.count({ where: { ...countBase, status: "in_progress" } }),
+                prisma.violation.count({ where: { ...countBase, status: "closed" } }),
+                prisma.violation.count({ where: { ...countBase, severity: { in: ["high", "critical"] } } }),
             ]),
         ]);
 
