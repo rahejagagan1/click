@@ -662,6 +662,22 @@ export default function AttendancePage() {
   })();
   const { data: myData }    = useSWR(`/api/hr/attendance?${attendanceQs}`, fetcher);
   const { data: boardData } = useSWR(`/api/hr/attendance/board`, fetcher);
+  // Caller's own shift — drives the per-row LATE chip cutoff (shift
+  // startTime + breakMinutes). Without it the page falls back to a
+  // hardcoded 10:00 IST rule which mis-flags both the 5-min grace
+  // window and YT Labs's 11:00 start. Cheap single-row fetch.
+  const { data: myShiftData } = useSWR<{
+    shift: { startTime: string | null; breakMinutes: number | null } | null;
+  }>(`/api/hr/me/shift`, fetcher);
+  // Late cutoff in IST minutes-of-day. Default 10:00 + 0 grace when
+  // no shift is assigned (matches clock-in route's legacy fallback).
+  const lateCutoffMin: number = (() => {
+    const s = myShiftData?.shift;
+    if (!s?.startTime) return 10 * 60;
+    const [sh, sm] = String(s.startTime).split(":").map((n) => Number(n) || 0);
+    const grace    = Number.isFinite(s.breakMinutes) ? Number(s.breakMinutes) : 15;
+    return sh * 60 + sm + grace;
+  })();
   const { data: regsData = [] } = useSWR(`/api/hr/attendance/regularize?view=${regView}`, fetcher);
   // Prefetch regularization balance so the modal shows it instantly on open.
   // Same key the modal uses — SWR dedupes and serves from cache.
@@ -1598,9 +1614,18 @@ export default function AttendancePage() {
                     // Uses the FIRST session's clockIn so resume sessions don't
                     // accidentally clear / set the flag.
                     const firstIn = sessions[0]?.clockIn ? new Date(sessions[0].clockIn) : null;
+                    // Late = first clock-in past the SHIFT-SPECIFIC
+                    // cutoff (shift.startTime + breakMinutes). The
+                    // previous rule was a hardcoded "IST hour >= 10"
+                    // which mis-fired on:
+                    //   • NB Media's 5-min grace (10:03 was wrongly LATE)
+                    //   • YT Labs's 11:00 start (everyone always LATE)
+                    // istMinutesOfDay-equivalent inline so we don't
+                    // pull an extra import into this large client file.
                     const isLateFirstIn = !!firstIn && (() => {
-                      const istHr = (firstIn.getUTCHours() + 5 + Math.floor((firstIn.getUTCMinutes() + 30) / 60)) % 24;
-                      return istHr >= 10;
+                      const totalUtcMin = firstIn.getUTCHours() * 60 + firstIn.getUTCMinutes();
+                      const istMin      = (totalUtcMin + 330) % (24 * 60); // +5:30
+                      return istMin > lateCutoffMin;
                     })();
 
                     return (

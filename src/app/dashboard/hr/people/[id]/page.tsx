@@ -821,6 +821,8 @@ export default function EmployeeDetailPage() {
                     workLocation={p?.workLocation ?? null}
                     targetOrgLevel={user.orgLevel ?? null}
                     targetIsDeveloper={user.isDeveloper === true}
+                    shiftStartTime={user.shift?.startTime ?? null}
+                    shiftBreakMinutes={user.shift?.breakMinutes ?? null}
                   />
                 )}
               </section>
@@ -2013,12 +2015,18 @@ function TimelineBar({
 function EmployeeTimePanel({
   userId, userName, isHRAdmin, meDbId, joiningDate, workLocation,
   targetOrgLevel, targetIsDeveloper,
+  shiftStartTime, shiftBreakMinutes,
 }: {
   userId: number; userName: string; isHRAdmin: boolean; meDbId: number | null;
   joiningDate?: string | null;
   workLocation?: string | null;
   targetOrgLevel?: string | null;
   targetIsDeveloper?: boolean;
+  // Shift coords drive the LATE-chip cutoff per row. Passed in from
+  // the parent so we don't refetch — /api/hr/people/[id] already
+  // includes shift in its response.
+  shiftStartTime?: string | null;
+  shiftBreakMinutes?: number | null;
 }) {
   // CEO + developers don't punch a clock — flexible schedules mean the
   // daily "Absent" cross-marks for every non-clocked-in day are noise.
@@ -2804,11 +2812,21 @@ function EmployeeTimePanel({
                 ? new Date(sess[0].clockIn)
                 : (rec.clockIn ? new Date(rec.clockIn) : null);
               const isLateFirstIn = !!firstIn && (() => {
-                // First clock-in at or past 10:00 IST → Late.
-                // UTC + 5:30 → IST hour. Don't use getHours() — that uses
-                // the SERVER's local timezone and would skew the cutoff.
-                const istHr = (firstIn.getUTCHours() + 5 + Math.floor((firstIn.getUTCMinutes() + 30) / 60)) % 24;
-                return istHr >= 10;
+                // Late = first clock-in past the SHIFT-SPECIFIC
+                // cutoff (shift.startTime + breakMinutes grace).
+                // Falls back to 10:00 IST + 0 grace when the
+                // employee has no shift assigned (matches clock-in
+                // route's legacy rule). UTC + 5:30 → IST minutes-of-
+                // day; don't use getHours() — that's the SERVER's
+                // local TZ and would skew the cutoff.
+                const totalUtcMin = firstIn.getUTCHours() * 60 + firstIn.getUTCMinutes();
+                const istMin      = (totalUtcMin + 330) % (24 * 60);
+                const [sh, sm]    = shiftStartTime
+                  ? String(shiftStartTime).split(":").map((n: string) => Number(n) || 0)
+                  : [10, 0];
+                const grace       = Number.isFinite(shiftBreakMinutes) ? Number(shiftBreakMinutes) : (shiftStartTime ? 15 : 0);
+                const cutoffMin   = sh * 60 + sm + grace;
+                return istMin > cutoffMin;
               })();
               const missedClockOut = !!rec.clockIn && !rec.clockOut && !isToday && !rec.isRegularized && !isLeaveRow;
               // "On break" — today, all closed sessions, day-total still < 9h.
