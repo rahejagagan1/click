@@ -204,6 +204,29 @@ export function rolesForUser(u: { orgLevel?: string | null; role?: string | null
   return [...out];
 }
 
+/** Pure gate evaluator — exposed for testing. Same rule the async
+ *  isEmailEnabledForRoles uses, but operates on an explicit state
+ *  object so tests can permute scenarios without DB writes.
+ *
+ *  Returns TRUE when the recipient should get the email:
+ *    • global[kind] === false              → false (kill switch)
+ *    • roles.length === 0                  → true (not a tracked role)
+ *    • ANY role.perRole[r][kind] !== false → true (OR-semantics)
+ *    • all roles explicitly false          → false
+ */
+export function evaluateRoleGate(
+  state: EmailToggleState,
+  kind:  EmailKey,
+  roles: EmailRole[],
+): boolean {
+  if (state.global[kind] === false) return false;
+  if (roles.length === 0) return true;
+  for (const r of roles) {
+    if (state.perRole[r]?.[kind] !== false) return true;
+  }
+  return false;
+}
+
 /** True when the given email kind should reach a recipient with this
  *  role set, taking BOTH gates into account. OR-semantics over roles:
  *  the email goes through if ANY of the user's roles has the per-role
@@ -214,13 +237,7 @@ export async function isEmailEnabledForRoles(
   kind: EmailKey,
   roles: EmailRole[],
 ): Promise<boolean> {
-  const state = await getEmailToggleState();
-  if (state.global[kind] === false) return false;        // global kill switch
-  if (roles.length === 0) return true;                   // not a tracked role
-  for (const r of roles) {
-    if (state.perRole[r]?.[kind] !== false) return true; // any allow = allow
-  }
-  return false;                                          // all blocked
+  return evaluateRoleGate(await getEmailToggleState(), kind, roles);
 }
 
 /**
