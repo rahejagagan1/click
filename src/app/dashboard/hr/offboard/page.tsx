@@ -34,6 +34,7 @@ type EmpProfile = {
   employmentType?: string | null;
   joiningDate?: string | null;
   noticePeriodDays?: number | null;
+  businessUnit?: string | null;
 };
 type Employee = {
   id: number;
@@ -42,6 +43,8 @@ type Employee = {
   profilePictureUrl?: string | null;
   employeeProfile?: EmpProfile | null;
 };
+
+type BrandScope = "NB Media" | "YT Labs" | "all";
 const fmtDate = (d: string | Date) =>
   new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
@@ -52,6 +55,18 @@ export default function OffboardPage() {
   const canManage = isHRAdmin(me);
 
   const [tab, setTab] = useUrlTab<"initiate" | "pipeline">("tab", "initiate", ["initiate", "pipeline"] as const);
+
+  // Brand scope from `?brand=` — narrows the employee picker (and the
+  // Offboarding Progress pipeline) to one brand. The HR Dashboard
+  // sidebar flyout passes the slug; we keep the human-readable form
+  // for filtering since `employeeProfile.businessUnit` is stored that
+  // way.
+  const searchParams = useSearchParams();
+  const brandSlug = (searchParams?.get("brand") || "").toLowerCase();
+  const brand: BrandScope =
+    brandSlug === "yt-labs" || brandSlug === "yt"      ? "YT Labs" :
+    brandSlug === "nb-media" || brandSlug === "nb"     ? "NB Media" :
+    "all";
 
   if (!canManage) {
     return (
@@ -66,6 +81,11 @@ export default function OffboardPage() {
       <header className="mb-5">
         <h1 className="text-[20px] font-bold text-slate-800 inline-flex items-center gap-2">
           <UserMinus size={20} className="text-rose-500" /> Offboard Employee
+          {brand !== "all" && (
+            <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#008CFF]/10 text-[#008CFF]">
+              {brand}
+            </span>
+          )}
         </h1>
         <p className="mt-1 text-[12.5px] text-slate-500">
           Record exits, fire goodbye / heads-up emails, and track clearance.
@@ -91,7 +111,7 @@ export default function OffboardPage() {
         ))}
       </div>
 
-      {tab === "initiate" && <InitiateExitTab />}
+      {tab === "initiate" && <InitiateExitTab brand={brand} />}
       {tab === "pipeline" && <ExitPipeline     />}
     </div>
   );
@@ -101,7 +121,7 @@ export default function OffboardPage() {
  *  Initiate Exit — picks an active employee, fills exit details
  * ─────────────────────────────────────────────────────────────────── */
 
-function InitiateExitTab() {
+function InitiateExitTab({ brand }: { brand: BrandScope }) {
   const { data: employees } = useSWR<Employee[]>("/api/hr/employees?isActive=true", fetcher);
   const [picked, setPicked] = useState<Employee | null>(null);
   const [query, setQuery]   = useState("");
@@ -120,13 +140,19 @@ function InitiateExitTab() {
   }, [preselectId, picked, employees]);
 
   const filtered = useMemo(() => {
-    const list = (employees ?? []).filter(e => e.id);
+    let list = (employees ?? []).filter(e => e.id);
+    // Brand scope — narrow to the chosen brand's employees. Empty
+    // `businessUnit` is bucketed as "NB Media" (parent-brand default),
+    // matching how the HR Dashboard panels treat legacy rows.
+    if (brand !== "all") {
+      list = list.filter(e => (e.employeeProfile?.businessUnit || "NB Media") === brand);
+    }
     if (!query.trim()) return list.slice(0, 12);
     const q = query.trim().toLowerCase();
     return list
       .filter(e => e.name?.toLowerCase().includes(q) || e.email?.toLowerCase().includes(q))
       .slice(0, 12);
-  }, [employees, query]);
+  }, [employees, query, brand]);
 
   // PopupPanel handles outside-click + Esc itself (it knows about both
   // the trigger and the portaled panel). Don't add a second listener —
