@@ -240,6 +240,29 @@ export async function isEmailEnabledForRoles(
   return evaluateRoleGate(await getEmailToggleState(), kind, roles);
 }
 
+/** Pure recipient gate — the rule emailsForUserIdsFiltered applies
+ *  per row. Exposed here so tests can permute exemption + role
+ *  combinations without DB writes.
+ *
+ *  Three-tier resolution:
+ *    1. Global kill switch — `global[kind] === false`     → false (everyone dropped, exemption does NOT override)
+ *    2. Direct-manager exemption — `exemptIds.has(id)`    → true  (per-role filter bypassed)
+ *    3. Per-role gate                                       → evaluateRoleGate
+ *
+ *  The exemption overrides the role gate, NOT the global kill. HR
+ *  can still flip an email off entirely; the exemption only saves
+ *  direct managers from per-role carve-outs. */
+export function shouldIncludeRecipient(
+  recipient: { id: number; orgLevel?: string | null; role?: string | null },
+  kind:      EmailKey,
+  state:     EmailToggleState,
+  exemptIds: ReadonlySet<number> = new Set(),
+): boolean {
+  if (state.global[kind] === false) return false;
+  if (exemptIds.has(recipient.id)) return true;
+  return evaluateRoleGate(state, kind, rolesForUser(recipient));
+}
+
 /**
  * Recipient-list helper — call inside any prisma.user.findMany({ where: { OR: [...] } })
  * that wants to include developer accounts as email recipients. Returns:

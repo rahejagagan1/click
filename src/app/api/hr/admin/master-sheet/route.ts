@@ -81,12 +81,49 @@ const fmtMins = (m: number | null | undefined) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────
+//  Brand scope helpers — every sheet generator accepts a `brand`
+//  ("NB Media" | "YT Labs" | null for All). Two Prisma where-clause
+//  shapes are derived from it: one for filtering User rows directly
+//  (Employees sheet), the other for filtering nested-via-user rows
+//  (Attendance / leave / WFH / OD / Regularizations / Comp-Off).
+//
+//  Brand membership comes from `EmployeeProfile.businessUnit`. We
+//  treat NULL businessUnit as "NB Media" (parent-brand default) so
+//  legacy rows show up on the NB sheet, matching the rest of the UI.
+// ─────────────────────────────────────────────────────────────────────
+
+type BrandFilter = "NB Media" | "YT Labs" | null;
+
+// Where-clause segment for `prisma.user.findMany`.
+function userWhereForBrand(brand: BrandFilter) {
+  if (!brand) return {};
+  if (brand === "YT Labs") {
+    return { employeeProfile: { businessUnit: "YT Labs" } };
+  }
+  // NB Media: include legacy rows where businessUnit is null OR matches.
+  return {
+    OR: [
+      { employeeProfile: { businessUnit: "NB Media" } },
+      { employeeProfile: { businessUnit: null } },
+      { employeeProfile: null }, // very-legacy users without a profile row
+    ],
+  };
+}
+
+// Where-clause segment that flows through the `user` relation on a
+// child entity (Attendance.user, LeaveApplication.user, etc.).
+function viaUserWhereForBrand(brand: BrandFilter) {
+  if (!brand) return {};
+  return { user: userWhereForBrand(brand) };
+}
+
+// ─────────────────────────────────────────────────────────────────────
 //  Sheet generators
 // ─────────────────────────────────────────────────────────────────────
 
-async function addEmployeesSheet(wb: ExcelJS.Workbook) {
+async function addEmployeesSheet(wb: ExcelJS.Workbook, brand: BrandFilter) {
   const users = await prisma.user.findMany({
-    where: { isActive: true },
+    where: { isActive: true, ...userWhereForBrand(brand) },
     orderBy: { name: "asc" },
     include: {
       employeeProfile: true,
@@ -136,12 +173,15 @@ async function addEmployeesSheet(wb: ExcelJS.Workbook) {
   styleSheet(ws);
 }
 
-async function addAttendanceSheet(wb: ExcelJS.Workbook, label: string, start: Date | null, end: Date | null) {
+async function addAttendanceSheet(wb: ExcelJS.Workbook, label: string, start: Date | null, end: Date | null, brand: BrandFilter) {
   // When start/end are null we export every attendance row regardless
   // of date — the "All time" option in the picker. Sheet names are
   // capped at 31 chars by Excel, so use a short label.
   const records = await prisma.attendance.findMany({
-    where: start && end ? { date: { gte: start, lt: end } } : undefined,
+    where: {
+      ...(start && end ? { date: { gte: start, lt: end } } : {}),
+      ...viaUserWhereForBrand(brand),
+    },
     include: { user: { select: { name: true, email: true, employeeProfile: { select: { employeeId: true, department: true } } } } },
     orderBy: [{ date: "asc" }, { user: { name: "asc" } }],
   });
@@ -173,8 +213,9 @@ async function addAttendanceSheet(wb: ExcelJS.Workbook, label: string, start: Da
   styleSheet(ws);
 }
 
-async function addLeaveBalancesSheet(wb: ExcelJS.Workbook) {
+async function addLeaveBalancesSheet(wb: ExcelJS.Workbook, brand: BrandFilter) {
   const balances = await prisma.leaveBalance.findMany({
+    where: viaUserWhereForBrand(brand),
     include: {
       user:      { select: { name: true, email: true, employeeProfile: { select: { employeeId: true, department: true } }, isActive: true } },
       leaveType: { select: { name: true, code: true } },
@@ -209,9 +250,11 @@ async function addLeaveBalancesSheet(wb: ExcelJS.Workbook) {
   styleSheet(ws);
 }
 
-async function addRequestsSheets(wb: ExcelJS.Workbook) {
+async function addRequestsSheets(wb: ExcelJS.Workbook, brand: BrandFilter) {
+  const whereBrand = viaUserWhereForBrand(brand);
   // Leave
   const leaves = await prisma.leaveApplication.findMany({
+    where: whereBrand,
     include: { user: { select: { name: true, employeeProfile: { select: { employeeId: true, department: true } } } }, leaveType: { select: { name: true } }, approver: { select: { name: true } } },
     orderBy: { appliedAt: "desc" },
   });
@@ -242,6 +285,7 @@ async function addRequestsSheets(wb: ExcelJS.Workbook) {
 
   // WFH
   const wfh = await prisma.wFHRequest.findMany({
+    where: whereBrand,
     include: { user: { select: { name: true, employeeProfile: { select: { employeeId: true, department: true } } } }, approver: { select: { name: true } } },
     orderBy: { createdAt: "desc" },
   });
@@ -268,6 +312,7 @@ async function addRequestsSheets(wb: ExcelJS.Workbook) {
 
   // On-Duty
   const od = await prisma.onDutyRequest.findMany({
+    where: whereBrand,
     include: { user: { select: { name: true, employeeProfile: { select: { employeeId: true, department: true } } } }, approver: { select: { name: true } } },
     orderBy: { createdAt: "desc" },
   });
@@ -295,6 +340,7 @@ async function addRequestsSheets(wb: ExcelJS.Workbook) {
 
   // Regularizations
   const regs = await prisma.attendanceRegularization.findMany({
+    where: whereBrand,
     include: { user: { select: { name: true, employeeProfile: { select: { employeeId: true, department: true } } } }, approver: { select: { name: true } } },
     orderBy: { createdAt: "desc" },
   });
@@ -321,6 +367,7 @@ async function addRequestsSheets(wb: ExcelJS.Workbook) {
 
   // Comp-Off
   const comp = await prisma.compOffRequest.findMany({
+    where: whereBrand,
     include: { user: { select: { name: true, employeeProfile: { select: { employeeId: true, department: true } } } }, approver: { select: { name: true } } },
     orderBy: { createdAt: "desc" },
   });
@@ -357,31 +404,42 @@ export async function GET(req: NextRequest) {
     const sheets = (req.nextUrl.searchParams.get("sheets") || "employees,attendance,leaves,requests")
       .split(",").map((s) => s.trim()).filter(Boolean);
     const period = req.nextUrl.searchParams.get("period") || "both"; // both | current | last | this-year | last-year | all
+    // Brand scope — "nb-media" / "yt-labs" narrows every sheet to that
+    // brand's employees + their related rows; "all" (or unset) exports
+    // the full org. Slug form matches what the HR-admin sidebar
+    // generates so the URL stays consistent end-to-end.
+    const brandRaw = (req.nextUrl.searchParams.get("brand") || "").toLowerCase();
+    const brand: BrandFilter =
+      brandRaw === "yt-labs" || brandRaw === "yt"      ? "YT Labs" :
+      brandRaw === "nb-media" || brandRaw === "nb"     ? "NB Media" :
+      null;
 
     const wb = new ExcelJS.Workbook();
-    wb.creator = "NB Media HR Dashboard";
+    wb.creator = brand
+      ? `${brand} HR Dashboard`
+      : "NB Media HR Dashboard";
     wb.created = new Date();
 
-    if (sheets.includes("employees"))     await addEmployeesSheet(wb);
+    if (sheets.includes("employees"))     await addEmployeesSheet(wb, brand);
     if (sheets.includes("attendance")) {
       const now = new Date();
       const yNow = now.getUTCFullYear();
       const mNow = now.getUTCMonth();
       if (period === "both" || period === "last") {
         const prev = istMonthRange(yNow, mNow - 1);
-        await addAttendanceSheet(wb, prev.label, prev.start, prev.end);
+        await addAttendanceSheet(wb, prev.label, prev.start, prev.end, brand);
       }
       if (period === "both" || period === "current") {
         const curr = istMonthRange(yNow, mNow);
-        await addAttendanceSheet(wb, curr.label, curr.start, curr.end);
+        await addAttendanceSheet(wb, curr.label, curr.start, curr.end, brand);
       }
       if (period === "this-year") {
         const r = istYearRange(yNow);
-        await addAttendanceSheet(wb, r.label, r.start, r.end);
+        await addAttendanceSheet(wb, r.label, r.start, r.end, brand);
       }
       if (period === "last-year") {
         const r = istYearRange(yNow - 1);
-        await addAttendanceSheet(wb, r.label, r.start, r.end);
+        await addAttendanceSheet(wb, r.label, r.start, r.end, brand);
       }
       if (period === "all") {
         // One sheet per year for readability. Years derived from the
@@ -393,20 +451,21 @@ export async function GET(req: NextRequest) {
              FROM "Attendance" ORDER BY y ASC`
         );
         if (yearsRaw.length === 0) {
-          await addAttendanceSheet(wb, "All time", null, null);
+          await addAttendanceSheet(wb, "All time", null, null, brand);
         } else {
           for (const { y } of yearsRaw) {
             const r = istYearRange(Number(y));
-            await addAttendanceSheet(wb, r.label, r.start, r.end);
+            await addAttendanceSheet(wb, r.label, r.start, r.end, brand);
           }
         }
       }
     }
-    if (sheets.includes("leaves"))   await addLeaveBalancesSheet(wb);
-    if (sheets.includes("requests")) await addRequestsSheets(wb);
+    if (sheets.includes("leaves"))   await addLeaveBalancesSheet(wb, brand);
+    if (sheets.includes("requests")) await addRequestsSheets(wb, brand);
 
     const buffer = await wb.xlsx.writeBuffer();
-    const filename = `nb-media-master-sheet-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const brandFileSlug = brand === "YT Labs" ? "yt-labs" : brand === "NB Media" ? "nb-media" : "all-brands";
+    const filename = `master-sheet-${brandFileSlug}-${new Date().toISOString().slice(0, 10)}.xlsx`;
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type":        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

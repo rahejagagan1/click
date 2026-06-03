@@ -4,17 +4,18 @@
 // per department — every employee whose EmployeeProfile.department
 // matches will see the doc on the public KPI listing automatically.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, BarChart3, FileText, Upload, Trash2, AlertCircle, CheckCircle2,
 } from "lucide-react";
 import { isFullHRAdmin } from "@/lib/access";
 import { DEPARTMENTS } from "@/lib/departments";
+import { DEPARTMENTS_YT_LABS } from "@/lib/departments-yt-labs";
 
 type Doc = {
   id: number;
@@ -36,8 +37,31 @@ export default function ManageKpisPage() {
     if (!isFullHRAdmin(user)) router.replace("/dashboard/kpis");
   }, [status, user, router]);
 
+  // Brand scope from `?brand=` — narrows the Department picker to the
+  // brand's canonical list and the existing-docs table to docs whose
+  // department belongs to that list. "all" = both brand catalogs.
+  const searchParams = useSearchParams();
+  const brandSlug = (searchParams?.get("brand") || "").toLowerCase();
+  const brand =
+    brandSlug === "yt-labs" || brandSlug === "yt"      ? "YT Labs" :
+    brandSlug === "nb-media" || brandSlug === "nb"     ? "NB Media" :
+    "all";
+  const deptOptions = useMemo(() => {
+    if (brand === "YT Labs") return DEPARTMENTS_YT_LABS;
+    if (brand === "NB Media") return DEPARTMENTS;
+    return [...DEPARTMENTS, ...DEPARTMENTS_YT_LABS];
+  }, [brand]);
+
   const { data } = useSWR<{ docs: Doc[] }>("/api/kpis/documents", fetcher);
-  const docs = data?.docs ?? [];
+  const allDocs = data?.docs ?? [];
+  // Narrow the existing-docs table to only departments in scope. Docs
+  // for departments outside the chosen brand are filtered out so the
+  // YT Labs HR doesn't see NB Media KPI rows and vice versa.
+  const docs = useMemo(() => {
+    if (brand === "all") return allDocs;
+    const set = new Set(deptOptions);
+    return allDocs.filter((d) => set.has(d.department));
+  }, [allDocs, deptOptions, brand]);
 
   const [department, setDepartment] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -92,7 +116,14 @@ export default function ManageKpisPage() {
             <BarChart3 size={20} />
           </div>
           <div>
-            <h1 className="text-[22px] font-bold tracking-tight text-slate-800">Manage KPI documents</h1>
+            <h1 className="text-[22px] font-bold tracking-tight text-slate-800 inline-flex items-center gap-2">
+              Manage KPI documents
+              {brand !== "all" && (
+                <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#3b82f6]/10 text-[#3b82f6]">
+                  {brand}
+                </span>
+              )}
+            </h1>
             <p className="mt-0.5 text-[13px] text-slate-500">
               One document per department. Every employee in that department sees the doc automatically.
             </p>
@@ -111,7 +142,7 @@ export default function ManageKpisPage() {
                 className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-[14px] text-slate-800 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15"
               >
                 <option value="">Select a department</option>
-                {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+                {deptOptions.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
               <p className="mt-1 text-[11.5px] text-slate-400">
                 Match the value used on employees' profiles (case-sensitive).

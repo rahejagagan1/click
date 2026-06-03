@@ -185,9 +185,22 @@ const STATUS_DOT: Record<JobStatus, string> = {
   on_hold:   "text-amber-500",
   closed:    "text-rose-400",
 };
-export default function JobsTab() {
+export default function JobsTab({
+  initialBrand,
+}: {
+  /** Seeds the Brand filter from the parent page's `?brand=` URL
+   *  param. The value uses the schema's underscore form
+   *  ("nb_media" / "yt_labs") to match `BRAND_OPTIONS`; empty string
+   *  means "no initial scope". */
+  initialBrand?: string;
+} = {}) {
   // ── Filters ─────────────────────────────────────────────────────
-  const [brand, setBrand]    = useState("");
+  const [brand, setBrand]    = useState(initialBrand ?? "");
+  // Sync to URL-driven changes (sidebar flyout navigating between
+  // brand variants of the same hiring page).
+  useEffect(() => {
+    if (initialBrand !== undefined) setBrand(initialBrand);
+  }, [initialBrand]);
   const [status, setStatus]  = useState<"all" | JobStatus>("all");
   const [department, setDepartment]   = useState("");
   const [hiringManager, setHM]        = useState("");
