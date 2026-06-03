@@ -1248,6 +1248,17 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
   const menuBtnRef   = useRef<HTMLButtonElement | null>(null);
   const menuPanelRef = useRef<HTMLDivElement | null>(null);
 
+  // Inline like + comment state (mirrors /dashboard/hr/engage). Lets HR
+  // react / comment without bouncing into the full feed page.
+  const [localReacted,  setLocalReacted]  = useState(
+    Array.isArray(post.reactions) && post.reactions.some((r: any) => r.userId === sessionUserId),
+  );
+  const [reactionCount, setReactionCount] = useState(post.reactions?.length ?? 0);
+  const [showComments,  setShowComments]  = useState(false);
+  const [commentText,   setCommentText]   = useState("");
+  const [commentEmojiOpen, setCommentEmojiOpen] = useState(false);
+  const commentInputRef = useRef<HTMLInputElement | null>(null);
+
   // The home feed is rendered inside cards with their own clipping. Render
   // the dropdown via a body-level portal at fixed position so the parent
   // overflow can never crop it (same pattern as the engage card).
@@ -1322,7 +1333,53 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
     ? post.content
     : post.content.slice(0, COLLAPSE_AT).trimEnd() + "…";
 
-  const reactionCount = post.reactions?.length || 0;
+  // Optimistic like toggle — flips local state immediately, fires the
+  // API call in the background, then revalidates SWR so the canonical
+  // count from the server replaces the optimistic guess.
+  const toggleReact = async () => {
+    setLocalReacted((p: boolean) => !p);
+    setReactionCount((c: number) => (localReacted ? c - 1 : c + 1));
+    try {
+      await fetch(`/api/hr/engage/posts/${post.id}/react`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+      });
+    } catch { /* keep the optimistic UI even if the network blip — SWR revalidate corrects it. */ }
+    revalidatePosts();
+  };
+
+  const submitComment = async () => {
+    const text = commentText.trim();
+    if (!text) return;
+    setCommentText("");
+    setCommentEmojiOpen(false);
+    try {
+      await fetch(`/api/hr/engage/posts/${post.id}/comments`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: text }),
+      });
+    } catch { /* best-effort; SWR re-fetch fills the comment in on success. */ }
+    revalidatePosts();
+  };
+
+  // Insert an emoji at the current caret position of the comment input.
+  // Keeping the caret math local to the comment input so it doesn't
+  // collide with the parent post-composer's insertAtCursor helper.
+  const insertEmojiIntoComment = (emoji: string) => {
+    const input = commentInputRef.current;
+    if (!input) { setCommentText((t) => t + emoji); return; }
+    const start = input.selectionStart ?? commentText.length;
+    const end   = input.selectionEnd   ?? commentText.length;
+    const next  = commentText.slice(0, start) + emoji + commentText.slice(end);
+    setCommentText(next);
+    // Restore focus + caret position one tick later so React's
+    // controlled-value update has landed.
+    requestAnimationFrame(() => {
+      input.focus();
+      const pos = start + emoji.length;
+      input.setSelectionRange(pos, pos);
+    });
+  };
+
   const commentCount  = post.comments?.length  || 0;
 
   return (
@@ -1436,23 +1493,30 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
       </div>
 
       {/* Single-row footer: Like / Comment on the left, reaction +
-          comment summary on the right — matches the Keka layout the
-          engage card already uses. Like/Comment stay as Links into the
-          full engage feed (this card is read-only on the home page). */}
+          comment summary on the right. Both buttons now act inline —
+          Like toggles the user's reaction directly, Comment expands
+          the comment panel below with a Send + emoji picker so wishes
+          stay quick. */}
       <div className="flex items-center justify-between border-t border-[#eef2f6] px-2 sm:px-3 py-1.5">
         <div className="flex items-center">
-          <Link
-            href="/dashboard/hr/engage"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-[#5f7183] hover:bg-[#f5f7fb] transition-colors"
+          <button
+            type="button"
+            onClick={toggleReact}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium transition-colors hover:bg-[#f5f7fb] ${
+              localReacted ? "text-[#008CFF]" : "text-[#5f7183]"
+            }`}
           >
-            <ThumbsUp className="h-4 w-4" />Like
-          </Link>
-          <Link
-            href="/dashboard/hr/engage"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-[#5f7183] hover:bg-[#f5f7fb] transition-colors"
+            <ThumbsUp className={`h-4 w-4 ${localReacted ? "fill-current" : ""}`} />Like
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowComments((p) => !p)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium transition-colors hover:bg-[#f5f7fb] ${
+              showComments ? "text-[#008CFF]" : "text-[#5f7183]"
+            }`}
           >
             <MessageSquare className="h-4 w-4" />Comment
-          </Link>
+          </button>
         </div>
         <div className="flex items-center gap-1.5 pr-2 text-[12px] text-[#8393a3]">
           {reactionCount > 0 && (
@@ -1466,6 +1530,77 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
           )}
         </div>
       </div>
+
+      {/* Inline comment panel — same structure as the engage page's
+          composer, plus an emoji picker. Existing comments render
+          above the composer. */}
+      {showComments && (
+        <div className="border-t border-[#eef2f6] bg-[#f9fafc] px-3 sm:px-4 py-3 space-y-3">
+          {Array.isArray(post.comments) && post.comments.length > 0 && (
+            <div className="space-y-2">
+              {post.comments.map((c: any) => (
+                <div key={c.id} className="flex items-start gap-2.5">
+                  <Av name={c.author?.name || "User"} url={c.author?.profilePictureUrl} size={26} />
+                  <div className="flex-1 bg-white border border-[#eef2f6] rounded-xl px-3 py-1.5">
+                    <p className="text-[11.5px] font-semibold text-[#3b4a5a]">{c.author?.name || "Team member"}</p>
+                    <p className="text-[12px] text-[#52647a] whitespace-pre-wrap break-words mt-0.5">{c.content}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-start gap-2.5">
+            <Av name={sessionUser?.name || "You"} url={sessionUser?.profilePictureUrl} size={26} />
+            <div className="relative flex-1">
+              <div className="flex items-center gap-1.5 bg-white border border-[#dbe4ed] rounded-full px-3 py-1.5 focus-within:border-[#008CFF] transition-colors">
+                <input
+                  ref={commentInputRef}
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); }
+                  }}
+                  placeholder="Write a comment…"
+                  className="flex-1 bg-transparent text-[12.5px] text-[#3b4a5a] placeholder-[#97a4b3] focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setCommentEmojiOpen((v) => !v)}
+                  title="Insert emoji"
+                  className={`shrink-0 flex h-7 w-7 items-center justify-center rounded-full transition ${
+                    commentEmojiOpen ? "bg-[#f5f9ff] text-[#008CFF]" : "text-[#5c6b80] hover:bg-[#f5f9ff] hover:text-[#008CFF]"
+                  }`}
+                >
+                  <Smile className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={submitComment}
+                  disabled={!commentText.trim()}
+                  title="Send"
+                  className="shrink-0 flex h-7 w-7 items-center justify-center rounded-full text-[#008CFF] hover:bg-[#f5f9ff] disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {commentEmojiOpen && (
+                <div className="absolute right-0 z-20 mt-1 flex flex-wrap gap-1 rounded-md border border-[#dbe4ed] bg-white p-2 shadow-lg w-[260px]">
+                  {["😀","😂","😍","🥳","🙏","👏","👍","🔥","💯","🎉","🚀","💡","✅","❤️","☕","☀️","🌟","🤝","💪","🙌","😊","😎","✨","📌","📷","🎯","💼","📝","🎂","🏆"].map((e) => (
+                    <button
+                      key={e}
+                      type="button"
+                      onClick={() => insertEmojiIntoComment(e)}
+                      className="flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f9ff] text-[16px]"
+                    >
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </article>
   );
 }

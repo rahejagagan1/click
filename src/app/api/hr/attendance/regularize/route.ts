@@ -3,7 +3,7 @@ import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { parseBody } from "@/lib/validate";
-import { notifyUsers } from "@/lib/notifications";
+import { notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
 import { writeAuditLog } from "@/lib/audit-log";
 import { istTimeOnDate, istMonthRange, istTodayDateOnly, istDateOnlyFrom } from "@/lib/ist-date";
 import { isRegularizationWindowEnforced } from "@/app/api/hr/policy/regularization-window/route";
@@ -266,19 +266,28 @@ export async function POST(req: NextRequest) {
     // approve at stage 1) PLUS HR finalisers as a heads-up. Admin-grants
     // skip L1 and go straight to admins for ratification. Developer
     // accounts gated by the "Notify developers" toggle.
-    const admins = await prisma.user.findMany({
-      where: {
-        isActive: true,
-        OR: [
-          // CEO + Special Access + HR Manager (role).
-          { orgLevel: { in: ["ceo", "special_access"] } },
-          { role: "hr_manager" },
-          ...(await devEmailRecipientsClause()),
-        ],
-      },
-      select: { id: true },
-    });
-    const adminIds = admins.map((u) => u.id).filter((id) => id !== targetUserId);
+    // Brand-CEO routing: HR/Special Access (CEO excluded) + the
+    // target's brand CEO. Cleanly isolates each CEO to their own
+    // brand's regularization queue.
+    const [admins, brandCeoId] = await Promise.all([
+      prisma.user.findMany({
+        where: {
+          isActive: true,
+          orgLevel: { not: "ceo" },
+          OR: [
+            { orgLevel: "special_access" },
+            { role: "hr_manager" },
+            ...(await devEmailRecipientsClause()),
+          ],
+        },
+        select: { id: true },
+      }),
+      brandCeoIdForEmployee(targetUserId),
+    ]);
+    const adminIds = [
+      ...admins.map((u) => u.id),
+      ...(brandCeoId ? [brandCeoId] : []),
+    ].filter((id) => id !== targetUserId);
     // Direct manager — gets the ping for stage-1 approval. Skip if
     // they're already in adminIds (avoids a double notify) or the
     // request was admin-granted (no L1 needed).
@@ -442,23 +451,28 @@ export async function PUT(req: NextRequest) {
         action: "regularize.approve_l1", entityType: "AttendanceRegularization", entityId: id,
         before: { status: "pending" }, after: { status: "partially_approved", approvalNote },
       });
-      // Notify HR finalisers + the requester. Developer accounts gated
-      // by the "Notify developers" toggle in Admin → Emails.
-      const finalApprovers = await prisma.user.findMany({
-        where: {
-          isActive: true,
-          OR: [
-            // CEO + Special Access + HR Manager (role).
-            { orgLevel: { in: ["ceo", "special_access"] } },
-            { role: "hr_manager" },
-            ...(await devEmailRecipientsClause()),
-          ],
-        },
-        select: { id: true },
-      });
+      // Brand-CEO L2 routing for the L1→L2 transition.
+      const [finalApprovers, brandCeoIdL2] = await Promise.all([
+        prisma.user.findMany({
+          where: {
+            isActive: true,
+            orgLevel: { not: "ceo" },
+            OR: [
+              { orgLevel: "special_access" },
+              { role: "hr_manager" },
+              ...(await devEmailRecipientsClause()),
+            ],
+          },
+          select: { id: true },
+        }),
+        brandCeoIdForEmployee(reg.userId),
+      ]);
       await notifyUsers({
         actorId: myId,
-        userIds: finalApprovers.map((u) => u.id).filter((uid) => uid !== reg.userId),
+        userIds: [
+          ...finalApprovers.map((u) => u.id),
+          ...(brandCeoIdL2 ? [brandCeoIdL2] : []),
+        ].filter((uid) => uid !== reg.userId),
         type: "regularization", entityId: reg.id,
         title: `A regularization for ${dateLabelEarly} needs final approval`,
         body: approvalNote ? `Manager approved · ${String(approvalNote).slice(0, 140)}` : "Manager approved — awaiting CEO / HR.",

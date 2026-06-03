@@ -90,21 +90,36 @@ export async function sendViolationInProgressReminders(): Promise<number> {
         validRecipients.push({ name: r.name ?? null, email: r.email, orgLevel: r.orgLevel, role: r.role });
     }
 
-    // CEO-per-direct-report lookup: resolve each affected employee's direct
-    // manager once; when that manager is the (active) CEO, the CEO is added
-    // to that violation's recipients (and only that violation's).
+    // CEO-per-brand lookup: resolve each affected employee's brand and
+    // tag the violation with their brand CEO. Wider than direct-manager-
+    // only — Kunal sees every YT Labs violation reminder, Nikit sees
+    // every NB Media one, regardless of reporting chain.
     const affectedIds = [...new Set(due.map((d) => d.userId).filter((id): id is number => id != null))];
     const ceoByEmployee = new Map<number, { name: string | null; email: string }>();
     if (affectedIds.length) {
-        const reports = await prisma.user.findMany({
-            where:  { id: { in: affectedIds } },
-            select: { id: true, manager: { select: { orgLevel: true, isActive: true, name: true, email: true } } },
-        });
-        for (const r of reports) {
-            const m = r.manager;
-            if (m && m.isActive && m.orgLevel === "ceo" && m.email) {
-                ceoByEmployee.set(r.id, { name: m.name, email: m.email });
-            }
+        const [emps, ceos] = await Promise.all([
+            prisma.user.findMany({
+                where:  { id: { in: affectedIds } },
+                select: { id: true, employeeProfile: { select: { businessUnit: true } } },
+            }),
+            prisma.user.findMany({
+                where: { isActive: true, orgLevel: "ceo" },
+                select: {
+                    id: true, name: true, email: true,
+                    employeeProfile: { select: { businessUnit: true } },
+                },
+            }),
+        ]);
+        const ceoByBrand = new Map<string, { name: string | null; email: string }>();
+        for (const c of ceos) {
+            if (!c.email) continue;
+            const bu = c.employeeProfile?.businessUnit || "NB Media";
+            ceoByBrand.set(bu, { name: c.name, email: c.email });
+        }
+        for (const e of emps) {
+            const bu = e.employeeProfile?.businessUnit || "NB Media";
+            const ceo = ceoByBrand.get(bu);
+            if (ceo) ceoByEmployee.set(e.id, ceo);
         }
     }
     if (validRecipients.length === 0 && ceoByEmployee.size === 0) return 0;

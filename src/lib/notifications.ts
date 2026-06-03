@@ -357,12 +357,14 @@ export async function directManagerIdForEmployee(
 /**
  * Resolve the set of users who should be notified when `actorId` submits a
  * request that needs approval: their direct manager + every active HR
- * manager / Special Access / developer. The actor themselves is excluded so
- * self-approvers don't ping their own inbox.
+ * manager / Special Access / developer + their BRAND CEO. The actor
+ * themselves is excluded so self-approvers don't ping their own inbox.
  *
- * The CEO is NOT a blanket recipient — they're only pinged when they're the
- * actor's *direct* manager, which the `actor.managerId` line below already
- * covers. See {@link ceoRecipientIdForEmployee}.
+ * Brand CEO routing (NB Media → Saurabh/Nikit, YT Labs → Kunal): we
+ * exclude CEOs from the blanket HR fan-out and add back the CEO whose
+ * `businessUnit` matches the actor's. This keeps brand inboxes
+ * isolated — Kunal never sees NB Media submissions, Nikit never sees
+ * YT Labs ones.
  */
 export async function approverIdsForUser(actorId: number): Promise<number[]> {
   // Approver chain: the actor's direct manager + every active Special
@@ -371,14 +373,15 @@ export async function approverIdsForUser(actorId: number): Promise<number[]> {
   // Emails Automation controls whether they're copied on the fan-out.
   // Default ON for backwards compatibility.
   const devClause = await devEmailRecipientsClause();
-  const [actor, admins] = await Promise.all([
+  const [actor, admins, brandCeoId] = await Promise.all([
     prisma.user.findUnique({ where: { id: actorId }, select: { managerId: true } }),
     prisma.user.findMany({
       where: {
         isActive: true,
-        // CEO excluded from the blanket fan-out — only re-added below when
-        // they're the actor's direct manager. Top-level NOT because the
-        // CEO/owner account also carries role="admin" / may be a dev email.
+        // CEO excluded from the blanket fan-out — re-added per-brand
+        // below so the YT Labs CEO never sees NB Media submissions
+        // (and vice versa). Top-level NOT because the CEO/owner
+        // account also carries role="admin" / may be a dev email.
         orgLevel: { not: "ceo" },
         OR: [
           // Special Access + HR Manager (role).
@@ -391,10 +394,13 @@ export async function approverIdsForUser(actorId: number): Promise<number[]> {
       },
       select: { id: true },
     }),
+    brandCeoIdForEmployee(actorId),
   ]);
   const ids = new Set<number>(admins.map((u) => u.id));
-  // The actor's direct manager — which IS how the CEO gets added for their
-  // own direct reports (and only them).
+  // Brand-CEO (NB Media → NB Media CEO, YT Labs → YT Labs CEO).
+  if (brandCeoId) ids.add(brandCeoId);
+  // The actor's direct manager — explicit add covers non-CEO chain
+  // (peer manager, team lead, etc.) that the admin pool doesn't.
   if (actor?.managerId) ids.add(actor.managerId);
   ids.delete(actorId);
   return Array.from(ids);
