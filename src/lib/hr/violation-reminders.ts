@@ -77,9 +77,18 @@ export async function sendViolationInProgressReminders(): Promise<number> {
                 ...(await devEmailRecipientsClause()),
             ],
         },
-        select: { name: true, email: true },
+        select: { name: true, email: true, orgLevel: true, role: true },
     });
-    const validRecipients = recipients.filter((r) => !!r.email);
+    // Apply the per-role email-toggle filter — drops recipients whose
+    // role-specific override for "violation_reminders" is OFF.
+    const { rolesForUser, isEmailEnabledForRoles } = await import("@/lib/email/toggles");
+    const validRecipients: Array<{ name: string | null; email: string; orgLevel: string | null; role: string | null }> = [];
+    for (const r of recipients) {
+        if (!r.email) continue;
+        const roles = rolesForUser({ orgLevel: r.orgLevel, role: r.role });
+        if (!(await isEmailEnabledForRoles("violation_reminders", roles))) continue;
+        validRecipients.push({ name: r.name ?? null, email: r.email, orgLevel: r.orgLevel, role: r.role });
+    }
 
     // CEO-per-direct-report lookup: resolve each affected employee's direct
     // manager once; when that manager is the (active) CEO, the CEO is added
@@ -108,7 +117,13 @@ export async function sendViolationInProgressReminders(): Promise<number> {
         );
         // Base recipients (HR / special_access / admin) plus the CEO only
         // when this violation is about one of their own direct reports.
-        const ceo = v.userId != null ? ceoByEmployee.get(v.userId) : undefined;
+        // The CEO entry is also subject to the per-role filter — if the
+        // "ceo" toggle for violation_reminders is OFF, the CEO drops
+        // out of THIS violation's recipient set.
+        let ceo = v.userId != null ? ceoByEmployee.get(v.userId) : undefined;
+        if (ceo && !(await isEmailEnabledForRoles("violation_reminders", ["ceo"]))) {
+            ceo = undefined;
+        }
         const violationRecipients = ceo ? [...validRecipients, ceo] : validRecipients;
         // Send one mail per recipient — keeps the salutation personal
         // and avoids exposing the recipient list in the To header.
