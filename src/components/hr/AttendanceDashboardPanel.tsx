@@ -461,7 +461,15 @@ function StatusPill({ s, rawStatus }: { s: Row["status"]; rawStatus: string }) {
   );
 }
 
-export default function AttendanceDashboardPanel() {
+export default function AttendanceDashboardPanel({
+  initialBrand,
+}: {
+  /** Locks the panel to a specific brand on mount (NB Media / YT Labs)
+   *  — comes from the `?brand=` URL param on /dashboard/hr/admin. When
+   *  null, the panel auto-detects from the viewer's businessUnit (or
+   *  "all" for super-admins) as before. */
+  initialBrand?: "NB Media" | "YT Labs" | "all" | null;
+} = {}) {
   const { data: session } = useSession();
   const me = session?.user as any;
   const canView =
@@ -489,13 +497,24 @@ export default function AttendanceDashboardPanel() {
   // downstream calculation (counts donut, stat cards, status sub-tabs,
   // table rows) scopes to the selected brand.
   type CompanyTab = "NB Media" | "YT Labs" | "all";
-  const [companyTab, setCompanyTab] = useState<CompanyTab>("all");
-  const [companyTabTouched, setCompanyTabTouched] = useState(false);
+  const [companyTab, setCompanyTab] = useState<CompanyTab>(initialBrand ?? "all");
+  // When the URL prop is set, treat it like a manual selection so the
+  // auto-detect block below doesn't overwrite it once /api/hr/profile
+  // resolves. The user can still re-pick via the Brand Scope pills —
+  // that path calls setCompanyTabTouched(true) explicitly.
+  const [companyTabTouched, setCompanyTabTouched] = useState<boolean>(initialBrand != null);
   const { data: viewerProfile } = useSWR<any>(
     me ? "/api/hr/profile" : null,
     fetcher,
     { revalidateOnFocus: false },
   );
+  // Sync to a changing URL param without remounting (sidebar flyout
+  // navigates between brand variants of the same route).
+  useEffect(() => {
+    if (initialBrand == null) return;
+    setCompanyTab(initialBrand);
+    setCompanyTabTouched(true);
+  }, [initialBrand]);
   useEffect(() => {
     if (companyTabTouched) return;
     const isSuperAdmin = me?.orgLevel === "ceo" || me?.isDeveloper;
@@ -649,33 +668,37 @@ export default function AttendanceDashboardPanel() {
             )}
           </p>
         </div>
-        {/* Company scope tabs — auto-default to viewer's brand. */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {([
-            { key: "NB Media", count: brandCounts.nb  },
-            { key: "YT Labs",  count: brandCounts.yt  },
-            { key: "all",      count: brandCounts.all },
-          ] as const).map(({ key, count }) => {
-            const active = companyTab === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => { setCompanyTab(key as CompanyTab); setCompanyTabTouched(true); }}
-                className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
-                  active
-                    ? "bg-[#008CFF] text-white shadow-sm"
-                    : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                <span>{key === "all" ? "All" : key}</span>
-                <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
-                  active ? "bg-white/20 text-white" : "bg-[#008CFF] text-white"
-                }`}>{count}</span>
-              </button>
-            );
-          })}
-        </div>
+        {/* Company scope tabs — hidden when the HR Dashboard sidebar
+            flyout already picked a brand (initialBrand set). Auto-
+            default to viewer's brand for standalone mounts. */}
+        {initialBrand == null && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {([
+              { key: "NB Media", count: brandCounts.nb  },
+              { key: "YT Labs",  count: brandCounts.yt  },
+              { key: "all",      count: brandCounts.all },
+            ] as const).map(({ key, count }) => {
+              const active = companyTab === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => { setCompanyTab(key as CompanyTab); setCompanyTabTouched(true); }}
+                  className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
+                    active
+                      ? "bg-[#008CFF] text-white shadow-sm"
+                      : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <span>{key === "all" ? "All" : key}</span>
+                  <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold !text-white ${
+                    active ? "bg-white/20" : "bg-[#008CFF]"
+                  }`} style={{ color: "#fff" }}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-3">
@@ -744,9 +767,9 @@ export default function AttendanceDashboardPanel() {
                   }`}
                 >
                   <span>{t.label}</span>
-                  <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
-                    active ? "bg-white/20 text-white" : "bg-[#008CFF] text-white"
-                  }`}>{t.n}</span>
+                  <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold !text-white ${
+                    active ? "bg-white/20" : "bg-[#008CFF]"
+                  }`} style={{ color: "#fff" }}>{t.n}</span>
                 </button>
               );
             })}
