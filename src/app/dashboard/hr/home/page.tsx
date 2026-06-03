@@ -2231,7 +2231,15 @@ export default function HRHomePage() {
   const postsUrl = orgTab === "org"
     ? "/api/hr/engage/posts"
     : `/api/hr/engage/posts?scope=${encodeURIComponent(teamScope)}`;
-  const { data: posts = [] } = useSWR(postsUrl, fetcher);
+  const { data: posts = [], isLoading: postsLoading } = useSWR(postsUrl, fetcher, {
+    // Keep the previous tab's posts on screen while the new tab's
+    // payload is in flight — otherwise switching Organization ↔
+    // My team flashes the empty state for one frame before the
+    // spinner appears. SWR returns the still-cached `data` and
+    // flips `isValidating`, so we render the spinner overlay only
+    // when there's no data yet for the active URL.
+    keepPreviousData: true,
+  });
   const { data: announcements = [] } = useSWR("/api/hr/announcements", fetcher);
 
   // Clock-in / clock-out actions are owned by a shared hook. See
@@ -3375,6 +3383,18 @@ export default function HRHomePage() {
               <div className="space-y-3">
                 {posts.length > 0 ? (
                   posts.slice(0, 4).map((post: any) => <FeedPostCard key={post.id} post={post} sessionUser={user} />)
+                ) : postsLoading ? (
+                  // Loading state — keeps the visual area populated
+                  // while the feed payload is in flight, instead of
+                  // flashing the empty state before posts arrive.
+                  <div className={`${C.card} px-5 py-10 flex flex-col items-center justify-center gap-3`}>
+                    <span
+                      className="inline-block h-8 w-8 rounded-full border-[3px] border-[#008CFF]/20 border-t-[#008CFF] animate-spin"
+                      role="status"
+                      aria-label="Loading posts"
+                    />
+                    <p className={`text-[12px] ${C.t3}`}>Loading posts…</p>
+                  </div>
                 ) : analyticsData ? (
                   <div className={`${C.card} px-5 py-8 text-center`}>
                     <p className="text-[13px] font-semibold text-[#334455]">No posts yet</p>
