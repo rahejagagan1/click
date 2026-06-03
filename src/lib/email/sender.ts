@@ -108,6 +108,13 @@ export async function emailsForUserIds(userIds: number[]): Promise<string[]> {
  * always allowed through (the per-role gate is opt-in for HR-leadership
  * accounts only).
  *
+ * `exemptUserIds` is the direct-manager escape hatch: even when the
+ * per-role toggle for a recipient's role is OFF, recipients in this
+ * list always pass through. Used to keep an employee's direct manager
+ * on emails about that employee — regardless of the manager's role
+ * (CEO, admin, HR Manager, Special Access) — while still allowing the
+ * per-role toggle to silence the org-wide blanket fan-out.
+ *
  * Single round-trip to the DB; the toggle state is also a single fetch
  * (and cached by Prisma within a request). The filter is layered on top
  * of the GLOBAL toggle which dispatchEmails already checks upstream.
@@ -115,18 +122,22 @@ export async function emailsForUserIds(userIds: number[]): Promise<string[]> {
 export async function emailsForUserIdsFiltered(
   userIds: number[],
   kind: import("./toggles").EmailKey,
+  opts?: { exemptUserIds?: number[] },
 ): Promise<string[]> {
   if (userIds.length === 0) return [];
-  const { rolesForUser, isEmailEnabledForRoles } = await import("./toggles");
-  const rows = await prisma.user.findMany({
-    where:  { id: { in: userIds }, isActive: true },
-    select: { email: true, orgLevel: true, role: true },
-  });
+  const exempt = new Set<number>(opts?.exemptUserIds ?? []);
+  const { getEmailToggleState, shouldIncludeRecipient } = await import("./toggles");
+  const [rows, state] = await Promise.all([
+    prisma.user.findMany({
+      where:  { id: { in: userIds }, isActive: true },
+      select: { id: true, email: true, orgLevel: true, role: true },
+    }),
+    getEmailToggleState(),
+  ]);
   const allowed: string[] = [];
   for (const r of rows) {
     if (!r.email) continue;
-    const roles = rolesForUser({ orgLevel: r.orgLevel, role: r.role });
-    if (await isEmailEnabledForRoles(kind, roles)) allowed.push(r.email);
+    if (shouldIncludeRecipient(r, kind, state, exempt)) allowed.push(r.email);
   }
   return allowed;
 }

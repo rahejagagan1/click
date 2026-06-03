@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
-import { notifyUsers, ceoRecipientIdForEmployee } from "@/lib/notifications";
+import { notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
 import { writeAuditLog } from "@/lib/audit-log";
 import { countWorkingDays } from "@/lib/hr/working-days";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
@@ -304,7 +304,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         },
         select: { id: true },
       });
-      const ceoFinalApprover = await ceoRecipientIdForEmployee(application.userId);
+      // Brand-CEO routing: every YT Labs applicant pulls in the YT
+      // Labs CEO (Kunal) at L2, and every NB Media applicant pulls in
+      // the NB Media CEO. Wider than the direct-manager-only
+      // `ceoRecipientIdForEmployee` we used before — was leaving e.g.
+      // Riya Uppal's leaves out of Kunal's inbox because her direct
+      // manager is Tanvi.
+      const ceoFinalApprover = await brandCeoIdForEmployee(application.userId);
       const extras = application.notifyUserIds ?? [];
       await notifyUsers({
         actorId:  myId,

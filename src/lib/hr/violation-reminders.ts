@@ -117,13 +117,12 @@ export async function sendViolationInProgressReminders(): Promise<number> {
         );
         // Base recipients (HR / special_access / admin) plus the CEO only
         // when this violation is about one of their own direct reports.
-        // The CEO entry is also subject to the per-role filter — if the
-        // "ceo" toggle for violation_reminders is OFF, the CEO drops
-        // out of THIS violation's recipient set.
-        let ceo = v.userId != null ? ceoByEmployee.get(v.userId) : undefined;
-        if (ceo && !(await isEmailEnabledForRoles("violation_reminders", ["ceo"]))) {
-            ceo = undefined;
-        }
+        // The per-violation CEO entry is the DIRECT-REPORT exemption —
+        // always sent regardless of the per-role "ceo" toggle, because
+        // the toggle only silences BLANKET fan-out. The HR / special /
+        // admin recipients above ARE filtered by their per-role toggle
+        // (see the validRecipients loop earlier in this file).
+        const ceo = v.userId != null ? ceoByEmployee.get(v.userId) : undefined;
         const violationRecipients = ceo ? [...validRecipients, ceo] : validRecipients;
         // Send one mail per recipient — keeps the salutation personal
         // and avoids exposing the recipient list in the To header.

@@ -3166,8 +3166,8 @@ function EmployeeTimePanel({
       {/* Regularize-on-behalf modal — admin only */}
       {regOpen && isHRAdmin ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div className="w-full max-w-md flex flex-col max-h-[90vh] rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 flex-shrink-0">
               <div>
                 <h3 className="text-[14px] font-semibold text-slate-800">Regularize attendance</h3>
                 <p className="text-[11.5px] text-slate-500">For {userName} · {regForm.date}</p>
@@ -3177,7 +3177,7 @@ function EmployeeTimePanel({
               </button>
             </div>
 
-            <div className="space-y-3 px-5 py-4">
+            <div className="space-y-3 px-5 py-4 flex-1 overflow-y-auto">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Clock-in</label>
@@ -3217,7 +3217,7 @@ function EmployeeTimePanel({
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 flex-shrink-0">
               <button
                 onClick={() => setRegOpen(false)}
                 className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50"
@@ -3240,8 +3240,8 @@ function EmployeeTimePanel({
       {/* ── HR on-behalf: On Duty modal ────────────────────────────── */}
       {odOpen && isHRAdmin ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div className="w-full max-w-md flex flex-col max-h-[90vh] rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 flex-shrink-0">
               <div>
                 <h3 className="text-[14px] font-semibold text-slate-800">Submit On Duty</h3>
                 <p className="text-[11.5px] text-slate-500">For {userName}</p>
@@ -3250,7 +3250,7 @@ function EmployeeTimePanel({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-3 px-5 py-4">
+            <div className="space-y-3 px-5 py-4 flex-1 overflow-y-auto">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">From</label>
@@ -3302,7 +3302,7 @@ function EmployeeTimePanel({
                 onNaChange={setHandoffPocNa}
               />
             </div>
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 flex-shrink-0">
               <button
                 onClick={() => { setOdOpen(false); resetHandoff(); }}
                 className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50"
@@ -3323,8 +3323,8 @@ function EmployeeTimePanel({
 
       {wfhOpen && isHRAdmin ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div className="w-full max-w-md flex flex-col max-h-[90vh] rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 flex-shrink-0">
               <div>
                 <h3 className="text-[14px] font-semibold text-slate-800">Grant Work From Home</h3>
                 <p className="text-[11.5px] text-slate-500">For {userName}</p>
@@ -3333,7 +3333,7 @@ function EmployeeTimePanel({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-3 px-5 py-4">
+            <div className="space-y-3 px-5 py-4 flex-1 overflow-y-auto">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">From</label>
@@ -3365,7 +3365,7 @@ function EmployeeTimePanel({
                 />
               </div>
             </div>
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 flex-shrink-0">
               <button
                 onClick={() => setWfhOpen(false)}
                 className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50"
@@ -3387,8 +3387,13 @@ function EmployeeTimePanel({
       {/* ── HR on-behalf: Leave + WFH unified modal ───────────────────── */}
       {leaveOpen && isHRAdmin ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          {/* Flex column with capped height so the form body scrolls
+              while the header + tab strip stay pinned to the top and
+              the action footer stays pinned to the bottom. Fixes the
+              small-screen bug where the Apply leave / Grant WFH button
+              was pushed off the viewport. */}
+          <div className="w-full max-w-md flex flex-col max-h-[90vh] rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 flex-shrink-0">
               <div>
                 <h3 className="text-[14px] font-semibold text-slate-800">
                   {leaveModalTab === "leave" ? "Apply Leave on behalf" : "Grant Work From Home"}
@@ -3401,7 +3406,7 @@ function EmployeeTimePanel({
             </div>
 
             {/* Tab strip */}
-            <div className="flex border-b border-slate-100 px-2">
+            <div className="flex border-b border-slate-100 px-2 flex-shrink-0">
               {(["leave", "wfh"] as const).map((t) => (
                 <button
                   key={t}
@@ -3418,6 +3423,8 @@ function EmployeeTimePanel({
               ))}
             </div>
 
+            {/* Scrollable form body — only this region scrolls. */}
+            <div className="flex-1 overflow-y-auto">
             {leaveModalTab === "leave" ? (
               <div className="space-y-3 px-5 py-4">
                 <div>
@@ -3606,8 +3613,9 @@ function EmployeeTimePanel({
                 />
               </div>
             )}
+            </div>
 
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 flex-shrink-0">
               <button
                 onClick={() => { setLeaveOpen(false); resetHandoff(); }}
                 className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50"

@@ -197,7 +197,27 @@ export default function OnboardEmployeePage() {
   const router = useRouter();
   const search = useSearchParams();
   const [step, setStep]       = useState<1 | 2 | 3 | 4 | 5>(1);
-  const [form, setForm]       = useState<Form>(EMPTY);
+  // Brand auto-fill — when HR opens onboarding from the YT Labs HR
+  // Dashboard flyout the link carries `?brand=yt-labs`, so the form
+  // should land pre-set to the YT Labs Number Series (which cascades
+  // into legalEntity / businessUnit / costCenter via the useEffect
+  // further down). NB Media / all / no-param falls through to the
+  // existing default. We read the param ONCE here and seed the
+  // useState initial value — that way a stored draft (restored a
+  // moment later by the localStorage effect) still wins, as the user
+  // would expect mid-flow.
+  const [form, setForm] = useState<Form>(() => {
+    const brand = (search?.get("brand") || "").toLowerCase();
+    if (brand === "yt-labs" || brand === "yt") {
+      return {
+        ...EMPTY,
+        numberSeries: "YT Labs Series",
+        legalEntity:  "YT Labs",
+        businessUnit: "YT Labs",
+      };
+    }
+    return EMPTY;
+  });
   const [saving, setSaving]   = useState(false);
   const [error, setError]     = useState("");
   const [success, setSuccess] = useState("");
@@ -543,13 +563,30 @@ export default function OnboardEmployeePage() {
   const [draftLoaded,     setDraftLoaded]     = useState(false);
 
   // Restore on mount (runs once — client-only to avoid hydration issues).
+  //
+  // URL-brand precedence: if the page was opened from the YT Labs (or
+  // NB Media) HR Dashboard flyout, `?brand=` carries that intent. A
+  // saved draft from a prior NB Media onboarding shouldn't override
+  // the brand the user just chose — so after merging the draft, we
+  // re-apply the URL brand's company-preset (NumberSeries / Legal
+  // Entity / Business Unit). Personal fields the user already typed
+  // are preserved; only the brand-related ones get reset.
   useEffect(() => {
     if (typeof window === "undefined") { setDraftLoaded(true); return; }
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed?.form)  setForm({ ...EMPTY, ...parsed.form });
+        if (parsed?.form) {
+          const brand = (search?.get("brand") || "").toLowerCase();
+          let restored: Form = { ...EMPTY, ...parsed.form };
+          if (brand === "yt-labs" || brand === "yt") {
+            restored = { ...restored, numberSeries: "YT Labs Series", legalEntity: "YT Labs", businessUnit: "YT Labs" };
+          } else if (brand === "nb-media" || brand === "nb") {
+            restored = { ...restored, numberSeries: "NB Media Series", legalEntity: "NB Media Productions", businessUnit: "NB Media" };
+          }
+          setForm(restored);
+        }
         if (parsed?.step && parsed.step >= 1 && parsed.step <= 4) {
           setStep(parsed.step as 1 | 2 | 3 | 4 | 5);
         }
@@ -561,7 +598,7 @@ export default function OnboardEmployeePage() {
       }
     } catch { /* malformed draft — ignore and start fresh */ }
     setDraftLoaded(true);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save on any meaningful change, debounced. Only starts AFTER the initial
   // restore completes so the first "write" isn't the empty default form

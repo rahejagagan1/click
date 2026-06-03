@@ -225,6 +225,9 @@ function buildEmailFor(
  * Internal: resolve emails for `userIds` and dispatch the templated
  * email. Fire-and-forget — silently swallows failures so notifications
  * never block the API.
+ *
+ * `exemptUserIds` is the direct-report escape hatch (see
+ * emailsForUserIdsFiltered).
  */
 async function dispatchEmails(
   userIds: number[],
@@ -232,6 +235,7 @@ async function dispatchEmails(
   title: string,
   body?: string,
   emailData?: EmailData,
+  exemptUserIds?: number[],
 ): Promise<void> {
   try {
     // Admin-controllable gate (Admin → Emails Automation). When a type is
@@ -245,8 +249,9 @@ async function dispatchEmails(
     if (!content) return;
     // Per-role filter: drops recipients whose role-specific override
     // for this email kind is OFF (e.g. "stop emailing the CEO about
-    // leave"). Users who don't match any tracked role pass through.
-    const to = await emailsForUserIdsFiltered(userIds, type as any);
+    // leave"). exemptUserIds bypasses the filter for direct-report
+    // CEOs — see emailsForUserIdsFiltered.
+    const to = await emailsForUserIdsFiltered(userIds, type as any, { exemptUserIds });
     if (to.length === 0) return;
     // Don't await — emails go out in the background.
     void sendEmail({ to, content });
@@ -278,6 +283,75 @@ export async function ceoRecipientIdForEmployee(
   });
   const mgr = emp?.manager;
   return mgr && mgr.isActive && mgr.orgLevel === "ceo" ? mgr.id : null;
+}
+
+/**
+ * Returns the CEO id whose `businessUnit` matches the given employee's
+ * brand — used for L2 routing where every employee in a brand should
+ * route to that brand's CEO at the final-approval stage (NOT just
+ * those whose direct manager is the CEO).
+ *
+ * Distinct from {@link ceoRecipientIdForEmployee}, which is the
+ * narrower "direct-manager-only" rule used for email exemptions and
+ * report locks. The brand-CEO rule is broader and ties final approval
+ * to brand membership, so e.g. every YT Labs leave's L2 stage pulls
+ * in the YT Labs CEO regardless of the applicant's reporting chain.
+ *
+ * Treats NULL `businessUnit` as "NB Media" (parent-brand default) so
+ * legacy rows route to the NB Media CEO. Returns null when no active
+ * CEO exists for that brand.
+ */
+export async function brandCeoIdForEmployee(
+  employeeId: number | null | undefined,
+): Promise<number | null> {
+  if (!employeeId) return null;
+  const emp = await prisma.user.findUnique({
+    where:  { id: employeeId },
+    select: { employeeProfile: { select: { businessUnit: true } } },
+  });
+  const bu = emp?.employeeProfile?.businessUnit ?? "NB Media";
+  // Match the brand-resolution rule used everywhere else: NB Media
+  // bucket includes null businessUnit + missing profile rows; YT Labs
+  // is strict-equal.
+  const brandWhere: any = bu === "YT Labs"
+    ? { employeeProfile: { businessUnit: "YT Labs" } }
+    : { OR: [
+        { employeeProfile: { businessUnit: "NB Media" } },
+        { employeeProfile: { businessUnit: null } },
+        { employeeProfile: null },
+      ] };
+  const ceo = await prisma.user.findFirst({
+    where: { isActive: true, orgLevel: "ceo", ...brandWhere },
+    select: { id: true },
+  });
+  return ceo?.id ?? null;
+}
+
+/**
+ * Returns the subject employee's direct manager id (any role) — used as
+ * the "always-deliver" exemption for the per-role email-toggle filter.
+ *
+ * Whatever role the manager carries (CEO, admin, HR Manager, Special
+ * Access, etc.), if HR has flipped that role's toggle for a given email
+ * kind OFF, the manager STILL gets the email about their own direct
+ * report. The per-role toggle is intended to silence org-wide blanket
+ * fan-out, not to cut managers off from their team's signals.
+ *
+ * Returns null when:
+ *  - employeeId is missing
+ *  - the employee has no manager
+ *  - the manager is inactive
+ */
+export async function directManagerIdForEmployee(
+  employeeId: number | null | undefined,
+): Promise<number | null> {
+  if (!employeeId) return null;
+  const emp = await prisma.user.findUnique({
+    where:  { id: employeeId },
+    select: { manager: { select: { id: true, isActive: true } } },
+  });
+  const mgr = emp?.manager;
+  return mgr && mgr.isActive ? mgr.id : null;
 }
 
 /**
@@ -344,6 +418,17 @@ export async function notifyUsers(params: {
    *  days, approver name, etc. so the template doesn't fall back to
    *  parsing the title/body. */
   emailData?: EmailData;
+  /** Subject employee — the person the email is "about" (leave
+   *  applicant, WFH applicant, employee whose violation reminder
+   *  this is, etc.). Used to compute the direct-report CEO exemption:
+   *  when subject's direct manager is the active CEO, that CEO is
+   *  always included on this email regardless of the per-role
+   *  CEO toggle. Defaults to actorId — covers the common case where
+   *  the subject IS the actor (submit-your-own-leave flow). For L1→L2
+   *  transitions where the actor is the approver, callers should
+   *  pass `subjectId: application.userId` so the exemption tracks
+   *  the applicant, not the approver. */
+  subjectId?: number | null;
 }): Promise<void> {
   try {
     const actor = params.actorId ?? null;
@@ -361,8 +446,18 @@ export async function notifyUsers(params: {
         linkUrl:  params.linkUrl,
       })),
     });
+    // Direct-manager exemption: when this email is "about" an
+    // employee, their direct manager ALWAYS gets the mail —
+    // regardless of role (CEO, admin, HR Manager, Special Access,
+    // etc.) and regardless of whether HR has flipped that role's
+    // per-role toggle off. The per-role toggle silences the
+    // org-wide blanket fan-out only; managers stay on emails about
+    // their own direct reports.
+    const subject = params.subjectId ?? params.actorId ?? null;
+    const exemptMgrId = subject ? await directManagerIdForEmployee(subject) : null;
+    const exemptUserIds = exemptMgrId ? [exemptMgrId] : undefined;
     // Mirror the in-app notification as an email — fire-and-forget.
-    void dispatchEmails(ids, params.type, params.title, params.body, params.emailData);
+    void dispatchEmails(ids, params.type, params.title, params.body, params.emailData, exemptUserIds);
   } catch (e) {
     console.error("notifyUsers failed:", e);
   }
@@ -403,7 +498,12 @@ export async function notifyApprovers(params: {
         linkUrl:  params.linkUrl,
       })),
     });
-    void dispatchEmails(recipientIds, params.type, params.title, params.body, params.emailData);
+    // Direct-manager exemption — same rule as notifyUsers. Subject of an
+    // approval email IS the actor, so the actor's direct manager always
+    // gets the mail even if their per-role toggle is OFF.
+    const exemptMgrId = await directManagerIdForEmployee(params.actorId);
+    const exemptUserIds = exemptMgrId ? [exemptMgrId] : undefined;
+    void dispatchEmails(recipientIds, params.type, params.title, params.body, params.emailData, exemptUserIds);
   } catch (e) {
     console.error("notifyApprovers failed:", e);
   }
