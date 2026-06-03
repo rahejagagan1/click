@@ -56,6 +56,14 @@ export default function Sidebar() {
     // CEO-only items stay restricted to the actual CEO + developers — `Dashboard`
     // for instance is the org-wide CEO console, not appropriate for special_access.
     const isCeo = user?.orgLevel === "ceo" || user?.isDeveloper === true;
+    // YT Labs CEO (Kunal) is brand-scoped — they see ONLY the 10
+    // sections HR carved out for the YT Labs sub-dashboard:
+    //   Home · Me · My Finances · Feedback · Tools · KPIs · Violation
+    //   Log · HR Dashboard · My Team · People
+    // Everything else (Dashboard / Cases / Company / Scores / YouTube /
+    // Admin / Reports) is hidden even though they pass the broader
+    // CEO checks above. NB Media CEO + developers keep full visibility.
+    const isYtLabsCeo = user?.orgLevel === "ceo" && user?.businessUnit === "YT Labs";
     const canSeeReports = isAdmin
         || user?.orgLevel === "manager"
         || user?.orgLevel === "hod"
@@ -74,8 +82,17 @@ export default function Sidebar() {
     );
     const tabAllowed = (key: string) => (perms?.permissions?.[key] ?? true);
 
+    // YT Labs CEO allowlist for the global NAV_ITEMS strip — only
+    // Feedback and Tools survive. Everything else (Dashboard, Cases,
+    // Company, Scores, YouTube, Admin) is hidden regardless of role.
+    const YT_CEO_NAV_ALLOWED = new Set(["Feedback", "Tools"]);
+
     const visibleItems = NAV_ITEMS.filter((item) => {
         const label = (item as any).label as string;
+        // YT Labs CEO is locked to a HR-carved allowlist. Apply the
+        // brand restriction before any other rule so a role bypass
+        // (isCeo / isAdmin) can't accidentally re-grant access.
+        if (isYtLabsCeo && !YT_CEO_NAV_ALLOWED.has(label)) return false;
         // Items that ARE in the Tab Permissions catalog let the per-user
         // permission win — that's what makes the Permissions UI actually
         // grant access. tabPermissionsForUser() already incorporates role
@@ -520,8 +537,10 @@ export default function Sidebar() {
                     );
                 })}
 
-                {/* Report — visible to CEO, developers, managers, HODs only */}
-                {canSeeReports && tabAllowed("reports") && (!isAdmin ? (
+                {/* Report — visible to CEO, developers, managers, HODs only.
+                    YT Labs CEO is locked out per the brand-scoped sidebar
+                    allowlist (no Report tile in their 10 allowed sections). */}
+                {canSeeReports && tabAllowed("reports") && !isYtLabsCeo && (!isAdmin ? (
                     <Link
                         href={`/dashboard/reports/${user?.dbId}`}
                         className={cn(
