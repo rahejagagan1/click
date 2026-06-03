@@ -593,7 +593,13 @@ html:not(.dark) .glass {
 .jd-prose h4,
 .jd-prose h5,
 .jd-prose h6 {
-  overflow-wrap: anywhere;
+  /* `break-word` wraps at SPACES like normal English text and
+     only falls back to mid-string breaking when a single token
+     genuinely can't fit (long URLs, identifiers). The earlier
+     `anywhere` value treated every glyph as a break candidate,
+     so the browser broke "enhancing" → "enhan-cing" and "in" →
+     "i-n" mid-line. With break-word those words stay intact. */
+  overflow-wrap: break-word;
   word-wrap:     break-word;
 }
 .jd-prose h1, .jd-prose h2 {
