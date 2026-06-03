@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
-import { notifyUsers, ceoRecipientIdForEmployee } from "@/lib/notifications";
+import { notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
 import { writeSnapshot as writeReportTeamSnapshot } from "@/lib/reports/team-snapshot";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
 
@@ -176,7 +176,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
                         },
                         select: { id: true },
                     }),
-                    ceoRecipientIdForEmployee(managerId),
+                    brandCeoIdForEmployee(managerId),
                 ]);
                 const periodLabel = `Week ${week}, ${month}/${year}`;
                 const link        = `/dashboard/reports/${managerId}/weekly/${week}?month=${month}&year=${year}`;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
-import { notifyApprovers, notifyUsers } from "@/lib/notifications";
+import { notifyApprovers, notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
 import { sendEmail } from "@/lib/email/sender";
 import { pocAssignmentEmail } from "@/lib/email/templates";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
@@ -205,23 +205,30 @@ export async function PUT(req: NextRequest) {
         where: { id },
         data: { status: "partially_approved", approvedById: myId!, approvalNote },
       });
-      // CEO + Special Access + HR Manager (role). Developer accounts
-      // gated by the "Notify developers" toggle.
-      const finalApprovers = await prisma.user.findMany({
-        where: {
-          isActive: true,
-          OR: [
-            { orgLevel: { in: ["ceo", "special_access"] } },
-            { role: "hr_manager" },
-            ...(await devEmailRecipientsClause()),
-          ],
-        },
-        select: { id: true },
-      });
+      // Brand-CEO L2 routing: HR/Special Access (CEO excluded) +
+      // applicant's brand CEO. Each CEO sees only their brand.
+      const [finalApprovers, brandCeoId] = await Promise.all([
+        prisma.user.findMany({
+          where: {
+            isActive: true,
+            orgLevel: { not: "ceo" },
+            OR: [
+              { orgLevel: "special_access" },
+              { role: "hr_manager" },
+              ...(await devEmailRecipientsClause()),
+            ],
+          },
+          select: { id: true },
+        }),
+        brandCeoIdForEmployee(record.userId),
+      ]);
       await Promise.all([
         notifyUsers({
           actorId:  myId!,
-          userIds:  finalApprovers.map((u) => u.id).filter((uid) => uid !== record.userId),
+          userIds:  [
+            ...finalApprovers.map((u) => u.id),
+            ...(brandCeoId ? [brandCeoId] : []),
+          ].filter((uid) => uid !== record.userId),
           type:     "comp_off",
           entityId: record.id,
           title:    `${record.user?.name || "An employee"}'s comp-off for ${workedLabel} needs final approval`,
