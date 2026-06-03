@@ -5,6 +5,8 @@
 // surface shows the uploaded KPI doc (or an empty state) plus a small
 // preview of who's in that department.
 
+import { useEffect, useMemo, useState } from "react";
+import { useSession } from "next-auth/react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import { BarChart3, FileText, Users, Building2, Download } from "lucide-react";
@@ -16,6 +18,7 @@ type Member = {
   designation: string | null;
 };
 type DepartmentEntry = {
+  brand: string;
   department: string;
   fileName: string | null;
   fileUrl: string | null;
@@ -25,6 +28,7 @@ type DepartmentEntry = {
 type ApiData = {
   scope: "all" | "self";
   myDepartment: string | null;
+  myBrand?: string;
   departments: DepartmentEntry[];
 };
 
@@ -121,10 +125,56 @@ function DepartmentCard({ entry }: { entry: DepartmentEntry }) {
 
 export default function KpisPage() {
   const { data, error, isLoading } = useSWR<ApiData>("/api/kpis", fetcher);
+  const { data: session } = useSession();
+  const sessionUser = session?.user as any;
+
+  // Brand scope — "" / "nb-media" / "yt-labs". Filters the department
+  // list using the canonical brand catalogues (DEPARTMENTS for NB
+  // Media, DEPARTMENTS_YT_LABS for YT Labs) since the /api/kpis
+  // payload only carries department NAMES, not businessUnit.
+  //
+  // Default seeded from the viewer's own businessUnit so a YT Labs
+  // HR Manager / employee lands on YT Labs by default and an NB
+  // Media one lands on NB Media. CEO / developer (super-admins) get
+  // "all" so they can scan both brands. Pills hidden when the API
+  // scoped them to a single department (scope='self') — there's
+  // nothing to narrow.
+  const [brand, setBrand] = useState<"" | "nb-media" | "yt-labs">("");
+  const [brandTouched, setBrandTouched] = useState<boolean>(false);
+  const { data: viewerProfile } = useSWR<any>(
+    sessionUser ? "/api/hr/profile" : null,
+    fetcher,
+    { revalidateOnFocus: false },
+  );
+  useEffect(() => {
+    if (brandTouched) return;
+    const isSuperAdmin = sessionUser?.orgLevel === "ceo" || sessionUser?.isDeveloper;
+    if (isSuperAdmin) { setBrand(""); return; }
+    const bu = viewerProfile?.employeeProfile?.businessUnit;
+    if (bu === "YT Labs") setBrand("yt-labs");
+    else if (bu === "NB Media" || bu == null) setBrand("nb-media");
+  }, [viewerProfile, sessionUser, brandTouched]);
+
+  // Filter by the entry's explicit `brand` — authoritative now that
+  // the API tags each row, instead of inferring brand from department
+  // catalogue membership. Handles the shared "HR Operations & TA"
+  // case cleanly: the same name produces two entries, one per brand.
+  const filteredDepartments = useMemo(() => {
+    const all = data?.departments ?? [];
+    if (!brand) return all;
+    const wanted = brand === "yt-labs" ? "YT Labs" : "NB Media";
+    return all.filter((d) => d.brand === wanted);
+  }, [data?.departments, brand]);
+
+  const brandPickerVisible = data?.scope === "all";
 
   const scopeBlurb = (() => {
     if (!data) return "";
-    if (data.scope === "all") return "Showing every department's KPI document.";
+    if (data.scope === "all") {
+      if (brand === "yt-labs") return "Showing YT Labs department KPI documents.";
+      if (brand === "nb-media") return "Showing NB Media department KPI documents.";
+      return "Showing every department's KPI document.";
+    }
     if (data.myDepartment)    return `Showing your department's KPI document (${data.myDepartment}).`;
     return "Your department isn't set on your profile yet — KPIs can't be loaded.";
   })();
@@ -139,10 +189,46 @@ export default function KpisPage() {
             <BarChart3 size={20} />
           </div>
           <div>
-            <h1 className="text-[22px] font-bold tracking-tight text-slate-800">KPIs</h1>
+            <h1 className="text-[22px] font-bold tracking-tight text-slate-800 inline-flex items-center gap-2">
+              KPIs
+              {brand && brandPickerVisible && (
+                <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#3b82f6]/10 text-[#3b82f6]">
+                  {brand === "yt-labs" ? "YT Labs" : "NB Media"}
+                </span>
+              )}
+            </h1>
             <p className="mt-0.5 text-[13px] text-slate-500">{scopeBlurb || "Loading…"}</p>
           </div>
         </div>
+
+        {/* Brand scope — pill toggle strip. Hidden when the API
+            scoped to a single department (regular employees), since
+            there's only one row and the pills would just hide it. */}
+        {brandPickerVisible && (
+          <div className="mb-5 flex items-center gap-1.5 flex-wrap">
+            {([
+              { key: "",         label: "All brands" },
+              { key: "nb-media", label: "NB Media" },
+              { key: "yt-labs",  label: "YT Labs" },
+            ] as const).map((opt) => {
+              const active = brand === opt.key;
+              return (
+                <button
+                  key={opt.key || "all"}
+                  type="button"
+                  onClick={() => { setBrand(opt.key as "" | "nb-media" | "yt-labs"); setBrandTouched(true); }}
+                  className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
+                    active
+                      ? "bg-[#3b82f6] text-white shadow-sm"
+                      : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {error && (
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-700">
@@ -158,15 +244,19 @@ export default function KpisPage() {
           </div>
         )}
 
-        {data && data.departments.length === 0 && (
+        {data && filteredDepartments.length === 0 && (
           <div className="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center">
             <Users className="mx-auto h-8 w-8 text-slate-300" />
             <p className="mt-3 text-[14px] font-semibold text-slate-700">
-              {data.scope === "all" ? "No KPI documents yet" : "Nothing to show"}
+              {data.scope === "all"
+                ? (brand ? `No departments in ${brand === "yt-labs" ? "YT Labs" : "NB Media"}` : "No KPI documents yet")
+                : "Nothing to show"}
             </p>
             <p className="mt-1 text-[12.5px] text-slate-500">
               {data.scope === "all"
-                ? "Upload your first KPI document from the Manage KPIs panel."
+                ? (brand
+                    ? "Switch to All brands to see the rest, or upload a KPI document for this brand from the Manage KPIs panel."
+                    : "Upload your first KPI document from the Manage KPIs panel.")
                 : data.myDepartment
                   ? "Your department doesn't have a KPI document uploaded yet."
                   : "Ask HR to set your department on your profile."}
@@ -175,7 +265,7 @@ export default function KpisPage() {
         )}
 
         <div className="space-y-5">
-          {data?.departments.map((entry) => (
+          {filteredDepartments.map((entry) => (
             <DepartmentCard key={entry.department} entry={entry} />
           ))}
         </div>
