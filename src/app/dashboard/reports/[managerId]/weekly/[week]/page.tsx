@@ -2353,6 +2353,18 @@ export default function WeeklyReportPage() {
                                 {isLocked ? "Submitted & Locked" : "Unlocked — Edit & Resubmit"}
                             </span>
                         )}
+                        {/* Top-right team-source pill: "Snapshot" vs "Live". */}
+                        {data?.teamSource && (
+                            data.teamSource === "snapshot" ? (
+                                <span title="Team list is frozen from the snapshot saved when this report was submitted" className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-bold uppercase tracking-wider">
+                                    <span className="h-1 w-1 rounded-full bg-emerald-500" /> Snapshot
+                                </span>
+                            ) : (
+                                <span title="No snapshot saved yet — showing current team. Admin can click Refresh to freeze." className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[9px] font-bold uppercase tracking-wider">
+                                    <span className="h-1 w-1 rounded-full bg-amber-500 animate-pulse" /> Live
+                                </span>
+                            )
+                        )}
                         {/* Admin-only refresh — match the API gate */}
                         {isLocked && (isAdmin || isCeo || sessionUser?.role === "admin") && (
                             <RefreshTeamSnapshotButton
