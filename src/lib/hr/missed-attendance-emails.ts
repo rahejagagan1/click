@@ -219,8 +219,18 @@ export async function sendHrLateClockInSummary(): Promise<number> {
         ...(await devEmailRecipientsClause()),
       ],
     },
-    select: { email: true, name: true },
+    select: { email: true, name: true, orgLevel: true, role: true },
   });
+  // Per-role email-toggle filter (Admin → Emails Automation →
+  // "Recipients by role"). Drops anyone whose role override for
+  // missed_attendance is OFF.
+  const { rolesForUser, isEmailEnabledForRoles } = await import("@/lib/email/toggles");
+  const filteredRecipients: typeof recipients = [];
+  for (const r of recipients) {
+    if (!r.email) continue;
+    const roles = rolesForUser({ orgLevel: r.orgLevel, role: r.role });
+    if (await isEmailEnabledForRoles("missed_attendance", roles)) filteredRecipients.push(r);
+  }
 
   // Headcount totals for the footer. WFH/OD are now folded into present/
   // late/absent based on whether they actually clocked in, so the only
@@ -241,7 +251,7 @@ export async function sendHrLateClockInSummary(): Promise<number> {
   });
 
   let sent = 0;
-  for (const r of recipients) {
+  for (const r of filteredRecipients) {
     try {
       await sendEmail({ to: r.email!, content });
       sent++;
@@ -253,10 +263,15 @@ export async function sendHrLateClockInSummary(): Promise<number> {
   // CEO digest — the full org list goes to HR / Special Access above; the
   // CEO is shown ONLY their own direct reports, and only when at least one
   // of them is absent/late (no email about an all-present team).
-  const ceos = await prisma.user.findMany({
-    where:  { isActive: true, orgLevel: "ceo" },
-    select: { id: true, email: true },
-  });
+  // Per-role gate: if the "ceo" toggle for missed_attendance is OFF, skip
+  // the entire per-CEO loop.
+  const ceoToggleOn = await isEmailEnabledForRoles("missed_attendance", ["ceo"]);
+  const ceos = ceoToggleOn
+    ? await prisma.user.findMany({
+        where:  { isActive: true, orgLevel: "ceo" },
+        select: { id: true, email: true },
+      })
+    : [];
   for (const ceo of ceos) {
     if (!ceo.email) continue;
     const ceoAbsent = absent.filter((r) => r.managerId === ceo.id);
