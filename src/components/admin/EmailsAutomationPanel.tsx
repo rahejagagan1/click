@@ -1,6 +1,11 @@
 "use client";
 
-// Admin → Emails Automation. One on/off switch per outbound email kind.
+// Admin → Emails Automation. Two layers of toggles:
+//   • Global per email type — kills that email for everyone when off.
+//   • Per role (CEO / HR Manager / Special Access / Admin) per type —
+//     when global is ON, individual roles can still be turned off
+//     ("stop emailing the CEO about leave, keep emailing HR").
+//
 // Each flip auto-saves (PATCH /api/admin/email-toggles) the moment the
 // switch moves — same UX as the Regularization Policy card. The change
 // is honored on the next email dispatch, no restart.
@@ -9,7 +14,7 @@
 // get added to src/lib/email/toggles.ts.
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, XCircle, Mail } from "lucide-react";
+import { CheckCircle2, XCircle, Mail, Users, ChevronDown, ChevronRight } from "lucide-react";
 
 type CatalogItem = {
     key: string;
@@ -17,12 +22,21 @@ type CatalogItem = {
     description: string;
     group: string;
 };
-type Toggles = Record<string, boolean>;
+type RoleItem = {
+    key: string;
+    label: string;
+    description: string;
+};
+type Toggles  = Record<string, boolean>;
+type PerRole  = Record<string, Record<string, boolean>>;
 
 export default function EmailsAutomationPanel() {
-    const [catalog,  setCatalog]  = useState<CatalogItem[]>([]);
-    const [toggles,  setToggles]  = useState<Toggles>({});
-    const [loading,  setLoading]  = useState(true);
+    const [catalog,     setCatalog]     = useState<CatalogItem[]>([]);
+    const [roleCatalog, setRoleCatalog] = useState<RoleItem[]>([]);
+    const [toggles,     setToggles]     = useState<Toggles>({});
+    const [perRole,     setPerRole]     = useState<PerRole>({});
+    const [openRole,    setOpenRole]    = useState<string | null>(null);
+    const [loading,     setLoading]     = useState(true);
     // Per-row save state — keyed by toggle.key. While a key is in this
     // set, its switch shows "Saving…" and is disabled to avoid stacking
     // requests on the same row.
@@ -40,7 +54,9 @@ export default function EmailsAutomationPanel() {
                 if (cancelled) return;
                 if (d?.error) { setBanner({ type: "err", text: d.error }); return; }
                 setCatalog(d.catalog ?? []);
+                setRoleCatalog(d.roleCatalog ?? []);
                 setToggles(d.toggles ?? {});
+                setPerRole(d.perRole ?? {});
             })
             .catch(() => { if (!cancelled) setBanner({ type: "err", text: "Failed to load toggles" }); })
             .finally(() => { if (!cancelled) setLoading(false); });
@@ -126,6 +142,59 @@ export default function EmailsAutomationPanel() {
     };
 
     const labelFor = (key: string) => catalog.find((c) => c.key === key)?.label;
+
+    /** Flip a per-role toggle. Mirror of flipAndSave but for the
+     *  `perRole[role][kind]` cell. Missing keys default to ON in the
+     *  server view, so we materialise that default on first interaction. */
+    const flipRoleAndSave = async (role: string, kind: string) => {
+        const flipKey = `${role}:${kind}`;
+        if (savingKeys.has(flipKey) || bulkSaving) return;
+        const before = perRole[role]?.[kind] !== false; // missing = ON
+        const next   = !before;
+        // Optimistic update.
+        setPerRole((p) => ({
+            ...p,
+            [role]: { ...(p[role] ?? {}), [kind]: next },
+        }));
+        setSavingKeys((s) => {
+            const n = new Set(s);
+            n.add(flipKey);
+            return n;
+        });
+        setBanner(null);
+        try {
+            const res = await fetch("/api/admin/email-toggles", {
+                method:  "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body:    JSON.stringify({ perRole: { [role]: { [kind]: next } } }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                setPerRole((p) => ({
+                    ...p,
+                    [role]: { ...(p[role] ?? {}), [kind]: before },
+                }));
+                setBanner({ type: "err", text: d?.error || "Save failed" });
+                return;
+            }
+            if (d?.perRole && typeof d.perRole === "object") setPerRole(d.perRole);
+            const roleLabel = roleCatalog.find((r) => r.key === role)?.label ?? role;
+            setBanner({ type: "ok", text: `${labelFor(kind) ?? kind} for ${roleLabel} ${next ? "enabled" : "disabled"}.` });
+            setTimeout(() => setBanner(null), 2500);
+        } catch {
+            setPerRole((p) => ({
+                ...p,
+                [role]: { ...(p[role] ?? {}), [kind]: before },
+            }));
+            setBanner({ type: "err", text: "Save failed" });
+        } finally {
+            setSavingKeys((s) => {
+                const n = new Set(s);
+                n.delete(flipKey);
+                return n;
+            });
+        }
+    };
 
     // Group catalog items by their `group` field for visual sectioning.
     const grouped: Record<string, CatalogItem[]> = {};
@@ -251,6 +320,87 @@ export default function EmailsAutomationPanel() {
                     </div>
                 </div>
             ))}
+
+            {/* ── Per-role overrides ─────────────────────────────────
+                One accordion section per role. Each row is the same
+                email kind from the catalog above, but the toggle
+                writes into perRole[role][kind] instead of the global
+                map. Global OFF still kills the email for everyone —
+                these per-role switches only refine WHO inside an
+                org-broadcast actually gets it. */}
+            {roleCatalog.length > 0 && (
+                <div className="rounded-2xl bg-white border border-slate-200 shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-hidden">
+                    <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2.5">
+                        <Users size={14} className="text-violet-500" />
+                        <h3 className="text-[12px] font-bold uppercase tracking-wider text-slate-500">Recipients by role</h3>
+                        <span className="ml-auto text-[11px] text-slate-400">
+                            Per-role overrides — global OFF above still wins.
+                        </span>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                        {roleCatalog.map((role) => {
+                            const open = openRole === role.key;
+                            const roleMap = perRole[role.key] ?? {};
+                            // Count enabled within this role (default = ON for
+                            // missing keys, matching server semantics).
+                            const enabled = catalog.filter((k) => roleMap[k.key] !== false).length;
+                            return (
+                                <div key={role.key}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setOpenRole(open ? null : role.key)}
+                                        className="w-full px-5 py-3.5 flex items-center justify-between gap-4 hover:bg-slate-50/60 transition-colors text-left"
+                                    >
+                                        <div className="min-w-0 flex items-center gap-2.5">
+                                            {open
+                                                ? <ChevronDown  size={14} className="text-slate-400 shrink-0" />
+                                                : <ChevronRight size={14} className="text-slate-400 shrink-0" />}
+                                            <div className="min-w-0">
+                                                <p className="text-[13.5px] font-semibold text-slate-800">{role.label}</p>
+                                                <p className="mt-0.5 text-[11.5px] text-slate-500 leading-relaxed">{role.description}</p>
+                                            </div>
+                                        </div>
+                                        <span className="shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200">
+                                            {enabled} / {catalog.length}
+                                        </span>
+                                    </button>
+                                    {open && (
+                                        <div className="px-5 pb-4 pt-1 grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-slate-50/40">
+                                            {catalog.map((t) => {
+                                                const on    = roleMap[t.key] !== false; // missing = ON
+                                                const busy  = savingKeys.has(`${role.key}:${t.key}`) || bulkSaving;
+                                                const globalOn = !!toggles[t.key];
+                                                return (
+                                                    <div key={t.key} className={`flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 ${globalOn ? "" : "opacity-60"}`}>
+                                                        <div className="min-w-0">
+                                                            <p className="text-[12.5px] font-semibold text-slate-800 truncate">{t.label}</p>
+                                                            <p className="text-[10.5px] text-slate-400 truncate">{t.key}</p>
+                                                            {!globalOn && (
+                                                                <p className="text-[10px] text-amber-600 mt-0.5">Global is off — this toggle has no effect.</p>
+                                                            )}
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            role="switch"
+                                                            aria-checked={on}
+                                                            aria-label={`${on ? "Disable" : "Enable"} ${t.label} for ${role.label}`}
+                                                            onClick={() => flipRoleAndSave(role.key, t.key)}
+                                                            disabled={busy}
+                                                            className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 disabled:cursor-wait ${on ? "bg-emerald-500" : "bg-slate-300"}`}
+                                                        >
+                                                            <span className={`absolute top-[2.5px] h-[15px] w-[15px] rounded-full bg-white shadow transition-transform ${on ? "translate-x-[19px]" : "translate-x-[2.5px]"}`} />
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
