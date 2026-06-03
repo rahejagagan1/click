@@ -21,12 +21,22 @@ const ALLOWED_EXTS   = new Set([".pdf", ".doc", ".docx", ".xls", ".xlsx"]);
 
 type DocRow = {
   id: number;
+  brand: string;
   department: string;
   fileName: string;
   fileUrl: string;
   uploadedAt: Date;
   uploadedBy: number | null;
 };
+
+/** Resolve `?brand=` from kebab-case slug to the storage value used in
+ *  `KpiDocument.brand`. Empty / unknown / "all" → null (no filter). */
+function parseBrandParam(raw: string | null): "NB Media" | "YT Labs" | null {
+  const v = (raw ?? "").toLowerCase();
+  if (v === "yt-labs" || v === "yt")     return "YT Labs";
+  if (v === "nb-media" || v === "nb")    return "NB Media";
+  return null;
+}
 
 function isAdmin(u: any): boolean {
   return (
@@ -38,18 +48,27 @@ function isAdmin(u: any): boolean {
   );
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   if (!isAdmin(session!.user)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   try {
-    const docs = await prisma.$queryRawUnsafe<DocRow[]>(
-      `SELECT id, department, "fileName", "fileUrl", "uploadedAt", "uploadedBy"
-         FROM "KpiDocument"
-        ORDER BY department ASC`,
-    );
+    const brand = parseBrandParam(req.nextUrl.searchParams.get("brand"));
+    const docs = brand
+      ? await prisma.$queryRawUnsafe<DocRow[]>(
+          `SELECT id, brand, department, "fileName", "fileUrl", "uploadedAt", "uploadedBy"
+             FROM "KpiDocument"
+            WHERE brand = $1
+            ORDER BY department ASC`,
+          brand,
+        )
+      : await prisma.$queryRawUnsafe<DocRow[]>(
+          `SELECT id, brand, department, "fileName", "fileUrl", "uploadedAt", "uploadedBy"
+             FROM "KpiDocument"
+            ORDER BY brand ASC, department ASC`,
+        );
     return NextResponse.json({ docs });
   } catch (e) {
     return serverError(e, "GET /api/kpis/documents");
@@ -67,6 +86,10 @@ export async function POST(req: NextRequest) {
     const form = await req.formData();
     const department = (form.get("department") as string | null)?.trim();
     const file       = form.get("file");
+    // Brand from the form (kebab slug) — admin UI passes whichever
+    // brand they're managing. Default to NB Media if omitted, matches
+    // the column default and keeps legacy clients working.
+    const brand = parseBrandParam((form.get("brand") as string | null) ?? null) ?? "NB Media";
 
     if (!department) {
       return NextResponse.json({ error: "Department is required" }, { status: 400 });
@@ -94,19 +117,22 @@ export async function POST(req: NextRequest) {
     const fileUrl  = `/uploads/kpis/${stamped}`;
 
     const uploadedBy = await resolveUserId(session);
-    // Upsert on department — re-upload replaces the existing pointer
-    // so each department keeps only ONE active doc.
+    // Upsert on (brand, department) — same department name can now
+    // hold a separate doc per brand (e.g. "HR Operations & TA" exists
+    // under both NB Media and YT Labs). Re-uploading from the same
+    // brand still replaces in place so each brand-dept pair has one
+    // active doc.
     const rows = await prisma.$queryRawUnsafe<{ id: number }[]>(
-      `INSERT INTO "KpiDocument" ("department","fileName","fileUrl","uploadedAt","uploadedBy")
-       VALUES ($1,$2,$3,NOW(),$4)
-       ON CONFLICT ("department")
+      `INSERT INTO "KpiDocument" ("brand","department","fileName","fileUrl","uploadedAt","uploadedBy")
+       VALUES ($1,$2,$3,$4,NOW(),$5)
+       ON CONFLICT ("brand","department")
        DO UPDATE SET
          "fileName"   = EXCLUDED."fileName",
          "fileUrl"    = EXCLUDED."fileUrl",
          "uploadedAt" = NOW(),
          "uploadedBy" = EXCLUDED."uploadedBy"
        RETURNING id`,
-      department, file.name, fileUrl, uploadedBy,
+      brand, department, file.name, fileUrl, uploadedBy,
     );
 
     return NextResponse.json({ ok: true, id: rows[0]?.id, fileUrl });
