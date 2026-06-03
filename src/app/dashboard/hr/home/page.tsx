@@ -1888,7 +1888,7 @@ export default function HRHomePage() {
 
   const handlePickImage = (file: File | null) => {
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { alert("Image too large (max 5 MB)"); return; }
+    if (file.size > 10 * 1024 * 1024) { alert("Image too large (max 10 MB)"); return; }
     const reader = new FileReader();
     reader.onload = () => setPostMedia(typeof reader.result === "string" ? reader.result : null);
     reader.readAsDataURL(file);
@@ -1918,7 +1918,7 @@ export default function HRHomePage() {
   const addPraiseFile = (file: File | null) => {
     if (!file) return;
     if (praiseFiles.length >= 5) { alert("Max 5 attachments."); return; }
-    if (file.size > 5 * 1024 * 1024) { alert(`"${file.name}" is over 5 MB.`); return; }
+    if (file.size > 10 * 1024 * 1024) { alert(`"${file.name}" is over 10 MB.`); return; }
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === "string") {
@@ -2942,7 +2942,7 @@ export default function HRHomePage() {
                             <label className="flex w-fit cursor-pointer items-center gap-2 text-[13px] font-semibold text-[#008CFF] hover:text-[#0070d4]">
                               <Paperclip className="h-4 w-4" />
                               Add Attachment
-                              <span title="Max 5 files, 5 MB each" className="text-[#8a96a8]">
+                              <span title="Max 5 files, 10 MB each" className="text-[#8a96a8]">
                                 <Info className="h-3.5 w-3.5" />
                               </span>
                               <input
