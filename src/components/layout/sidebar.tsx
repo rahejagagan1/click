@@ -115,14 +115,18 @@ export default function Sidebar() {
 
     // HR sideways flyout state — portalled to body so overflow-y:auto can't clip them
     const isHRPath = pathname.startsWith("/dashboard/hr");
-    const [hrMeOpen,   setHrMeOpen]   = useState(false);
-    const [hrTeamOpen, setHrTeamOpen] = useState(false);
-    const [hrMeY,      setHrMeY]      = useState(0);
-    const [hrTeamY,    setHrTeamY]    = useState(0);
-    const hrMeTrigger   = useRef<HTMLDivElement>(null);
-    const hrTeamTrigger = useRef<HTMLDivElement>(null);
-    const hrMeTimer     = useRef<NodeJS.Timeout | null>(null);
-    const hrTeamTimer   = useRef<NodeJS.Timeout | null>(null);
+    const [hrMeOpen,    setHrMeOpen]    = useState(false);
+    const [hrTeamOpen,  setHrTeamOpen]  = useState(false);
+    const [hrAdminOpen, setHrAdminOpen] = useState(false);
+    const [hrMeY,    setHrMeY]    = useState(0);
+    const [hrTeamY,  setHrTeamY]  = useState(0);
+    const [hrAdminY, setHrAdminY] = useState(0);
+    const hrMeTrigger    = useRef<HTMLDivElement>(null);
+    const hrTeamTrigger  = useRef<HTMLDivElement>(null);
+    const hrAdminTrigger = useRef<HTMLDivElement>(null);
+    const hrMeTimer    = useRef<NodeJS.Timeout | null>(null);
+    const hrTeamTimer  = useRef<NodeJS.Timeout | null>(null);
+    const hrAdminTimer = useRef<NodeJS.Timeout | null>(null);
 
     const makeHrHandlers = (
         setOpen: (v: boolean) => void,
@@ -189,6 +193,7 @@ export default function Sidebar() {
     useEffect(() => {
       setHrMeOpen(false);
       setHrTeamOpen(false);
+      setHrAdminOpen(false);
       setFinancesOpen(false);
       setMyPaySubOpen(false);
       setDeptHovered(false);
@@ -365,14 +370,17 @@ export default function Sidebar() {
                         && !pathname.startsWith("/dashboard/hr/home")
                         && !pathname.startsWith("/dashboard/hr/admin")
                         && !pathname.startsWith("/dashboard/hr/assets")
-                        // Hiring lives under the Dashboard rail's
-                        // admin grouping — exclude here so the pinned
-                        // "Me" tile at the top of the rail doesn't
-                        // light up when HR is browsing the Hiring
-                        // console. (The sibling `isMeActive` at the
-                        // bottom of this file already excludes this;
-                        // both need to stay in sync.)
+                        // Hiring / Onboard / Offboard live under the
+                        // Dashboard rail's admin grouping — exclude
+                        // here so the pinned "Me" tile at the top of
+                        // the rail doesn't light up when HR is in any
+                        // of those admin flows. (The sibling
+                        // `isMeActive` at the bottom of this file
+                        // already excludes this; both need to stay
+                        // in sync.)
                         && !pathname.startsWith("/dashboard/hr/hiring")
+                        && !pathname.startsWith("/dashboard/hr/onboard")
+                        && !pathname.startsWith("/dashboard/hr/offboard")
                         && pathname !== "/admin";
                     const homeActive = pathname === "/dashboard/hr/home" || pathname.startsWith("/dashboard/hr/home/");
                     const E = "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]";
@@ -663,8 +671,9 @@ export default function Sidebar() {
                     const E = "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]";
                     const A = "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]";
 
-                    const meHandlers   = makeHrHandlers(setHrMeOpen,   setHrMeY,   hrMeTrigger,   hrMeTimer);
-                    const teamHandlers = makeHrHandlers(setHrTeamOpen, setHrTeamY, hrTeamTrigger, hrTeamTimer);
+                    const meHandlers    = makeHrHandlers(setHrMeOpen,    setHrMeY,    hrMeTrigger,    hrMeTimer);
+                    const teamHandlers  = makeHrHandlers(setHrTeamOpen,  setHrTeamY,  hrTeamTrigger,  hrTeamTimer);
+                    const adminHandlers = makeHrHandlers(setHrAdminOpen, setHrAdminY, hrAdminTrigger, hrAdminTimer);
 
                     const isMeActive    = isHRPath
                         && !pathname.startsWith("/dashboard/hr/my-team")
@@ -675,17 +684,23 @@ export default function Sidebar() {
                         && !pathname.startsWith("/dashboard/hr/home")
                         && !pathname.startsWith("/dashboard/hr/admin")
                         && !pathname.startsWith("/dashboard/hr/assets")
-                        // Hiring is an HR-admin function (Jobs / Dashboard /
-                        // Preboarding / Settings / Reports), not part of the
-                        // personal "Me" space. Excluded here so the Me rail
-                        // doesn't light up when HR navigates to it; HR
-                        // Dashboard rail picks it up via isAdminActive below.
+                        // Hiring / Onboard / Offboard are HR-admin
+                        // functions (Jobs / Dashboard / Preboarding /
+                        // Settings / Reports / new-joiner flows), not
+                        // part of the personal "Me" space. Excluded
+                        // here so the Me rail doesn't light up when
+                        // HR navigates into them; HR Dashboard rail
+                        // picks them up via isAdminActive below.
                         && !pathname.startsWith("/dashboard/hr/hiring")
+                        && !pathname.startsWith("/dashboard/hr/onboard")
+                        && !pathname.startsWith("/dashboard/hr/offboard")
                         && pathname !== "/admin";
                     const isTeamActive  = pathname.startsWith("/dashboard/hr/my-team") || pathname.startsWith("/dashboard/hr/inbox");
                     const isAdminActive = pathname.startsWith("/dashboard/hr/admin")
                         || pathname.startsWith("/dashboard/hr/assets")
-                        || pathname.startsWith("/dashboard/hr/hiring");
+                        || pathname.startsWith("/dashboard/hr/hiring")
+                        || pathname.startsWith("/dashboard/hr/onboard")
+                        || pathname.startsWith("/dashboard/hr/offboard");
 
                     // Flyout link
                     const fl = (href: string, label: string, badge?: ReactNode) => {
@@ -747,15 +762,19 @@ export default function Sidebar() {
                                 );
                             })}
 
-                            {/* HR DASHBOARD — direct link to the tabbed hub
-                                page. Role gate AND tab toggle must both pass. */}
+                            {/* HR DASHBOARD — hover-flyout trigger. Splits
+                                into per-brand sub-dashboards (NB Media /
+                                YT Labs, plus "All brands" for founders).
+                                Each entry routes to /dashboard/hr/admin
+                                with a ?brand= param the page reads and
+                                seeds each panel's brand filter from. */}
                             {isHRAdmin && tabAllowed("hr_admin") && (
                                 <>
                                     <div className="mx-3 mt-4 mb-1.5 border-t border-[#e4ebf2]" />
-                                    <Link href="/dashboard/hr/admin"
-                                        className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", isAdminActive ? A : E)}>
+                                    <div ref={hrAdminTrigger} {...adminHandlers}
+                                        className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isAdminActive || hrAdminOpen ? A : E)}>
                                         <span className="relative inline-flex">
-                                            <BarChart2 size={15} strokeWidth={1.75} className={isAdminActive ? "text-[#0f6ecd]" : ""} />
+                                            <BarChart2 size={15} strokeWidth={1.75} className={isAdminActive || hrAdminOpen ? "text-[#0f6ecd]" : ""} />
                                             {approvalsCount > 0 && (
                                                 <span className="absolute -top-1.5 -right-2.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-[#008CFF] px-[3px] text-[9px] font-bold leading-none text-white tabular-nums ring-2 ring-[#f7f9fc]">
                                                     {approvalsCount > 99 ? "99+" : approvalsCount}
@@ -763,7 +782,7 @@ export default function Sidebar() {
                                             )}
                                         </span>
                                         HR Dashboard
-                                    </Link>
+                                    </div>
                                 </>
                             )}
 
@@ -889,6 +908,56 @@ export default function Sidebar() {
                                             </span>
                                         ) : undefined
                                     )}
+                                </div>,
+                                document.body
+                            )}
+
+                            {/* HR Dashboard flyout — per-brand sub-dashboards.
+                                Both brand entries route to the same page with
+                                a ?brand= param; the page reads it and seeds
+                                each panel's brand filter. "All brands" is
+                                gated to founders / super-admins only.
+                                Active state is brand-aware: we can't reuse
+                                `fl()` here because pathname doesn't include
+                                the query string. */}
+                            {hrAdminOpen && typeof document !== "undefined" && createPortal(
+                                <div style={{ position: "fixed", left: 108, top: hrAdminY, zIndex: 9999 }}
+                                    className={panelCls} {...adminHandlers}>
+                                    <p className="text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1 px-4 pt-1">HR Dashboard</p>
+                                    {(() => {
+                                        const currentBrand = pathname.startsWith("/dashboard/hr/admin")
+                                            ? searchParams.get("brand")
+                                            : null;
+                                        const brandEntry = (slug: string, label: string) => {
+                                            const active = currentBrand === slug;
+                                            return (
+                                                <Link key={slug} href={`/dashboard/hr/admin?brand=${slug}`}
+                                                    className={cn(
+                                                        "flex items-center justify-between px-4 py-2 text-[13px] transition-all duration-150",
+                                                        active
+                                                            ? "bg-[#eef4fb] font-semibold text-[#1f3b57]"
+                                                            : "text-[#34495e] hover:bg-[#dde4ec] hover:text-[#1f2f3f]"
+                                                    )}>
+                                                    <span className="truncate">{label}</span>
+                                                    <svg className="w-3 h-3 opacity-30 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                    </svg>
+                                                </Link>
+                                            );
+                                        };
+                                        return (
+                                            <>
+                                                {brandEntry("nb-media", "NB Media")}
+                                                {brandEntry("yt-labs",  "YT Labs")}
+                                                {isCeo && (
+                                                    <>
+                                                        <div className="my-1 mx-3 border-t border-[#d1dae5]" />
+                                                        {brandEntry("all", "All brands")}
+                                                    </>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
                                 </div>,
                                 document.body
                             )}

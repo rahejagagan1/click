@@ -263,15 +263,16 @@ export async function sendHrLateClockInSummary(): Promise<number> {
   // CEO digest — the full org list goes to HR / Special Access above; the
   // CEO is shown ONLY their own direct reports, and only when at least one
   // of them is absent/late (no email about an all-present team).
-  // Per-role gate: if the "ceo" toggle for missed_attendance is OFF, skip
-  // the entire per-CEO loop.
-  const ceoToggleOn = await isEmailEnabledForRoles("missed_attendance", ["ceo"]);
-  const ceos = ceoToggleOn
-    ? await prisma.user.findMany({
-        where:  { isActive: true, orgLevel: "ceo" },
-        select: { id: true, email: true },
-      })
-    : [];
+  //
+  // This loop is the DIRECT-REPORT exemption — always sent regardless of
+  // the per-role "ceo" toggle, because the toggle silences only the
+  // ORG-WIDE blanket fan-out. Each CEO here gets nothing but their own
+  // team's status, which is the exact case the exemption is designed to
+  // preserve.
+  const ceos = await prisma.user.findMany({
+    where:  { isActive: true, orgLevel: "ceo" },
+    select: { id: true, email: true },
+  });
   for (const ceo of ceos) {
     if (!ceo.email) continue;
     const ceoAbsent = absent.filter((r) => r.managerId === ceo.id);
