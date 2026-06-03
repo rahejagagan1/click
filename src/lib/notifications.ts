@@ -1,5 +1,5 @@
 import prisma from "@/lib/prisma";
-import { sendEmail, emailsForUserIds } from "@/lib/email/sender";
+import { sendEmail, emailsForUserIds, emailsForUserIdsFiltered } from "@/lib/email/sender";
 import { isEmailEnabled, devEmailRecipientsClause } from "@/lib/email/toggles";
 import {
   leaveRequestEmail, wfhRequestEmail, onDutyRequestEmail,
@@ -243,7 +243,10 @@ async function dispatchEmails(
     }
     const content = buildEmailFor(type, title, body, emailData);
     if (!content) return;
-    const to = await emailsForUserIds(userIds);
+    // Per-role filter: drops recipients whose role-specific override
+    // for this email kind is OFF (e.g. "stop emailing the CEO about
+    // leave"). Users who don't match any tracked role pass through.
+    const to = await emailsForUserIdsFiltered(userIds, type as any);
     if (to.length === 0) return;
     // Don't await — emails go out in the background.
     void sendEmail({ to, content });
