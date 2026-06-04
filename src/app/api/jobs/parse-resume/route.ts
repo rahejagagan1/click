@@ -909,7 +909,16 @@ export async function POST(req: NextRequest) {
     // candidate doesn't have to retype what's already on their CV.
     const educationSection = extractSection(text, ["education", "academic", "qualifications", "academics"]);
     let educations = parseEducations(educationSection);
-    // Fallback: many resumes render their bold section headings + the
+    // Fallback 1: prose narrative format common on Indian resumes —
+    // numbered "N.Passed X from Y in YEAR." sentences. pdfjs word-
+    // wraps each one across 2-3 lines so the line-based scanners miss
+    // them; we whitespace-collapse the whole document and match the
+    // pattern globally. Very specific shape (numbered + "Passed" +
+    // "from" + year-ending) so false positives are negligible.
+    if (educations.length === 0) {
+      educations = scanEducationProsePassed(text);
+    }
+    // Fallback 2: many resumes render their bold section headings + the
     // degree name as VECTOR OUTLINES instead of selectable text, so
     // pdfjs returns the text content with "EDUCATION" and "Bachelor
     // of …" completely missing. The university-name + year-range line
