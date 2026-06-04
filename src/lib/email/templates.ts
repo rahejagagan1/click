@@ -1096,6 +1096,115 @@ export function violationFollowUpEmail(args: {
   return { subject, html: SHELL(subject, body), text };
 }
 
+// ── Probation ending soon (7 days out) ───────────────────────────────
+// Fires once per employee, ~7 days before EmployeeProfile.probationEndDate.
+// Recipients: HR (special_access + role=hr_manager) + the employee's
+// reporting manager. The email gives HR a chance to plan the
+// confirmation review OR extend probation in one click.
+//
+// Extension CTAs deep-link to the People page with query params the
+// page reads to auto-open the quick-extend modal:
+//   ?extendProbation=1m   → +1 month
+//   ?extendProbation=2m   → +2 months
+//   ?extendProbation=custom → opens the modal with a custom date picker
+// HR still has to confirm in the UI — the email itself doesn't mutate
+// any data, so accidental clicks don't change probation dates.
+export function probationEndingReminderEmail(args: {
+  recipientName?: string | null;            // greets the HR person / manager
+  employeeName: string;                     // the person on probation
+  employeeId?: string | null;               // HRM No.
+  joiningDate?: Date | null;
+  probationEndDate: Date;                   // when probation ends (required)
+  daysRemaining: number;                    // <= 7
+  managerName?: string | null;
+  department?: string | null;
+  /// User ID of the person on probation — used to build the
+  /// deep-link to the People page so HR lands directly on the right
+  /// employee from the email.
+  employeeUserId: number;
+}): EmailContent {
+  const fmt = (d: Date | null | undefined) =>
+    d ? d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
+  const subject = `Probation ending soon · ${args.employeeName} (${args.daysRemaining} day${args.daysRemaining === 1 ? "" : "s"})`;
+
+  const peopleLink = (suffix: string) =>
+    `${appUrl()}/dashboard/hr/people/${args.employeeUserId}${suffix}`;
+
+  // Header callout — calm indigo (matches the violation follow-up
+  // palette so HR can pattern-match "this is a scheduled HR check-in,
+  // not a fire").
+  const callout = `
+    <div style="margin:0 0 16px;padding:16px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;text-align:center">
+      <p style="margin:0;font-size:10.5px;color:#3730a3;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Probation ends in</p>
+      <p style="margin:6px 0 0;font-size:32px;font-weight:700;color:#3730a3;line-height:1">${args.daysRemaining}<span style="font-size:14px;font-weight:600;margin-left:4px">day${args.daysRemaining === 1 ? "" : "s"}</span></p>
+      <p style="margin:6px 0 0;font-size:11.5px;color:#3730a3">${escape(args.employeeName)} · ends ${fmt(args.probationEndDate)}</p>
+    </div>`;
+
+  const rows: string[] = [];
+  rows.push(vRow("Employee",      escape(args.employeeName)));
+  if (args.employeeId)   rows.push(vRow("HRM No.",    escape(args.employeeId)));
+  if (args.department)   rows.push(vRow("Department", escape(args.department)));
+  if (args.managerName)  rows.push(vRow("Reporting Manager", escape(args.managerName)));
+  if (args.joiningDate)  rows.push(vRow("Joined",     fmt(args.joiningDate)));
+  rows.push(vRow("Probation Ends", fmt(args.probationEndDate)));
+
+  // Extension shortcut row — three buttons that deep-link to the
+  // People page with the quick-extend modal pre-opened. Stacked
+  // vertically for predictable rendering on mobile.
+  const extensionCTAs = `
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:18px 0 0;border-collapse:collapse;width:100%">
+      <tr>
+        <td style="padding:0 0 8px;font-family:${FONT};font-size:11px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:0.08em">Need more time? Extend probation:</td>
+      </tr>
+      <tr>
+        <td style="padding:0">
+          <a href="${peopleLink("?extendProbation=1m")}" style="display:inline-block;margin:0 8px 8px 0;background:#ffffff;color:#3730a3;text-decoration:none;font-family:${FONT};font-size:12.5px;font-weight:600;padding:8px 14px;border:1px solid #c7d2fe;border-radius:6px">Extend by 1 month</a>
+          <a href="${peopleLink("?extendProbation=2m")}" style="display:inline-block;margin:0 8px 8px 0;background:#ffffff;color:#3730a3;text-decoration:none;font-family:${FONT};font-size:12.5px;font-weight:600;padding:8px 14px;border:1px solid #c7d2fe;border-radius:6px">Extend by 2 months</a>
+          <a href="${peopleLink("?extendProbation=custom")}" style="display:inline-block;margin:0 0 8px 0;background:#ffffff;color:#3730a3;text-decoration:none;font-family:${FONT};font-size:12.5px;font-weight:600;padding:8px 14px;border:1px solid #c7d2fe;border-radius:6px">Custom date…</a>
+        </td>
+      </tr>
+    </table>`;
+
+  const body = `
+    <p style="margin:0 0 12px;font-size:14px;color:#1f2937;line-height:1.6">
+      ${args.recipientName ? `Hi ${escape(args.recipientName)},` : "Hi,"}
+    </p>
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      Heads-up — ${escape(args.employeeName)}'s probation period is wrapping up. A confirmation review (or an extension) should happen before the end date.
+    </p>
+    ${callout}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      ${rows.join("")}
+    </table>
+    ${extensionCTAs}
+    <p style="margin:18px 0 0;padding:12px 14px;background:#f8fafc;border-left:3px solid #6366f1;border-radius:0 6px 6px 0;font-size:12.5px;color:#475569;line-height:1.55">
+      Extension buttons open the employee's profile with a confirmation modal — they don't change anything until you confirm. Use "Custom date" if you need a specific end date.
+    </p>
+    ${ctaButton("Open employee profile", peopleLink(""))}
+  `;
+
+  const text = [
+    args.recipientName ? `Hi ${args.recipientName},` : "Hi,",
+    `${args.employeeName}'s probation ends in ${args.daysRemaining} day${args.daysRemaining === 1 ? "" : "s"} (${fmt(args.probationEndDate)}).`,
+    ``,
+    `Employee: ${args.employeeName}`,
+    args.employeeId   ? `HRM No.: ${args.employeeId}` : null,
+    args.department   ? `Department: ${args.department}` : null,
+    args.managerName  ? `Reporting Manager: ${args.managerName}` : null,
+    args.joiningDate  ? `Joined: ${fmt(args.joiningDate)}` : null,
+    `Probation Ends: ${fmt(args.probationEndDate)}`,
+    ``,
+    `Need more time? Extend probation:`,
+    `  +1 month  : ${peopleLink("?extendProbation=1m")}`,
+    `  +2 months : ${peopleLink("?extendProbation=2m")}`,
+    `  Custom    : ${peopleLink("?extendProbation=custom")}`,
+    ``,
+    `Open profile: ${peopleLink("")}`,
+  ].filter(Boolean).join("\n");
+
+  return { subject, html: SHELL(subject, body), text };
+}
+
 // ── POC assignment ────────────────────────────────────────────────────
 // Sent to the employee picked as "POC in Absence" on any leave-style
 // request (Leave / WFH / On Duty / Half Day / Comp Off). Heads-up that
