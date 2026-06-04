@@ -95,7 +95,17 @@ export const DESIGNATION_SEED: DesignationSeed[] = [
   { key: "gc",             label: "GC",              scorecardFunction: null,        sortOrder: 13, permissions: [...BASELINE] },
   { key: "vo_artist",      label: "VO Artist",       scorecardFunction: null,        sortOrder: 14, permissions: [...BASELINE] },
   { key: "publisher",      label: "Publisher",       scorecardFunction: null,        sortOrder: 15, permissions: [...BASELINE] },
-  { key: "member",         label: "Member",          scorecardFunction: null,        sortOrder: 16, permissions: [...BASELINE] },
+  // ── IT Security tier ──
+  // Owns the company asset register but otherwise has no HR access.
+  // Distinct from HR tiers (which all carry MANAGE_HR + MANAGE_ASSETS):
+  // the sidebar surfaces the Assets tab to anyone with MANAGE_ASSETS
+  // *and not* MANAGE_HR — i.e. exactly this tier. HR tiers continue to
+  // reach Assets through the HR Dashboard sub-panel.
+  // Intern gets the same MANAGE_ASSETS today; HR can later edit the
+  // designation to view-only via the RBAC UI without a code change.
+  { key: "it_security",        label: "IT Security",        scorecardFunction: null, sortOrder: 16, permissions: ["MANAGE_ASSETS", ...BASELINE] },
+  { key: "it_security_intern", label: "IT Security Intern", scorecardFunction: null, sortOrder: 17, permissions: ["MANAGE_ASSETS", ...BASELINE] },
+  { key: "member",         label: "Member",          scorecardFunction: null,        sortOrder: 18, permissions: [...BASELINE] },
 ];
 
 /**

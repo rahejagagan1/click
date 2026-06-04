@@ -14,7 +14,7 @@
 // get added to src/lib/email/toggles.ts.
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, XCircle, Mail, Users, ChevronDown, ChevronRight } from "lucide-react";
+import { CheckCircle2, XCircle, Mail, Users, ChevronDown, ChevronRight, Clock } from "lucide-react";
 
 type CatalogItem = {
     key: string;
@@ -29,12 +29,25 @@ type RoleItem = {
 };
 type Toggles  = Record<string, boolean>;
 type PerRole  = Record<string, Record<string, boolean>>;
+type HistoryEntry = { by: string; byId: number | null; at: string };
+type History = Record<string, HistoryEntry>;
+
+// "27 May 2026, 03:16 pm" — matches the screenshot format. Renders in
+// the viewer's local timezone (Intl handles DST + offset automatically).
+function formatChangedAt(iso: string): string {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const date = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    const time = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true }).toLowerCase();
+    return `${date}, ${time}`;
+}
 
 export default function EmailsAutomationPanel() {
     const [catalog,     setCatalog]     = useState<CatalogItem[]>([]);
     const [roleCatalog, setRoleCatalog] = useState<RoleItem[]>([]);
     const [toggles,     setToggles]     = useState<Toggles>({});
     const [perRole,     setPerRole]     = useState<PerRole>({});
+    const [history,     setHistory]     = useState<History>({});
     const [openRole,    setOpenRole]    = useState<string | null>(null);
     const [loading,     setLoading]     = useState(true);
     // Per-row save state — keyed by toggle.key. While a key is in this
@@ -57,6 +70,7 @@ export default function EmailsAutomationPanel() {
                 setRoleCatalog(d.roleCatalog ?? []);
                 setToggles(d.toggles ?? {});
                 setPerRole(d.perRole ?? {});
+                setHistory(d.history ?? {});
             })
             .catch(() => { if (!cancelled) setBanner({ type: "err", text: "Failed to load toggles" }); })
             .finally(() => { if (!cancelled) setLoading(false); });
@@ -93,6 +107,7 @@ export default function EmailsAutomationPanel() {
             }
             // Trust the server response as the new truth.
             if (d?.toggles && typeof d.toggles === "object") setToggles(d.toggles);
+            if (d?.history && typeof d.history === "object") setHistory(d.history);
             setBanner({ type: "ok", text: `${labelFor(key) ?? key} ${next ? "enabled" : "disabled"}.` });
             setTimeout(() => setBanner(null), 2500);
         } catch {
@@ -178,6 +193,7 @@ export default function EmailsAutomationPanel() {
                 return;
             }
             if (d?.perRole && typeof d.perRole === "object") setPerRole(d.perRole);
+            if (d?.history && typeof d.history === "object") setHistory(d.history);
             const roleLabel = roleCatalog.find((r) => r.key === role)?.label ?? role;
             setBanner({ type: "ok", text: `${labelFor(kind) ?? kind} for ${roleLabel} ${next ? "enabled" : "disabled"}.` });
             setTimeout(() => setBanner(null), 2500);
@@ -285,12 +301,19 @@ export default function EmailsAutomationPanel() {
                         {grouped[g].map((t) => {
                             const on    = !!toggles[t.key];
                             const busy  = savingKeys.has(t.key) || bulkSaving;
+                            const last  = history[t.key];
                             return (
                                 <div key={t.key} className="flex items-start justify-between gap-4 px-5 py-3.5">
                                     <div className="min-w-0">
                                         <p className="text-[13.5px] font-semibold text-slate-800">{t.label}</p>
                                         <p className="mt-0.5 text-[11.5px] text-slate-500 leading-relaxed">{t.description}</p>
                                         <code className="mt-1 inline-block text-[10px] text-slate-400 bg-slate-50 px-1.5 rounded">{t.key}</code>
+                                        {last && (
+                                            <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-slate-500">
+                                                <Clock size={11} className="shrink-0 text-slate-400" />
+                                                <span>Last changed by <span className="font-medium text-slate-700">{last.by}</span> · {formatChangedAt(last.at)}</span>
+                                            </p>
+                                        )}
                                     </div>
                                     <div className="shrink-0 flex flex-col items-end gap-1">
                                         <button
