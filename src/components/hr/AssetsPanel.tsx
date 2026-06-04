@@ -152,28 +152,79 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
   const employeeView = !canManageAssets;
   const [category, setCategory] = useState("All");
   const [showCreate, setShowCreate] = useState(false);
-  const [assetForm, setAssetForm] = useState({ name: "", category: "Laptop", serialNumber: "", purchaseDate: "", currentValue: "", condition: "good", notes: "" });
+  // Repeating-rows form: HR can hand a new hire their full kit
+  // (laptop + monitor + keyboard + mouse + headset etc.) in ONE
+  // submit. Items default to one blank row; HR adds rows as needed.
+  // Shared fields (assignee / purchase date / notes) apply to every
+  // item in the batch.
+  type ItemRow = {
+    id: string;          // local React key
+    name: string;
+    category: string;
+    serialNumber: string;
+    condition: string;
+  };
+  const blankRow = (): ItemRow => ({
+    id: Math.random().toString(36).slice(2),
+    name: "",
+    category: "Laptop",
+    serialNumber: "",
+    condition: "good",
+  });
+  const [items, setItems] = useState<ItemRow[]>([blankRow()]);
+  const [sharedPurchaseDate, setSharedPurchaseDate] = useState<string>("");
+  const [sharedNotes, setSharedNotes] = useState<string>("");
   const [assignee, setAssignee] = useState<Employee | null>(null);
-  const setF = (k: string, v: string) => setAssetForm(f => ({ ...f, [k]: v }));
+  const [saving, setSaving] = useState(false);
+
+  const setItem = (id: string, patch: Partial<ItemRow>) =>
+    setItems((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const addItem    = () => setItems((rows) => [...rows, blankRow()]);
+  const removeItem = (id: string) =>
+    setItems((rows) => (rows.length === 1 ? rows : rows.filter((r) => r.id !== id)));
 
   const resetForm = () => {
-    setAssetForm({ name: "", category: "Laptop", serialNumber: "", purchaseDate: "", currentValue: "", condition: "good", notes: "" });
+    setItems([blankRow()]);
+    setSharedPurchaseDate("");
+    setSharedNotes("");
     setAssignee(null);
   };
 
   const handleCreateAsset = async () => {
-    const body: any = { ...assetForm };
-    if (!body.name || !body.category) return alert("Name and category are required");
-    if (body.purchaseDate) body.purchaseDate = new Date(body.purchaseDate).toISOString();
-    if (body.currentValue) body.currentValue = parseFloat(body.currentValue); else delete body.currentValue;
-    if (!body.serialNumber) delete body.serialNumber;
-    if (!body.notes) delete body.notes;
-    if (assignee) body.assignedToUserId = assignee.id;
-    const res = await fetch("/api/hr/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (!res.ok) return alert((await res.json()).error ?? "Failed to create asset");
-    setShowCreate(false);
-    resetForm();
-    mutate(assetsUrl);
+    // Local validation: every row needs name + category. Surface a
+    // specific row index so HR knows where to fix.
+    for (let i = 0; i < items.length; i++) {
+      if (!items[i].name.trim()) return alert(`Item #${i + 1}: asset name is required.`);
+      if (!items[i].category.trim()) return alert(`Item #${i + 1}: category is required.`);
+    }
+    setSaving(true);
+    try {
+      const body: any = {
+        items: items.map((r) => ({
+          name: r.name.trim(),
+          category: r.category.trim(),
+          serialNumber: r.serialNumber.trim() || undefined,
+          condition: r.condition || "good",
+        })),
+      };
+      if (assignee) body.assignedToUserId = assignee.id;
+      if (sharedPurchaseDate) body.purchaseDate = new Date(sharedPurchaseDate).toISOString();
+      if (sharedNotes.trim()) body.notes = sharedNotes.trim();
+      const res = await fetch("/api/hr/assets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        return alert(j?.error ?? "Failed to add assets");
+      }
+      setShowCreate(false);
+      resetForm();
+      mutate(assetsUrl);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Employee view explicitly asks the API for the mine-scoped list.
@@ -306,63 +357,138 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
       {showCreate && (
         <>
           <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowCreate(false)} />
-          <div className="fixed top-0 right-0 bottom-0 w-[380px] bg-[#f4f7f8] dark:bg-[#001529] border-l border-slate-200 dark:border-white/[0.08] shadow-2xl z-50 flex flex-col animate-slide-in">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06]">
-              <h2 className="text-[16px] font-semibold text-slate-800 dark:text-white">Add Asset</h2>
-              <button onClick={() => setShowCreate(false)} className="text-slate-500 hover:text-slate-800 dark:text-white text-xl">✕</button>
+          <div className="fixed top-0 right-0 bottom-0 w-[440px] bg-[#f4f7f8] dark:bg-[#001529] border-l border-slate-200 dark:border-white/[0.08] shadow-2xl z-50 flex flex-col animate-slide-in">
+            <div className="flex items-start justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06]">
+              <div>
+                <h2 className="text-[16px] font-semibold text-slate-800 dark:text-white">Add Assets</h2>
+                <p className="mt-0.5 text-[11.5px] text-slate-500">Add one or more items in a single entry.</p>
+              </div>
+              <button onClick={() => { setShowCreate(false); }} aria-label="Close" className="text-slate-400 hover:text-slate-700 dark:hover:text-white -mt-1">
+                <X size={18} />
+              </button>
             </div>
-            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+              {/* Assignee — top, optional. Leaving it empty stocks the
+                  register without an owner (status defaults to 'available'). */}
               <div>
-                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Asset Name *</label>
-                <input value={assetForm.name} onChange={e => setF("name", e.target.value)} className={FIELD_CLS} placeholder="e.g. MacBook Pro 14" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Category *</label>
-                  <SelectField
-                    value={assetForm.category}
-                    onChange={(v) => setF("category", v)}
-                    options={CATEGORIES.filter((c) => c !== "All")}
-                    className={FIELD_CLS}
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Condition</label>
-                  <SelectField
-                    value={assetForm.condition}
-                    onChange={(v) => setF("condition", v)}
-                    options={["new","good","fair","poor"].map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) }))}
-                    className={FIELD_CLS}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Serial Number</label>
-                <input value={assetForm.serialNumber} onChange={e => setF("serialNumber", e.target.value)} className={FIELD_CLS} placeholder="SN-XXXXXX" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Purchase Date</label>
-                  <DateField value={assetForm.purchaseDate} onChange={(v) => setF("purchaseDate", v)} className="mt-1 w-full" />
-                </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Value (₹)</label>
-                  <input type="number" value={assetForm.currentValue} onChange={e => setF("currentValue", e.target.value)} className={FIELD_CLS} placeholder="0" />
-                </div>
-              </div>
-              <div>
-                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Assign To</label>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Assign To <span className="text-slate-400 font-normal normal-case tracking-normal">(optional)</span></label>
                 <EmployeePicker value={assignee} onChange={setAssignee} />
               </div>
+
+              {/* ITEMS — each row is a clean two-field card. Stacked
+                  divider style (no heavy borders per row), trash icon
+                  on hover, "+ Add item" sits below as a quiet ghost
+                  button. Drops the Value field that crowded the row
+                  for a 50/50 Category+Name top, 50/50 Serial+Condition
+                  bottom layout — same fields, less visual noise. */}
               <div>
-                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Notes</label>
-                <textarea value={assetForm.notes} onChange={e => setF("notes", e.target.value)} rows={2}
-                  className="mt-1 w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none resize-none" />
+                <div className="flex items-center justify-between mb-2.5">
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Items</label>
+                  <span className="text-[11px] text-slate-400">{items.length} item{items.length === 1 ? "" : "s"}</span>
+                </div>
+                <div className="rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] divide-y divide-slate-100 dark:divide-white/[0.05]">
+                  {items.map((row, idx) => (
+                    <div key={row.id} className="p-4 group relative">
+                      <div className="flex items-center justify-between mb-2.5">
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-400">
+                          <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-slate-100 dark:bg-white/[0.06] text-[10px] font-bold text-slate-600 dark:text-slate-300 px-1.5">{idx + 1}</span>
+                          <span className="text-slate-500">{row.name.trim() || "New item"}</span>
+                        </span>
+                        {items.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeItem(row.id)}
+                            aria-label="Remove item"
+                            className="text-slate-400 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                          >
+                            <X size={15} />
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+                        <div>
+                          <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Category</label>
+                          <SelectField
+                            value={row.category}
+                            onChange={(v) => setItem(row.id, { category: v })}
+                            options={CATEGORIES.filter((c) => c !== "All")}
+                            className={FIELD_CLS}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Asset Name</label>
+                          <input
+                            value={row.name}
+                            onChange={(e) => setItem(row.id, { name: e.target.value })}
+                            className={FIELD_CLS}
+                            placeholder="e.g. MacBook Pro 14"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Serial No.</label>
+                          <input
+                            value={row.serialNumber}
+                            onChange={(e) => setItem(row.id, { serialNumber: e.target.value })}
+                            className={FIELD_CLS}
+                            placeholder="Optional"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Condition</label>
+                          <SelectField
+                            value={row.condition}
+                            onChange={(v) => setItem(row.id, { condition: v })}
+                            options={["new","good","fair","poor"].map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) }))}
+                            className={FIELD_CLS}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={addItem}
+                  className="mt-2.5 inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[#008CFF] hover:text-[#0070cc] transition-colors"
+                >
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#008CFF]/10">+</span>
+                  Add another item
+                </button>
+              </div>
+
+              {/* Shared fields collapse into one compact section —
+                  fewer headings, lighter visual weight. Both fields
+                  apply to every item above. */}
+              <div className="border-t border-slate-100 dark:border-white/[0.05] pt-4 space-y-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Purchase Date <span className="text-slate-400 font-normal normal-case tracking-normal">(optional)</span></label>
+                  <DateField value={sharedPurchaseDate} onChange={setSharedPurchaseDate} className="mt-1 w-full max-w-[180px]" />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Notes <span className="text-slate-400 font-normal normal-case tracking-normal">(optional)</span></label>
+                  <textarea
+                    value={sharedNotes}
+                    onChange={(e) => setSharedNotes(e.target.value)}
+                    rows={2}
+                    placeholder="Warranty, batch number, or anything else…"
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-slate-300 resize-none"
+                  />
+                </div>
               </div>
             </div>
             <div className="px-6 py-4 border-t border-slate-200 dark:border-white/[0.06] flex justify-end gap-3">
-              <button onClick={() => setShowCreate(false)} className="h-9 px-5 text-[13px] text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:text-white rounded-lg">Cancel</button>
-              <button onClick={handleCreateAsset} className="h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold">Add Asset</button>
+              <button
+                onClick={() => setShowCreate(false)}
+                disabled={saving}
+                className="h-9 px-5 text-[13px] text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:text-white rounded-lg disabled:opacity-50"
+              >Cancel</button>
+              <button
+                onClick={handleCreateAsset}
+                disabled={saving}
+                className="h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-60 disabled:cursor-wait"
+              >{saving ? "Saving…" : `Add ${items.length} asset${items.length === 1 ? "" : "s"}`}</button>
             </div>
           </div>
         </>

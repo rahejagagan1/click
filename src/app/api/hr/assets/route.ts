@@ -55,16 +55,86 @@ export async function GET(req: NextRequest) {
   } catch (e) { return serverError(e, "GET /api/hr/assets"); }
 }
 
+// POST accepts TWO shapes — legacy single-asset and batch multi-asset:
+//
+//  Legacy (still supported for any older caller):
+//    { name, category, ...assetFields, assignedToUserId? }
+//    → creates one Asset.
+//
+//  Batch (new — drives the redesigned "Add Assets" modal so HR can
+//   hand a new hire their laptop + monitor + keyboard + mouse +
+//   headset in ONE submit):
+//    {
+//      assignedToUserId?: number,    // shared by every item; null = stock
+//      purchaseDate?: ISO string,    // shared
+//      notes?: string,               // shared
+//      items: [{ name, category, condition?, serialNumber?, currentValue? }, …]
+//    }
+//    → creates N Assets atomically (prisma transaction). If any item
+//      fails validation, the whole batch rolls back so HR doesn't end
+//      up with half a kit on a fresh joiner.
+//
+// The legacy branch stays bytewise-equivalent so any client that hasn't
+// upgraded keeps working.
 export async function POST(req: NextRequest) {
   const { errorResponse } = await requireAdmin();
   if (errorResponse) return errorResponse;
   try {
     const body = await req.json();
-    if (body.purchaseDate) body.purchaseDate = new Date(body.purchaseDate);
 
+    // ── BATCH branch ────────────────────────────────────────────────
+    if (Array.isArray(body?.items)) {
+      const sharedAssignee = body.assignedToUserId
+        ? Number(body.assignedToUserId)
+        : null;
+      const sharedPurchaseDate = body.purchaseDate ? new Date(body.purchaseDate) : null;
+      const sharedNotes: string | null = body.notes ? String(body.notes) : null;
+      const items: any[] = body.items;
+      if (items.length === 0) {
+        return NextResponse.json({ error: "Add at least one item." }, { status: 400 });
+      }
+      // Validate every row up-front so a transaction failure surfaces a
+      // clear message (rather than a generic Prisma error).
+      for (const [i, it] of items.entries()) {
+        if (!it?.name || !String(it.name).trim()) {
+          return NextResponse.json({ error: `Item #${i + 1}: name is required.` }, { status: 400 });
+        }
+        if (!it?.category || !String(it.category).trim()) {
+          return NextResponse.json({ error: `Item #${i + 1}: category is required.` }, { status: 400 });
+        }
+      }
+      const created = await prisma.$transaction(items.map((it) => prisma.asset.create({
+        data: {
+          name: String(it.name).trim(),
+          category: String(it.category).trim(),
+          serialNumber: it.serialNumber ? String(it.serialNumber).trim() : null,
+          condition: it.condition || "good",
+          currentValue: it.currentValue != null && it.currentValue !== ""
+            ? Number(it.currentValue)
+            : null,
+          purchaseDate: sharedPurchaseDate,
+          notes: sharedNotes,
+          status: sharedAssignee ? "assigned" : "available",
+          ...(sharedAssignee
+            ? {
+                assignments: {
+                  create: {
+                    userId: sharedAssignee,
+                    conditionOnAssign: it.condition || "good",
+                  },
+                },
+              }
+            : {}),
+        },
+        include: { assignments: { include: { user: { select: { id: true, name: true } } } } },
+      })));
+      return NextResponse.json({ ok: true, count: created.length, assets: created });
+    }
+
+    // ── LEGACY single-asset branch ─────────────────────────────────
+    if (body.purchaseDate) body.purchaseDate = new Date(body.purchaseDate);
     const { assignedToUserId, ...assetData } = body;
     if (assignedToUserId) assetData.status = "assigned";
-
     const asset = await prisma.asset.create({
       data: {
         ...assetData,
