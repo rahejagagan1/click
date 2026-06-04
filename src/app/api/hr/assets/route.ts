@@ -1,9 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, requireAdmin, serverError } from "@/lib/api-auth";
+import { requireAuth, serverError } from "@/lib/api-auth";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { can } from "@/lib/permissions/can";
+
+// Asset write permission — OR-gates two paths so users get in via
+// EITHER the new RBAC OR the legacy role check:
+//   1. can(user, "MANAGE_ASSETS") — covers IT Security designations,
+//      backfilled HR / admin / CEO sessions, and devs (blanket).
+//   2. Legacy fallback — anyone whose orgLevel / role places them in
+//      the HR-admin tier. Catches users whose designation hasn't been
+//      backfilled yet on prod (the failure mode we hit for Khushal —
+//      special_access, but his session's permissions array didn't
+//      include MANAGE_ASSETS because the seed re-run hadn't happened).
+//      As soon as the designation backfill lands the legacy branch is
+//      a no-op for him — both paths agree.
+function canManageAssets(user: any): boolean {
+  if (!user) return false;
+  if (can(user, "MANAGE_ASSETS")) return true;
+  return user.orgLevel === "ceo"
+    || user.orgLevel === "special_access"
+    || user.orgLevel === "hr_manager"
+    || user.role === "hr_manager"
+    || user.role === "admin"
+    || user.isDeveloper === true;
+}
 
 export async function GET(req: NextRequest) {
   const { errorResponse } = await requireAuth();
@@ -77,8 +99,11 @@ export async function GET(req: NextRequest) {
 // The legacy branch stays bytewise-equivalent so any client that hasn't
 // upgraded keeps working.
 export async function POST(req: NextRequest) {
-  const { errorResponse } = await requireAdmin();
+  const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+  if (!canManageAssets(session?.user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   try {
     const body = await req.json();
 
