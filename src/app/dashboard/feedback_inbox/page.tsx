@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
+import { canUseFeedback } from "@/lib/access";
 
 const CATEGORY_LABELS: Record<string, string> = {
     // Current categories
@@ -34,7 +35,10 @@ type Row = {
 export default function FeedbackInboxPage() {
     const { data: session, status } = useSession();
     const user = session?.user as any;
-    const allowed = canViewFeedbackInbox(user);
+    // Stack the role gate with the brand gate — Feedback is an NB Media
+    // program, so YT Labs admins (e.g. the YT Labs CEO) don't see the
+    // inbox even though they otherwise pass canViewFeedbackInbox.
+    const allowed = canViewFeedbackInbox(user) && canUseFeedback(user);
 
     const [rows, setRows] = useState<Row[]>([]);
     const [loading, setLoading] = useState(true);
