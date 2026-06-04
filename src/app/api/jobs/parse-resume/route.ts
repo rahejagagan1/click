@@ -520,12 +520,18 @@ function clusterEducationByShape(text: string): ExtractedEducation[] {
   const RANGE_RE = /(19|20)\d{2}\s*[-–—]\s*(?:(19|20)\d{2}|present|current)/i;
   const SINGLE_YEAR_RE = /\b(?:19|20)\d{2}\b/;
   const INST_RE = /\b(University|Institute|College|Collage|Polytechnic|Academy|School|Board|CBSE|ICSE|HNBGU|HBSE)\b/i;
+  // B.E. / M.E. require an explicit period — without it "BE" / "ME"
+  // false-positives in English prose ("AROUND ME", "About Me",
+  // "I'll BE there"). XII / X kept since they're rarely standalone
+  // English words in a resume body.
   const DEGREE_RE =
-    /\b(MBA(?:[\s-][\w &]+)?|BBA|BCA|MCA|BSc|MSc|B\.?Sc|M\.?Sc|B\.?A|M\.?A|B\.?Com|Bcom|M\.?Com|B\.?Tech|M\.?Tech|B\.?E|M\.?E|PhD|Doctorate|Diploma|HSC|SSC|XII|X|10\+2|12th|10th|Postgraduate|Undergraduate|Bachelors?|Masters?|Class\s*X{1,2}|Class\s*10|Class\s*12)\b/i;
+    /\b(MBA(?:[\s-][\w &]+)?|BBA|BCA|MCA|BSc|MSc|B\.?Sc|M\.?Sc|B\.A|M\.A|B\.?Com|Bcom|M\.?Com|B\.?Tech|M\.?Tech|B\.E|M\.E|PhD|Doctorate|Diploma|HSC|SSC|XII|X|10\+2|12th|10th|Postgraduate|Undergraduate|Bachelors?|Masters?|Class\s*X{1,2}|Class\s*10|Class\s*12)\b/i;
   // Heuristic to drop work-history year mentions (e.g. "1SEPT 2023 -1NOV
-  // 2023", "DURATION - 5 MONTHS"). We treat a line as work context if
-  // it mentions any month abbrev or work-shape verb alongside the year.
-  const WORK_CONTEXT_RE = /\b(Jan|Feb|Mar|Apr|May|June|July?|Aug|Sept?|Oct|Nov|Dec|Worked|Working|Duration|Designation|Intern|Volunteer|present|current)\b/i;
+  // 2023", "DURATION - 5 MONTHS"). Treat a line as work context if it
+  // mentions any month abbrev or work-shape verb alongside the year.
+  // Month tokens drop the LEFT word boundary so "1SEPT" / "1NOV" (day
+  // glued to month after pdfjs extraction) still matches.
+  const WORK_CONTEXT_RE = /(?:\b|\d)(Jan|Feb|Mar|Apr|May|June|July?|Aug|Sept?|Oct|Nov|Dec)\b|\b(Worked|Working|Duration|Designation|Intern|Volunteer|present|current)\b/i;
 
   const years: string[] = [];
   const institutions: string[] = [];
@@ -583,6 +589,110 @@ function clusterEducationByShape(text: string): ExtractedEducation[] {
     }
   }
   return out.slice(0, 8);
+}
+
+// ── Section-window adjacency fallback ────────────────────────────────
+// For resumes where the EDUCATION section has NO years at all (the
+// candidate just listed degree + institution), AND for two-column
+// layouts where pdfjs returns the left-column section header AFTER
+// the right-column body content. The cluster scanner above can't help
+// because it's year-anchored.
+//
+// Approach: locate any line that IS just an EDUCATION-style header.
+// Take a window of N lines on each side (covers the pre-header content
+// in two-column resumes). Within the window, find runs of adjacent
+// lines where one is institutional and the other is a degree — emit
+// one entry per pair. No year required (left blank if absent).
+function scanEducationSectionLoose(text: string): ExtractedEducation[] {
+  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
+  // Header has to be ALONE on the line (or only with a few decorative
+  // chars) so we don't catch the word inside narrative prose.
+  const HEADER_RE = /^(?:EDUCATION(?:\s*&\s*\w+)?|ACADEMIC(?:\s+(?:QUALIFICATIONS?|DETAILS|RECORD|BACKGROUND))?|EDUCATIONAL\s+(?:QUALIFICATIONS?|BACKGROUND|DETAILS))\s*[:.\s]*$/i;
+  const headerIdx = lines.findIndex(l => HEADER_RE.test(l));
+  if (headerIdx === -1) return [];
+
+  const WINDOW = 30;
+  const lo = Math.max(0, headerIdx - WINDOW);
+  const hi = Math.min(lines.length, headerIdx + WINDOW);
+  const win = lines.slice(lo, hi);
+
+  const INST_RE = /\b(University|Institute|College|Collage|Polytechnic|Academy|School|Board|CBSE|ICSE|HNBGU|HBSE)\b/i;
+  const DEGREE_RE =
+    /\b(MBA(?:[\s-][\w &]+)?|BBA|BCA|MCA|BSc|MSc|B\.?Sc|M\.?Sc|B\.A|M\.A|B\.?Com|Bcom|M\.?Com|B\.?Tech|M\.?Tech|B\.E|M\.E|PhD|Doctorate|Diploma|HSC|SSC|XII|X|10\+2|12th|10th|Postgraduate|Undergraduate|Bachelors?|Bachelor's|Masters?|Master's|Class\s*X{1,2}|Class\s*10|Class\s*12)\b/i;
+  // Optional year-of-passing on the same line; reused below.
+  const YEAR_RE = /\b(19|20)\d{2}\b/;
+
+  const out: ExtractedEducation[] = [];
+  for (let i = 0; i < win.length; i++) {
+    const a = win[i];
+    if (a === lines[headerIdx]) continue; // skip the header itself
+    // Try pairs (a, b) where one is institution and the other is degree.
+    const next = win[i + 1] ?? "";
+    const aInst = INST_RE.test(a) && a.length <= 90;
+    const aDeg  = DEGREE_RE.test(a) && a.length <= 60;
+    const bInst = INST_RE.test(next) && next.length <= 90;
+    const bDeg  = DEGREE_RE.test(next) && next.length <= 60;
+
+    // Extract the FULL course label when the line is short + degree-
+    // dominant. "Bachelor's of arts" / "MBA in Marketing" / "B.Tech in
+    // Computer Science" all want to keep the suffix, not just the
+    // matched root token.
+    const fullCourse = (line: string, m: RegExpMatchArray): string => {
+      const t = line.trim();
+      const lc = t.toLowerCase();
+      const tok = m[0].toLowerCase();
+      // Whole line if it's short and the degree token starts the line
+      // (with optional leading bullet / dash / quote chars stripped).
+      const stripped = lc.replace(/^[\s•·*\-–—"']+/, "");
+      if (t.length <= 45 && stripped.startsWith(tok)) return t;
+      return m[0].trim();
+    };
+
+    let institution = "", course = "";
+    if (aInst && bDeg && !aDeg) {
+      institution = a; course = fullCourse(next, next.match(DEGREE_RE)!);
+      i++; // consume the degree line
+    } else if (aDeg && bInst && !aInst) {
+      course = fullCourse(a, a.match(DEGREE_RE)!); institution = next;
+      i++; // consume the institution line
+    } else if (aInst && aDeg) {
+      institution = a.replace(DEGREE_RE, "").replace(/\s+/g, " ").trim();
+      course = fullCourse(a, a.match(DEGREE_RE)!);
+    } else {
+      continue;
+    }
+
+    // Year of passing — check both lines in the pair for any year.
+    const combined = `${a} ${next}`;
+    const ym = combined.match(YEAR_RE);
+
+    // Clean up "Bachelor's" → "Bachelor's" (preserve case), strip
+    // year + degree tokens from institution text so it doesn't echo
+    // them back.
+    institution = institution
+      .replace(DEGREE_RE, "")
+      .replace(YEAR_RE, "")
+      .replace(/[|·•\-–—]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!course && !institution) continue;
+    out.push({
+      course,
+      branch: "",
+      startOfCourse: "",
+      endOfCourse: ym ? ym[0] : "",
+      university: institution,
+      location: "",
+    });
+  }
+  // Dedupe — two-column resumes can produce the same pair from before-
+  // and after-window halves.
+  const seen = new Set<string>();
+  return out.filter((e) => {
+    const k = `${(e.course || "").toLowerCase()}|${(e.university || "").toLowerCase().slice(0, 32)}`;
+    if (seen.has(k)) return false;
+    seen.add(k); return true;
+  }).slice(0, 6);
 }
 
 // ── Skills + Languages ────────────────────────────────────────────────
@@ -815,6 +925,15 @@ export async function POST(req: NextRequest) {
     // them by index.
     if (educations.length === 0) {
       educations = clusterEducationByShape(text);
+    }
+    // Final fallback: resumes with NO years in education (just degree
+    // + institution), or two-column layouts where pdfjs returns the
+    // section header AFTER its body content (so the section-based
+    // scanners can't find content following the header). Looks for
+    // EDUCATION-style header anywhere, then pairs adjacent institution
+    // / degree lines within a window around it.
+    if (educations.length === 0) {
+      educations = scanEducationSectionLoose(text);
     }
     const skills     = parseSkills(text);
 
