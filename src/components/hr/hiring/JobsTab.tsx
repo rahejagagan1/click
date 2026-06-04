@@ -34,6 +34,85 @@ import CreateJobWizard from "./CreateJobWizard";
 import JobShareDialog from "./JobShareDialog";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import { useUrlState } from "@/lib/hooks/useUrlState";
+import dynamic from "next/dynamic";
+import "react-quill-new/dist/quill.snow.css";
+
+// ReactQuill must be dynamically imported with ssr:false — its
+// constructor accesses `window` at import time.
+const ReactQuill = dynamic(
+  async () => (await import("react-quill-new")).default,
+  { ssr: false, loading: () => <div className="px-5 py-4 text-[12.5px] text-slate-400">Loading editor…</div> },
+);
+
+// Full-featured Quill toolbar — gives HR Bold / Italic / Underline /
+// font size / headings / lists / alignment, the MS-Word feature set
+// most JD authors actually use. The NB Media letterhead + watermark
+// in the rendered PDF come from the DOCX template (not the editor
+// content), so any toolbar action affects ONLY the body text — the
+// branded chrome stays intact across edits.
+const JD_QUILL_MODULES = {
+  toolbar: [
+    [{ header: [1, 2, 3, false] }],
+    [{ size: ["small", false, "large", "huge"] }],
+    ["bold", "italic", "underline", "strike"],
+    [{ list: "ordered" }, { list: "bullet" }],
+    [{ align: [] }],
+    ["clean"],
+  ],
+};
+const JD_QUILL_FORMATS = [
+  "header", "size", "bold", "italic", "underline", "strike",
+  "list", "bullet", "align",
+];
+
+/** Convert plain text (as extracted from an uploaded PDF / DOCX)
+ *  into Quill-compatible HTML — preserves line breaks and applies
+ *  light auto-formatting:
+ *    • Lines ending with ":" (≤60 chars) → <h3>
+ *    • Lines starting with "-", "*", "•" → <li> wrapped in <ul>
+ *    • Lines starting with "1.", "2." …  → <li> wrapped in <ol>
+ *    • Everything else                   → <p>
+ *  Lines that already look like HTML (start with "<") pass through. */
+function plainTextToQuillHtml(input: string): string {
+  if (!input) return "";
+  const trimmed = input.trim();
+  if (trimmed.startsWith("<")) return input;  // already HTML — likely re-edit
+  const lines = input.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  let bulletBuf: string[] = [];
+  let numberedBuf: string[] = [];
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const flushB = () => {
+    if (bulletBuf.length) {
+      out.push(`<ul>${bulletBuf.map((b) => `<li>${escape(b)}</li>`).join("")}</ul>`);
+      bulletBuf = [];
+    }
+  };
+  const flushN = () => {
+    if (numberedBuf.length) {
+      out.push(`<ol>${numberedBuf.map((b) => `<li>${escape(b)}</li>`).join("")}</ol>`);
+      numberedBuf = [];
+    }
+  };
+  const flushAll = () => { flushB(); flushN(); };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { flushAll(); out.push("<p><br></p>"); continue; }
+    const bullet = line.match(/^[-*•]\s+(.*)$/);
+    if (bullet) { flushN(); bulletBuf.push(bullet[1]); continue; }
+    const num = line.match(/^\d+[.)]\s+(.*)$/);
+    if (num) { flushB(); numberedBuf.push(num[1]); continue; }
+    flushAll();
+    if (/:\s*$/.test(line) && line.length <= 60) {
+      out.push(`<h3>${escape(line.replace(/:\s*$/, ""))}</h3>`);
+    } else {
+      out.push(`<p>${escape(line)}</p>`);
+    }
+  }
+  flushAll();
+  return out.join("");
+}
 
 type JobStatus = "draft" | "published" | "on_hold" | "closed";
 type ViewMode  = "grid" | "list";
@@ -106,16 +185,22 @@ const STATUS_DOT: Record<JobStatus, string> = {
   on_hold:   "text-amber-500",
   closed:    "text-rose-400",
 };
-const STATUS_DOT_LABEL: Record<JobStatus, string> = {
-  draft:     "DRAFT",
-  published: "ONLINE",
-  on_hold:   "ON HOLD",
-  closed:    "CLOSED",
-};
-
-export default function JobsTab() {
+export default function JobsTab({
+  initialBrand,
+}: {
+  /** Seeds the Brand filter from the parent page's `?brand=` URL
+   *  param. The value uses the schema's underscore form
+   *  ("nb_media" / "yt_labs") to match `BRAND_OPTIONS`; empty string
+   *  means "no initial scope". */
+  initialBrand?: string;
+} = {}) {
   // ── Filters ─────────────────────────────────────────────────────
-  const [brand, setBrand]    = useState("");
+  const [brand, setBrand]    = useState(initialBrand ?? "");
+  // Sync to URL-driven changes (sidebar flyout navigating between
+  // brand variants of the same hiring page).
+  useEffect(() => {
+    if (initialBrand !== undefined) setBrand(initialBrand);
+  }, [initialBrand]);
   const [status, setStatus]  = useState<"all" | JobStatus>("all");
   const [department, setDepartment]   = useState("");
   const [hiringManager, setHM]        = useState("");
@@ -625,14 +710,6 @@ function JobCard({
   // matches Keka where the check goes green once hired === vacancies.
   const fullyFilled = job.vacancies > 0 && job.hiredCount >= job.vacancies;
 
-  // Status pill spec — coloured background + dot for each state.
-  const STATUS_PILL_STYLE: Record<JobStatus, string> = {
-    published: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/70",
-    draft:     "bg-slate-100 text-slate-600 ring-1 ring-slate-200",
-    on_hold:   "bg-amber-50 text-amber-700 ring-1 ring-amber-200/70",
-    closed:    "bg-rose-50 text-rose-700 ring-1 ring-rose-200/70",
-  };
-
   // Coloured left accent strip per status — adds identity without
   // shouting like a full coloured header would.
   const ACCENT_BAR: Record<JobStatus, string> = {
@@ -642,6 +719,17 @@ function JobCard({
     closed:    "bg-rose-500",
   };
 
+  // Status pill colour — light tint + dot per state. Used in the
+  // header so the chip reads as a real status badge rather than a
+  // bare uppercase label.
+  const STATUS_CHIP: Record<JobStatus, { wrap: string; dot: string; label: string }> = {
+    published: { wrap: "bg-emerald-50 text-emerald-700 ring-emerald-200/70",  dot: "bg-emerald-500", label: "Online" },
+    draft:     { wrap: "bg-slate-100 text-slate-600 ring-slate-200",          dot: "bg-slate-400",   label: "Draft"  },
+    on_hold:   { wrap: "bg-amber-50 text-amber-700 ring-amber-200/70",        dot: "bg-amber-500",   label: "On hold" },
+    closed:    { wrap: "bg-rose-50 text-rose-700 ring-rose-200/70",           dot: "bg-rose-500",    label: "Closed" },
+  };
+  const chip = STATUS_CHIP[st];
+
   return (
     <div
       onClick={onOpen}
@@ -650,7 +738,7 @@ function JobCard({
         bg-white rounded-2xl border border-slate-200
         shadow-[0_1px_3px_rgba(15,23,42,0.04)]
         transition-all duration-200
-        hover:-translate-y-0.5 hover:border-[#3b82f6]/60
+        hover:-translate-y-0.5 hover:border-[#3b82f6]/50
         hover:shadow-[0_8px_24px_-6px_rgba(15,23,42,0.10)]
       "
     >
@@ -659,54 +747,75 @@ function JobCard({
       <div aria-hidden="true" className={`w-[3px] flex-shrink-0 ${ACCENT_BAR[st]}`} />
 
       <div className="flex-1 flex flex-col min-w-0">
-        {/* ── Body ───────────────────────────────────────────── */}
-        <div className="relative p-4 pb-3.5 flex-1">
-          {/* Meta line: status text + job id, then star on the right */}
-          <div className="flex items-center justify-between gap-2 mb-2.5">
-            <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 flex items-center gap-1.5 min-w-0">
-              <span className={`${
-                st === "published" ? "text-emerald-600" :
-                st === "draft"     ? "text-slate-500"   :
-                st === "on_hold"   ? "text-amber-600"   :
-                                     "text-rose-600"
-              }`}>{STATUS_DOT_LABEL[st]}</span>
-              <span className="text-slate-300">·</span>
-              <span className="tabular-nums">#{job.id}</span>
-            </p>
+        {/* ── Header: status chip + id (left), actions (right) ── */}
+        <div className="flex items-start justify-between gap-2 px-4 pt-4 pb-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className={`inline-flex items-center gap-1.5 h-[22px] pl-2 pr-2.5 rounded-full ring-1 text-[10.5px] font-semibold tracking-[0.02em] ${chip.wrap}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${chip.dot}`} />
+              {chip.label}
+            </span>
+            <span className="text-[11px] font-medium tabular-nums text-slate-400">#{job.id}</span>
+          </div>
+          {/* Action cluster — star + ⋯, ALWAYS visible. Stops click
+              propagation so the card's onOpen doesn't fire when
+              hitting these. */}
+          <div
+            className="flex items-center gap-0.5 flex-shrink-0 -mr-1"
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
               onClick={(e) => { e.stopPropagation(); onPriorityToggle(); }}
               title={job.isPriority ? "Remove from priority" : "Mark as priority"}
-              className={`flex-shrink-0 h-6 w-6 inline-flex items-center justify-center rounded-full transition-all ${
+              className={`h-7 w-7 inline-flex items-center justify-center rounded-full transition-colors ${
                 job.isPriority
                   ? "bg-amber-400 text-white shadow-[0_2px_6px_rgba(251,191,36,0.35)] hover:bg-amber-500"
-                  : "text-slate-300 hover:text-amber-500"
+                  : "text-slate-300 hover:text-amber-500 hover:bg-slate-50"
               }`}
             >
               <Star size={13} strokeWidth={2} className={job.isPriority ? "fill-white" : ""} />
             </button>
+            <CardActionsMenu
+              job={job}
+              status={st}
+              busy={busy}
+              menuOpen={menuOpen}
+              onMenuToggle={onMenuToggle}
+              onTransition={onTransition}
+              onShare={onShare}
+              onDelete={onDelete}
+            />
           </div>
+        </div>
 
-          {/* Title — kept slate at rest so it reads cleanly. */}
-          <h3 className="text-[16px] font-semibold text-slate-900 group-hover:text-[#3b82f6] transition-colors tracking-[-0.012em] leading-tight line-clamp-1">
+        {/* ── Body ───────────────────────────────────────────── */}
+        <div className="px-4 pb-4 flex-1 min-w-0">
+          <h3 className="text-[15.5px] font-semibold text-slate-900 group-hover:text-[#3b82f6] transition-colors tracking-[-0.012em] leading-[1.3] line-clamp-2">
             {job.title}
           </h3>
-          <p className="text-[12px] text-slate-500 mt-1 truncate">
-            <span className="font-medium">{job.department || brandName}</span>
-            {job.location && <> <span className="text-slate-300 mx-1">·</span> <span>{job.location}</span></>}
+          <p className="text-[12px] text-slate-500 mt-1.5 truncate flex items-center gap-1.5">
+            <span className="font-medium text-slate-600">{job.department || brandName}</span>
+            {job.location && (
+              <>
+                <span className="h-[3px] w-[3px] rounded-full bg-slate-300" />
+                <span>{job.location}</span>
+              </>
+            )}
           </p>
 
-          {/* Stats — bare inline rows, no boxed pills. Reads like
-              an info ledger rather than a chunky toolbar. */}
-          <div className="mt-4 flex items-center gap-4 text-[12.5px]">
+          {/* Stats — inline metrics ledger. Consistent icon size +
+              tabular numerics for a tidy column read. */}
+          <div className="mt-3.5 flex items-center gap-x-4 gap-y-1.5 text-[12px] flex-wrap">
             <span className="inline-flex items-center gap-1.5 text-slate-700" title="Applicants">
               <Users size={13} className="text-slate-400" strokeWidth={2.25} />
               <span className="font-semibold tabular-nums">{job.applicationCount}</span>
+              <span className="text-slate-400">applicants</span>
             </span>
             <span className="inline-flex items-center gap-1.5" title={`${job.hiredCount} hired of ${job.vacancies} positions`}>
               <CheckCircle2 size={13} className={fullyFilled ? "text-emerald-500" : "text-slate-400"} strokeWidth={2.25} />
               <span className={`font-semibold tabular-nums ${fullyFilled ? "text-emerald-700" : "text-slate-700"}`}>
                 {job.hiredCount}/{job.vacancies}
               </span>
+              <span className="text-slate-400">hired</span>
             </span>
             {dateLabel && (
               <span className="inline-flex items-center gap-1.5" title={overdue ? "Past the close date" : "Closes on"}>
@@ -720,34 +829,20 @@ function JobCard({
         </div>
 
         {/* ── Footer ─────────────────────────────────────────── */}
-        <div className="relative border-t border-slate-100 px-4 py-2.5 flex items-center justify-between gap-2">
+        <div className="border-t border-slate-100 bg-slate-50/40 px-4 py-2.5 flex items-center justify-between gap-2">
           <p className="text-[10.5px] font-semibold tracking-[0.04em] text-slate-500">
-            <span className={`tabular-nums ${job.newCount > 0 ? "text-[#3b82f6] font-bold" : "text-slate-900"}`}>
+            <span className={`tabular-nums ${job.newCount > 0 ? "text-[#3b82f6] font-bold" : "text-slate-700"}`}>
               {job.newCount}
             </span>
             <span className="ml-1 uppercase">new</span>
             <span className="mx-1.5 text-slate-300">·</span>
-            <span className="text-slate-900 tabular-nums">{job.rejectedCount}</span>
+            <span className="text-slate-700 tabular-nums">{job.rejectedCount}</span>
             <span className="ml-1 uppercase">archived</span>
           </p>
-          <p className="text-[10.5px] font-medium text-slate-400">
+          <p className="text-[10.5px] font-medium text-slate-400 tabular-nums">
             {job.vacancies > 1 ? `${job.vacancies} positions` : "1 position"}
           </p>
         </div>
-      </div>
-
-      {/* Hover overflow menu — top-right, slides in on hover */}
-      <div className="absolute right-2 top-9 opacity-0 group-hover:opacity-100 translate-x-1 group-hover:translate-x-0 transition-all duration-200 z-10">
-        <CardActionsMenu
-          job={job}
-          status={st}
-          busy={busy}
-          menuOpen={menuOpen}
-          onMenuToggle={onMenuToggle}
-          onTransition={onTransition}
-          onShare={onShare}
-          onDelete={onDelete}
-        />
       </div>
     </div>
   );
@@ -869,16 +964,46 @@ function CardActionsMenu({
 
   // Recompute the menu position whenever it opens — anchored to the
   // trigger button's bounding rect so the panel always lands flush
-  // below it, even if the user scrolls or resizes mid-open.
+  // against it, regardless of the menu's actual height. When the
+  // trigger sits near the bottom of the viewport (last card in the
+  // grid, scrolled-to-end list view), opening downward would clip
+  // the lower menu items — we flip to opening UPWARD in that case.
+  //
+  // To handle both cases without measuring the menu height, we use
+  // CSS bottom-anchoring on the upward open: the panel's bottom edge
+  // sits 4px above the trigger, so however tall it ends up it
+  // remains visually attached. (The earlier estimate-based approach
+  // floated the menu ~80px above the trigger because the estimate
+  // overshot the real height.)
+  const [menuPos, setMenuPos] = useState<
+    | { mode: "down"; top: number; right: number }
+    | { mode: "up";   bottom: number; right: number }
+    | null
+  >(null);
+  // 240px is a conservative "this menu won't fit below" threshold —
+  // tight enough to flip when really needed, loose enough to NOT
+  // flip when there's plenty of room (avoids unnecessary flipping
+  // mid-card-grid).
+  const FLIP_THRESHOLD = 240;
   useLayoutEffect(() => {
-    if (!menuOpen) { setPos(null); return; }
+    if (!menuOpen) { setMenuPos(null); setPos(null); return; }
     const place = () => {
       const r = triggerRef.current?.getBoundingClientRect();
       if (!r) return;
-      setPos({
-        top:   r.bottom + 4,            // 4-px gap below the ⋯ button
-        right: window.innerWidth - r.right, // anchor to the right edge
-      });
+      const vh = window.innerHeight;
+      const spaceBelow = vh - r.bottom;
+      const spaceAbove = r.top;
+      const openUp = spaceBelow < FLIP_THRESHOLD && spaceAbove > spaceBelow;
+      const right = window.innerWidth - r.right;
+      if (openUp) {
+        setMenuPos({ mode: "up", bottom: vh - r.top + 4, right });
+      } else {
+        setMenuPos({ mode: "down", top: r.bottom + 4, right });
+      }
+      // Keep the legacy `pos` boolean so the existing render path
+      // (which checks `pos` truthiness before rendering the portal)
+      // continues to work — its actual values are no longer read.
+      setPos({ top: 0, right });
     };
     place();
     window.addEventListener("scroll", place, true);
@@ -934,16 +1059,20 @@ function CardActionsMenu({
             onClick={(e) => { e.stopPropagation(); onMenuToggle(); }}
           />
           <div
-            className="fixed z-[201] w-48 rounded-lg border border-slate-200 bg-white shadow-lg py-1.5"
-            style={{ top: pos.top, right: pos.right }}
+            className="fixed z-[201] w-48 rounded-lg border border-slate-200 bg-white shadow-lg py-0.5 overflow-y-auto"
+            style={
+              menuPos?.mode === "up"
+                ? { bottom: menuPos.bottom, right: menuPos.right, maxHeight: "calc(100vh - 16px)" }
+                : { top: menuPos?.top ?? pos.top, right: menuPos?.right ?? pos.right, maxHeight: "calc(100vh - 16px)" }
+            }
             onClick={(e) => e.stopPropagation()}
           >
             <a
               href={editHref}
-              className="flex items-center gap-2 px-3 py-1.5 text-[12px] text-slate-700 hover:bg-slate-50"
+              className="flex items-center gap-2.5 px-3 h-7 text-[12px] text-slate-700 hover:bg-slate-50"
               onClick={(e) => e.stopPropagation()}
-            ><Pencil size={12} className="text-slate-400" /> Edit details</a>
-            <div className="my-1 h-px bg-slate-100" />
+            ><Pencil size={12} strokeWidth={2} className="text-slate-400" /> Edit details</a>
+            <div className="my-0.5 h-px bg-slate-100" />
             {status !== "published" && (
               <MenuItem icon={Send}        label="Publish"        onClick={() => onTransition("publish")} />
             )}
@@ -962,7 +1091,7 @@ function CardActionsMenu({
                 href={`/jobs/${job.publicSlug}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 px-3 py-1.5 text-[12px] text-slate-700 hover:bg-slate-50"
+                className="flex items-center gap-2.5 px-3 h-7 text-[12px] text-slate-700 hover:bg-slate-50"
                 onClick={(e) => e.stopPropagation()}
               ><ExternalLink size={12} className="text-slate-400" /> View role page</a>
             )}
@@ -973,10 +1102,10 @@ function CardActionsMenu({
               href="/jobs"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 px-3 py-1.5 text-[12px] text-slate-700 hover:bg-slate-50"
+              className="flex items-center gap-2.5 px-3 h-7 text-[12px] text-slate-700 hover:bg-slate-50"
               onClick={(e) => e.stopPropagation()}
             ><ExternalLink size={12} className="text-slate-400" /> View careers page</a>
-            <div className="my-1 h-px bg-slate-100" />
+            <div className="my-0.5 h-px bg-slate-100" />
             <MenuItem icon={Trash2} label="Delete job" onClick={onDelete} danger />
           </div>
         </>,
@@ -1152,7 +1281,10 @@ function JdReplaceModal({
         const j = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (!res.ok) throw new Error(j?.error || `Couldn't read the file (HTTP ${res.status})`);
-        setText(String(j?.text ?? "").trim());
+        // Extractor returns plain text — Quill needs HTML. Apply the
+        // light auto-formatting so the first paint already shows
+        // headings / lists, then HR can refine with the toolbar.
+        setText(plainTextToQuillHtml(String(j?.text ?? "").trim()));
       } catch (e: any) {
         if (cancelled || e?.name === "AbortError") return;
         setError(e?.message ?? "Couldn't read the file");
@@ -1164,7 +1296,10 @@ function JdReplaceModal({
     return () => { cancelled = true; window.clearTimeout(timeoutId); ctrl.abort(); };
   }, [file]);
 
-  const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+  // Strip HTML tags before counting words — Quill emits "<p>hello</p>"
+  // and we want a real human-readable count of body text, not markup.
+  const plainText = text.replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;/g, " ").trim();
+  const wordCount = plainText ? plainText.split(/\s+/).length : 0;
 
   const showPreview = async () => {
     if (!text.trim()) return;
@@ -1190,8 +1325,12 @@ function JdReplaceModal({
 
   return (
     <div
+      // Backdrop click DOES NOT close the modal — HR can edit a long
+      // JD for several minutes and accidental outside-clicks were
+      // wiping the work. The close button (X) in the header + the
+      // Cancel button at the bottom + Esc are the explicit dismiss
+      // paths.
       className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
-      onClick={saving ? undefined : onCancel}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -1231,25 +1370,33 @@ function JdReplaceModal({
           </div>
         )}
 
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={expanded ? 32 : 16}
-          disabled={extracting || saving}
-          placeholder={
-            extracting
-              ? "Reading file content…"
-              : error
-                ? "Couldn't extract the file's text — paste or type the JD here."
-                : "Edit the extracted JD here — remove lines, fix typos, polish phrasing."
-          }
-          // Times New Roman to match the rendered PDF's typography so
-          // what HR types in the editor reads the same as the final
-          // document. Slightly larger size + relaxed leading for
-          // long-form editing comfort.
+        {/* Full WYSIWYG editor. Times New Roman matches the PDF
+            output so what HR sees in the editor reads exactly the
+            same as the final document. The NB Media letterhead +
+            watermark live in the DOCX template (public/templates/
+            jd-template.docx), NOT in this content — formatting
+            applied here only affects the body region of the
+            generated PDF. */}
+        <div
+          className={`jd-quill-wrap flex-1 overflow-auto bg-white ${extracting || saving ? "opacity-60 pointer-events-none" : ""}`}
           style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
-          className="w-full flex-1 px-5 py-4 text-[14.5px] leading-[1.7] focus:outline-none disabled:bg-slate-50/60 resize-none text-slate-800"
-        />
+        >
+          <ReactQuill
+            theme="snow"
+            value={text}
+            onChange={setText}
+            modules={JD_QUILL_MODULES}
+            formats={JD_QUILL_FORMATS}
+            placeholder={
+              extracting
+                ? "Reading file content…"
+                : error
+                  ? "Couldn't extract the file's text — paste or type the JD here."
+                  : "Edit the extracted JD here — use the toolbar to bold, resize, or list items."
+            }
+            readOnly={extracting || saving}
+          />
+        </div>
 
         <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 flex-wrap">
           <span className="text-[11px] text-slate-500">
@@ -1327,10 +1474,10 @@ function MenuItem({
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-2 px-3 py-1.5 text-[12px] hover:bg-slate-50 ${
+      className={`w-full flex items-center gap-2.5 px-3 h-7 text-[12px] hover:bg-slate-50 ${
         danger ? "text-rose-600" : "text-slate-700"
       }`}
-    ><Icon size={12} className={danger ? "text-rose-400" : "text-slate-400"} /> {label}</button>
+    ><Icon size={12} strokeWidth={2} className={danger ? "text-rose-400" : "text-slate-400"} /> {label}</button>
   );
 }
 

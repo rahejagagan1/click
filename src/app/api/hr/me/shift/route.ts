@@ -26,9 +26,17 @@ export async function GET() {
       workDays: unknown;
       saturdayPolicy: string | null;
       saturdayWeeks: number[] | null;
+      startTime: string | null;
+      breakMinutes: number | null;
       effectiveFrom: Date;
     }>>(
-      `SELECT s."workDays", s."saturdayPolicy", s."saturdayWeeks", us."effectiveFrom"
+      // startTime + breakMinutes feed the late-clock-in cutoff on the
+      // attendance history page (HH:MM + grace). Without these fields
+      // the page used to fall back to a hardcoded 10:00 IST rule, which
+      // wrongly flagged YT Labs employees (11:00 start) and any NB
+      // Media punch inside the 5-min grace window as LATE.
+      `SELECT s."workDays", s."saturdayPolicy", s."saturdayWeeks",
+              s."startTime", s."breakMinutes", us."effectiveFrom"
          FROM "UserShift" us
          JOIN "Shift" s ON s.id = us."shiftId"
         WHERE us."userId" = $1
@@ -40,9 +48,11 @@ export async function GET() {
     const r = rows[0];
     return NextResponse.json({
       shift: {
-        workDays: r.workDays,
+        workDays:       r.workDays,
         saturdayPolicy: r.saturdayPolicy,
-        saturdayWeeks: r.saturdayWeeks,
+        saturdayWeeks:  r.saturdayWeeks,
+        startTime:      r.startTime,
+        breakMinutes:   r.breakMinutes,
       },
       effectiveFrom: r.effectiveFrom,
     });

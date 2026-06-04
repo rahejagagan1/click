@@ -11,10 +11,11 @@
 // uploaded yet) plus a small "members" preview so the listing page
 // can show who the doc applies to.
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { DEPARTMENTS } from "@/lib/departments";
+import { DEPARTMENTS_YT_LABS } from "@/lib/departments-yt-labs";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,7 @@ type Member = {
   designation: string | null;
 };
 type DepartmentEntry = {
+  brand: string;
   department: string;
   fileName: string | null;
   fileUrl:  string | null;
@@ -58,7 +60,7 @@ function bucketFor(m: { orgLevel: string | null; role: string | null; department
   return m.department;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
 
@@ -73,14 +75,18 @@ export async function GET() {
       u?.orgLevel === "hr_manager" ||
       u?.role === "hr_manager";
 
-    // Resolve the viewer's department + role/orgLevel — used to pick
-    // the right KPI bucket for non-admin viewers.
+    // Resolve the viewer's department + role/orgLevel + brand — used
+    // to pick the right KPI bucket AND the right brand-tagged doc.
+    // The brand split means the same department name (e.g. "HR
+    // Operations & TA") can hold two distinct docs and we have to
+    // pick the one matching the viewer.
     const viewerInfo = await prisma.$queryRawUnsafe<Array<{
-      department: string | null;
-      orgLevel:   string | null;
-      role:       string | null;
+      department:   string | null;
+      orgLevel:     string | null;
+      role:         string | null;
+      businessUnit: string | null;
     }>>(
-      `SELECT ep.department, u."orgLevel", u."role"
+      `SELECT ep.department, u."orgLevel", u."role", ep."businessUnit"
          FROM "User" u
          LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
         WHERE u.id = $1 LIMIT 1`,
@@ -89,33 +95,58 @@ export async function GET() {
     const myDepartment = viewerInfo[0]?.department || null;
     const myOrgLevel   = viewerInfo[0]?.orgLevel   || null;
     const myRole       = viewerInfo[0]?.role       || null;
+    const myBrand: "NB Media" | "YT Labs" =
+      (viewerInfo[0]?.businessUnit || "NB Media") === "YT Labs" ? "YT Labs" : "NB Media";
     const viewerBucket = bucketFor({
       orgLevel: myOrgLevel, role: myRole, department: myDepartment,
     });
 
+    // Admins (top tier) can optionally narrow to a specific brand via
+    // ?brand=. Falls back to all brands when unset / "all" so the
+    // existing org-wide view stays the default.
+    const adminBrandSlug = (req.nextUrl.searchParams.get("brand") || "").toLowerCase();
+    const adminBrand: "NB Media" | "YT Labs" | null =
+      adminBrandSlug === "yt-labs" || adminBrandSlug === "yt"     ? "YT Labs" :
+      adminBrandSlug === "nb-media" || adminBrandSlug === "nb"    ? "NB Media" :
+      null;
+
     type DocRow = {
+      brand: string;
       department: string;
       fileName: string;
       fileUrl: string;
       uploadedAt: Date;
     };
-    const docs = isTopTier
-      ? await prisma.$queryRawUnsafe<DocRow[]>(
-          `SELECT department, "fileName", "fileUrl", "uploadedAt"
-             FROM "KpiDocument" ORDER BY department ASC`,
-        )
-      : viewerBucket
+    let docs: DocRow[];
+    if (isTopTier) {
+      docs = adminBrand
         ? await prisma.$queryRawUnsafe<DocRow[]>(
-            `SELECT department, "fileName", "fileUrl", "uploadedAt"
-               FROM "KpiDocument" WHERE department = $1`,
-            viewerBucket,
+            `SELECT brand, department, "fileName", "fileUrl", "uploadedAt"
+               FROM "KpiDocument" WHERE brand = $1 ORDER BY department ASC`,
+            adminBrand,
           )
-        : [];
+        : await prisma.$queryRawUnsafe<DocRow[]>(
+            `SELECT brand, department, "fileName", "fileUrl", "uploadedAt"
+               FROM "KpiDocument" ORDER BY brand ASC, department ASC`,
+          );
+    } else if (viewerBucket) {
+      // Non-admin: the doc is keyed by (brand, department) so we MUST
+      // include the viewer's brand to avoid showing the wrong-brand
+      // doc when the department name is shared (e.g. HR Ops & TA).
+      docs = await prisma.$queryRawUnsafe<DocRow[]>(
+        `SELECT brand, department, "fileName", "fileUrl", "uploadedAt"
+           FROM "KpiDocument" WHERE brand = $1 AND department = $2`,
+        myBrand, viewerBucket,
+      );
+    } else {
+      docs = [];
+    }
 
     type MemberRow = Member & {
-      department: string | null;
-      orgLevel:   string | null;
-      role:       string | null;
+      department:   string | null;
+      orgLevel:     string | null;
+      role:         string | null;
+      businessUnit: string | null;
     };
     // Exclude CEO-tier users from the KPI listing — they don't have a
     // KPI document tracked against them, so without this filter their
@@ -129,83 +160,114 @@ export async function GET() {
     const members = await prisma.$queryRawUnsafe<MemberRow[]>(
       `SELECT u.id, u.name, u."profilePictureUrl",
               u."orgLevel", u."role",
-              ep.designation, ep.department
+              ep.designation, ep.department, ep."businessUnit"
          FROM "User" u
          LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
         WHERE u."isActive" = true AND u."orgLevel" <> 'ceo'
         ORDER BY ep.department ASC NULLS LAST, u.name ASC`,
     );
 
-    // Pre-compute each member's bucket once.
+    // Pre-compute each member's bucket + brand once. Bucket = the
+    // department key the KPI doc is filed under; brand = which doc
+    // version (NB Media vs YT Labs) they should see for that bucket.
     const memberBucket = new Map<number, string | null>();
-    for (const m of members) memberBucket.set(m.id, bucketFor(m));
-
-    const visibleMembers = isTopTier
-      ? members
-      : viewerBucket
-        ? members.filter((m) => memberBucket.get(m.id) === viewerBucket)
-        : [];
-
-    // Build per-bucket entries.
-    // Admin tier sees every CANONICAL department (always — even with
-    //   0 members and no doc) so the listing matches the upload form
-    //   in /dashboard/kpis/manage. Any legacy stored department label
-    //   that still has live members tagged to it (an orphan-with-
-    //   people) is appended so HR can spot rows that need re-classifying.
-    //   Orphan docs WITHOUT members (e.g. a doc lingering after a team
-    //   was retired) are intentionally NOT surfaced — re-upload to a
-    //   canonical name to bring them back.
-    // Everyone else sees only their own bucket.
-    const deptKeys = new Set<string>();
-    if (isTopTier) {
-      for (const d of DEPARTMENTS) deptKeys.add(d);
-      for (const m of visibleMembers) {
-        const b = memberBucket.get(m.id);
-        if (b) deptKeys.add(b);
-      }
-    } else if (viewerBucket) {
-      deptKeys.add(viewerBucket);
+    const memberBrand  = new Map<number, "NB Media" | "YT Labs">();
+    for (const m of members) {
+      memberBucket.set(m.id, bucketFor(m));
+      memberBrand.set(m.id, (m.businessUnit === "YT Labs" ? "YT Labs" : "NB Media"));
     }
 
-    const docByDept     = new Map(docs.map((d) => [d.department, d]));
-    const membersByDept = new Map<string, Member[]>();
+    const visibleMembers = isTopTier
+      ? (adminBrand
+          ? members.filter((m) => memberBrand.get(m.id) === adminBrand)
+          : members)
+      : viewerBucket
+        ? members.filter((m) => memberBucket.get(m.id) === viewerBucket && memberBrand.get(m.id) === myBrand)
+        : [];
+
+    // Build per-(brand, dept) entries — same dept name can produce
+    // two cards, one per brand, when both brands populate it (e.g.
+    // shared "HR Operations & TA").
+    //
+    // Admin tier sees every CANONICAL (brand, department) pair plus
+    // any (brand, department) that has live members or an existing
+    // doc — same orphan-with-people surfacing as before, just keyed
+    // by brand too.
+    type Key = `${string}::${string}`; // brand::department
+    const keyOf = (brand: string, dept: string): Key => `${brand}::${dept}` as Key;
+
+    const entryKeys = new Set<Key>();
+    if (isTopTier) {
+      if (!adminBrand || adminBrand === "NB Media") {
+        for (const d of DEPARTMENTS) entryKeys.add(keyOf("NB Media", d));
+      }
+      if (!adminBrand || adminBrand === "YT Labs") {
+        for (const d of DEPARTMENTS_YT_LABS) entryKeys.add(keyOf("YT Labs", d));
+      }
+      for (const m of visibleMembers) {
+        const b = memberBucket.get(m.id);
+        const br = memberBrand.get(m.id)!;
+        if (b) entryKeys.add(keyOf(br, b));
+      }
+      // Surface any orphan docs (no live members yet) so admins can
+      // see what's uploaded.
+      for (const d of docs) entryKeys.add(keyOf(d.brand, d.department));
+    } else if (viewerBucket) {
+      entryKeys.add(keyOf(myBrand, viewerBucket));
+    }
+
+    const docByKey     = new Map<Key, typeof docs[number]>();
+    for (const d of docs) docByKey.set(keyOf(d.brand, d.department), d);
+    const membersByKey = new Map<Key, Member[]>();
     for (const m of visibleMembers) {
       const b = memberBucket.get(m.id);
+      const br = memberBrand.get(m.id)!;
       if (!b) continue;
-      if (!membersByDept.has(b)) membersByDept.set(b, []);
-      membersByDept.get(b)!.push({
+      const k = keyOf(br, b);
+      if (!membersByKey.has(k)) membersByKey.set(k, []);
+      membersByKey.get(k)!.push({
         id: m.id, name: m.name,
         profilePictureUrl: m.profilePictureUrl,
         designation: m.designation,
       });
     }
 
-    // Sort: canonical order first (matches the upload-form dropdown),
-    // then any non-canonical legacy departments alphabetically.
-    const canonicalIndex = new Map(DEPARTMENTS.map((d, i) => [d, i]));
-    const sortedKeys = Array.from(deptKeys).sort((a, b) => {
-      const ai = canonicalIndex.get(a);
-      const bi = canonicalIndex.get(b);
+    // Sort: NB Media canonical order → YT Labs canonical order →
+    // anything legacy alphabetically. Matches the upload-form
+    // dropdown layout in /dashboard/kpis/manage.
+    const nbIndex = new Map(DEPARTMENTS.map((d, i) => [d, i]));
+    const ytIndex = new Map(DEPARTMENTS_YT_LABS.map((d, i) => [d, i]));
+    const brandOrder = (b: string) => b === "NB Media" ? 0 : b === "YT Labs" ? 1 : 2;
+    const sortedKeys = Array.from(entryKeys).sort((aKey, bKey) => {
+      const [aBrand, aDept] = aKey.split("::");
+      const [bBrand, bDept] = bKey.split("::");
+      const bo = brandOrder(aBrand) - brandOrder(bBrand);
+      if (bo !== 0) return bo;
+      const ai = aBrand === "NB Media" ? nbIndex.get(aDept) : ytIndex.get(aDept);
+      const bi = bBrand === "NB Media" ? nbIndex.get(bDept) : ytIndex.get(bDept);
       if (ai !== undefined && bi !== undefined) return ai - bi;
-      if (ai !== undefined) return -1;   // canonical wins
+      if (ai !== undefined) return -1;
       if (bi !== undefined) return 1;
-      return a.localeCompare(b);
+      return aDept.localeCompare(bDept);
     });
 
-    const departments: DepartmentEntry[] = sortedKeys.map((dept) => {
-      const doc = docByDept.get(dept) || null;
+    const departments: DepartmentEntry[] = sortedKeys.map((k) => {
+      const [brand, dept] = k.split("::");
+      const doc = docByKey.get(k) || null;
       return {
+        brand,
         department: dept,
         fileName:   doc?.fileName  ?? null,
         fileUrl:    doc?.fileUrl   ?? null,
         uploadedAt: doc?.uploadedAt ? new Date(doc.uploadedAt).toISOString() : null,
-        members:    membersByDept.get(dept) ?? [],
+        members:    membersByKey.get(k) ?? [],
       };
     });
 
     return NextResponse.json({
       scope: isTopTier ? "all" : "self",
       myDepartment: viewerBucket,
+      myBrand,
       departments,
     });
   } catch (e) {

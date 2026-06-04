@@ -9,8 +9,24 @@
 // developer / admin can flip any of the 10 email kinds on/off from
 // the Admin → Emails Automation panel without redeploying.
 //
+// TWO-LAYER GATING:
+//
+//   • GLOBAL — `{ [emailKey]: boolean }` — kills the email for everyone
+//              when off. Existing semantics, unchanged.
+//   • PER-ROLE — `perRole: { [role]: { [emailKey]: boolean } }` — when
+//              global is ON, lets HR carve out exceptions per role:
+//              "stop emailing the CEO about leave, keep emailing HR".
+//              Both gates must agree for the email to send to a given
+//              recipient.
+//
 // `email_toggles.value` shape:
-//   { [emailKey]: boolean }   — missing key = enabled (default ON).
+//   {
+//     [emailKey]: boolean,                          // global per-kind
+//     perRole: {
+//       [role]: { [emailKey]: boolean },            // per-role override
+//     },
+//   }
+// Missing keys at any level = enabled (default ON) for backward compat.
 
 import prisma from "@/lib/prisma";
 
@@ -32,6 +48,23 @@ export type EmailKey =
   // gate whether a class of recipient is added to ANY admin-broadcast
   // recipient lookup).
   | "dev_emails";
+
+/** Roles that can be toggled per-email-kind. A single User may match
+ *  multiple roles (CEO who's also admin); the dispatch filter uses
+ *  "ANY matching role has the toggle ON" semantics so a CEO doesn't
+ *  lose CEO emails just because admin was disabled. */
+export type EmailRole = "ceo" | "hr_manager" | "special_access" | "admin";
+
+export const EMAIL_ROLE_CATALOG: Array<{
+  key:         EmailRole;
+  label:       string;
+  description: string;
+}> = [
+  { key: "ceo",            label: "CEO",            description: "Users with orgLevel = 'ceo'. Receives org-wide broadcasts + direct-report-specific notifications (leave, reports, etc.)." },
+  { key: "hr_manager",     label: "HR Manager",     description: "Users with orgLevel = 'hr_manager' OR role = 'hr_manager'. Primary recipient for approvals, hiring, and request fan-outs." },
+  { key: "special_access", label: "Special Access", description: "Users with orgLevel = 'special_access'. Same fan-out treatment as HR Manager — used for HR-team members who don't carry the hr_manager role itself." },
+  { key: "admin",          label: "Admin",          description: "Users with role = 'admin'. Cross-cutting role usually held by developers / owners — receives feedback, job applications, exit notifications." },
+];
 
 export const EMAIL_TOGGLE_CATALOG: Array<{
   key: EmailKey;
@@ -55,45 +88,179 @@ export const EMAIL_TOGGLE_CATALOG: Array<{
 const SYNC_KEY = "email_toggles";
 
 export type EmailToggles = Record<EmailKey, boolean>;
+/** Per-role overlay. Each key in PerRoleToggles[role] mirrors EmailKey
+ *  semantics: missing = ON (default). */
+export type PerRoleToggles = Record<EmailRole, Partial<EmailToggles>>;
 
-function defaults(): EmailToggles {
-  // Default: every email kind is enabled.
+export interface EmailToggleState {
+  global:  EmailToggles;
+  perRole: PerRoleToggles;
+}
+
+function defaultGlobal(): EmailToggles {
   const out = {} as EmailToggles;
   for (const t of EMAIL_TOGGLE_CATALOG) out[t.key] = true;
   return out;
 }
 
-/** Read the full toggle map, filling defaults for missing keys. */
-export async function getEmailToggles(): Promise<EmailToggles> {
-  const out = defaults();
+function defaultPerRole(): PerRoleToggles {
+  const out = {} as PerRoleToggles;
+  for (const r of EMAIL_ROLE_CATALOG) {
+    out[r.key] = {} as Partial<EmailToggles>;
+    for (const t of EMAIL_TOGGLE_CATALOG) out[r.key][t.key] = true;
+  }
+  return out;
+}
+
+function defaultState(): EmailToggleState {
+  return { global: defaultGlobal(), perRole: defaultPerRole() };
+}
+
+/** Read the full toggle state, filling defaults for missing keys. */
+export async function getEmailToggleState(): Promise<EmailToggleState> {
+  const out = defaultState();
   try {
     const row = await prisma.syncConfig.findUnique({ where: { key: SYNC_KEY } });
-    const raw = (row?.value ?? {}) as Partial<Record<EmailKey, boolean>>;
+    const raw = (row?.value ?? {}) as Record<string, unknown>;
     for (const t of EMAIL_TOGGLE_CATALOG) {
-      if (typeof raw[t.key] === "boolean") out[t.key] = raw[t.key]!;
+      if (typeof raw[t.key] === "boolean") out.global[t.key] = raw[t.key] as boolean;
+    }
+    const rawPerRole = (raw.perRole ?? {}) as Record<string, Record<string, unknown>>;
+    for (const r of EMAIL_ROLE_CATALOG) {
+      const rawRoleMap = rawPerRole[r.key] ?? {};
+      for (const t of EMAIL_TOGGLE_CATALOG) {
+        if (typeof rawRoleMap[t.key] === "boolean") {
+          out.perRole[r.key][t.key] = rawRoleMap[t.key] as boolean;
+        }
+      }
     }
   } catch { /* table missing pre-migrate → defaults */ }
   return out;
 }
 
-/** Persist the toggle map (whitelisted against the catalog). */
-export async function saveEmailToggles(toggles: Partial<EmailToggles>): Promise<EmailToggles> {
-  const current = await getEmailToggles();
-  for (const t of EMAIL_TOGGLE_CATALOG) {
-    if (typeof toggles[t.key] === "boolean") current[t.key] = toggles[t.key]!;
+/** Legacy shape — kept for any caller that doesn't need per-role.
+ *  Returns just the global map. */
+export async function getEmailToggles(): Promise<EmailToggles> {
+  return (await getEmailToggleState()).global;
+}
+
+/** Patch the toggle state. Both `global` and `perRole` are optional;
+ *  whichever is supplied is merged into the stored value. Returns the
+ *  updated full state. */
+export async function saveEmailToggleState(
+  patch: { global?: Partial<EmailToggles>; perRole?: Partial<Record<EmailRole, Partial<EmailToggles>>> },
+): Promise<EmailToggleState> {
+  const current = await getEmailToggleState();
+  if (patch.global) {
+    for (const t of EMAIL_TOGGLE_CATALOG) {
+      if (typeof patch.global[t.key] === "boolean") current.global[t.key] = patch.global[t.key]!;
+    }
   }
+  if (patch.perRole) {
+    for (const r of EMAIL_ROLE_CATALOG) {
+      const roleMap = patch.perRole[r.key];
+      if (!roleMap) continue;
+      for (const t of EMAIL_TOGGLE_CATALOG) {
+        if (typeof roleMap[t.key] === "boolean") current.perRole[r.key][t.key] = roleMap[t.key]!;
+      }
+    }
+  }
+  // Serialised shape: global keys + nested perRole — matches what the
+  // reader expects, no schema migration needed.
+  const payload: Record<string, unknown> = { ...current.global, perRole: current.perRole };
   await prisma.syncConfig.upsert({
     where:  { key: SYNC_KEY },
-    create: { key: SYNC_KEY, value: current as object },
-    update: { value: current as object },
+    create: { key: SYNC_KEY, value: payload as object },
+    update: { value: payload as object },
   });
   return current;
 }
 
-/** True when emails of this kind should actually be sent. Defaults to ON. */
+/** Legacy save helper — accepts a flat global-only patch. */
+export async function saveEmailToggles(toggles: Partial<EmailToggles>): Promise<EmailToggles> {
+  const state = await saveEmailToggleState({ global: toggles });
+  return state.global;
+}
+
+/** True when emails of this kind should actually be sent (global gate
+ *  only — call isEmailEnabledForRoles for the per-recipient filter). */
 export async function isEmailEnabled(kind: EmailKey): Promise<boolean> {
   const all = await getEmailToggles();
   return all[kind] !== false;
+}
+
+/** Given a user's orgLevel + role, return every role key that applies.
+ *  A user may match multiple (e.g. CEO with role=admin); the dispatch
+ *  filter uses an OR over them so they keep receiving emails any one
+ *  of their roles is allowed to receive. */
+export function rolesForUser(u: { orgLevel?: string | null; role?: string | null }): EmailRole[] {
+  const out = new Set<EmailRole>();
+  const org = (u.orgLevel || "").toLowerCase();
+  const r   = (u.role     || "").toLowerCase();
+  if (org === "ceo")                                  out.add("ceo");
+  if (org === "hr_manager" || r === "hr_manager")     out.add("hr_manager");
+  if (org === "special_access")                       out.add("special_access");
+  if (r === "admin")                                  out.add("admin");
+  return [...out];
+}
+
+/** Pure gate evaluator — exposed for testing. Same rule the async
+ *  isEmailEnabledForRoles uses, but operates on an explicit state
+ *  object so tests can permute scenarios without DB writes.
+ *
+ *  Returns TRUE when the recipient should get the email:
+ *    • global[kind] === false              → false (kill switch)
+ *    • roles.length === 0                  → true (not a tracked role)
+ *    • ANY role.perRole[r][kind] !== false → true (OR-semantics)
+ *    • all roles explicitly false          → false
+ */
+export function evaluateRoleGate(
+  state: EmailToggleState,
+  kind:  EmailKey,
+  roles: EmailRole[],
+): boolean {
+  if (state.global[kind] === false) return false;
+  if (roles.length === 0) return true;
+  for (const r of roles) {
+    if (state.perRole[r]?.[kind] !== false) return true;
+  }
+  return false;
+}
+
+/** True when the given email kind should reach a recipient with this
+ *  role set, taking BOTH gates into account. OR-semantics over roles:
+ *  the email goes through if ANY of the user's roles has the per-role
+ *  toggle ON. A user with no recognised role (e.g. plain `member`)
+ *  bypasses the per-role gate entirely — they're not the target
+ *  audience of this filter. */
+export async function isEmailEnabledForRoles(
+  kind: EmailKey,
+  roles: EmailRole[],
+): Promise<boolean> {
+  return evaluateRoleGate(await getEmailToggleState(), kind, roles);
+}
+
+/** Pure recipient gate — the rule emailsForUserIdsFiltered applies
+ *  per row. Exposed here so tests can permute exemption + role
+ *  combinations without DB writes.
+ *
+ *  Three-tier resolution:
+ *    1. Global kill switch — `global[kind] === false`     → false (everyone dropped, exemption does NOT override)
+ *    2. Direct-manager exemption — `exemptIds.has(id)`    → true  (per-role filter bypassed)
+ *    3. Per-role gate                                       → evaluateRoleGate
+ *
+ *  The exemption overrides the role gate, NOT the global kill. HR
+ *  can still flip an email off entirely; the exemption only saves
+ *  direct managers from per-role carve-outs. */
+export function shouldIncludeRecipient(
+  recipient: { id: number; orgLevel?: string | null; role?: string | null },
+  kind:      EmailKey,
+  state:     EmailToggleState,
+  exemptIds: ReadonlySet<number> = new Set(),
+): boolean {
+  if (state.global[kind] === false) return false;
+  if (exemptIds.has(recipient.id)) return true;
+  return evaluateRoleGate(state, kind, rolesForUser(recipient));
 }
 
 /**

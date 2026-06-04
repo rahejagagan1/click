@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
-import { istTodayDateOnly } from "@/lib/ist-date";
+import { istTodayDateOnly, istMinutesOfDay } from "@/lib/ist-date";
 import { parseAttLoc } from "@/lib/attendance-location";
 import { serializeBigInt } from "@/lib/utils";
 import { getPoliciesByUser } from "@/lib/hr/notification-policy";
+import { evaluateOfficeGeofence } from "@/lib/office-geofence";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,28 @@ export async function GET() {
       },
     });
     const byUser = new Map(todayRows.map((r) => [r.userId, r]));
+
+    // Each user's shift drives the "late" cutoff (shift.startTime +
+    // shift.breakMinutes). Stored Attendance.status only reflects the
+    // computed status at CLOCK-IN time — if HR later edits the row
+    // (regularization, manual fix), the stored "present"/"late"
+    // diverges from the truth. We pull the user's shift here so the
+    // dashboard can re-derive `late` from the CURRENT clockIn timestamp
+    // and surface a fresh, always-accurate badge. Users with no shift
+    // fall back to a hardcoded 10:00 IST cutoff (matches clock-in's
+    // legacy rule).
+    const userShifts = await prisma.userShift.findMany({
+      where:   { userId: { in: users.map((u) => u.id) } },
+      include: { shift: { select: { startTime: true, breakMinutes: true } } },
+    });
+    const shiftByUser = new Map(userShifts.map((us) => [us.userId, us.shift]));
+    function lateCutoffMinForUser(userId: number): number {
+      const s = shiftByUser.get(userId);
+      if (!s) return 10 * 60; // legacy 10:00 IST when no shift assigned
+      const [sh, sm] = String(s.startTime).split(":").map((n) => Number(n) || 0);
+      const grace = Number.isFinite(s.breakMinutes) ? s.breakMinutes : 15;
+      return sh * 60 + sm + grace;
+    }
 
     // Anyone with a LeaveApplication that covers today, in any status that
     // isn't rejected/cancelled, counts as "on_leave" even when there's no
@@ -103,9 +126,25 @@ export async function GET() {
       //               row stops contradicting its own off-site badge.
       const profileWl = (u.employeeProfile?.workLocation ?? "").toLowerCase();
       const profileCs = ((u.employeeProfile as any)?.attendanceCaptureScheme ?? "").toLowerCase();
+      const profileBu = (u.employeeProfile as any)?.businessUnit ?? null;
       const isClassifiedRemote = profileWl === "remote" || profileCs === "remote";
       const isClassifiedHybrid = profileWl === "hybrid" || profileCs === "hybrid";
-      const atOfficeStrictFalse = loc?.atOffice === false;
+
+      // Re-evaluate the office geofence against the employee's
+      // businessUnit so YT Labs employees are checked against the
+      // YT Labs office instead of the NB Media default — old rows
+      // were stored with atOffice=false (everyone was measured
+      // against NB Media) and the dashboard's "off-site flagged"
+      // banner kept lighting them up. When the stored row carries
+      // lat/lng we can recompute on read; when it doesn't (older
+      // punches predating the location capture) we fall back to
+      // the stored atOffice/distance.
+      const recomputed = (typeof loc?.lat === "number" && typeof loc?.lng === "number")
+        ? evaluateOfficeGeofence(loc.lat, loc.lng, profileBu)
+        : null;
+      const effAtOffice    = recomputed?.configured ? recomputed.atOffice    : (loc?.atOffice            ?? null);
+      const effDistance    = recomputed?.configured ? recomputed.distanceM   : (loc?.distanceFromOfficeM ?? null);
+      const atOfficeStrictFalse = effAtOffice === false;
       const isWfhToday          = wfhTodayIds.has(u.id);
       const status =
         rec?.status === "on_leave" || onLeaveIds.has(u.id) ? "on_leave" :
@@ -135,17 +174,36 @@ export async function GET() {
         clockIn:      rec?.clockIn  ?? null,
         clockOut:     rec?.clockOut ?? null,
         totalMinutes: rec?.totalMinutes ?? 0,
-        rawStatus:    rec?.status ?? "absent",
+        // rawStatus = the live derived value so the UI's `· LATE`
+        // chip always reflects the CURRENT clockIn vs the employee's
+        // shift cutoff (shift.startTime + shift.breakMinutes). The
+        // stored Attendance.status is preserved for absent/on-leave
+        // signal but late/present is recomputed on read — that way
+        // a regularization that moves the clockIn before/after the
+        // grace immediately updates the badge without a separate
+        // status backfill.
+        rawStatus: (() => {
+          // No clock-in row → keep the stored value (which is
+          // "absent" / "on_leave" / etc.).
+          if (!rec?.clockIn) return rec?.status ?? "absent";
+          // on_leave overrides everything else.
+          if (rec.status === "on_leave") return "on_leave";
+          const clockMin    = istMinutesOfDay(new Date(rec.clockIn));
+          const cutoffMin   = lateCutoffMinForUser(u.id);
+          return clockMin > cutoffMin ? "late" : "present";
+        })(),
         locationAddress: loc?.address ?? null,
         locationMode:    mode,
         locationLat:     loc?.lat   ?? null,
         locationLng:     loc?.lng   ?? null,
-        // Office-geofence result computed at clock-in time and stored
-        // in the location JSON blob. Both fields are nullable —
-        // undefined for older punches that pre-date the geofence
-        // feature, or when OFFICE_LAT/LNG weren't configured.
-        atOffice:             loc?.atOffice ?? null,
-        distanceFromOfficeM:  loc?.distanceFromOfficeM ?? null,
+        // Office-geofence — re-evaluated at READ time using the
+        // employee's businessUnit (see recomputed/effAtOffice above)
+        // so YT Labs employees are checked against the YT Labs
+        // office instead of the NB Media default. Falls back to
+        // the value stored at clock-in time when lat/lng is missing
+        // on the row.
+        atOffice:             effAtOffice,
+        distanceFromOfficeM:  effDistance,
         status, // derived: on_leave | wfh | hybrid | remote | office | absent
         wfhToday: isWfhToday,
       };

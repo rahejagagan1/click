@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
+import { parseYearMonth, istCalendarMonthRange } from "@/lib/ist-date";
 
 export const dynamic = "force-dynamic";
 
@@ -49,11 +50,48 @@ export async function GET(req: NextRequest) {
     //                same view, with rejected/cancelled rows filtered out.
     //   - "all"     — every status (history / audit trail).
     const scope = (searchParams.get("scope") || "pending").toLowerCase();
+    // Month filter ("YYYY-MM") — when present, narrows each tab's query to
+    // requests SUBMITTED within that IST calendar month. Filters on
+    // appliedAt for leave (matches the "Applied · …" stamp in the UI),
+    // createdAt for everything else. Unparseable / missing → no filter.
+    const ymRaw = searchParams.get("month");
+    const ym    = parseYearMonth(ymRaw);
+    const monthRange = ym ? istCalendarMonthRange(ym.year, ym.month) : null;
+    const leaveMonth   = monthRange ? { appliedAt: monthRange } : {};
+    const createdMonth = monthRange ? { createdAt: monthRange } : {};
 
-    // Team scope for managers (self excluded). Final approvers see everything.
-    const teamWhere: any = isFinalApprover
-      ? {}
-      : { user: { managerId: myId! } };
+    // Brand filter (NB Media / YT Labs) — narrows every list to that
+    // brand's employees so the tab badge counts on the ApprovalsPanel
+    // match the rows the user actually sees. Slug form mirrors what
+    // the HR Dashboard sidebar flyout emits. Treats NULL businessUnit
+    // as "NB Media" (parent-brand default) so legacy rows still
+    // surface on the NB scope.
+    const brandRaw = (searchParams.get("brand") || "").toLowerCase();
+    const brand: "NB Media" | "YT Labs" | null =
+      brandRaw === "yt-labs" || brandRaw === "yt"   ? "YT Labs" :
+      brandRaw === "nb-media" || brandRaw === "nb"  ? "NB Media" :
+      null;
+
+    // Combine team + brand filters into ONE `user` clause. Spreading
+    // two separate `{ user: ... }` objects into a `where` would have
+    // the later one clobber the earlier — managers were silently
+    // losing their team scope as soon as a brand was passed. AND-ing
+    // the sub-clauses keeps both predicates active.
+    const userClauses: any[] = [];
+    if (!isFinalApprover) userClauses.push({ managerId: myId! });
+    if (brand === "YT Labs") {
+      userClauses.push({ employeeProfile: { businessUnit: "YT Labs" } });
+    } else if (brand === "NB Media") {
+      userClauses.push({ OR: [
+        { employeeProfile: { businessUnit: "NB Media" } },
+        { employeeProfile: { businessUnit: null } },
+        { employeeProfile: null },
+      ] });
+    }
+    const teamWhere: any =
+      userClauses.length === 0 ? {} :
+      userClauses.length === 1 ? { user: userClauses[0] } :
+      { user: { AND: userClauses } };
 
     const selectUser = { id: true, name: true, email: true, profilePictureUrl: true, teamCapsule: true, role: true };
     // `businessUnit` is needed by the UI so HR can split the approvals
@@ -80,6 +118,7 @@ export async function GET(req: NextRequest) {
         where: {
           ...statusFilter(["pending", "partially_approved"]),
           ...teamWhere,
+          ...leaveMonth,
         },
         include: {
           leaveType: true,
@@ -113,7 +152,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json(serializeBigInt({ items: [], count: 0 }));
       }
       const rows = await prisma.attendanceRegularization.findMany({
-        where: { ...statusFilter(["pending", "partially_approved"]) },
+        where: { ...statusFilter(["pending", "partially_approved"]), ...teamWhere, ...createdMonth },
         include: includeUser,
         orderBy: { createdAt: "desc" },
         take: 300,
@@ -127,13 +166,13 @@ export async function GET(req: NextRequest) {
       // partially_approved so final approvers see stage-2 items.
       const [wfhRows, odRows] = await Promise.all([
         prisma.wFHRequest.findMany({
-          where: { ...statusFilter(["pending", "partially_approved"]), ...teamWhere },
+          where: { ...statusFilter(["pending", "partially_approved"]), ...teamWhere, ...createdMonth },
           include: includeUser,
           orderBy: { createdAt: "desc" },
           take: 300,
         }),
         prisma.onDutyRequest.findMany({
-          where: { ...statusFilter(["pending", "partially_approved"]), ...teamWhere },
+          where: { ...statusFilter(["pending", "partially_approved"]), ...teamWhere, ...createdMonth },
           include: includeUser,
           orderBy: { createdAt: "desc" },
           take: 300,
@@ -149,7 +188,7 @@ export async function GET(req: NextRequest) {
     if (tab === "comp_off") {
       // Comp-off also runs the L1 → L2 flow now — include partially_approved.
       const rows = await prisma.compOffRequest.findMany({
-        where: { ...statusFilter(["pending", "partially_approved"]), ...teamWhere },
+        where: { ...statusFilter(["pending", "partially_approved"]), ...teamWhere, ...createdMonth },
         include: includeUser,
         orderBy: { createdAt: "desc" },
         take: 300,

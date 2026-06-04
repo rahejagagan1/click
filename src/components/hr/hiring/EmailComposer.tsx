@@ -242,8 +242,13 @@ export default function EmailComposer({
       </Field>
 
       <Field label="Body">
+        {/* Times New Roman: matches the visual signature of the
+            sent email body + NB Media's printed letterhead, so
+            HR sees the message in the typeface candidates will
+            receive it in. */}
         <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={12}
-          className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
+          style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
+          className="w-full px-3 py-2 rounded-lg border border-slate-200 text-[14px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
         <p className="mt-1 text-[10.5px] text-slate-400">Plain text — line breaks become &lt;br&gt; in the sent email.</p>
       </Field>
 
