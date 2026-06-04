@@ -23,6 +23,11 @@ export async function PATCH(
 
         if (body.role !== undefined) updateData.role = body.role;
         if (body.orgLevel !== undefined) updateData.orgLevel = body.orgLevel;
+        // Designation-based RBAC. The single Designation picker sends this plus
+        // the derived role/orgLevel (compat shim) so current access is unchanged.
+        if (body.designationId !== undefined) {
+            updateData.designationId = body.designationId === null ? null : parseInt(String(body.designationId), 10);
+        }
         if (body.managerId !== undefined) {
             updateData.managerId = body.managerId === null ? null : parseInt(body.managerId);
         }

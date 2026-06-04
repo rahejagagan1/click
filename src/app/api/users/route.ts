@@ -81,7 +81,18 @@ export async function GET(request: Request) {
             },
         });
 
-        return NextResponse.json(serializeBigInt(users));
+        // Attach designationId via raw SQL — the typed client may not know the
+        // column yet (pre-`prisma generate`). Cheap: one query over all users.
+        let desigById = new Map<number, number | null>();
+        try {
+            const rows = await prisma.$queryRawUnsafe<{ id: number; designationId: number | null }[]>(
+                `SELECT "id","designationId" FROM "User"`
+            );
+            desigById = new Map(rows.map((r) => [r.id, r.designationId]));
+        } catch { /* column missing pre-migration → no-op */ }
+        const withDesignation = users.map((u) => ({ ...u, designationId: desigById.get(u.id) ?? null }));
+
+        return NextResponse.json(serializeBigInt(withDesignation));
     } catch (error) {
         return serverError(error, "route");
     }
