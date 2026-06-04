@@ -1442,6 +1442,21 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
   const reactorNames: string[] = Array.isArray(post.reactions)
     ? post.reactions.map((r: any) => r.user?.name).filter(Boolean)
     : [];
+  // Distinct emojis used on this post, ordered by frequency desc
+  // then most-recent. Drives the stacked-emoji chip in the summary
+  // so the surface reflects what people actually picked instead of
+  // a hardcoded 👍.
+  const emojiCounts = new Map<string, number>();
+  if (Array.isArray(post.reactions)) {
+    for (const r of post.reactions) {
+      const e = (r?.emoji as string) || "👍";
+      emojiCounts.set(e, (emojiCounts.get(e) ?? 0) + 1);
+    }
+  }
+  const topEmojis: string[] = [...emojiCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([e]) => e)
+    .slice(0, 3);
   const latestReactor = reactorNames.length > 0 ? reactorNames[reactorNames.length - 1] : null;
   const otherReactors = reactorNames.length > 1 ? reactorNames.length - 1 : 0;
   const initialsOf = (n: string) =>
@@ -1687,12 +1702,22 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
         </div>
         <div className="flex items-center gap-1.5 pr-2 text-[12px] text-[#8393a3]">
           {reactionCount > 0 && (
-            // Compact reactor summary — Instagram-style. Shows just
-            // the most recent reactor inline; clicking "+ N others"
-            // opens the full list as a body-level modal. Quieter
-            // than the old hover card and works on touch devices.
+            // Compact reactor summary — Instagram-style. Stacked
+            // emojis reflect the distinct reactions used (top 3 by
+            // count), latest reactor name inline, clickable +N for
+            // the full list popover.
             <span className="inline-flex items-center gap-1">
-              <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-[#008CFF] text-white text-[10px] ring-2 ring-white">👍</span>
+              <span className="inline-flex items-center -space-x-1">
+                {topEmojis.map((e, i) => (
+                  <span
+                    key={e}
+                    className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-white text-[12px] ring-1 ring-slate-200 shadow-sm leading-none"
+                    style={{ zIndex: topEmojis.length - i }}
+                  >
+                    {e}
+                  </span>
+                ))}
+              </span>
               <span className="truncate max-w-[180px]" title={latestReactor || ""}>{latestReactor}</span>
               {otherReactors > 0 && (
                 <button
