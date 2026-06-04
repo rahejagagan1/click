@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { notifyApprovers, notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
 import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
+import { istMonthRange } from "@/lib/ist-date";
 import { sendEmail } from "@/lib/email/sender";
 import { pocAssignmentEmail } from "@/lib/email/templates";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
@@ -99,6 +100,33 @@ export async function POST(req: NextRequest) {
     if (!onBehalf && toDateObj.getTime() !== fromDate.getTime()) {
       return NextResponse.json({ error: "Date ranges are only available when HR applies on behalf." }, { status: 400 });
     }
+
+    // Self-apply monthly cap: a user may file at most MAX_SELF_OD_PER_MONTH
+    // On-Duty requests in a given calendar month (counted in the month of the
+    // requested date, IST). HR applying on behalf (onBehalf) is exempt — that
+    // path stays unlimited. Cancelled / rejected requests don't burn quota, so
+    // a turned-down request doesn't cost the employee one of their two.
+    const MAX_SELF_OD_PER_MONTH = 2;
+    if (!onBehalf) {
+      const { start, end } = istMonthRange(fromDate);
+      const usedThisMonth = await prisma.onDutyRequest.count({
+        where: {
+          userId: subjectUserId,
+          date: { gte: start, lte: end },
+          status: { notIn: ["rejected", "cancelled"] },
+        },
+      });
+      if (usedThisMonth >= MAX_SELF_OD_PER_MONTH) {
+        return NextResponse.json(
+          {
+            error: `You can apply for at most ${MAX_SELF_OD_PER_MONTH} On-Duty requests per month. Ask HR to file any additional ones on your behalf.`,
+            code: "od_monthly_limit",
+          },
+          { status: 400 },
+        );
+      }
+    }
+
     const targetDays: Date[] = [];
     for (let cur = new Date(fromDate.getTime()); cur.getTime() <= toDateObj.getTime(); cur.setUTCDate(cur.getUTCDate() + 1)) {
       targetDays.push(new Date(cur));
