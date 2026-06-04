@@ -174,6 +174,26 @@ export function isFullHRAdmin(user: ClientUser): boolean {
 }
 
 /**
+ * Bypass brand-scoping on cross-brand surfaces (HR home "On Leave Today" /
+ * "Working Remotely" lists, etc.). Most users see only their own brand —
+ * CEOs are deliberately brand-scoped (Kunal → YT Labs, Nikit → NB Media)
+ * so this DELIBERATELY excludes them. The bypass is for two tiers HR
+ * explicitly asked to grant full cross-brand visibility:
+ *   • Developers — they need full visibility to debug / triage.
+ *   • role="hr_manager" — the actual HR Manager (e.g. Tanvi) sees the
+ *     whole org; orgLevel="hr_manager" alone (HR Members) still gets
+ *     brand-scoped because they only support their own brand.
+ *
+ * Add new gate sites by composing: `canViewAllBrands(user) || same-brand`.
+ */
+export function canViewAllBrands(user: ClientUser): boolean {
+  if (!user) return false;
+  if (user.isDeveloper === true) return true;
+  if (user.role === "hr_manager") return true;
+  return false;
+}
+
+/**
  * Feedback (the org-wide /dashboard/feedback form + its API) is an
  * NB Media program. YT Labs employees — including the YT Labs CEO —
  * shouldn't see the tab or be able to submit. Gate the sidebar nav
