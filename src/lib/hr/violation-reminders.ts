@@ -11,11 +11,18 @@
 
 import prisma from "@/lib/prisma";
 import { sendEmail } from "@/lib/email/sender";
-import { violationInProgressReminderEmail } from "@/lib/email/templates";
+import { violationInProgressReminderEmail, violationFollowUpEmail } from "@/lib/email/templates";
 import { isDryRun } from "@/lib/email/transport";
 import { isEmailEnabled, devEmailRecipientsClause } from "@/lib/email/toggles";
 
 const REMINDER_INTERVAL_DAYS = 15;
+// Follow-up email parameters — fires once per violation at day 23
+// (= 30 - 7), so the reporting manager gets a heads-up roughly a week
+// before the implicit 1-month resolution mark. Both knobs in one
+// place if HR wants to retune later (e.g. severity-based windows).
+const FOLLOW_UP_VIOLATION_DURATION_DAYS = 30;
+const FOLLOW_UP_LEAD_DAYS = 7;
+const FOLLOW_UP_FIRE_AFTER_DAYS = FOLLOW_UP_VIOLATION_DURATION_DAYS - FOLLOW_UP_LEAD_DAYS;
 
 type DueRow = {
     id: number;
@@ -166,6 +173,111 @@ export async function sendViolationInProgressReminders(): Promise<number> {
         if (!isDryRun()) {
             await prisma.$executeRawUnsafe(
                 `UPDATE "Violation" SET "lastReminderAt" = NOW() WHERE id = $1`,
+                v.id,
+            );
+        }
+        processed++;
+    }
+    return processed;
+}
+
+// ── Pre-resolution follow-up to the reporting manager ────────────────
+// Sweeps every open / in_progress violation that's been around for
+// FOLLOW_UP_FIRE_AFTER_DAYS days AND hasn't had its follow-up email
+// stamped yet. For each one we look up the AFFECTED EMPLOYEE'S reporting
+// manager (User.managerId) — NOT the violation's reportedBy or
+// responsiblePersonId, which can be HR — and email them asking for a
+// status check before the implicit 1-month resolution window closes.
+// One mail per violation per manager; the followUpSentAt stamp keeps
+// the cron idempotent across reruns.
+type FollowUpRow = {
+    id: number;
+    title: string;
+    severity: string;
+    category: string | null;
+    actionTaken: string | null;
+    createdAt: Date;
+    userId: number | null;
+    userName: string | null;
+    reporterName: string | null;
+    managerId: number | null;
+    managerName: string | null;
+    managerEmail: string | null;
+};
+
+export async function sendViolationFollowUpReminders(): Promise<number> {
+    if (!(await isEmailEnabled("violation_reminders"))) {
+        console.log("[violation-followup] skipped — disabled in admin toggles");
+        return 0;
+    }
+
+    // "Old enough to need a follow-up" cutoff: createdAt <= NOW() - 23 days.
+    const cutoff = new Date(Date.now() - FOLLOW_UP_FIRE_AFTER_DAYS * 24 * 60 * 60 * 1000);
+
+    // Pull every open / in_progress violation past the cutoff that hasn't
+    // had its follow-up sent yet. Join the affected employee's manager
+    // in one shot so we can route by managerId without a per-row query.
+    const due = await prisma.$queryRawUnsafe<FollowUpRow[]>(
+        `SELECT v.id, v.title, v.severity::text AS severity, v.category, v."actionTaken",
+                v."createdAt", v."userId",
+                u.name  AS "userName",
+                r.name  AS "reporterName",
+                u."managerId" AS "managerId",
+                m.name  AS "managerName",
+                m.email AS "managerEmail"
+           FROM "Violation" v
+           LEFT JOIN "User" u ON u.id = v."userId"
+           LEFT JOIN "User" r ON r.id = v."reportedBy"
+           LEFT JOIN "User" m ON m.id = u."managerId"
+          WHERE v.status IN ('open', 'in_progress')
+            AND v."followUpSentAt" IS NULL
+            AND v."createdAt" <= $1
+          ORDER BY v."createdAt" ASC`,
+        cutoff,
+    );
+    if (due.length === 0) return 0;
+
+    let processed = 0;
+    for (const v of due) {
+        // No reporting manager on file → skip + log. We don't fall back
+        // to HR / CEO because the whole point of THIS reminder is to
+        // engage the manager accountable for the person; the org-wide
+        // bystanders already get the 15-day reminder above.
+        if (!v.managerId || !v.managerEmail) {
+            console.warn(`[violation-followup] violation #${v.id} (${v.userName ?? "?"}) has no reporting manager — skipping`);
+            continue;
+        }
+
+        const daysOpen = Math.max(
+            1,
+            Math.floor((Date.now() - new Date(v.createdAt).getTime()) / (24 * 60 * 60 * 1000)),
+        );
+
+        try {
+            await sendEmail({
+                to: v.managerEmail,
+                content: violationFollowUpEmail({
+                    recipientName:    v.managerName ?? null,
+                    affectedUserName: v.userName || "an employee",
+                    title:            v.title,
+                    daysOpen,
+                    severity:         v.severity,
+                    category:         v.category,
+                    reporterName:     v.reporterName,
+                    actionTaken:      v.actionTaken,
+                }),
+            });
+        } catch (e) {
+            console.warn("[violation-followup] mail failed:", v.managerEmail, e);
+            // Don't stamp on send failure — let the next cron tick retry.
+            continue;
+        }
+
+        // Stamp so the cron never re-sends for this violation. Skip in
+        // dry-run so dev testing doesn't permanently mark prod rows.
+        if (!isDryRun()) {
+            await prisma.$executeRawUnsafe(
+                `UPDATE "Violation" SET "followUpSentAt" = NOW() WHERE id = $1`,
                 v.id,
             );
         }
