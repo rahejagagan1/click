@@ -81,7 +81,7 @@ export const TAB_CATALOG: TabDef[] = [
   { key: "hr_me",       label: "Me",            description: "My Profile, Attendance, Leaves…",    pathPrefixes: ["/dashboard/hr/profile","/dashboard/hr/attendance","/dashboard/hr/leaves","/dashboard/hr/payroll","/dashboard/hr/goals","/dashboard/hr/documents","/dashboard/hr/tickets"],
                                                                                                                                                             defaultForNewUser: true  },
   { key: "hr_my_team",  label: "My Team",       description: "Team overview + inbox (managers)",   pathPrefixes: ["/dashboard/hr/my-team","/dashboard/hr/inbox"], defaultForNewUser: false },
-  { key: "hr_admin",    label: "HR Dashboard",  description: "HR-admin: approvals, shifts, etc.",  pathPrefixes: ["/dashboard/hr/admin","/dashboard/hr/assets"], defaultForNewUser: false },
+  { key: "hr_admin",    label: "HR Dashboard",  description: "HR-admin: approvals, shifts, etc.",  pathPrefixes: ["/dashboard/hr/admin"], defaultForNewUser: false },
   { key: "hr_people",   label: "People",        description: "Employee directory + onboard",       pathPrefixes: ["/dashboard/hr/people","/dashboard/hr/onboard"], defaultForNewUser: false },
   { key: "hr_hiring",   label: "Hiring",        description: "Job openings + applications inbox",  pathPrefixes: ["/dashboard/hr/hiring"], defaultForNewUser: false },
   { key: "hr_offboard", label: "Offboarding",   description: "Exit workflow + clearance tracking", pathPrefixes: ["/dashboard/hr/offboard"], defaultForNewUser: false },

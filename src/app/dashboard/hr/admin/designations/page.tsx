@@ -118,7 +118,8 @@ export default function DesignationsPage() {
 
   async function remove() {
     if (typeof selectedId !== "number") return;
-    if (!confirm("Delete this designation? This can't be undone.")) return;
+    const warn = selected?.isSystem ? "This is a built-in designation (a sync can recreate it). " : "";
+    if (!confirm(`${warn}Delete "${selected?.label ?? ""}"? This can't be undone.`)) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/admin/rbac/designations/${selectedId}`, { method: "DELETE" });
@@ -289,7 +290,7 @@ export default function DesignationsPage() {
                 Active
               </label>
               <div className="flex items-center gap-2">
-                {selected && !selected.isSystem && selected.userCount === 0 && (
+                {selected && selected.userCount === 0 && (
                   <button onClick={remove} disabled={saving} className="px-3 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50 disabled:opacity-50">
                     Delete
                   </button>
@@ -304,7 +305,11 @@ export default function DesignationsPage() {
               </div>
             </div>
             {selected?.isSystem && (
-              <p className="mt-2 text-xs text-slate-400">Built-in designation — editable, but can&apos;t be deleted.</p>
+              <p className="mt-2 text-xs text-slate-400">
+                Built-in designation — editable. {selected.userCount === 0
+                  ? "Can be deleted when empty (a sync may recreate it)."
+                  : "Reassign its users first to delete it."}
+              </p>
             )}
           </div>
         )}
