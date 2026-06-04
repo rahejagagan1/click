@@ -1017,6 +1017,85 @@ export function violationInProgressReminderEmail(args: {
   return { subject, html: SHELL(subject, body), text };
 }
 
+// ── Pre-resolution follow-up to the reporting manager ────────────────
+// Fires once at ~day 23 (= 30 - 7) of an open / in_progress violation —
+// asks the affected employee's reporting manager for a status check:
+// improvement seen? Any actions taken? Should this be closed or
+// escalated? Distinct from the 15-day "still open" reminder above:
+//   • The 15-day reminder goes to HR / admins (org-wide bystanders)
+//   • This follow-up goes to the manager who's actually accountable
+//     for the person and best placed to give a status update.
+// The cron stamps Violation.followUpSentAt so we send only once per
+// violation; the violations page renders a "follow-up email sent"
+// badge under the Manager row when this is set.
+export function violationFollowUpEmail(args: {
+  recipientName?: string | null;          // manager's name (greeting)
+  affectedUserName: string;               // the reported employee
+  title: string;
+  daysOpen: number;
+  severity: string;
+  category?: string | null;
+  reporterName?: string | null;
+  actionTaken?: string | null;
+}): EmailContent {
+  const subject = `Follow-up: ${args.affectedUserName}'s violation · ${args.title}`;
+  const link = `${appUrl()}/dashboard/violations`;
+  const sev = SEVERITY_LABEL[args.severity] ?? args.severity;
+  const sevTint = SEVERITY_TINT[args.severity] ?? SEVERITY_TINT.medium;
+
+  const rows: string[] = [];
+  rows.push(vRow("Employee", escape(args.affectedUserName)));
+  rows.push(vRow("Title",    escape(args.title)));
+  if (args.category)     rows.push(vRow("Category", escape(args.category)));
+  rows.push(vRow("Severity", `<span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700;background:${sevTint.bg};color:${sevTint.text}">${escape(sev)}</span>`));
+  rows.push(vRow("Open for", `${args.daysOpen} day${args.daysOpen === 1 ? "" : "s"}`));
+  if (args.reporterName) rows.push(vRow("Reported by", escape(args.reporterName)));
+
+  // Soft callout — phrased as a manager-facing question, not a "you're
+  // behind" warning. The 15-day reminder uses the orange day-counter;
+  // this one uses a calmer indigo so HR can tell the two emails apart.
+  const callout = `
+    <div style="margin:0 0 16px;padding:14px 16px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px">
+      <p style="margin:0;font-size:13px;color:#3730a3;line-height:1.55">
+        This violation has been open for around <strong>${args.daysOpen} days</strong> and is approaching the 1-month mark. Could you share a quick status update — improvement seen, action taken, or anything that should be flagged?
+      </p>
+    </div>`;
+
+  const body = `
+    <p style="margin:0 0 12px;font-size:14px;color:#1f2937;line-height:1.6">
+      ${args.recipientName ? `Hi ${escape(args.recipientName)},` : "Hi,"}
+    </p>
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      A quick check-in on a violation involving someone on your team.
+    </p>
+    ${callout}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      ${rows.join("")}
+    </table>
+    ${args.actionTaken ? sectionCard("Last action taken", args.actionTaken) : ""}
+    <p style="margin:20px 0 0;padding:12px 14px;background:#f8fafc;border-left:3px solid #6366f1;border-radius:0 6px 6px 0;font-size:12.5px;color:#475569;line-height:1.55">
+      Reply with a brief status, or open the dashboard to add an action / close the violation if the issue's resolved.
+    </p>
+    ${ctaButton("Open the violation", link)}
+  `;
+  const text = [
+    args.recipientName ? `Hi ${args.recipientName},` : "Hi,",
+    `Follow-up on a violation involving ${args.affectedUserName} — open for around ${args.daysOpen} days and approaching the 1-month mark.`,
+    ``,
+    `Employee: ${args.affectedUserName}`,
+    `Title: ${args.title}`,
+    args.category ? `Category: ${args.category}` : null,
+    `Severity: ${sev}`,
+    `Open for: ${args.daysOpen} day${args.daysOpen === 1 ? "" : "s"}`,
+    args.reporterName ? `Reported by: ${args.reporterName}` : null,
+    args.actionTaken ? `\nLast action taken:\n${args.actionTaken}` : null,
+    ``,
+    `Could you share a brief status — improvement, action taken, or anything to flag?`,
+    `Open: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html: SHELL(subject, body), text };
+}
+
 // ── POC assignment ────────────────────────────────────────────────────
 // Sent to the employee picked as "POC in Absence" on any leave-style
 // request (Leave / WFH / On Duty / Half Day / Comp Off). Heads-up that
