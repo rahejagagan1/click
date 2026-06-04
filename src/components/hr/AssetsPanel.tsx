@@ -10,7 +10,7 @@ import Link from "next/link";
 import { Search, X, Pencil } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 
-const CATEGORIES = ["All", "Laptop", "Monitor", "Keyboard", "Mouse", "Headset", "Phone", "Other"];
+const CATEGORIES = ["All", "Laptop", "Monitor", "Keyboard", "Mouse", "Headset", "CPU", "Phone", "Other"];
 
 const FIELD_CLS = "mt-1 w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]";
 
@@ -189,6 +189,11 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
     condition: "good", currentValue: "",
     purchaseDate: "", notes: "",
   });
+  // Tracks the assignee for the Edit modal. Initialized to the row's
+  // current open assignment on open; setting to null marks the asset
+  // unassigned on save; setting to a different user atomically swaps
+  // the assignment in the server-side transaction.
+  const [editAssignee, setEditAssignee] = useState<Employee | null>(null);
   const [extraItems, setExtraItems] = useState<ItemRow[]>([]);
   const setE = (k: string, v: string) => setEditForm((f) => ({ ...f, [k]: v }));
   const setExtra = (id: string, patch: Partial<ItemRow>) =>
@@ -209,10 +214,16 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
         : "",
       notes: a.notes ?? "",
     });
+    // Pre-fill the assignee from the current open assignment on this
+    // asset so HR sees who it's checked out to and can swap them in
+    // the same save (the server diff-and-applies in a transaction).
+    const cur = a.assignments?.[0]?.user;
+    setEditAssignee(cur ? { id: cur.id, name: cur.name } as any : null);
     setExtraItems([]);
   };
   const closeEdit = () => {
     setEditing(null);
+    setEditAssignee(null);
     setExtraItems([]);
   };
   const handleSaveEdit = async () => {
@@ -226,7 +237,13 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
     }
     setSaving(true);
     try {
-      // 1. PUT the existing row.
+      // 1. PUT the existing row. assigneeId is included whenever the
+      //    picker value differs from the current open assignment — the
+      //    server diff-and-applies in a transaction (create / close /
+      //    swap). Undefined means "leave the assignment alone".
+      const currentAssigneeId = editing.assignments?.[0]?.user?.id ?? null;
+      const newAssigneeId = editAssignee?.id ?? null;
+      const assigneeChanged = currentAssigneeId !== newAssigneeId;
       const body: any = {
         name: editForm.name.trim(),
         category: editForm.category.trim(),
@@ -238,6 +255,7 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
           : null,
         notes: editForm.notes.trim() || null,
       };
+      if (assigneeChanged) body.assigneeId = newAssigneeId;  // null = make unassigned
       const res = await fetch(`/api/hr/assets/${editing.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -247,10 +265,11 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
         const j = await res.json().catch(() => ({}));
         return alert(j?.error ?? "Failed to update asset");
       }
-      // 2. POST any extra items as a batch, inheriting the existing
-      //    row's assignee so HR doesn't have to re-pick them.
+      // 2. POST any extra items as a batch, inheriting whatever the
+      //    edit just resolved to (so adding a mouse while reassigning
+      //    from Abhishek → Aviral assigns the mouse to Aviral too).
       if (extraItems.length > 0) {
-        const inheritedAssignee = editing.assignments?.[0]?.user?.id ?? null;
+        const inheritedAssignee = newAssigneeId;
         const batchBody: any = {
           items: extraItems.map((r) => ({
             name: r.name.trim(),
@@ -642,6 +661,32 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+              {/* Assignee picker — pre-filled with whoever the asset
+                  is currently checked out to. Setting to "Unassigned"
+                  (clearing the picker) atomically closes the active
+                  assignment; picking a different employee atomically
+                  closes the current one and opens a new one. Server
+                  uses a transaction so the swap is all-or-nothing. */}
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                  Assigned To
+                  {(() => {
+                    const cur = editing.assignments?.[0]?.user;
+                    const curId = cur?.id ?? null;
+                    const newId = editAssignee?.id ?? null;
+                    if (curId === newId) return null;
+                    return (
+                      <span className="ml-1.5 inline-flex items-center rounded-full bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200 px-1.5 py-0.5 text-[9.5px] font-bold normal-case tracking-normal">
+                        will reassign
+                      </span>
+                    );
+                  })()}
+                </label>
+                <EmployeePicker value={editAssignee} onChange={setEditAssignee} />
+                <p className="mt-1 text-[10.5px] text-slate-400">
+                  Clear to mark unassigned; pick a different employee to swap. Assignment history is preserved.
+                </p>
+              </div>
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
                   <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Category</label>
@@ -794,9 +839,6 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
                   </>
                 )}
               </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Re-assigning this asset to a different employee goes through the existing Assign / Return flow on the asset row (keeps the assignment history intact).
-              </p>
             </div>
             <div className="px-6 py-4 border-t border-slate-200 dark:border-white/[0.06] flex items-center justify-between gap-3">
               {/* Delete sits on the left — destructive actions get
