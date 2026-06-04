@@ -420,7 +420,17 @@ export function hrLateSummaryEmail(args: {
   absent: Array<{ name: string; department: string | null }>;
   late:   Array<{ name: string; department: string | null; clockIn: Date | null }>;
   totals: { absent: number; late: number; onTime: number; onLeave: number };
+  /** Optional label shown in the header ("Daily Attendance · <fireTimeLabel>")
+   *  and the text-version preamble. Defaults to "10:05 AM IST" to preserve
+   *  the legacy NB-Media-only behavior. The split-brand scheduler passes
+   *  the actual fire time so each brand's email reflects its own send slot. */
+  fireTimeLabel?: string;
+  /** Optional label shown in the "Late · clocked in after X" heading and
+   *  the text-version equivalent. Defaults to "10:00 IST". */
+  cutoffLabel?: string;
 }): EmailContent {
+  const fireTimeLabel = args.fireTimeLabel ?? "10:05 AM IST";
+  const cutoffLabel   = args.cutoffLabel   ?? "10:00 IST";
   const subject = `Attendance — ${fmtDate(args.today)} · ${args.totals.absent} absent · ${args.totals.late} late`;
   const fmtTime = (d: Date | null) =>
     d ? d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "—";
@@ -488,7 +498,7 @@ export function hrLateSummaryEmail(args: {
     <!-- Header: just the date, lightly styled. No coloured banner. -->
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 4px">
       <tr>
-        <td style="font-family:${FONT};font-size:11px;color:#64748b;letter-spacing:0.12em;text-transform:uppercase;font-weight:700">Daily Attendance · 10:05 AM IST</td>
+        <td style="font-family:${FONT};font-size:11px;color:#64748b;letter-spacing:0.12em;text-transform:uppercase;font-weight:700">Daily Attendance · ${fireTimeLabel}</td>
       </tr>
       <tr>
         <td style="font-family:${FONT};font-size:20px;font-weight:700;color:#0f172a;line-height:1.3;padding-top:4px">${weekday}, ${dateStr}</td>
@@ -500,7 +510,7 @@ export function hrLateSummaryEmail(args: {
     ${statsLine}
 
     ${renderSection("Absent · no clock-in, no leave", "#dc2626", args.absent.length, absentRows, "Nobody absent today.")}
-    ${renderSection("Late · clocked in after 10:00 IST", "#ea580c", args.late.length, lateRows, "Everyone clocked in on time.")}
+    ${renderSection(`Late · clocked in after ${cutoffLabel}`, "#ea580c", args.late.length, lateRows, "Everyone clocked in on time.")}
 
     <!-- CTA: simple inline link button. -->
     <div style="margin-top:28px;border-top:1px solid #e2e8f0;padding-top:18px">
@@ -515,13 +525,13 @@ export function hrLateSummaryEmail(args: {
     </p>`;
 
   const textRows = [
-    `Daily Attendance — ${weekday}, ${dateStr} (10:05 AM IST)`,
+    `Daily Attendance — ${weekday}, ${dateStr} (${fireTimeLabel})`,
     `${args.totals.absent} absent · ${args.totals.late} late · ${args.totals.onTime} on time · ${args.totals.onLeave} on leave (${headcount} in scope)`,
     ``,
     `ABSENT (${args.totals.absent})`,
     ...(args.absent.length ? args.absent.map((r) => `  • ${r.name}${r.department ? ` — ${r.department}` : ""}`) : ["  (none)"]),
     ``,
-    `LATE (${args.totals.late}) — clocked in after 10:00 IST`,
+    `LATE (${args.totals.late}) — clocked in after ${cutoffLabel}`,
     ...(args.late.length ? args.late.map((r) => `  • ${r.name}${r.department ? ` — ${r.department}` : ""} · ${fmtTime(r.clockIn)}`) : ["  (none)"]),
     ``,
     `Open: ${link}`,
