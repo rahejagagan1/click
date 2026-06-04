@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { serverError } from "@/lib/api-auth";
+import prisma from "@/lib/prisma";
 import {
   EMAIL_TOGGLE_CATALOG,
   EMAIL_ROLE_CATALOG,
@@ -50,6 +51,7 @@ export async function GET() {
       roleCatalog: EMAIL_ROLE_CATALOG,
       toggles:     state.global,             // legacy field — flat map
       perRole:     state.perRole,            // new nested map
+      history:     state.history,            // per-key last-changed { by, byId, at }
     });
   } catch (error) {
     return serverError(error, "admin/email-toggles GET");
@@ -99,14 +101,30 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
+    // Resolve actor for the per-key history stamp. Prefer the session
+    // dbId if present; fall back to a DB lookup by email so we still
+    // get an ID for older sessions that didn't carry dbId.
+    const sUser = session?.user as { name?: string | null; email?: string | null; dbId?: number | string | null } | undefined;
+    let actorId: number | null = null;
+    if (sUser?.dbId != null) {
+      const n = Number(sUser.dbId);
+      if (Number.isInteger(n) && n > 0) actorId = n;
+    }
+    if (actorId == null && sUser?.email) {
+      const row = await prisma.user.findUnique({ where: { email: sUser.email }, select: { id: true, name: true } });
+      if (row?.id) actorId = row.id;
+    }
+    const actorName = sUser?.name?.trim() || sUser?.email?.split("@")[0] || "Unknown";
+
     const state = await saveEmailToggleState({
       global:  globalPatch,
       perRole: perRolePatch,
-    });
+    }, { name: actorName, id: actorId });
     return NextResponse.json({
       ok:      true,
       toggles: state.global,
       perRole: state.perRole,
+      history: state.history,
     });
   } catch (error) {
     return serverError(error, "admin/email-toggles PATCH");
