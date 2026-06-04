@@ -2484,21 +2484,31 @@ export default function HRHomePage() {
     const t = setTimeout(() => setConfirmingClockOut(false), 6000);
     return () => clearTimeout(t);
   }, [confirmingClockOut, clockingOut]);
+  // Viewer brand for the leave/wfh lists below. Every viewer is
+  // brand-scoped — even CEOs (Kunal sees only YT Labs, Nikit sees
+  // only NB Media) and HR managers. Legacy users with no
+  // businessUnit set bucket as NB Media (parent-brand default).
+  // Developers / super-admins are NOT exempt here per HR's ask.
+  const viewerBrand: "NB Media" | "YT Labs" =
+    user?.businessUnit === "YT Labs" ? "YT Labs" : "NB Media";
+  const matchesViewerBrand = (u: any): boolean =>
+    (u.businessUnit || "NB Media") === viewerBrand;
   // On Leave Today — anyone whose attendance record is `on_leave` today, OR
   // who has an applied leave (pending / partially_approved / approved) that
   // covers today. Approval isn't required to appear here — the moment a
   // colleague applies, they show up so others know they intend to be away.
+  // Brand-scoped to the viewer.
   const onLeave = (boardData?.board || []).filter((u: any) =>
-    u.status === "on_leave" || u.leaveToday === true
+    (u.status === "on_leave" || u.leaveToday === true) && matchesViewerBrand(u)
   );
   // Split clocked-in employees by their actual location mode (from Attendance.location JSON).
-  const clockedIn = (boardData?.board || []).filter((u: any) => u.status === "present" || u.status === "late");
+  const clockedIn = (boardData?.board || []).filter((u: any) => (u.status === "present" || u.status === "late") && matchesViewerBrand(u));
   // Working Remotely — ONLY employees who explicitly applied for WFH
   // today. Permanent remote / hybrid folks who clock in from home as
   // their default mode show up under the "Remote Clock-in" filter on
   // the attendance dashboard, not here. This card flags exception
-  // cases: office-default people who took WFH for a day.
-  const remote = ((boardData?.board || []) as any[]).filter((u: any) => u.wfhToday === true);
+  // cases: office-default people who took WFH for a day. Brand-scoped.
+  const remote = ((boardData?.board || []) as any[]).filter((u: any) => u.wfhToday === true && matchesViewerBrand(u));
   // Show only leave types the user actually has a quota or in-flight
   // activity for — drop fully-zero rows (no quota AND nothing used or
   // pending) so the card doesn't render six "0 days" tiles for every
