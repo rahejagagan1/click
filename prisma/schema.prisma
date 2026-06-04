@@ -979,6 +979,12 @@ model Violation {
   /// this to decide whether to fire another reminder (~ every 15 days).
   /// Null = never reminded yet.
   lastReminderAt      DateTime?
+  /// Stamped when the pre-resolution follow-up email is sent to the
+  /// reported employee's reporting manager (cron fires once at day 23
+  /// for any open / in_progress violation). Null = follow-up not yet
+  /// sent. Used both to dedupe the cron and to render the "follow-up
+  /// email sent" badge in the Admin → Violations card.
+  followUpSentAt      DateTime?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 

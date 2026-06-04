@@ -48,6 +48,11 @@ interface Violation {
     violationDate: string | null;
     responsiblePersonId: number | null;
     resolvedAt: string | null;
+    // Stamped by the cron when the pre-resolution follow-up email is
+    // sent to the reported employee's reporting manager (one-off,
+    // ~day 23 of an open / in_progress violation). Drives the green
+    // "follow-up email sent" badge under the Manager row below.
+    followUpSentAt: string | null;
     createdAt: string;
     user: ViolationUser;
     reporter: ViolationUser;
@@ -932,6 +937,14 @@ export default function ViolationsPage() {
                                                     <UserAvatar name={v.responsiblePerson.name} src={v.responsiblePerson.profilePictureUrl} size="sm" />
                                                     <span className="text-sm text-slate-700 dark:text-slate-300">{v.responsiblePerson.name}</span>
                                                 </div>
+                                                {v.followUpSentAt && (
+                                                    <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 dark:bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300 ring-1 ring-inset ring-emerald-200 dark:ring-emerald-500/30">
+                                                        <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                            <path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.5 7.5a1 1 0 01-1.414 0l-3.5-3.5a1 1 0 011.414-1.414L8.5 12.085l6.79-6.79a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                        </svg>
+                                                        Follow-up email sent · {new Date(v.followUpSentAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </div>
