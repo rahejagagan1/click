@@ -14,7 +14,14 @@ export async function GET() {
 
     const allActive = await prisma.user.findMany({
       where: { isActive: true },
-      select: { id: true, name: true, profilePictureUrl: true, role: true },
+      select: {
+        id: true, name: true, profilePictureUrl: true, role: true,
+        // businessUnit comes through the employee profile and lets
+        // the HR home page brand-scope the "On Leave Today" and
+        // "Working Remotely" lists per viewer. NULL bucket = NB Media
+        // (parent-brand default, matches the rest of the app).
+        employeeProfile: { select: { businessUnit: true } },
+      },
       orderBy: { name: "asc" },
     });
     // Filter out attendance-disabled users (CEO + developers default OFF;
@@ -77,14 +84,19 @@ export async function GET() {
 
     const board = allUsers.map((u) => {
       const rec = recordMap.get(u.id);
+      const { employeeProfile, ...rest } = u;
       return {
-        ...u, status: rec?.status || "absent",
+        ...rest,
+        status: rec?.status || "absent",
         clockIn: rec?.clockIn || null, clockOut: rec?.clockOut || null,
         totalMinutes: rec?.totalMinutes || 0,
         location: rec?.location ?? null,
         wfhToday:   wfhTodayIds.has(u.id),
         leaveToday: leaveTodayIds.has(u.id),
         leaveKind:  leaveKindByUser.get(u.id) ?? null,
+        // Brand for client-side filtering. Bucket NULL as NB Media
+        // (parent-brand default).
+        businessUnit: employeeProfile?.businessUnit || "NB Media",
       };
     });
 
