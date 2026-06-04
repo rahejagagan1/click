@@ -80,7 +80,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     try {
       const erows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
         `SELECT "secondaryJobTitle", "legalEntity", "jobLocation",
-                "probationPolicy", "internshipEndDate",
+                "probationPolicy", "probationEndDate", "probationReminderSentAt",
+                "internshipEndDate",
                 "leavePlan", "holidayList", "weeklyOff",
                 "attendanceNumber", "timeTrackingPolicy", "penalizationPolicy",
                 "workCountry", "nationality",
@@ -180,7 +181,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       noticePeriodDays,
       // Extended onboarding fields — every wizard input is now editable.
       workCountry, nationality,
-      secondaryJobTitle, legalEntity, jobLocation, probationPolicy, internshipEndDate,
+      secondaryJobTitle, legalEntity, jobLocation, probationPolicy, probationEndDate, internshipEndDate,
       leavePlan, holidayList, weeklyOff, attendanceNumber, timeTrackingPolicy, penalizationPolicy,
       // ── Keka-parity additions (extended profile) ──
       homePhone, physicallyHandicapped,
@@ -427,6 +428,43 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (legalEntity        !== undefined) { setParts.push(`"legalEntity" = $${i++}`);        args.push(legalEntity        || null); }
       if (jobLocation        !== undefined) { setParts.push(`"jobLocation" = $${i++}`);        args.push(jobLocation        || null); }
       if (probationPolicy    !== undefined) { setParts.push(`"probationPolicy" = $${i++}`);    args.push(probationPolicy    || null); }
+      // probationEndDate — either explicitly sent by HR (override) OR
+      // auto-derived from joiningDate when this is the first time the
+      // joining date is being set and probationEndDate is still NULL
+      // on the row. The 3-month default mirrors the policy the user
+      // confirmed; HR can edit it later from the same field. Clearing
+      // probationEndDate also clears probationReminderSentAt so the
+      // 7-day reminder re-arms cleanly when probation gets extended.
+      const fetchProbationCurrent = async (): Promise<{ probationEndDate: Date | null } | null> => {
+        const rows = await prisma.$queryRawUnsafe<any[]>(
+          `SELECT "probationEndDate" FROM "EmployeeProfile" WHERE "userId" = $1`, id,
+        );
+        return rows[0] ?? null;
+      };
+      let probationEndToWrite: Date | null | undefined = undefined; // tri-state: skip / set / clear
+      if (probationEndDate !== undefined) {
+        probationEndToWrite = probationEndDate ? new Date(probationEndDate) : null;
+      } else if (joiningDate !== undefined && joiningDate) {
+        // Auto-set only when the row has no probationEndDate yet.
+        // Avoids stomping an HR-edited value when joiningDate is
+        // changed later.
+        const cur = await fetchProbationCurrent();
+        if (!cur?.probationEndDate) {
+          const jd = new Date(joiningDate);
+          const ed = new Date(jd);
+          ed.setMonth(ed.getMonth() + 3);
+          probationEndToWrite = ed;
+        }
+      }
+      if (probationEndToWrite !== undefined) {
+        setParts.push(`"probationEndDate" = $${i++}`);
+        args.push(probationEndToWrite);
+        // Re-arm the reminder whenever probationEndDate is rewritten —
+        // covers both "cleared" (no reminder needed) and "extended" (a
+        // fresh end date deserves a fresh reminder window).
+        setParts.push(`"probationReminderSentAt" = $${i++}`);
+        args.push(null);
+      }
       if (internshipEndDate  !== undefined) {
         setParts.push(`"internshipEndDate" = $${i++}`);
         args.push(internshipEndDate ? new Date(internshipEndDate) : null);
