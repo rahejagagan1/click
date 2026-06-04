@@ -1,4 +1,5 @@
 import prisma from "@/lib/prisma";
+import { getPermissionsForUserId } from "./permissions/resolve-permissions";
 
 export type OrgLevel = "ceo" | "special_access" | "hod" | "manager" | "hr_manager" | "lead" | "sub_lead" | "member";
 
@@ -33,6 +34,15 @@ export async function getVisibleUserIds(
         });
         return allUsers.map((u: { id: number }) => u.id);
     }
+
+    // Designation may grant org-wide visibility (RBAC). Checked here for tiers
+    // not already all-access above, so a custom designation with SEE_ALL_DATA
+    // also sees everyone. The orgLevel checks above still cover the legacy top
+    // tiers (and dev-forced special_access).
+    try {
+        const perms = await getPermissionsForUserId(userId);
+        if (perms.includes("SEE_ALL_DATA")) return null;
+    } catch { /* RBAC tables missing → ignore */ }
 
     // Manager / Lead / Sub-lead: see self + all descendants in the hierarchy.
     // The tree is defined by User.managerId — each level can see everyone below them.
