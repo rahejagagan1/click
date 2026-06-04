@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
@@ -171,7 +171,57 @@ export default function EmployeeDetailPage() {
     url.searchParams.delete("extendProbation");
     window.history.replaceState({}, "", url.toString());
   }, [extendParam]);
-  const [activeTab, setActiveTab] = useState<Tab>("About");
+  // Tab state is URL-backed (?tab=edit / ?tab=assets / etc.) so:
+  //   1. Refresh keeps you on the tab you were on.
+  //   2. Search from the header carries the tab over to the new
+  //      person's profile (see header-search.tsx).
+  //   3. The tab can be deep-linked / bookmarked.
+  // Mapping uses lowercase URL tokens; Edit Profile maps to "edit"
+  // for brevity. Unknown / missing token falls back to About.
+  const TAB_FROM_SLUG: Record<string, Tab> = {
+    "about":       "About",
+    "profile":     "Profile",
+    "job":         "Job",
+    "attendance":  "Attendance",
+    "documents":   "Documents",
+    "assets":      "Assets",
+    "finances":    "Finances",
+    "edit":        "Edit Profile",
+  };
+  const SLUG_FROM_TAB: Record<Tab, string> = {
+    "About":        "about",
+    "Profile":      "profile",
+    "Job":          "job",
+    "Attendance":   "attendance",
+    "Documents":    "documents",
+    "Assets":       "assets",
+    "Finances":     "finances",
+    "Edit Profile": "edit",
+  };
+  const urlTab = (searchParamsObj?.get("tab") ?? "").toLowerCase();
+  const [activeTab, setActiveTab] = useState<Tab>(TAB_FROM_SLUG[urlTab] ?? "About");
+  // Sync activeTab ⇄ URL. Whenever the user clicks a tab we replace
+  // the URL silently (no extra back-button entry). Whenever the URL
+  // changes externally — e.g. the header search carried a tab over
+  // from another profile — we react and update activeTab to match.
+  useEffect(() => {
+    const expected = SLUG_FROM_TAB[activeTab];
+    const current = (searchParamsObj?.get("tab") ?? "").toLowerCase();
+    if (expected === "about" && !current) return; // default tab, leave URL clean
+    if (current === expected) return;
+    const url = new URL(window.location.href);
+    if (expected === "about") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", expected);
+    window.history.replaceState({}, "", url.toString());
+  }, [activeTab, searchParamsObj]);
+  // Bring activeTab in line when the URL changes from outside (e.g.
+  // header search navigated to a different person but kept ?tab=edit).
+  useEffect(() => {
+    const slug = (searchParamsObj?.get("tab") ?? "").toLowerCase();
+    const next = TAB_FROM_SLUG[slug] ?? "About";
+    if (next !== activeTab) setActiveTab(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParamsObj?.get("tab")]);
   // Sub-view inside the Attendance tab: the employee's clock-in/log panel,
   // or a read-only mirror of their personal Leave page (balances + history).
   const [attendanceView, setAttendanceView] = useState<"attendance" | "leave">("attendance");
@@ -185,7 +235,7 @@ export default function EmployeeDetailPage() {
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   // Which PROFILE-tab section is currently being edited. null = closed.
   // Each section opens its own focused modal with just that card's fields.
-  const [editSection, setEditSection] = useState<null | "primary" | "contact" | "family" | "address" | "identity" | "job" | "time" | "other" | "org" | "bios">(null);
+  const [editSection, setEditSection] = useState<null | "primary" | "contact" | "family" | "address" | "identity" | "job" | "time" | "other" | "org" | "bios" | "education">(null);
   useEffect(() => {
     if (!headerMenuOpen) return;
     const close = (e: MouseEvent) => {
@@ -756,6 +806,47 @@ export default function EmployeeDetailPage() {
                       </Grid3>
                     </DetailCard>
 
+                    {/* ── Education ── compliance-tracked; the cron
+                        needs at least one entry with degree +
+                        institution OR it'll warn the employee + later
+                        auto-violate. JSON column on EmployeeProfile,
+                        same shape the candidate apply form uses. */}
+                    {(() => {
+                      const raw: any = (p as any).educationDetails;
+                      let entries: any[] = [];
+                      if (Array.isArray(raw)) entries = raw;
+                      else if (typeof raw === "string") {
+                        try { const v = JSON.parse(raw); if (Array.isArray(v)) entries = v; } catch {}
+                      }
+                      return (
+                        <DetailCard title="Education" onEdit={canEdit ? () => setEditSection("education") : undefined}>
+                          {entries.length === 0 ? (
+                            <p className="text-[13px] text-slate-400 italic">No education entries on file. Required for compliance.</p>
+                          ) : (
+                            <div className="space-y-2.5">
+                              {entries.map((e: any, i: number) => {
+                                const degree      = String(e?.degree      ?? e?.course     ?? "").trim();
+                                const institution = String(e?.institution ?? e?.university ?? "").trim();
+                                const startY      = String(e?.startOfCourse ?? e?.startYear ?? "").trim();
+                                const endY        = String(e?.endOfCourse   ?? e?.endYear   ?? "").trim();
+                                return (
+                                  <div key={i} className="rounded-lg border border-slate-200 px-4 py-2.5">
+                                    <p className="text-[13px] font-semibold text-slate-800">{degree || "(degree missing)"}</p>
+                                    <p className="text-[12px] text-slate-500 mt-0.5">
+                                      {institution || "(institution missing)"}
+                                      {(startY || endY) && (
+                                        <span className="text-slate-400"> · {startY}{startY && endY ? "–" : ""}{endY}</span>
+                                      )}
+                                    </p>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </DetailCard>
+                      );
+                    })()}
+
                     {/* ── Other ── */}
                     <DetailCard title="Other" onEdit={canEdit ? () => setEditSection("other") : undefined}>
                       <Grid3>
@@ -892,7 +983,7 @@ export default function EmployeeDetailPage() {
             ))}
 
             {activeTab === "Documents" && (
-              <DocumentsPanel profile={p} documents={user.documents || []} />
+              <DocumentsPanel profile={p} documents={user.documents || []} userId={userId} />
             )}
 
             {activeTab === "Assets" && (
@@ -1321,6 +1412,24 @@ export default function EmployeeDetailPage() {
             ]}
           />
         );
+        if (editSection === "education") return (
+          <EducationEditModal
+            userId={userId}
+            initial={(() => {
+              const raw: any = (p as any).educationDetails;
+              if (Array.isArray(raw)) return raw;
+              if (typeof raw === "string") {
+                try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; } catch { return []; }
+              }
+              return [];
+            })()}
+            onClose={() => close(false)}
+            onSaved={async () => {
+              await mutate(`/api/hr/people/${userId}`);
+              close(true);
+            }}
+          />
+        );
         return null;
       })()}
 
@@ -1350,6 +1459,174 @@ export default function EmployeeDetailPage() {
 // ─────────────────────────────────────────────────────────────────────
 //  Probation extension modal
 // ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
+//  Education editor modal — repeating-rows form for the new
+//  EmployeeProfile.educationDetails JSON column. Required field by
+//  the compliance cron (at least one entry with degree + institution
+//  filled). Field shape mirrors the candidate apply form so HR can
+//  later copy across without remapping.
+// ─────────────────────────────────────────────────────────────────────
+function EducationEditModal({
+  userId, initial, onClose, onSaved,
+}: {
+  userId: number;
+  initial: any[];
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}) {
+  type Row = { id: string; degree: string; institution: string; startYear: string; endYear: string; branch: string };
+  const fromExisting = (e: any): Row => ({
+    id: Math.random().toString(36).slice(2),
+    degree:      String(e?.degree      ?? e?.course        ?? "").trim(),
+    institution: String(e?.institution ?? e?.university    ?? "").trim(),
+    startYear:   String(e?.startOfCourse ?? e?.startYear   ?? "").trim(),
+    endYear:     String(e?.endOfCourse   ?? e?.endYear     ?? "").trim(),
+    branch:      String(e?.branch      ?? ""              ).trim(),
+  });
+  const blankRow = (): Row => ({
+    id: Math.random().toString(36).slice(2),
+    degree: "", institution: "", startYear: "", endYear: "", branch: "",
+  });
+  const [rows, setRows] = useState<Row[]>(
+    initial.length > 0 ? initial.map(fromExisting) : [blankRow()],
+  );
+  const setRow = (id: string, patch: Partial<Row>) =>
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const addRow = () => setRows((rs) => [...rs, blankRow()]);
+  const removeRow = (id: string) =>
+    setRows((rs) => (rs.length === 1 ? rs : rs.filter((r) => r.id !== id)));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    // Drop blank rows; keep partial rows so HR sees their data in the
+    // payload until they fill the missing piece.
+    const cleaned = rows
+      .filter((r) => r.degree.trim() || r.institution.trim() || r.startYear.trim() || r.endYear.trim() || r.branch.trim())
+      .map((r) => ({
+        degree:        r.degree.trim()      || "",
+        institution:   r.institution.trim() || "",
+        startOfCourse: r.startYear.trim()   || "",
+        endOfCourse:   r.endYear.trim()     || "",
+        branch:        r.branch.trim()      || "",
+      }));
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/hr/people/${userId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ educationDetails: cleaned }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j?.error || `Save failed (${res.status})`);
+        return;
+      }
+      await onSaved();
+    } catch (e: any) {
+      setError(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm px-4" onClick={onClose}>
+      <div className="w-full max-w-lg max-h-[85vh] rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-slate-100">
+          <h3 className="text-[15px] font-semibold text-slate-900">Education</h3>
+          <p className="mt-0.5 text-[12px] text-slate-500">
+            Required for compliance — at least one entry with degree + institution.
+          </p>
+        </div>
+        <div className="px-6 py-5 space-y-3 overflow-y-auto">
+          {rows.map((row, idx) => (
+            <div key={row.id} className="rounded-lg border border-slate-200 p-3.5 group">
+              <div className="flex items-center justify-between mb-2.5">
+                <span className="text-[11px] font-semibold text-slate-400">#{idx + 1}</span>
+                {rows.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeRow(row.id)}
+                    className="text-[11px] text-rose-500 hover:text-rose-600 font-medium opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  >Remove</button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Degree</label>
+                  <input
+                    value={row.degree}
+                    onChange={(e) => setRow(row.id, { degree: e.target.value })}
+                    placeholder="e.g. B.Tech"
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Institution</label>
+                  <input
+                    value={row.institution}
+                    onChange={(e) => setRow(row.id, { institution: e.target.value })}
+                    placeholder="e.g. IIT Delhi"
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:border-slate-300"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2.5">
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Branch</label>
+                  <input
+                    value={row.branch}
+                    onChange={(e) => setRow(row.id, { branch: e.target.value })}
+                    placeholder="Optional"
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Start</label>
+                  <input
+                    value={row.startYear}
+                    onChange={(e) => setRow(row.id, { startYear: e.target.value })}
+                    placeholder="2019"
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">End</label>
+                  <input
+                    value={row.endYear}
+                    onChange={(e) => setRow(row.id, { endYear: e.target.value })}
+                    placeholder="2023"
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:border-slate-300"
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={addRow}
+            className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[#008CFF] hover:text-[#0070cc] transition-colors"
+          >
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#008CFF]/10">+</span>
+            Add another education
+          </button>
+          {error && (
+            <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[12.5px] text-rose-700">{error}</div>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50">Cancel</button>
+          <button type="button" onClick={submit} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white bg-[#008CFF] hover:bg-[#0070cc] disabled:opacity-50">
+            {saving ? "Saving…" : "Save education"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProbationExtendModal({
   userId, employeeName, currentEnd, defaultMode, onClose, onSaved,
 }: {
@@ -1683,50 +1960,169 @@ function maskPan(v?: string | null): string | null {
 // Folder labels match the categories used in /api/hr/profile uploads.
 const DOC_FOLDERS: { key: string; label: string; cats: string[] }[] = [
   { key: "identity",    label: "Identity Docs",          cats: ["id_proof", "aadhar", "pan_card"] },
+  { key: "education",   label: "Education",              cats: ["education_certificate"] },
   { key: "letters",     label: "Employee Letters",       cats: ["offer_letter", "experience_letter", "contract"] },
   { key: "previous",    label: "Previous Experience",    cats: ["experience_letter", "payslip"] },
   { key: "other",       label: "Other",                  cats: ["other"] },
 ];
 
-function DocumentsPanel({ profile, documents }: { profile: any; documents: any[] }) {
+// Tailwind classes for the upload modal's text inputs — kept inline
+// to avoid coupling this file to AssetsPanel's local constant.
+const DOC_FIELD_CLS = "mt-1 w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]";
+
+function DocumentsPanel({ profile, documents, userId }: { profile: any; documents: any[]; userId: number }) {
   const [folder, setFolder] = useState<string>("identity");
   const active = DOC_FOLDERS.find((f) => f.key === folder)!;
   const filesInFolder = documents.filter((d) => active.cats.includes((d.category || "").toLowerCase()));
 
+  // Per-folder file counts for the sidebar badges.
+  const folderCounts = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const f of DOC_FOLDERS) {
+      out[f.key] = documents.filter((d) => f.cats.includes((d.category || "").toLowerCase())).length;
+    }
+    return out;
+  }, [documents]);
+
+  // Default category for new uploads per folder. Identity defaults to
+  // id_proof but HR can switch to aadhar/pan in the picker.
+  const defaultCategoryFor = (key: string): string =>
+    key === "identity"  ? "id_proof"
+  : key === "education" ? "education_certificate"
+  : key === "letters"   ? "offer_letter"
+  : key === "previous"  ? "experience_letter"
+  : "other";
+
+  const [uploadOpen, setUploadOpen]   = useState(false);
+  const [uploadFile, setUploadFile]   = useState<File | null>(null);
+  const [uploadName, setUploadName]   = useState<string>("");
+  const [uploadCategory, setUploadCategory] = useState<string>("id_proof");
+  const [uploading, setUploading]     = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dragOver, setDragOver]       = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const openUpload = () => {
+    setUploadFile(null);
+    setUploadName("");
+    setUploadCategory(defaultCategoryFor(folder));
+    setUploadError(null);
+    setUploadOpen(true);
+  };
+  const closeUpload = () => {
+    if (uploading) return;
+    setUploadOpen(false);
+  };
+
+  const pickFile = (f: File) => {
+    setUploadError(null);
+    if (f.size > 10 * 1024 * 1024) {
+      setUploadError("File is larger than the 10 MB limit.");
+      return;
+    }
+    setUploadFile(f);
+    if (!uploadName.trim()) setUploadName(f.name);
+  };
+
+  const submitUpload = async () => {
+    if (!uploadFile) { setUploadError("Pick a file first."); return; }
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", uploadFile);
+      fd.append("userId", String(userId));
+      fd.append("category", uploadCategory);
+      if (uploadName.trim()) fd.append("fileName", uploadName.trim());
+      const res = await fetch("/api/hr/documents", { method: "POST", body: fd });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setUploadError(j?.error || `Upload failed (${res.status})`);
+        return;
+      }
+      await mutate(`/api/hr/people/${userId}`);
+      setUploadOpen(false);
+    } catch (e: any) {
+      setUploadError(e?.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async (doc: any) => {
+    if (!confirm(`Delete "${doc.fileName}"?`)) return;
+    const res = await fetch(`/api/hr/documents/${doc.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      return alert(j?.error || `Delete failed (${res.status})`);
+    }
+    await mutate(`/api/hr/people/${userId}`);
+  };
+
+  // Category options shown in the upload modal — limited to what's
+  // sensible for the current folder so HR doesn't accidentally drop a
+  // PAN under "Letters".
+  const categoryOptions = active.cats.map((c) => ({
+    value: c,
+    label: c.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase()),
+  }));
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) pickFile(file);
+  };
+
   return (
     <section className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-hidden">
-      <div className="px-6 py-4 border-b border-slate-100">
+      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
         <h3 className="text-[14px] font-semibold text-slate-800">Employee Documents</h3>
+        <button
+          type="button"
+          onClick={openUpload}
+          className="inline-flex items-center gap-1.5 h-8 px-3 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12.5px] font-semibold transition-colors"
+        >
+          + Upload
+        </button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-[220px_1fr]">
-        {/* Folder sidebar */}
+        {/* Folder sidebar with counts */}
         <div className="border-b md:border-b-0 md:border-r border-slate-100 py-2 bg-slate-50/40">
           <p className="px-4 py-1.5 text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Folders</p>
-          {DOC_FOLDERS.map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              onClick={() => setFolder(f.key)}
-              className={`w-full text-left px-4 py-2.5 text-[13px] flex items-center gap-2 transition-colors ${
-                folder === f.key
-                  ? "bg-[#008CFF]/10 text-[#008CFF] font-semibold"
-                  : "text-slate-600 hover:bg-slate-100"
-              }`}
-            >
-              <FileText size={14} className="shrink-0" />
-              {f.label}
-            </button>
-          ))}
+          {DOC_FOLDERS.map((f) => {
+            const count = folderCounts[f.key] ?? 0;
+            return (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setFolder(f.key)}
+                className={`w-full text-left px-4 py-2.5 text-[13px] flex items-center justify-between gap-2 transition-colors ${
+                  folder === f.key
+                    ? "bg-[#008CFF]/10 text-[#008CFF] font-semibold"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <FileText size={14} className="shrink-0" />
+                  {f.label}
+                </span>
+                {count > 0 && (
+                  <span className={`text-[11px] font-semibold rounded-full px-1.5 ${
+                    folder === f.key ? "bg-[#008CFF]/15 text-[#008CFF]" : "bg-slate-200/70 text-slate-500"
+                  }`}>{count}</span>
+                )}
+              </button>
+            );
+          })}
         </div>
         {/* Folder body */}
         <div className="p-6 space-y-5">
           {folder === "identity" && (
             <>
-              {/* Aadhaar Card panel — built from EmployeeProfile fields */}
               {(profile.aadhaarNumber || profile.aadhaarEnrollment) && (
                 <IdDocCard
-                  flag="🇮🇳"
-                  title="Aadhaar Card"
+                  flag="🇮🇳" title="Aadhaar Card"
                   status={profile.aadhaarNumber ? "verified" : "pending"}
                   rows={[
                     ["Aadhaar Number",     maskAadhaar(profile.aadhaarNumber) || "—"],
@@ -1738,11 +2134,9 @@ function DocumentsPanel({ profile, documents }: { profile: any; documents: any[]
                   ]}
                 />
               )}
-              {/* PAN Card panel */}
               {(profile.panNumber || profile.parentName) && (
                 <IdDocCard
-                  flag="🇮🇳"
-                  title="Pan Card"
+                  flag="🇮🇳" title="Pan Card"
                   status={profile.panNumber ? "verified" : "pending"}
                   rows={[
                     ["Permanent Account Number", maskPan(profile.panNumber) || "—"],
@@ -1752,55 +2146,142 @@ function DocumentsPanel({ profile, documents }: { profile: any; documents: any[]
                   ]}
                 />
               )}
-              {!profile.aadhaarNumber && !profile.panNumber && filesInFolder.length === 0 && (
-                <EmptyState icon={IdCard} label="No identity documents on file" />
-              )}
             </>
           )}
 
-          {/* File list — appears in every folder for files that match the folder's categories */}
-          {filesInFolder.length > 0 && (
+          {/* File list */}
+          {filesInFolder.length > 0 ? (
             <div>
               <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">
-                Uploaded files
+                Uploaded files ({filesInFolder.length})
               </p>
               <div className="space-y-2">
                 {filesInFolder.map((doc: any) => (
-                  <a
+                  <div
                     key={doc.id}
-                    href={doc.fileUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 hover:border-[#008CFF]/40 hover:bg-[#008CFF]/[0.02] transition-colors"
+                    className="group flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 hover:border-[#008CFF]/40 transition-colors"
                   >
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#008CFF]/10 text-[#008CFF]">
                       <FileText size={16} />
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-semibold text-slate-800">{doc.fileName || doc.name}</p>
+                    <a
+                      href={doc.fileUrl?.startsWith("http") ? doc.fileUrl : `/api/hr/documents/${doc.id}/file`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="min-w-0 flex-1 cursor-pointer"
+                    >
+                      <p className="truncate text-[13px] font-semibold text-slate-800">{doc.fileName || "Untitled"}</p>
                       <p className="truncate text-[11px] text-slate-500">
                         {(doc.category || "Document").replace(/_/g, " ")} · {fmtDate(doc.createdAt)}
                       </p>
-                    </div>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                      doc.isVerified
-                        ? "bg-emerald-50 text-emerald-600"
-                        : "bg-amber-50 text-amber-600"
-                    }`}>
-                      {doc.isVerified ? "Verified" : "Pending"}
-                    </span>
-                  </a>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(doc)}
+                      title="Delete"
+                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-slate-400 hover:text-rose-500"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
                 ))}
               </div>
             </div>
-          )}
-
-          {/* Folder-empty fallback for non-identity folders */}
-          {folder !== "identity" && filesInFolder.length === 0 && (
-            <EmptyState icon={FileText} label={`No documents in ${active.label}`} />
+          ) : (
+            <button
+              type="button"
+              onClick={openUpload}
+              className="w-full rounded-xl border-2 border-dashed border-slate-200 hover:border-[#008CFF]/40 hover:bg-[#008CFF]/[0.02] transition-colors py-10 text-center"
+            >
+              <FileText size={28} className="mx-auto text-slate-300 mb-2" strokeWidth={1.5} />
+              <p className="text-[13px] font-semibold text-slate-700">Upload to {active.label}</p>
+              <p className="mt-0.5 text-[11.5px] text-slate-500">Click here or drop a file. PDF / image / DOCX, up to 10 MB.</p>
+            </button>
           )}
         </div>
       </div>
+
+      {/* Upload drawer */}
+      {uploadOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-40" onClick={closeUpload} />
+          <div className="fixed top-0 right-0 bottom-0 w-[420px] bg-[#f4f7f8] border-l border-slate-200 shadow-2xl z-50 flex flex-col animate-slide-in">
+            <div className="flex items-start justify-between px-6 py-4 border-b border-slate-200">
+              <div>
+                <h2 className="text-[16px] font-semibold text-slate-800">Upload document</h2>
+                <p className="mt-0.5 text-[11.5px] text-slate-500">Adds to <strong className="text-slate-700">{active.label}</strong>.</p>
+              </div>
+              <button onClick={closeUpload} aria-label="Close" disabled={uploading} className="text-slate-400 hover:text-slate-700 -mt-1 disabled:opacity-50">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+              <div
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={onDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`rounded-xl border-2 border-dashed py-8 px-4 text-center cursor-pointer transition-colors ${
+                  dragOver
+                    ? "border-[#008CFF] bg-[#008CFF]/[0.04]"
+                    : "border-slate-200 hover:border-slate-300 bg-white"
+                }`}
+              >
+                <FileText size={28} className="mx-auto text-slate-300 mb-2" strokeWidth={1.5} />
+                {uploadFile ? (
+                  <>
+                    <p className="text-[13px] font-semibold text-slate-800">{uploadFile.name}</p>
+                    <p className="mt-0.5 text-[11.5px] text-slate-500">{(uploadFile.size / 1024).toFixed(1)} KB · click to replace</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[13px] font-semibold text-slate-700">Drop a file here or click to pick</p>
+                    <p className="mt-0.5 text-[11.5px] text-slate-500">PDF, image, or DOCX up to 10 MB</p>
+                  </>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) pickFile(f);
+                  }}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Category</label>
+                <SelectField
+                  value={uploadCategory}
+                  onChange={setUploadCategory}
+                  options={categoryOptions}
+                  className={DOC_FIELD_CLS}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Display name <span className="text-slate-400 font-normal normal-case tracking-normal">(optional)</span></label>
+                <input
+                  value={uploadName}
+                  onChange={(e) => setUploadName(e.target.value)}
+                  placeholder={uploadFile?.name || "Defaults to the file name"}
+                  className={DOC_FIELD_CLS}
+                />
+              </div>
+              {uploadError && (
+                <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[12.5px] text-rose-700">{uploadError}</div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-3">
+              <button onClick={closeUpload} disabled={uploading} className="h-9 px-5 text-[13px] text-slate-500 hover:text-slate-800 rounded-lg disabled:opacity-50">Cancel</button>
+              <button
+                onClick={submitUpload}
+                disabled={uploading || !uploadFile}
+                className="h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-60 disabled:cursor-wait"
+              >{uploading ? "Uploading…" : "Upload"}</button>
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }

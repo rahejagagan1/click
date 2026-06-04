@@ -1028,6 +1028,113 @@ export function violationInProgressReminderEmail(args: {
 // The cron stamps Violation.followUpSentAt so we send only once per
 // violation; the violations page renders a "follow-up email sent"
 // badge under the Manager row when this is set.
+// ── Compliance: missing PAN / Aadhaar / Education ───────────────────
+// Two-stage escalation driven by the daily cron in
+// src/lib/hr/doc-compliance.ts.
+//
+// Stage 1 — friendly warning sent only to the employee. Lists which
+// specific pieces are missing so they know what to upload. Heading
+// avoids the word "violation" (we're not there yet); copy is
+// supportive, not punitive.
+export function docComplianceWarningEmail(args: {
+  employeeName: string;
+  missing: string[];        // human-readable list, e.g. ["PAN number", "Aadhaar document"]
+}): EmailContent {
+  const subject = `Action needed: complete your compliance documents`;
+  const link = `${appUrl()}/dashboard/hr/profile`;
+  const redDot = `<span style="display:inline-block;width:7px;height:7px;background:#dc2626;border-radius:50%;vertical-align:middle;margin-right:8px"></span>`;
+  const missingRows = args.missing.map((m) =>
+    `<tr><td style="padding:6px 0;font-family:${FONT};font-size:13px;color:#1f2937">${redDot}${escape(m)}</td></tr>`
+  ).join("");
+  const body = `
+    <p style="margin:0 0 12px;font-size:14px;color:#1f2937;line-height:1.6">
+      Hi ${escape(args.employeeName)},
+    </p>
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      A quick reminder — some compliance details are still pending on your profile. Please upload / fill the items below within the next <strong>2 days</strong> to keep your record up to date.
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0;padding:14px 16px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px">
+      <tr><td style="font-family:${FONT};font-size:11px;color:#9a3412;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;padding-bottom:6px">Still missing</td></tr>
+      ${missingRows}
+    </table>
+    <p style="margin:14px 0 0;padding:12px 14px;background:#f8fafc;border-left:3px solid #0f6ecd;border-radius:0 6px 6px 0;font-size:12.5px;color:#475569;line-height:1.55">
+      If you've already submitted these on paper, please also upload them in the dashboard — the system needs them on file. If anything looks incorrect, ping HR directly.
+    </p>
+    ${ctaButton("Open your profile to upload", link)}
+  `;
+  const text = [
+    `Hi ${args.employeeName},`,
+    ``,
+    `Compliance items still pending on your profile. Please complete within 2 days:`,
+    ...args.missing.map((m) => `  • ${m}`),
+    ``,
+    `Upload them here: ${link}`,
+  ].join("\n");
+  return { subject, html: SHELL(subject, body), text };
+}
+
+// Stage 2 — escalation. Sent to the employee + HR Manager + the
+// employee's reporting manager when the auto-violation has just been
+// created. Lays out exactly what's still missing, names the violation
+// id so HR can find it on the dashboard, and signals to the manager
+// that their direct report needs a nudge.
+export function docComplianceViolationEmail(args: {
+  recipientName: string | null;
+  employeeName: string;
+  employeeEmail: string;
+  missing: string[];
+  violationId: number | null;
+  hrManagerName: string | null;
+  reportingManagerName: string | null;
+}): EmailContent {
+  const subject = `Compliance violation logged: ${args.employeeName} — missing PAN / Aadhaar / Education`;
+  const link = `${appUrl()}/dashboard/violations${args.violationId ? `?focus=${args.violationId}` : ""}`;
+  const redDot = `<span style="display:inline-block;width:7px;height:7px;background:#dc2626;border-radius:50%;vertical-align:middle;margin-right:8px"></span>`;
+  const missingRows = args.missing.map((m) =>
+    `<tr><td style="padding:6px 0;font-family:${FONT};font-size:13px;color:#1f2937">${redDot}${escape(m)}</td></tr>`
+  ).join("");
+  const rows: string[] = [];
+  rows.push(vRow("Employee", `${escape(args.employeeName)} <${escape(args.employeeEmail)}>`));
+  if (args.reportingManagerName) rows.push(vRow("Reporting Manager", escape(args.reportingManagerName)));
+  if (args.hrManagerName)        rows.push(vRow("Reported by",        escape(args.hrManagerName)));
+  rows.push(vRow("Severity",     `<span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700;background:${SEVERITY_TINT.low.bg};color:${SEVERITY_TINT.low.text}">${escape(SEVERITY_LABEL.low ?? "low")}</span>`));
+  rows.push(vRow("Category",     "Compliance"));
+  const body = `
+    <p style="margin:0 0 12px;font-size:14px;color:#1f2937;line-height:1.6">
+      ${args.recipientName ? `Hi ${escape(args.recipientName)},` : "Hi,"}
+    </p>
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      The compliance reminder sent 2 days ago wasn't resolved, so an automatic violation has been logged. Items still missing from <strong>${escape(args.employeeName)}</strong>'s profile:
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0;padding:14px 16px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px">
+      <tr><td style="font-family:${FONT};font-size:11px;color:#991b1b;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;padding-bottom:6px">Missing items</td></tr>
+      ${missingRows}
+    </table>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      ${rows.join("")}
+    </table>
+    <p style="margin:14px 0 0;padding:12px 14px;background:#f8fafc;border-left:3px solid #6366f1;border-radius:0 6px 6px 0;font-size:12.5px;color:#475569;line-height:1.55">
+      Once the missing items are uploaded, the violation can be marked as closed on the dashboard.
+    </p>
+    ${ctaButton("Open the violation", link)}
+  `;
+  const text = [
+    args.recipientName ? `Hi ${args.recipientName},` : "Hi,",
+    ``,
+    `A compliance violation has been auto-logged for ${args.employeeName} <${args.employeeEmail}>.`,
+    `Still missing:`,
+    ...args.missing.map((m) => `  • ${m}`),
+    ``,
+    args.reportingManagerName ? `Reporting Manager: ${args.reportingManagerName}` : null,
+    args.hrManagerName ? `Reported by: ${args.hrManagerName}` : null,
+    `Severity: Low`,
+    `Category: Compliance`,
+    ``,
+    `Open: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html: SHELL(subject, body), text };
+}
+
 export function violationFollowUpEmail(args: {
   recipientName?: string | null;          // manager's name (greeting)
   affectedUserName: string;               // the reported employee

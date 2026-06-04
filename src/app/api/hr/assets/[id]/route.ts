@@ -81,8 +81,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     // General update — set only the fields HR explicitly sent. Edit
     // modal posts name + category + serialNumber + condition + value
-    // + purchaseDate + notes; assign/return go through the action
-    // branches above. Empty strings clear nullable fields.
+    // + purchaseDate + notes; the dedicated assign/return action
+    // branches above stay the canonical entry points for assignment
+    // changes but the edit modal can ALSO change assigneeId in one
+    // call (handled below) so HR doesn't have to bounce between
+    // three flows for a single edit.
     const data: any = {};
     if (typeof body.name === "string" && body.name.trim()) data.name = body.name.trim();
     if (typeof body.category === "string" && body.category.trim()) data.category = body.category.trim();
@@ -100,14 +103,84 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       data.purchaseDate = body.purchaseDate ? new Date(body.purchaseDate) : null;
     }
     if (body.notes !== undefined) data.notes = body.notes || null;
-    if (Object.keys(data).length === 0) return NextResponse.json({ error: "No updatable fields provided" }, { status: 400 });
 
-    const asset = await prisma.asset.update({
+    // Assignee change handling — the edit modal sends `assigneeId`
+    // (number for new owner, null for "make unassigned",
+    // undefined to leave alone). We diff against the current open
+    // assignment and apply minimum-touch ops in a transaction so the
+    // assignment history stays correct:
+    //   • no current + new = X        → CREATE assignment + status=assigned
+    //   • current = X + new = null    → CLOSE current + status=available
+    //   • current = X + new = Y       → CLOSE current + CREATE new + status=assigned
+    //   • current = X + new = X       → no-op
+    let assigneeOp: "create" | "close" | "swap" | null = null;
+    let nextAssigneeId: number | null = null;
+    let currentAssignmentId: number | null = null;
+    if (body.assigneeId !== undefined) {
+      const raw = body.assigneeId;
+      if (raw === null || raw === "") {
+        nextAssigneeId = null;
+      } else {
+        const n = Number(raw);
+        if (!Number.isInteger(n) || n <= 0) {
+          return NextResponse.json({ error: "Bad assigneeId" }, { status: 400 });
+        }
+        // Verify the user exists so we don't end up with an
+        // orphaned AssetAssignment row.
+        const u = await prisma.user.findUnique({ where: { id: n }, select: { id: true } });
+        if (!u) return NextResponse.json({ error: "User not found" }, { status: 404 });
+        nextAssigneeId = n;
+      }
+      const current = await prisma.assetAssignment.findFirst({
+        where: { assetId, returnedAt: null },
+        select: { id: true, userId: true },
+      });
+      currentAssignmentId = current?.id ?? null;
+      const currentUserId  = current?.userId ?? null;
+      if (currentUserId === nextAssigneeId) {
+        assigneeOp = null;          // unchanged
+      } else if (currentUserId === null && nextAssigneeId !== null) {
+        assigneeOp = "create";      // unassigned → assigned
+      } else if (currentUserId !== null && nextAssigneeId === null) {
+        assigneeOp = "close";       // assigned → unassigned
+      } else {
+        assigneeOp = "swap";        // assigned to X → assigned to Y
+      }
+      // Drive the asset's denormalised status to match the next state.
+      data.status = nextAssigneeId === null ? "available" : "assigned";
+    }
+
+    if (Object.keys(data).length === 0 && !assigneeOp) {
+      return NextResponse.json({ error: "No updatable fields provided" }, { status: 400 });
+    }
+
+    // Single transaction so reassignment + field edits commit together.
+    const ops: any[] = [];
+    if (Object.keys(data).length > 0) {
+      ops.push(prisma.asset.update({ where: { id: assetId }, data }));
+    }
+    if (assigneeOp === "close" || assigneeOp === "swap") {
+      ops.push(prisma.assetAssignment.update({
+        where: { id: currentAssignmentId! },
+        data:  { returnedAt: new Date() },
+      }));
+    }
+    if (assigneeOp === "create" || assigneeOp === "swap") {
+      ops.push(prisma.assetAssignment.create({
+        data: {
+          assetId,
+          userId: nextAssigneeId!,
+          conditionOnAssign: (typeof body.condition === "string" && body.condition) ? body.condition : null,
+        },
+      }));
+    }
+    if (ops.length > 0) await prisma.$transaction(ops);
+
+    const refreshed = await prisma.asset.findUnique({
       where: { id: assetId },
-      data,
       include: { assignments: { where: { returnedAt: null }, include: { user: { select: { id: true, name: true } } }, take: 1 } },
     });
-    return NextResponse.json(asset);
+    return NextResponse.json(refreshed);
   } catch (e) { return serverError(e, "PUT /api/hr/assets/[id]"); }
 }
 

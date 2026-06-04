@@ -7,6 +7,15 @@
 
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+// Shared 3-stage fallback chain. Identical to what the public
+// /api/jobs/parse-resume endpoint runs; importing instead of
+// duplicating means a fix added in one place benefits both call
+// sites automatically.
+import {
+  scanEducationProsePassed,
+  clusterEducationByShape,
+  scanEducationSectionLoose,
+} from "./resume-education-fallbacks";
 
 export type ExtractedEducation = {
   course: string;
@@ -567,10 +576,46 @@ export async function extractResumeData(buf: Buffer, fileName: string): Promise<
   }
 
   const { linkedinUrl, portfolioUrl } = extractUrls(text);
-  let educations = parseEducations(
-    extractSection(text, ["education","academic","qualifications","academics"]),
-  );
-  if (educations.length === 0) educations = scanEducationByUniversityYear(text);
+  // Full 5-stage education fallback chain. Order is from most
+  // specific to most permissive — first non-empty result wins.
+  // The last three live in the shared module so the apply form +
+  // HR drawer run identical code (drift-free).
+  const runChain = (src: string): ExtractedEducation[] => {
+    let acc = parseEducations(
+      extractSection(src, ["education","academic","qualifications","academics"]),
+    );
+    if (acc.length === 0) acc = scanEducationProsePassed(src);
+    if (acc.length === 0) acc = scanEducationByUniversityYear(src);
+    if (acc.length === 0) acc = clusterEducationByShape(src);
+    if (acc.length === 0) acc = scanEducationSectionLoose(src);
+    return acc;
+  };
+  let educations = runChain(text);
+
+  // SECOND-CHANCE OCR — if the original text extracted but the chain
+  // still returned 0 education entries, the PDF text was probably
+  // mangled (column-flattened tables, vector outlines on bold heads,
+  // multi-column shuffling). Re-render the pages as PNGs and OCR
+  // them — Tesseract sees the visual layout the same way humans
+  // would. We re-run the full chain against the OCR text + any
+  // entries it finds get used. Skipped if OCR already fired above
+  // (don't double-run).
+  if (educations.length === 0 && !triggerOcr && /\.pdf$/i.test(fileName)) {
+    try {
+      const { isOcrAvailable, ocrPdf } = await import("./ocr-pdf");
+      if (await isOcrAvailable()) {
+        const ocrText = await ocrPdf(buf);
+        if (ocrText && ocrText.trim().length > 20) {
+          const fromOcr = runChain(ocrText);
+          if (fromOcr.length > 0) {
+            educations = fromOcr;
+          }
+        }
+      }
+    } catch (e: any) {
+      console.error("[resume-auto-extract] second-chance OCR failed:", e?.message ?? e);
+    }
+  }
   const skills    = parseSkills(text);
   const languages = parseLanguages(text);
   return { linkedinUrl, portfolioUrl, educations, skills, languages };
