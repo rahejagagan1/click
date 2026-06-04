@@ -8,6 +8,7 @@ import {
     teamCapsuleToSelectionKey,
 } from "@/lib/team-capsule-catalog-ui";
 import { USER_ROLE_OPTIONS, getUserRoleLabel } from "@/lib/user-role-options";
+import { legacyDesignationKey, legacyFromDesignationKey } from "@/lib/permissions/designation-seed";
 
 interface UserNode {
     id: number;
@@ -19,6 +20,8 @@ interface UserNode {
     profilePictureUrl: string | null;
     teamCapsule: string | null;
     isActive: boolean;
+    /** Current designation (RBAC). Used to default the Designation picker. */
+    designationId?: number | null;
     /** Monthly case target for Production Manager (delivery % denominator). */
     monthlyDeliveryTargetCases?: number | null;
 }
@@ -70,6 +73,7 @@ const ORG_OPTIONS = [
 type OrgUserUpdatePayload = {
     role?: string;
     orgLevel?: string;
+    designationId?: number | null;
     managerId?: number | null;
     monthlyDeliveryTargetCases?: number | null;
     teamCapsule?: string | null;
@@ -86,13 +90,27 @@ export default function OrgTree({
     const [editData, setEditData] = useState<{
         role: string;
         orgLevel: string;
+        /** Single designation picker; role/orgLevel above are derived from it. */
+        designationKey: string;
         managerId: number | null;
         monthlyDeliveryTargetCases: number | null;
         /** "" | "l:123" (production list) | "c:456" (whole capsule folder) */
         teamCapsuleKey: string;
-    }>({ role: "", orgLevel: "", managerId: null, monthlyDeliveryTargetCases: null, teamCapsuleKey: "" });
+    }>({ role: "", orgLevel: "", designationKey: "", managerId: null, monthlyDeliveryTargetCases: null, teamCapsuleKey: "" });
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
+    const [designations, setDesignations] = useState<{ id: number; key: string; label: string }[]>([]);
+
+    // Label to show on a node: the user's stored designation, else the one
+    // derived from their legacy orgLevel/role, else the raw orgLevel.
+    const designationLabelFor = (u: UserNode): string => {
+        if (u.designationId != null) {
+            const d = designations.find((x) => x.id === u.designationId);
+            if (d) return d.label;
+        }
+        const key = legacyDesignationKey(u.orgLevel, u.role);
+        return designations.find((x) => x.key === key)?.label ?? (ORG_LABELS[u.orgLevel] || u.orgLevel);
+    };
     const [teamCapsuleCatalog, setTeamCapsuleCatalog] = useState<TeamCapsuleCatalog | null>(null);
     const [draggedUser, setDraggedUser] = useState<number | null>(null);
     const [dropTarget, setDropTarget] = useState<number | null>(null);
@@ -115,6 +133,14 @@ export default function OrgTree({
                 }
             })
             .catch(() => setTeamCapsuleCatalog({ capsules: [], productionLists: [] }));
+    }, []);
+
+    // Designations for the single Designation picker (replaces Org Level + Role).
+    useEffect(() => {
+        fetch("/api/admin/rbac/designations")
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => { if (d?.designations) setDesignations(d.designations); })
+            .catch(() => {});
     }, []);
 
     /** Sync list/capsule dropdown from stored user when opening editor or when catalog loads. */
@@ -143,9 +169,15 @@ export default function OrgTree({
     const openEdit = (user: UserNode) => {
         setSaveError(null);
         setEditingUser(user);
+        // Prefer the user's truly-stored designation; fall back to deriving one
+        // from the legacy orgLevel/role only when they have none yet.
+        const storedKey = user.designationId != null
+            ? designations.find((d) => d.id === user.designationId)?.key
+            : undefined;
         setEditData({
             role: user.role,
             orgLevel: user.orgLevel,
+            designationKey: storedKey ?? legacyDesignationKey(user.orgLevel, user.role),
             managerId: user.managerId,
             monthlyDeliveryTargetCases: user.monthlyDeliveryTargetCases ?? null,
             teamCapsuleKey: "",
@@ -166,9 +198,11 @@ export default function OrgTree({
         if (!editingUser) return;
         setSaving(true);
         setSaveError(null);
+        const designationId = designations.find((d) => d.key === editData.designationKey)?.id ?? null;
         const payload: OrgUserUpdatePayload = {
             role: editData.role,
             orgLevel: editData.orgLevel,
+            designationId,
             managerId: editData.managerId,
             teamCapsule: teamCapsuleSelectionKeyToName(editData.teamCapsuleKey, teamCapsuleCatalog),
         };
@@ -329,10 +363,7 @@ export default function OrgTree({
                         {/* Badges */}
                         <div className="flex flex-wrap gap-1 justify-center">
                             <span className={`text-[8px] px-1.5 py-0.5 rounded-md border font-semibold uppercase tracking-wide ${ORG_BADGE_COLORS[user.orgLevel] || ORG_BADGE_COLORS.member}`}>
-                                {ORG_LABELS[user.orgLevel] || user.orgLevel}
-                            </span>
-                            <span className="text-[8px] px-1.5 py-0.5 rounded-md border bg-white/5 text-slate-400 border-white/10">
-                                {getUserRoleLabel(user.role)}
+                                {designationLabelFor(user)}
                             </span>
                         </div>
                     </div>
@@ -485,22 +516,20 @@ export default function OrgTree({
 
                         <div className="space-y-4">
                             <div>
-                                <label className="block text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5 font-medium">Org Level</label>
-                                <select value={editData.orgLevel}
-                                    onChange={(e) => setEditData(d => ({ ...d, orgLevel: e.target.value }))}
+                                <label className="block text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5 font-medium">Designation</label>
+                                <select value={editData.designationKey}
+                                    onChange={(e) => {
+                                        const key = e.target.value;
+                                        const { orgLevel, role } = legacyFromDesignationKey(key);
+                                        setEditData(d => ({ ...d, designationKey: key, orgLevel, role }));
+                                    }}
                                     className="w-full px-3 py-2.5 bg-slate-50 dark:bg-[#1a1a35] border border-slate-200 dark:border-white/10 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500/40">
-                                    {ORG_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                    {designations.length === 0 && (
+                                        <option value={editData.designationKey}>{editData.designationKey || "—"}</option>
+                                    )}
+                                    {designations.map(dg => <option key={dg.key} value={dg.key}>{dg.label}</option>)}
                                 </select>
-                            </div>
-                            <div>
-                                <label className="block text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5 font-medium">Role</label>
-                                <select value={editData.role}
-                                    onChange={(e) => setEditData(d => ({ ...d, role: e.target.value }))}
-                                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-[#1a1a35] border border-slate-200 dark:border-white/10 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500/40">
-                                    {USER_ROLE_OPTIONS.map((o) => (
-                                        <option key={o.value} value={o.value}>{o.label}</option>
-                                    ))}
-                                </select>
+                                <p className="mt-1.5 text-[10px] text-slate-400">Sets access tier + scorecard. Replaces the old Org&nbsp;Level + Role.</p>
                             </div>
                             <div>
                                 <label className="block text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5 font-medium">Reports To</label>
