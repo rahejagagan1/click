@@ -8,7 +8,7 @@
 // to the browser.
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import {
@@ -23,6 +23,13 @@ import {
 } from "lucide-react";
 import { isHRAdmin } from "@/lib/access";
 import SelectField from "@/components/ui/SelectField";
+
+type BrandScope = "all" | "nb-media" | "yt-labs";
+const BRAND_OPTIONS: Array<{ value: BrandScope; label: string }> = [
+  { value: "all",      label: "All brands (NB Media + YT Labs)" },
+  { value: "nb-media", label: "NB Media only" },
+  { value: "yt-labs",  label: "YT Labs only" },
+];
 
 type SheetKey = "employees" | "attendance" | "leaves" | "requests";
 
@@ -50,6 +57,7 @@ const PERIOD_OPTIONS = [
 export default function MasterSheetPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const user = session?.user as any;
 
   // Default: every sheet ticked — that's what a full export looks like.
@@ -57,6 +65,16 @@ export default function MasterSheetPage() {
     new Set<SheetKey>(["employees", "attendance", "leaves", "requests"])
   );
   const [period, setPeriod] = useState<string>("both");
+  // Brand scope — seeded from ?brand= so entering via the HR
+  // Dashboard sidebar flyout (NB Media / YT Labs) lands on the right
+  // option. Unknown / missing → "all". User can still flip the
+  // selector before downloading.
+  const [brand, setBrand] = useState<BrandScope>(() => {
+    const raw = (searchParams?.get("brand") || "").toLowerCase();
+    return raw === "yt-labs" || raw === "yt"      ? "yt-labs"
+         : raw === "nb-media" || raw === "nb"     ? "nb-media"
+         : "all";
+  });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>("");
 
@@ -94,6 +112,9 @@ export default function MasterSheetPage() {
     try {
       const sheets = Array.from(picked).join(",");
       const qs = new URLSearchParams({ sheets, period });
+      // Only send `brand=` when narrowing — keeps the URL clean for
+      // "all" exports and matches the API's "missing = all" default.
+      if (brand !== "all") qs.set("brand", brand);
       // Stream straight from the server — fetch+blob keeps us inside
       // the SPA shell so the error path can show an inline message
       // rather than navigating to a JSON error page.
@@ -106,7 +127,8 @@ export default function MasterSheetPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `nb-media-master-sheet-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const brandSlug = brand === "all" ? "all-brands" : brand;
+      a.download = `master-sheet-${brandSlug}-${new Date().toISOString().slice(0, 10)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -132,7 +154,14 @@ export default function MasterSheetPage() {
           </Link>
           <FileSpreadsheet className="w-5 h-5 text-[#008CFF]" />
           <div>
-            <h1 className="text-[15px] font-bold text-slate-800 dark:text-white">Master Sheet</h1>
+            <h1 className="text-[15px] font-bold text-slate-800 dark:text-white inline-flex items-center gap-2">
+              Master Sheet
+              {brand !== "all" && (
+                <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#008CFF]/10 text-[#008CFF]">
+                  {brand === "yt-labs" ? "YT Labs" : "NB Media"}
+                </span>
+              )}
+            </h1>
             <p className="text-[12px] text-slate-500 dark:text-slate-400">Export the live HR database as a single multi-tab Excel workbook.</p>
           </div>
         </div>
@@ -183,6 +212,38 @@ export default function MasterSheetPage() {
                       </p>
                     </div>
                   </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Brand scope — pick which brand's data the workbook covers.
+            Defaults from `?brand=` so entering via the HR Dashboard
+            sidebar flyout lands on the right brand; HR can flip to
+            "All brands" before downloading for a combined export. */}
+        <section className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl p-5">
+          <h2 className="text-[13px] font-bold text-slate-800 dark:text-white uppercase tracking-wide">
+            Brand scope
+          </h2>
+          <p className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
+            Filters every sheet to employees from the chosen brand. Choose <strong>All brands</strong> for the full org.
+          </p>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {BRAND_OPTIONS.map((o) => {
+              const on = brand === o.value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => setBrand(o.value)}
+                  className={`text-left rounded-lg border px-4 py-3 transition-colors text-[12.5px] font-semibold ${
+                    on
+                      ? "border-[#008CFF] bg-[#008CFF]/[0.08] text-[#008CFF]"
+                      : "border-slate-200 dark:border-white/[0.06] bg-white dark:bg-white/[0.02] text-slate-700 dark:text-slate-300 hover:border-slate-300"
+                  }`}
+                >
+                  {o.label}
                 </button>
               );
             })}

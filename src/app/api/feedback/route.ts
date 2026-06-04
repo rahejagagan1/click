@@ -8,7 +8,7 @@ import prisma from "@/lib/prisma";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
 import { parseBody } from "@/lib/validate";
 import { serializeBigInt } from "@/lib/utils";
-import { notifyUsers } from "@/lib/notifications";
+import { notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
 
 export const dynamic = "force-dynamic";
@@ -95,20 +95,29 @@ export async function POST(request: NextRequest) {
         // prefixed with `category:` so the email template can pluck it
         // out without an extra column.
         try {
-            // CEO / HR / Special Access / admin. Developer accounts gated
-            // by the "Notify developers" toggle in Admin → Emails.
-            const recipients = await prisma.user.findMany({
-                where: {
-                    isActive: true,
-                    OR: [
-                        { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
-                        { role: "admin" },
-                        ...(await devEmailRecipientsClause()),
-                    ],
-                },
-                select: { id: true },
-            });
-            const recipientIds = recipients.map((u) => u.id);
+            // Brand-CEO routing: drop blanket CEO from the HR/admin
+            // recipient pool and add back the submitter's brand CEO.
+            // Keeps each CEO inside their brand's feedback inbox even
+            // though the submitter is rendered anonymous to recipients.
+            const [recipients, brandCeoId] = await Promise.all([
+                prisma.user.findMany({
+                    where: {
+                        isActive: true,
+                        orgLevel: { not: "ceo" },
+                        OR: [
+                            { orgLevel: { in: ["hr_manager", "special_access"] } },
+                            { role: "admin" },
+                            ...(await devEmailRecipientsClause()),
+                        ],
+                    },
+                    select: { id: true },
+                }),
+                brandCeoIdForEmployee(userId),
+            ]);
+            const recipientIds = [
+                ...recipients.map((u) => u.id),
+                ...(brandCeoId ? [brandCeoId] : []),
+            ];
             if (recipientIds.length > 0) {
                 const prettyCategory = category
                     .split("_")
