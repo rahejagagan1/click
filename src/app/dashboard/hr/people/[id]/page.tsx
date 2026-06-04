@@ -4,7 +4,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { getUserRoleLabel } from "@/lib/user-role-options";
 import { parseAttLoc, type AttLoc } from "@/lib/attendance-location";
 import {
@@ -146,6 +146,31 @@ export default function EmployeeDetailPage() {
   const { id } = useParams();
   const userId = Number(id);
   const { data: user, isLoading } = useSWR(`/api/hr/people/${id}`, fetcher);
+  // Probation extension modal — opens automatically when the URL
+  // carries ?extendProbation=1m | 2m | custom (deep-link from the
+  // probationEndingReminderEmail). HR can also open it from the Edit
+  // Profile → Job Details modal, but this flow keeps the email →
+  // one-click extension path tight.
+  const searchParamsObj = useSearchParams();
+  const extendParam = searchParamsObj?.get("extendProbation");
+  const [probationModalOpen, setProbationModalOpen] = useState(false);
+  const [probationModalDefault, setProbationModalDefault] = useState<"1m" | "2m" | "custom" | null>(null);
+  useEffect(() => {
+    if (!extendParam) return;
+    const mode = extendParam === "1m" ? "1m"
+              : extendParam === "2m" ? "2m"
+              : extendParam === "custom" ? "custom"
+              : null;
+    if (mode) {
+      setProbationModalDefault(mode);
+      setProbationModalOpen(true);
+    }
+    // Strip the param from the URL so refreshing doesn't keep re-
+    // opening the modal. Keep other params intact.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("extendProbation");
+    window.history.replaceState({}, "", url.toString());
+  }, [extendParam]);
   const [activeTab, setActiveTab] = useState<Tab>("About");
   // Sub-view inside the Attendance tab: the employee's clock-in/log panel,
   // or a read-only mirror of their personal Leave page (balances + history).
@@ -677,9 +702,20 @@ export default function EmployeeDetailPage() {
               // the left, the Organization sidebar (manager + reports
               // chain) on the right. Theme stays slate-on-white to match
               // the rest of the app.
+              // "In Probation" badge — uses probationEndDate to show
+              // whether probation is currently active and when it ends.
+              // Interns reuse their internship window; everyone else
+              // uses the explicit probationEndDate column. "No" once
+              // the end date is in the past.
+              const probationEnd = p.probationEndDate ? new Date(p.probationEndDate) : null;
+              const isOnProbation = p.employmentType === "intern"
+                ? true
+                : !!(probationEnd && probationEnd.getTime() > Date.now());
               const inProbationLabel = p.employmentType === "intern"
                 ? `Yes${p.joiningDate ? ` (${fmtDate(p.joiningDate)}` : ""}${p.internshipEndDate ? ` – ${fmtDate(p.internshipEndDate)})` : ""}`
-                : "No";
+                : isOnProbation
+                  ? `Yes · ends ${fmtDate(p.probationEndDate)}`
+                  : "No";
               const contractRange = (p.joiningDate || p.internshipEndDate)
                 ? `${p.employmentType === "intern" ? "Internship" : "Employed"}${p.joiningDate ? ` · ${fmtDate(p.joiningDate)}` : ""}${p.internshipEndDate ? ` – ${fmtDate(p.internshipEndDate)}` : ""}`
                 : null;
@@ -723,9 +759,28 @@ export default function EmployeeDetailPage() {
                     {/* ── Other ── */}
                     <DetailCard title="Other" onEdit={canEdit ? () => setEditSection("other") : undefined}>
                       <Grid3>
-                        <KV label="Biometric"           value={p.biometricId} />
-                        <KV label="Internship End Date" value={fmtDate(p.internshipEndDate)} />
-                        <KV label="Job Location"        value={p.jobLocation} capitalize />
+                        <KV label="Biometric"            value={p.biometricId} />
+                        <KV label="Internship End Date"  value={fmtDate(p.internshipEndDate)} />
+                        {/* Probation End Date — inline "Extend" chip
+                            opens the same quick-extend modal the email
+                            reminder deep-links into. Visible only when
+                            an end date is set + viewer can edit. */}
+                        <div>
+                          <p className="text-[10px] uppercase tracking-[0.1em] font-medium text-slate-400">Probation End Date</p>
+                          <div className="mt-1 flex items-center gap-2 flex-wrap">
+                            <p className="text-[13px] text-slate-800">{fmtDate(p.probationEndDate) || "—"}</p>
+                            {canEdit && p.probationEndDate && (
+                              <button
+                                type="button"
+                                onClick={() => { setProbationModalDefault("1m"); setProbationModalOpen(true); }}
+                                className="inline-flex items-center gap-1 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-semibold px-2.5 py-0.5 transition-colors"
+                              >
+                                Extend
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <KV label="Job Location"         value={p.jobLocation} capitalize />
                       </Grid3>
                     </DetailCard>
                   </div>
@@ -1095,6 +1150,7 @@ export default function EmployeeDetailPage() {
               internshipEndDate: dateISO(p.internshipEndDate),
               noticePeriodDays:  p.noticePeriodDays != null ? String(p.noticePeriodDays) : "30",
               probationPolicy:   p.probationPolicy ?? "",
+              probationEndDate:  dateISO(p.probationEndDate),
             }}
             fields={[
               { key: "employeeId",        label: "HRM No." },
@@ -1111,6 +1167,11 @@ export default function EmployeeDetailPage() {
               { key: "internshipEndDate", label: "Internship End Date (only when Intern)", type: "date" },
               { key: "noticePeriodDays",  label: "Notice Period (days)" },
               { key: "probationPolicy",   label: "Probation Policy" },
+              // Auto-populated to joiningDate + 3 months on new onboarding
+              // (server-side). HR can edit to shorten / extend / clear.
+              // Clearing this field also clears probationReminderSentAt so
+              // the 7-day reminder re-arms next time HR sets a new date.
+              { key: "probationEndDate",  label: "Probation End Date", type: "date" },
             ]}
           />
         );
@@ -1262,6 +1323,151 @@ export default function EmployeeDetailPage() {
         );
         return null;
       })()}
+
+      {/* Probation extension modal — opened either by email deep-link
+          (?extendProbation=1m | 2m | custom) or via the Job Details
+          modal. Self-contained: fetches the current probationEndDate,
+          shows quick presets + a custom date picker, PATCHes to the
+          People API, then revalidates the SWR cache. */}
+      {probationModalOpen && (
+        <ProbationExtendModal
+          userId={userId}
+          employeeName={user?.name ?? ""}
+          currentEnd={user?.profile?.probationEndDate ?? null}
+          defaultMode={probationModalDefault}
+          onClose={() => { setProbationModalOpen(false); setProbationModalDefault(null); }}
+          onSaved={async () => {
+            await mutate(`/api/hr/people/${userId}`);
+            setProbationModalOpen(false);
+            setProbationModalDefault(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  Probation extension modal
+// ─────────────────────────────────────────────────────────────────────
+function ProbationExtendModal({
+  userId, employeeName, currentEnd, defaultMode, onClose, onSaved,
+}: {
+  userId: number;
+  employeeName: string;
+  currentEnd: string | Date | null;
+  defaultMode: "1m" | "2m" | "custom" | null;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}) {
+  // Anchor preset extensions to the EXISTING probation end date when
+  // present; fall back to today so HR can use this even on rows that
+  // never had probation set up. Calculations below add whole months
+  // using Date.setMonth so DST / month-length edge cases handle
+  // themselves (e.g. Jan 31 → +1 month → Feb 28/29).
+  const anchor = currentEnd ? new Date(currentEnd) : new Date();
+  const plusMonths = (n: number) => {
+    const d = new Date(anchor);
+    d.setMonth(d.getMonth() + n);
+    return d;
+  };
+  const dateInputValue = (d: Date) => {
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+  const [mode, setMode] = useState<"1m" | "2m" | "custom">(defaultMode ?? "1m");
+  const [customDate, setCustomDate] = useState<string>(dateInputValue(plusMonths(1)));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const computedEnd = mode === "1m" ? plusMonths(1)
+                    : mode === "2m" ? plusMonths(2)
+                    : (customDate ? new Date(customDate + "T00:00:00.000Z") : null);
+
+  const submit = async () => {
+    if (!computedEnd || Number.isNaN(computedEnd.getTime())) {
+      setError("Pick a valid date.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/hr/people/${userId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ probationEndDate: computedEnd.toISOString() }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j?.error || `Save failed (${res.status})`);
+        return;
+      }
+      await onSaved();
+    } catch (e: any) {
+      setError(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const fmt = (d: Date) => d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm px-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-slate-100">
+          <h3 className="text-[15px] font-semibold text-slate-900">Extend probation</h3>
+          <p className="mt-0.5 text-[12px] text-slate-500">
+            {employeeName}
+            {currentEnd && <> · currently ends <strong className="text-slate-700">{fmt(new Date(currentEnd))}</strong></>}
+          </p>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div className="space-y-2">
+            {([
+              { v: "1m", label: "Extend by 1 month",  to: fmt(plusMonths(1)) },
+              { v: "2m", label: "Extend by 2 months", to: fmt(plusMonths(2)) },
+              { v: "custom", label: "Custom date", to: null },
+            ] as const).map((opt) => (
+              <button
+                key={opt.v}
+                type="button"
+                onClick={() => setMode(opt.v)}
+                className={`w-full flex items-center justify-between gap-3 rounded-lg border px-3.5 py-3 text-left text-[13px] transition-colors ${
+                  mode === opt.v
+                    ? "border-indigo-400 bg-indigo-50 text-indigo-900"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                }`}
+              >
+                <span className="font-medium">{opt.label}</span>
+                {opt.to && <span className="text-[11.5px] text-slate-500">→ {opt.to}</span>}
+              </button>
+            ))}
+          </div>
+          {mode === "custom" && (
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 mb-1.5">New probation end date</label>
+              <input
+                type="date"
+                value={customDate}
+                onChange={(e) => setCustomDate(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+              />
+            </div>
+          )}
+          {error && (
+            <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[12.5px] text-rose-700">{error}</div>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50">Cancel</button>
+          <button type="button" onClick={submit} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50">
+            {saving ? "Saving…" : "Confirm extension"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
