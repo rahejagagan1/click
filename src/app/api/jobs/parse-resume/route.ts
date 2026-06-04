@@ -413,20 +413,176 @@ function parseEducations(section: string): ExtractedEducation[] {
 function scanEducationByUniversityYear(text: string): ExtractedEducation[] {
   const lines = text.split(/\n/).map(l => healFragmentedText(l)).filter(l => l.trim());
   const out: ExtractedEducation[] = [];
-  for (const line of lines) {
-    if (!/\b(University|Institute|College|Polytechnic|Academy)\b/i.test(line)) continue;
-    const yr = line.match(/(19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|present|current)/i);
-    if (!yr) continue;
-    const ys = yr[0].match(/(19|20)\d{2}/g) ?? [];
-    const startOfCourse = ys[0] ?? "";
-    const endOfCourse   = ys[1] ?? (/present|current/i.test(yr[0]) ? "Present" : "");
-    const university = line
-      .replace(/\(?\s*(19|20)\d{2}\s*[-–—]\s*(?:(19|20)\d{2}|present|current)\s*\)?/i, "")
+  // Two accepted shapes per line:
+  //   (a) Year range — "2019 - 2023" / "2019-Present" (legacy CV style)
+  //   (b) Single "Year of Passing" — "2023" (table-style Indian
+  //       resumes with columns Degree | Board | Institute | Year)
+  // (b) was the gap: pdfjs flattens the table to one line per row
+  // and the old range-only regex skipped the whole entry.
+  const RANGE_RE = /(19|20)\d{2}\s*[-–—]\s*(?:(19|20)\d{2}|present|current)/i;
+  const SINGLE_YEAR_RE = /\b(?:19|20)\d{2}\b/;
+  // Common degree tokens for the table case — let us pull a course
+  // label out of the same line when one's present.
+  const DEGREE_TABLE_RE =
+    /\b(MBA(?:[\s-][\w &]+)?|BBA|BCA|MCA|BSc|MSc|B\.?Sc|M\.?Sc|B\.?A|M\.?A|B\.?Com|Bcom|M\.?Com|B\.?Tech|M\.?Tech|B\.?E|M\.?E|PhD|Doctorate|Diploma|HSC|SSC|XII|X|10\+2|12th|10th|Postgraduate|Undergraduate|Bachelors?|Masters?|Class\s*X{1,2}|Class\s*10|Class\s*12)\b/i;
+  // Lookback helper — if a row's degree got pushed onto its own
+  // line (pdfjs splits "MBA-HR" off because of the dash), the next
+  // line (the year/university one) won't have a degree match. Pull
+  // it from the line just above, but only if that line is SHORT and
+  // is MOSTLY a degree token (so we don't wrongly grab a degree
+  // mention from a paragraph above).
+  const degreeOnlyShortLine = (line: string): string | null => {
+    const t = line.trim();
+    if (!t || t.length > 30) return null;
+    const m = t.match(DEGREE_TABLE_RE);
+    if (!m) return null;
+    // Strip the degree token from the line — what remains should be
+    // mostly punctuation / whitespace if the line really is degree-
+    // dominant.
+    const remainder = t.replace(DEGREE_TABLE_RE, "").replace(/[|·•\-–—\s]+/g, "");
+    if (remainder.length > 3) return null;
+    return m[0].trim();
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Accept "Collage" alongside "College" — common Indian-English
+    // typo on real resumes; without this the institution name on the
+    // line gets dropped and the row only counts via the degree branch.
+    const hasUni = /\b(University|Institute|College|Collage|Polytechnic|Academy|School|Board|CBSE|ICSE|HNBGU|HBSE)\b/i.test(line);
+    const rangeMatch = line.match(RANGE_RE);
+    const singleYearMatch = !rangeMatch ? line.match(SINGLE_YEAR_RE) : null;
+    if (!hasUni && !singleYearMatch && !rangeMatch) continue;
+    // Skip non-education one-off year mentions (e.g. work history).
+    // Both an institutional keyword AND a year must be present, OR
+    // a recognised degree token + a year.
+    const degreeMatch = line.match(DEGREE_TABLE_RE);
+    if (!rangeMatch && !singleYearMatch) continue;
+    if (!hasUni && !degreeMatch) continue;
+
+    let startOfCourse = "", endOfCourse = "";
+    if (rangeMatch) {
+      const ys = rangeMatch[0].match(/(19|20)\d{2}/g) ?? [];
+      startOfCourse = ys[0] ?? "";
+      endOfCourse   = ys[1] ?? (/present|current/i.test(rangeMatch[0]) ? "Present" : "");
+    } else if (singleYearMatch) {
+      // Single Year of Passing → record as the END (graduation year).
+      endOfCourse = singleYearMatch[0];
+    }
+    let course = degreeMatch?.[0]?.trim() ?? "";
+    // Lookback: if this is the year/university line but the degree
+    // landed on the line above (pdfjs split "MBA-HR" off because of
+    // the dash), pick it up.
+    if (!course && i > 0) {
+      const above = degreeOnlyShortLine(lines[i - 1]);
+      if (above) course = above;
+    }
+    // University string = the line minus the degree token and the
+    // year part, collapsed.
+    let university = line
+      .replace(RANGE_RE, "")
+      .replace(SINGLE_YEAR_RE, "")
+      .replace(DEGREE_TABLE_RE, "")
+      .replace(/[|·•\-–—]+/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    out.push({ course: "", branch: "", startOfCourse, endOfCourse, university, location: "" });
+    // Drop common table-cell padding artefacts.
+    university = university.replace(/\b(Year of Passing|Highest Degree|Board\/University|Institute\/College)\b/gi, "").replace(/\s+/g, " ").trim();
+    if (course || university) {
+      out.push({ course, branch: "", startOfCourse, endOfCourse, university, location: "" });
+    }
   }
-  return out.slice(0, 6);
+  // Dedupe near-identical entries (same course + endOfCourse) — pdfjs
+  // sometimes emits the same row twice when the table has alternating
+  // shading rendered as separate text layers.
+  const seen = new Set<string>();
+  const deduped = out.filter((e) => {
+    const k = `${(e.course || "").toLowerCase()}|${e.endOfCourse}|${(e.university || "").toLowerCase().slice(0, 24)}`;
+    if (seen.has(k)) return false;
+    seen.add(k); return true;
+  });
+  return deduped.slice(0, 8);
+}
+
+// ── Cluster-by-shape fallback ─────────────────────────────────────────
+// Designed multi-column resumes (sidebar + main column) often confuse
+// pdfjs into interleaving cell text — the BACHELOR / institution / year
+// of a single education row can land 15+ lines apart. The line-by-line
+// scanner above can't bridge that, so when it returns nothing, we fall
+// back to "extract all year markers, all institution lines, all degree
+// tokens IN ORDER OF APPEARANCE — then zip them by index".
+//
+// It's heuristic but holds up well in practice because resumes list
+// education chronologically and pdfjs keeps the within-column order
+// even when interleaving across columns. The check we use to call
+// this only when the primary scanner came back empty keeps risk low.
+function clusterEducationByShape(text: string): ExtractedEducation[] {
+  const lines = text.split(/\n/).map(l => healFragmentedText(l)).filter(l => l.trim());
+  const RANGE_RE = /(19|20)\d{2}\s*[-–—]\s*(?:(19|20)\d{2}|present|current)/i;
+  const SINGLE_YEAR_RE = /\b(?:19|20)\d{2}\b/;
+  const INST_RE = /\b(University|Institute|College|Collage|Polytechnic|Academy|School|Board|CBSE|ICSE|HNBGU|HBSE)\b/i;
+  const DEGREE_RE =
+    /\b(MBA(?:[\s-][\w &]+)?|BBA|BCA|MCA|BSc|MSc|B\.?Sc|M\.?Sc|B\.?A|M\.?A|B\.?Com|Bcom|M\.?Com|B\.?Tech|M\.?Tech|B\.?E|M\.?E|PhD|Doctorate|Diploma|HSC|SSC|XII|X|10\+2|12th|10th|Postgraduate|Undergraduate|Bachelors?|Masters?|Class\s*X{1,2}|Class\s*10|Class\s*12)\b/i;
+  // Heuristic to drop work-history year mentions (e.g. "1SEPT 2023 -1NOV
+  // 2023", "DURATION - 5 MONTHS"). We treat a line as work context if
+  // it mentions any month abbrev or work-shape verb alongside the year.
+  const WORK_CONTEXT_RE = /\b(Jan|Feb|Mar|Apr|May|June|July?|Aug|Sept?|Oct|Nov|Dec|Worked|Working|Duration|Designation|Intern|Volunteer|present|current)\b/i;
+
+  const years: string[] = [];
+  const institutions: string[] = [];
+  const degrees: string[] = [];
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    // ── Years ── prefer ranges; fall back to single year-of-passing.
+    if (!WORK_CONTEXT_RE.test(line)) {
+      const range = line.match(RANGE_RE);
+      if (range) years.push(range[0]);
+      else {
+        const single = line.match(SINGLE_YEAR_RE);
+        // Skip lines where the year is clearly embedded in a longer
+        // sentence (>60 chars) — those tend to be experience prose.
+        if (single && line.length <= 50) years.push(single[0]);
+      }
+    }
+    // ── Institutions ── any line with an institutional keyword. Skip
+    // tagline-style sentences that just mention a school in passing.
+    if (INST_RE.test(line) && line.length <= 90) institutions.push(line);
+    // ── Degrees ── degree keyword on a short-ish line (filter out
+    // narrative paragraphs that incidentally mention "Bachelor").
+    const dm = line.match(DEGREE_RE);
+    if (dm && line.length <= 60) degrees.push(dm[0].trim());
+  }
+
+  // Need at least two clusters to be confident the resume is education-
+  // shaped (one match is too easy to false-positive on a stray "school"
+  // mention in an unrelated paragraph).
+  const N = Math.min(years.length, institutions.length);
+  if (N < 2) return [];
+
+  const out: ExtractedEducation[] = [];
+  for (let i = 0; i < N; i++) {
+    const yr = years[i];
+    let startOfCourse = "", endOfCourse = "";
+    const isRange = /[-–—]/.test(yr);
+    if (isRange) {
+      const ys = yr.match(/(19|20)\d{2}/g) ?? [];
+      startOfCourse = ys[0] ?? "";
+      endOfCourse   = ys[1] ?? (/present|current/i.test(yr) ? "Present" : "");
+    } else {
+      endOfCourse = yr;
+    }
+    const course = degrees[i] ?? "";
+    const university = institutions[i]
+      .replace(RANGE_RE, "")
+      .replace(SINGLE_YEAR_RE, "")
+      .replace(/[|·•]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (course || university) {
+      out.push({ course, branch: "", startOfCourse, endOfCourse, university, location: "" });
+    }
+  }
+  return out.slice(0, 8);
 }
 
 // ── Skills + Languages ────────────────────────────────────────────────
@@ -652,6 +808,13 @@ export async function POST(req: NextRequest) {
     // came up empty, so candidates still get an entry.
     if (educations.length === 0) {
       educations = scanEducationByUniversityYear(text);
+    }
+    // Last-resort: designed multi-column resumes where pdfjs interleaves
+    // column text, so the degree / institution / year of one education
+    // entry land far apart. Extract the shape pieces globally and zip
+    // them by index.
+    if (educations.length === 0) {
+      educations = clusterEducationByShape(text);
     }
     const skills     = parseSkills(text);
 
