@@ -19,6 +19,7 @@
 
 import prisma from "@/lib/prisma";
 import { istTodayDateOnly } from "@/lib/ist-date";
+import { isWorkingDay } from "@/lib/hr/shift-working-days";
 
 // 48h grace + the day itself = 3 calendar days between "missed day" and
 // "earliest cron run that may apply LOP".
@@ -27,9 +28,6 @@ const SCAN_BACK_DAYS = 7;
 
 // Bump only when intentionally enabling retroactive LOP for older missing days.
 const FEATURE_START_DATE_ISO = "2026-05-29";
-
-// Day-of-week labels matching the JSON in Shift.workDays ("Mon"…"Sun").
-const DOW_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 export type AutoLOPSummary = {
   datesScanned: number;
@@ -91,9 +89,20 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
       id: true,
       employeeProfile: { select: { joiningDate: true } },
       employeeExit:    { select: { lastWorkingDay: true } },
-      userShift:       { select: { shift: { select: { workDays: true } } } },
     },
   });
+
+  // Each user's shift rule: workDays + alternate-Saturday policy + the
+  // effectiveFrom anchor (phase for "alternate" Saturdays). Read via raw SQL
+  // so the new saturday* columns work before `prisma generate` picks them up.
+  // Users with no shift are absent from the map → never auto-LOP'd (unchanged).
+  const shiftRows = await prisma.$queryRawUnsafe<Array<{
+    userId: number; effectiveFrom: Date; workDays: unknown; saturdayPolicy: string; saturdayWeeks: number[];
+  }>>(
+    `SELECT us."userId", us."effectiveFrom", s."workDays", s."saturdayPolicy", s."saturdayWeeks"
+       FROM "UserShift" us JOIN "Shift" s ON s.id = us."shiftId"`,
+  );
+  const shiftByUser = new Map(shiftRows.map((r) => [r.userId, r]));
 
   let datesScanned = 0;
   let lopApplied = 0;
@@ -102,8 +111,6 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
     datesScanned++;
 
     if (holidaySet.has(isoKey(date))) continue;
-
-    const dowLabel = DOW_NAMES[date.getUTCDay()];
 
     // Pre-filter users to those for whom this date is in-scope.
     const eligibleUserIds: number[] = [];
@@ -115,9 +122,11 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
       const lwd = u.employeeExit?.lastWorkingDay;
       if (lwd && dateOnlyUTC(lwd).getTime() < date.getTime()) continue;
 
-      const workDaysRaw = u.userShift?.shift?.workDays;
-      if (!Array.isArray(workDaysRaw)) continue;
-      if (!(workDaysRaw as unknown[]).includes(dowLabel)) continue;
+      // Working-day decision respects the alternate-Saturday rule. No shift
+      // → skip (unchanged: a user with no shift is never auto-LOP'd).
+      const sr = shiftByUser.get(u.id);
+      if (!sr || !Array.isArray(sr.workDays)) continue;
+      if (!isWorkingDay(date, { workDays: sr.workDays, saturdayPolicy: sr.saturdayPolicy, saturdayWeeks: sr.saturdayWeeks }, sr.effectiveFrom)) continue;
 
       eligibleUserIds.push(u.id);
     }

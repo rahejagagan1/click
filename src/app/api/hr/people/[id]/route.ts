@@ -63,6 +63,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       console.warn("[people GET] inlineManager lookup failed:", e);
     }
 
+    // designationId (RBAC) via raw SQL — the stale typed client may omit it.
+    let designationId: number | null = null;
+    try {
+      const drows = await prisma.$queryRawUnsafe<Array<{ designationId: number | null }>>(
+        `SELECT "designationId" FROM "User" WHERE "id" = $1`, id,
+      );
+      designationId = drows[0]?.designationId ?? null;
+    } catch { /* column missing → null */ }
+
     // Extended onboarding fields — fetched via raw SQL so the GET
     // returns them even when `prisma generate` is stale on the VPS.
     // Merged onto profile below so EditProfilePanel can read them
@@ -124,6 +133,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       directReports: teamMembers,
       shift:         userShift?.shift ?? null,
       inlineManager,
+      designationId,
       todayAttendance: todayAtt
         ? { ...todayAtt, hasOpenSession }
         : null,
@@ -187,7 +197,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       // Now HR-admin can edit them on any user's profile too.
       about, jobLove, hobbies,
       // User row fields — role / orgLevel / manager / team membership.
-      role: newRole, orgLevel, managerId, inlineManagerId, teamCapsule,
+      // designationId is the new RBAC field; role/orgLevel are sent derived
+      // from it (compat shim) until the columns are dropped.
+      role: newRole, orgLevel, designationId, managerId, inlineManagerId, teamCapsule,
       // Leave policy assignment — drives accrual + "Apply policy" balances.
       leavePolicyId,
     } = body;
@@ -358,6 +370,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
     if (newRole   !== undefined) userPatch.role     = newRole;
     if (orgLevel  !== undefined) userPatch.orgLevel = orgLevel;
+    if (designationId !== undefined) {
+      userPatch.designationId = designationId === null ? null : parseInt(String(designationId), 10);
+    }
     if (managerId !== undefined) {
       userPatch.managerId = managerId === null || managerId === "" ? null : parseInt(String(managerId), 10);
     }

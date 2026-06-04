@@ -14,6 +14,7 @@ import { isHRAdmin, canApplyRestrictedLeave } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { DateField } from "@/components/ui/date-field";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
+import { isWorkingDay } from "@/lib/hr/shift-working-days";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
 
 // ── Form copy per kind ───────────────────────────────────────────────────────
@@ -769,12 +770,32 @@ export default function AttendancePage() {
   };
   const istMinsSinceMidnight = clock ? toIstMinutes(clock) : 0;
 
-  const SHIFT_START = 9  * 60;  // 9:00 AM IST
-  const SHIFT_END   = 18 * 60;  // 6:00 PM IST
-  const SHIFT_MID   = 14 * 60;  // 2:00 PM IST \u2014 first/second half boundary
-  const SHIFT_LEN   = SHIFT_END - SHIFT_START;        // 540
-  const MID_POS     = SHIFT_MID - SHIFT_START;        // 300 (bar position of 2 PM)
-  const MID_PCT     = (MID_POS / SHIFT_LEN) * 100;    // ~55.56% of the bar
+  // Shift window comes from the user's assigned shift template (myData.shift),
+  // falling back to the legacy 9:00\u201318:00 when no shift is assigned. Drives the
+  // Timings widget, the shift-progress bar, and the "time left" calc \u2014 so each
+  // employee sees their OWN hours instead of a hardcoded 9\u20136.
+  const parseHM = (s: any, fallback: number): number => {
+    if (typeof s !== "string") return fallback;
+    const [h, m] = s.split(":").map(Number);
+    return Number.isFinite(h) ? h * 60 + (Number.isFinite(m) ? m : 0) : fallback;
+  };
+  const SHIFT_START = parseHM(myData?.shift?.startTime, 9 * 60);   // e.g. 10:00 \u2192 600
+  const SHIFT_END   = parseHM(myData?.shift?.endTime, 18 * 60);    // e.g. 19:00 \u2192 1140
+  const SHIFT_MID   = Math.round((SHIFT_START + SHIFT_END) / 2);   // first/second-half boundary
+  const SHIFT_LEN   = Math.max(1, SHIFT_END - SHIFT_START);
+  const MID_POS     = SHIFT_MID - SHIFT_START;
+  const MID_PCT     = (MID_POS / SHIFT_LEN) * 100;
+  // "10:00 AM" style label from minutes-of-day, for the Timings header.
+  const fmtShiftTime = (mins: number) => {
+    const h24 = Math.floor(mins / 60), mm = mins % 60;
+    const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+    return `${h12}:${String(mm).padStart(2, "0")} ${h24 >= 12 ? "PM" : "AM"}`;
+  };
+  // Shift used for working-day (weekly-off vs absent) decisions, with its
+  // alternate-Saturday anchor (the user's UserShift.effectiveFrom). Null shift
+  // → the helper falls back to Mon–Fri.
+  const myShift = (myData?.shift ?? null) as any;
+  const shiftAnchor = myData?.shiftEffectiveFrom ? new Date(myData.shiftEffectiveFrom) : null;
 
   // Map an IST minutes value to a 0..540 position within the shift window.
   const toShiftPos = (m: number) => Math.max(0, Math.min(SHIFT_LEN, m - SHIFT_START));
@@ -872,8 +893,9 @@ export default function AttendancePage() {
       if (rec) {
         out.push(rec);
       } else {
-        const dow = d.getUTCDay(); // 0 = Sun, 6 = Sat
-        const isWeekend = dow === 0 || dow === 6;
+        // Off day for THIS user's shift — weekly-off OR a non-working
+        // alternate Saturday. Working Saturdays correctly stay "absent".
+        const isWeekend = !isWorkingDay(d, myShift, shiftAnchor);
         const isToday = iso === istTodayIso;
         // For CEO / developers, skip synthesizing the "absent" rows —
         // they don't punch a clock, so the cross-mark noise is wrong.
@@ -1065,7 +1087,7 @@ export default function AttendancePage() {
           </div>
 
           {/* Shift info */}
-          <p className="text-[12px] font-medium text-slate-600 dark:text-slate-400 mb-3">Today (9:00 AM - 6:00 PM)</p>
+          <p className="text-[12px] font-medium text-slate-600 dark:text-slate-400 mb-3">Today ({fmtShiftTime(SHIFT_START)} - {fmtShiftTime(SHIFT_END)})</p>
 
           {/* Timeline progress bar: grey track, yellow half-day bands where the
               user missed a half, cyan fill = elapsed / 9 h. Progress starts at 0
@@ -1469,7 +1491,7 @@ export default function AttendancePage() {
                     const date      = new Date(rec.date);
                     const dateIso   = String(rec.date).slice(0, 10);
                     const isTodayRow = dateIso === istTodayIso;
-                    const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+                    const isWeekend = !isWorkingDay(date, myShift, shiftAnchor);
                     const isHoliday = rec.status === "holiday";
                     const isLeave   = rec.status === "on_leave";
                     const isPending = rec.status === "pending" && !rec.clockIn;
@@ -1598,10 +1620,11 @@ export default function AttendancePage() {
                     // Uses the FIRST session's clockIn so resume sessions don't
                     // accidentally clear / set the flag.
                     const firstIn = sessions[0]?.clockIn ? new Date(sessions[0].clockIn) : null;
-                    const isLateFirstIn = !!firstIn && (() => {
-                      const istHr = (firstIn.getUTCHours() + 5 + Math.floor((firstIn.getUTCMinutes() + 30) / 60)) % 24;
-                      return istHr >= 10;
-                    })();
+                    // "Late" follows the stored, shift-aware status (set at clock-in
+                    // from the user's own shift start + grace) rather than a
+                    // hardcoded 10:00 cutoff — so a 10:00-start shift with grace
+                    // isn't wrongly flagged late for, e.g., a 10:03 punch.
+                    const isLateFirstIn = rec.status === "late";
 
                     return (
                       <tr key={rec.id || rec.date}
@@ -1988,7 +2011,9 @@ export default function AttendancePage() {
                 for (let d = 1; d <= daysInMonth; d++) {
                   const rec = recMap.get(d) as any;
                   const dd = new Date(y, m - 1, d);
-                  const isWeekend = dd.getDay() === 0 || dd.getDay() === 6;
+                  // UTC date for the working-day check (helper uses getUTCDay /
+                  // getUTCDate); dd above stays local for the display compares.
+                  const isWeekend = !isWorkingDay(new Date(Date.UTC(y, m - 1, d)), myShift, shiftAnchor);
                   const isToday   = d === now.getDate() && m === now.getMonth() + 1 && y === now.getFullYear();
                   cells.push(
                     <div key={d} className={`border-b border-r border-slate-100 dark:border-white/[0.03] p-2 min-h-[70px] ${isToday ? "ring-1 ring-inset ring-[#008CFF]/30 bg-[#008CFF]/5" : ""} ${isWeekend ? "bg-slate-50 dark:bg-white/[0.015]" : ""}`}>
