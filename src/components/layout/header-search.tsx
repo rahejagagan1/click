@@ -1,10 +1,21 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
+
+// Next.js 16 + Turbopack require any consumer of useSearchParams() to
+// sit under a <Suspense> boundary, otherwise pages that try to
+// statically prerender (including the auto-generated /_not-found and
+// payroll/summary) abort with the missing-suspense-with-csr-bailout
+// error. We isolate the searchParams read into a tiny inner component
+// and wrap it in Suspense so the rest of the tree prerenders cleanly.
+//
+// The fallback returns null — the search-continuity behavior is a UX
+// nice-to-have, not a hard requirement; rendering without it for the
+// SSR pass is fine.
 
 // Static jump list — common dashboard pages that should be reachable
 // from search-as-you-type. Filtered by substring match on `label` so
@@ -29,7 +40,21 @@ const PAGE_LINKS: { label: string; href: string; hint?: string }[] = [
 // Hits People (/api/hr/employees) and Cases (/api/cases) in parallel
 // once the user has typed ≥ 2 chars, plus a static Pages jump list.
 // Dropdown portals to body so overflow:hidden on the header can't clip it.
+//
+// Default export wraps the impl in <Suspense> — required because the
+// inner component uses useSearchParams(), and Next.js 16 + Turbopack
+// abort any static prerender that touches it without a suspense
+// boundary upstream. The fallback is null (no header search shown
+// during the brief SSR pass).
 export default function HeaderSearch() {
+  return (
+    <Suspense fallback={null}>
+      <HeaderSearchInner />
+    </Suspense>
+  );
+}
+
+function HeaderSearchInner() {
   const [query, setQuery]         = useState("");
   const [debounced, setDebounced] = useState("");
   const [open, setOpen]           = useState(false);
