@@ -1,11 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAdmin, serverError } from "@/lib/api-auth";
+import { requireAuth, serverError } from "@/lib/api-auth";
+import { can } from "@/lib/permissions/can";
 
-// PUT /api/hr/assets/:id — update or assign/return. Admin-only.
+// Mirror of canManageAssets in the parent route — kept inline rather
+// than imported because Next.js route files are isolated bundles.
+// See parent route for the rationale (RBAC + legacy OR-gate).
+function canManageAssets(user: any): boolean {
+  if (!user) return false;
+  if (can(user, "MANAGE_ASSETS")) return true;
+  return user.orgLevel === "ceo"
+    || user.orgLevel === "special_access"
+    || user.orgLevel === "hr_manager"
+    || user.role === "hr_manager"
+    || user.role === "admin"
+    || user.isDeveloper === true;
+}
+
+// PUT /api/hr/assets/:id — update fields, assign, or return.
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { errorResponse } = await requireAdmin();
+  const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+  if (!canManageAssets(session?.user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   try {
     const { id: idParam } = await params;
     const assetId = Number(idParam);
@@ -61,15 +79,34 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ success: true });
     }
 
-    // General update
+    // General update — set only the fields HR explicitly sent. Edit
+    // modal posts name + category + serialNumber + condition + value
+    // + purchaseDate + notes; assign/return go through the action
+    // branches above. Empty strings clear nullable fields.
     const data: any = {};
-    if (typeof body.name === "string" && body.name) data.name = body.name;
+    if (typeof body.name === "string" && body.name.trim()) data.name = body.name.trim();
+    if (typeof body.category === "string" && body.category.trim()) data.category = body.category.trim();
+    if (body.serialNumber !== undefined) {
+      data.serialNumber = body.serialNumber ? String(body.serialNumber).trim() : null;
+    }
     if (typeof body.condition === "string" && body.condition) data.condition = body.condition;
     if (typeof body.status === "string" && body.status) data.status = body.status;
-    if (body.notes !== undefined) data.notes = body.notes;
+    if (body.currentValue !== undefined) {
+      data.currentValue = body.currentValue === "" || body.currentValue === null
+        ? null
+        : Number(body.currentValue);
+    }
+    if (body.purchaseDate !== undefined) {
+      data.purchaseDate = body.purchaseDate ? new Date(body.purchaseDate) : null;
+    }
+    if (body.notes !== undefined) data.notes = body.notes || null;
     if (Object.keys(data).length === 0) return NextResponse.json({ error: "No updatable fields provided" }, { status: 400 });
 
-    const asset = await prisma.asset.update({ where: { id: assetId }, data });
+    const asset = await prisma.asset.update({
+      where: { id: assetId },
+      data,
+      include: { assignments: { where: { returnedAt: null }, include: { user: { select: { id: true, name: true } } }, take: 1 } },
+    });
     return NextResponse.json(asset);
   } catch (e) { return serverError(e, "PUT /api/hr/assets/[id]"); }
 }

@@ -7,7 +7,7 @@ import { useSession } from "next-auth/react";
 import { can } from "@/lib/permissions/can";
 import SelectField from "@/components/ui/SelectField";
 import Link from "next/link";
-import { Search, X } from "lucide-react";
+import { Search, X, Pencil } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 
 const CATEGORIES = ["All", "Laptop", "Monitor", "Keyboard", "Mouse", "Headset", "Phone", "Other"];
@@ -177,6 +177,64 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
   const [assignee, setAssignee] = useState<Employee | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // Edit-asset modal state. Editing one row at a time — re-use the
+  // same field set as the create form but pre-filled, and PUT to
+  // /api/hr/assets/[id] instead of POSTing.
+  const [editing, setEditing] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: "", category: "Laptop", serialNumber: "",
+    condition: "good", currentValue: "",
+    purchaseDate: "", notes: "",
+  });
+  const setE = (k: string, v: string) => setEditForm((f) => ({ ...f, [k]: v }));
+  const openEdit = (a: any) => {
+    setEditing(a);
+    setEditForm({
+      name: a.name ?? "",
+      category: a.category ?? "Laptop",
+      serialNumber: a.serialNumber ?? "",
+      condition: a.condition ?? "good",
+      currentValue: a.currentValue != null ? String(a.currentValue) : "",
+      purchaseDate: a.purchaseDate
+        ? new Date(a.purchaseDate).toISOString().slice(0, 10)
+        : "",
+      notes: a.notes ?? "",
+    });
+  };
+  const closeEdit = () => setEditing(null);
+  const handleSaveEdit = async () => {
+    if (!editing) return;
+    if (!editForm.name.trim()) return alert("Asset name is required.");
+    if (!editForm.category.trim()) return alert("Category is required.");
+    setSaving(true);
+    try {
+      const body: any = {
+        name: editForm.name.trim(),
+        category: editForm.category.trim(),
+        serialNumber: editForm.serialNumber.trim() || null,
+        condition: editForm.condition,
+        currentValue: editForm.currentValue ? Number(editForm.currentValue) : null,
+        purchaseDate: editForm.purchaseDate
+          ? new Date(editForm.purchaseDate).toISOString()
+          : null,
+        notes: editForm.notes.trim() || null,
+      };
+      const res = await fetch(`/api/hr/assets/${editing.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        return alert(j?.error ?? "Failed to update asset");
+      }
+      closeEdit();
+      mutate(assetsUrl);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const setItem = (id: string, patch: Partial<ItemRow>) =>
     setItems((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const addItem    = () => setItems((rows) => [...rows, blankRow()]);
@@ -316,8 +374,8 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
                   attributes that actually vary per row. */}
               <thead><tr className="border-b border-slate-200 dark:border-white/[0.06]">{(employeeView
                 ? ["Asset Name", "Type", "Serial No.", "Condition", "Status", "Date"]
-                : ["Asset Name", "Type", "Serial No.", "Assigned To", "Condition", "Status", "Date"]
-              ).map((h) => <th key={h} className="px-5 py-3 text-left text-[11px] uppercase tracking-wider text-slate-500 font-medium">{h}</th>)}</tr></thead>
+                : ["Asset Name", "Type", "Serial No.", "Assigned To", "Condition", "Status", "Date", ""]
+              ).map((h, i) => <th key={`${h}-${i}`} className="px-5 py-3 text-left text-[11px] uppercase tracking-wider text-slate-500 font-medium">{h}</th>)}</tr></thead>
               <tbody>
                 {filtered.map((a: any, i: number) => {
                   const assignment = a.assignments?.[0];
@@ -340,6 +398,19 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
                       <td className="px-5 py-3"><span className={`text-[11px] px-2 py-0.5 rounded-full ${a.condition === "good" || a.condition === "new" ? "bg-emerald-500/10 text-emerald-600" : a.condition === "fair" ? "bg-amber-500/10 text-amber-600" : "bg-red-500/10 text-red-600"}`}>{a.condition}</span></td>
                       <td className="px-5 py-3"><span className={`text-[11px] px-2 py-0.5 rounded-full capitalize ${a.status === "assigned" ? "bg-blue-500/10 text-[#008CFF]" : a.status === "available" ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-600"}`}>{a.status?.replace("_"," ")}</span></td>
                       <td className="px-5 py-3 text-[13px] text-slate-500">{new Date(a.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
+                      {!employeeView && (
+                        <td className="px-5 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => openEdit(a)}
+                            className="inline-flex items-center gap-1 text-[12px] font-medium text-slate-500 hover:text-[#008CFF] transition-colors"
+                            aria-label={`Edit ${a.name}`}
+                          >
+                            <Pencil size={13} />
+                            Edit
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -489,6 +560,101 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
                 disabled={saving}
                 className="h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-60 disabled:cursor-wait"
               >{saving ? "Saving…" : `Add ${items.length} asset${items.length === 1 ? "" : "s"}`}</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Edit Asset drawer — single-asset edit. Mirrors the visual
+          shell of the Add Assets drawer but with one fixed item
+          instead of repeating rows; the assignee isn't editable here
+          (re-assign goes through the existing assign/return actions
+          to keep the audit trail clean). */}
+      {editing && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-40" onClick={closeEdit} />
+          <div className="fixed top-0 right-0 bottom-0 w-[440px] bg-[#f4f7f8] dark:bg-[#001529] border-l border-slate-200 dark:border-white/[0.08] shadow-2xl z-50 flex flex-col animate-slide-in">
+            <div className="flex items-start justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06]">
+              <div>
+                <h2 className="text-[16px] font-semibold text-slate-800 dark:text-white">Edit Asset</h2>
+                <p className="mt-0.5 text-[11.5px] text-slate-500">{editing.name}</p>
+              </div>
+              <button onClick={closeEdit} aria-label="Close" className="text-slate-400 hover:text-slate-700 dark:hover:text-white -mt-1">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Category</label>
+                  <SelectField
+                    value={editForm.category}
+                    onChange={(v) => setE("category", v)}
+                    options={CATEGORIES.filter((c) => c !== "All")}
+                    className={FIELD_CLS}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Asset Name</label>
+                  <input
+                    value={editForm.name}
+                    onChange={(e) => setE("name", e.target.value)}
+                    className={FIELD_CLS}
+                    placeholder="e.g. MacBook Pro 14"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Serial No.</label>
+                  <input
+                    value={editForm.serialNumber}
+                    onChange={(e) => setE("serialNumber", e.target.value)}
+                    className={FIELD_CLS}
+                    placeholder="Optional"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Condition</label>
+                  <SelectField
+                    value={editForm.condition}
+                    onChange={(v) => setE("condition", v)}
+                    options={["new","good","fair","poor"].map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) }))}
+                    className={FIELD_CLS}
+                  />
+                </div>
+              </div>
+              <div className="border-t border-slate-100 dark:border-white/[0.05] pt-4 space-y-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Purchase Date <span className="text-slate-400 font-normal normal-case tracking-normal">(optional)</span></label>
+                  <DateField value={editForm.purchaseDate} onChange={(v) => setE("purchaseDate", v)} className="mt-1 w-full max-w-[180px]" />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Notes <span className="text-slate-400 font-normal normal-case tracking-normal">(optional)</span></label>
+                  <textarea
+                    value={editForm.notes}
+                    onChange={(e) => setE("notes", e.target.value)}
+                    rows={2}
+                    placeholder="Warranty, batch number, or anything else…"
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-slate-300 resize-none"
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Re-assigning this asset to a different employee goes through the existing Assign / Return flow on the asset row (keeps the assignment history intact).
+              </p>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-white/[0.06] flex justify-end gap-3">
+              <button
+                onClick={closeEdit}
+                disabled={saving}
+                className="h-9 px-5 text-[13px] text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:text-white rounded-lg disabled:opacity-50"
+              >Cancel</button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={saving}
+                className="h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-60 disabled:cursor-wait"
+              >{saving ? "Saving…" : "Save changes"}</button>
             </div>
           </div>
         </>
