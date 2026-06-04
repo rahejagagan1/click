@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, requireAdmin, serverError } from "@/lib/api-auth";
+import { requireAuth, serverError } from "@/lib/api-auth";
+import { can } from "@/lib/permissions/can";
+
+// Asset register — gated by the MANAGE_ASSETS permission (designation-driven),
+// so a designation like "IT Security" can manage assets without full HR-admin.
 
 export async function GET(req: NextRequest) {
-  const { errorResponse } = await requireAuth();
+  const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+  if (!can(session!.user as any, "MANAGE_ASSETS")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   try {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
@@ -22,8 +29,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { errorResponse } = await requireAdmin();
+  const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+  if (!can(session!.user as any, "MANAGE_ASSETS")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   try {
     const body = await req.json();
     if (body.purchaseDate) body.purchaseDate = new Date(body.purchaseDate);
