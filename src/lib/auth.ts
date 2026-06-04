@@ -2,6 +2,7 @@ import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import prisma from "@/lib/prisma";
+import { getPermissionsByEmail } from "@/lib/permissions/resolve-permissions";
 
 const useDevLogin = process.env.NEXT_PUBLIC_DEV_LOGIN === "true";
 const developerEmails = (process.env.DEVELOPER_EMAILS || "").split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
@@ -204,6 +205,14 @@ export const authOptions: NextAuthOptions = {
                 } catch {
                     if (useDevLogin) (session.user as any).role = "admin";
                 }
+            }
+            // Designation-based permissions for can(). Resolved per-request (no
+            // cookie bloat); a permission change takes effect on the next session
+            // fetch without re-login. Empty pre-migration or for users without a
+            // designation — can() then relies on the isDeveloper override only.
+            if (session.user?.email) {
+                (session.user as any).permissions =
+                    await getPermissionsByEmail(session.user.email);
             }
             return session;
         },
