@@ -47,6 +47,9 @@ model User {
   email             String     @unique
   role              UserRole   @default(member)
   orgLevel          OrgLevel   @default(member)
+  /// New designation-based RBAC. Nullable during migration while orgLevel/role
+  /// still co-exist; backfilled from (orgLevel, role), then the source of truth.
+  designationId     Int?
   managerId         Int?
   /// Day-to-day / dotted-line manager. Independent of the formal
   /// reporting line in `managerId` — used for org-tree views that need
@@ -73,6 +76,7 @@ model User {
   teamMembers       User[]     @relation("TeamHierarchy")
   inlineManager     User?      @relation("InlineHierarchy", fields: [inlineManagerId], references: [id])
   inlineReports     User[]     @relation("InlineHierarchy")
+  designation       Designation? @relation(fields: [designationId], references: [id])
 
   assignedCases     Case[]     @relation("CaseAssignee")
   researchedCases   Case[]     @relation("CaseResearcher")
@@ -169,6 +173,65 @@ model User {
 
   @@index([managerId])
   @@index([inlineManagerId])
+  @@index([designationId])
+}
+
+// ═══════════════════════════════════════════════════════
+// RBAC — designation-based permissions (replaces orgLevel/role)
+//
+// Permission keys are code-defined (src/lib/permissions/catalog.ts) and seeded
+// into `Permission` so the HR-Manager admin UI can list/describe them. The
+// GRANTS (DesignationPermission) are editable at runtime. User.designationId
+// points at the holder's designation, whose permissions resolve via `can()`.
+// ═══════════════════════════════════════════════════════
+
+model Permission {
+  id          Int       @id @default(autoincrement())
+  /// Matches a Permission literal in src/lib/permissions/catalog.ts.
+  key         String    @unique
+  label       String
+  description String?
+  category    String
+  sensitive   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  designations DesignationPermission[]
+}
+
+model Designation {
+  id                Int       @id @default(autoincrement())
+  /// Stable slug used in code/seed (e.g. "hr_manager", "video_editor").
+  key               String    @unique
+  /// Human-facing title shown in the UI (e.g. "HR Manager").
+  label             String
+  /// Optional rating track for the scorecard engine. Null = not rated by a
+  /// production scorecard. One of: writer|editor|qa|researcher|manager.
+  scorecardFunction String?
+  isActive          Boolean   @default(true)
+  sortOrder         Int       @default(0)
+  /// System designations are seeded to mirror legacy access. HR can edit them
+  /// but the UI blocks deletion so a built-in tier can't be removed by mistake.
+  isSystem          Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  permissions DesignationPermission[]
+  users       User[]
+}
+
+model DesignationPermission {
+  designationId Int
+  permissionId  Int
+  /// Audit trail: who granted this permission to this designation, and when.
+  grantedBy     Int?
+  createdAt     DateTime    @default(now())
+
+  designation   Designation @relation(fields: [designationId], references: [id], onDelete: Cascade)
+  permission    Permission  @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([designationId, permissionId])
+  @@index([permissionId])
 }
 
 // ═══════════════════════════════════════════════════════
