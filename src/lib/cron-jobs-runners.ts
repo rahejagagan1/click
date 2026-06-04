@@ -8,6 +8,7 @@ import { syncYoutubeStats } from "@/lib/youtube/sync";
 import { calculateMonthlyRatings } from "@/lib/ratings/calculator";
 import { runYoutubeDashboardSync } from "@/lib/youtube/yt-dashboard-sync";
 import { sendViolationInProgressReminders, sendViolationFollowUpReminders } from "@/lib/hr/violation-reminders";
+import { sendProbationEndingReminders } from "@/lib/hr/probation-reminders";
 import { runAutoLOP } from "@/lib/hr/auto-lop";
 import { getCronJobsConfig } from "@/lib/cron-jobs-config";
 import type { CronJobId } from "@/lib/cron-jobs-registry";
@@ -37,5 +38,6 @@ export const CRON_JOB_RUNNERS: Record<CronJobId, () => Promise<void>> = {
     await sendViolationInProgressReminders();
     await sendViolationFollowUpReminders();
   },
+  probation_reminders: async () => { await sendProbationEndingReminders(); },
   auto_lop:            async () => { await runAutoLOP(); },
 };
