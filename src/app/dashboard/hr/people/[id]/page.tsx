@@ -20,6 +20,7 @@ import {
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
 import { isHRAdmin as canViewAsHRAdmin, canViewSalary } from "@/lib/access";
+import { isWorkingDay } from "@/lib/hr/shift-working-days";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
 import EmployeeFinancesPanel from "@/components/hr/EmployeeFinancesPanel";
 import EmployeeLeavePanel from "@/components/hr/EmployeeLeavePanel";
@@ -2080,6 +2081,10 @@ function EmployeeTimePanel({
     return `/api/hr/attendance?userId=${userId}&month=${period}`;
   })();
   const { data, isLoading } = useSWR(url, fetcher);
+  // This employee's shift + alternate-Saturday anchor (from the attendance
+  // API) — drives the weekly-off vs absent synthesis below. Null → Mon–Fri.
+  const panelShift = (data?.shift ?? null) as any;
+  const panelAnchor = data?.shiftEffectiveFrom ? new Date(data.shiftEffectiveFrom) : null;
   const records: any[] = data?.records ?? [];
 
   // Status rank for "best" choice when multiple requests exist for the same date.
@@ -2167,8 +2172,9 @@ function EmployeeTimePanel({
       const rec = byDate.get(iso);
       if (rec) out.push(rec);
       else {
-        const dow = d.getUTCDay();
-        const isWeekend = dow === 0 || dow === 6;
+        // Off day for THIS employee's shift — weekly-off OR a non-working
+        // alternate Saturday. Working Saturdays correctly stay "absent".
+        const isWeekend = !isWorkingDay(d, panelShift, panelAnchor);
         // CEO + developers — only synthesize weekends (calendar context).
         // Drop the "Absent" placeholders so the log isn't a wall of
         // cross-marks for someone who doesn't punch a clock.
