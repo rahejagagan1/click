@@ -177,16 +177,25 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
   const [assignee, setAssignee] = useState<Employee | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Edit-asset modal state. Editing one row at a time — re-use the
-  // same field set as the create form but pre-filled, and PUT to
-  // /api/hr/assets/[id] instead of POSTing.
+  // Edit-asset modal — hybrid: PUTs the original row's edits AND
+  // POSTs any extra items added inline. Lets HR fix a typo on a row
+  // AND add more kit to the same employee from the same drawer
+  // without bouncing between modals. The extra items inherit the
+  // current asset's assignee (so adding "Mouse" while editing a
+  // laptop assigned to Abhishek auto-assigns the mouse to Abhishek).
   const [editing, setEditing] = useState<any | null>(null);
   const [editForm, setEditForm] = useState({
     name: "", category: "Laptop", serialNumber: "",
     condition: "good", currentValue: "",
     purchaseDate: "", notes: "",
   });
+  const [extraItems, setExtraItems] = useState<ItemRow[]>([]);
   const setE = (k: string, v: string) => setEditForm((f) => ({ ...f, [k]: v }));
+  const setExtra = (id: string, patch: Partial<ItemRow>) =>
+    setExtraItems((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const addExtra = () => setExtraItems((rows) => [...rows, blankRow()]);
+  const removeExtra = (id: string) =>
+    setExtraItems((rows) => rows.filter((r) => r.id !== id));
   const openEdit = (a: any) => {
     setEditing(a);
     setEditForm({
@@ -200,14 +209,24 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
         : "",
       notes: a.notes ?? "",
     });
+    setExtraItems([]);
   };
-  const closeEdit = () => setEditing(null);
+  const closeEdit = () => {
+    setEditing(null);
+    setExtraItems([]);
+  };
   const handleSaveEdit = async () => {
     if (!editing) return;
     if (!editForm.name.trim()) return alert("Asset name is required.");
     if (!editForm.category.trim()) return alert("Category is required.");
+    // Validate extra rows the same way Add Assets does.
+    for (let i = 0; i < extraItems.length; i++) {
+      if (!extraItems[i].name.trim()) return alert(`New item #${i + 1}: name is required.`);
+      if (!extraItems[i].category.trim()) return alert(`New item #${i + 1}: category is required.`);
+    }
     setSaving(true);
     try {
+      // 1. PUT the existing row.
       const body: any = {
         name: editForm.name.trim(),
         category: editForm.category.trim(),
@@ -227,6 +246,45 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         return alert(j?.error ?? "Failed to update asset");
+      }
+      // 2. POST any extra items as a batch, inheriting the existing
+      //    row's assignee so HR doesn't have to re-pick them.
+      if (extraItems.length > 0) {
+        const inheritedAssignee = editing.assignments?.[0]?.user?.id ?? null;
+        const batchBody: any = {
+          items: extraItems.map((r) => ({
+            name: r.name.trim(),
+            category: r.category.trim(),
+            serialNumber: r.serialNumber.trim() || undefined,
+            condition: r.condition || "good",
+          })),
+        };
+        if (inheritedAssignee) batchBody.assignedToUserId = inheritedAssignee;
+        const r2 = await fetch("/api/hr/assets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(batchBody),
+        });
+        if (!r2.ok) {
+          const j = await r2.json().catch(() => ({}));
+          return alert(j?.error ?? "Edit saved, but new items failed to add");
+        }
+      }
+      closeEdit();
+      mutate(assetsUrl);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const handleDeleteAsset = async () => {
+    if (!editing) return;
+    if (!confirm(`Delete "${editing.name}"? This removes the asset and its assignment history.`)) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/hr/assets/${editing.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        return alert(j?.error ?? "Failed to delete asset");
       }
       closeEdit();
       mutate(assetsUrl);
@@ -640,21 +698,131 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
                   />
                 </div>
               </div>
+              {/* "+ Add more items" — extra rows inherit this asset's
+                  current assignee so HR doesn't have to re-pick them.
+                  Saves alongside the edit (batch POST + PUT in
+                  parallel paths under one click). */}
+              <div className="border-t border-slate-100 dark:border-white/[0.05] pt-4 space-y-3">
+                {extraItems.length === 0 ? (
+                  <button
+                    type="button"
+                    onClick={addExtra}
+                    className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[#008CFF] hover:text-[#0070cc] transition-colors"
+                  >
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#008CFF]/10">+</span>
+                    Add more items for {editing.assignments?.[0]?.user?.name ?? "stock"}
+                  </button>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                        New items
+                        <span className="ml-1.5 text-slate-400 font-normal normal-case tracking-normal">
+                          (for {editing.assignments?.[0]?.user?.name ?? "stock"})
+                        </span>
+                      </label>
+                      <span className="text-[11px] text-slate-400">{extraItems.length} new</span>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] divide-y divide-slate-100 dark:divide-white/[0.05]">
+                      {extraItems.map((row, idx) => (
+                        <div key={row.id} className="p-3.5 group relative">
+                          <div className="flex items-center justify-between mb-2.5">
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-400">
+                              <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-slate-100 dark:bg-white/[0.06] text-[10px] font-bold text-slate-600 dark:text-slate-300 px-1.5">+{idx + 1}</span>
+                              <span className="text-slate-500">{row.name.trim() || "New item"}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removeExtra(row.id)}
+                              aria-label="Remove item"
+                              className="text-slate-400 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                            >
+                              <X size={15} />
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+                            <div>
+                              <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Category</label>
+                              <SelectField
+                                value={row.category}
+                                onChange={(v) => setExtra(row.id, { category: v })}
+                                options={CATEGORIES.filter((c) => c !== "All")}
+                                className={FIELD_CLS}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Asset Name</label>
+                              <input
+                                value={row.name}
+                                onChange={(e) => setExtra(row.id, { name: e.target.value })}
+                                className={FIELD_CLS}
+                                placeholder="e.g. Logitech MX Mouse"
+                              />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2.5">
+                            <div>
+                              <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Serial No.</label>
+                              <input
+                                value={row.serialNumber}
+                                onChange={(e) => setExtra(row.id, { serialNumber: e.target.value })}
+                                className={FIELD_CLS}
+                                placeholder="Optional"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Condition</label>
+                              <SelectField
+                                value={row.condition}
+                                onChange={(v) => setExtra(row.id, { condition: v })}
+                                options={["new","good","fair","poor"].map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) }))}
+                                className={FIELD_CLS}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addExtra}
+                      className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[#008CFF] hover:text-[#0070cc] transition-colors"
+                    >
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#008CFF]/10">+</span>
+                      Add another item
+                    </button>
+                  </>
+                )}
+              </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
                 Re-assigning this asset to a different employee goes through the existing Assign / Return flow on the asset row (keeps the assignment history intact).
               </p>
             </div>
-            <div className="px-6 py-4 border-t border-slate-200 dark:border-white/[0.06] flex justify-end gap-3">
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-white/[0.06] flex items-center justify-between gap-3">
+              {/* Delete sits on the left — destructive actions get
+                  visual separation from the safe primary action so a
+                  reflex click on Save doesn't trigger it. */}
               <button
-                onClick={closeEdit}
+                onClick={handleDeleteAsset}
                 disabled={saving}
-                className="h-9 px-5 text-[13px] text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:text-white rounded-lg disabled:opacity-50"
-              >Cancel</button>
-              <button
-                onClick={handleSaveEdit}
-                disabled={saving}
-                className="h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-60 disabled:cursor-wait"
-              >{saving ? "Saving…" : "Save changes"}</button>
+                className="h-9 px-4 text-[13px] font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg disabled:opacity-50"
+              >Delete</button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={closeEdit}
+                  disabled={saving}
+                  className="h-9 px-5 text-[13px] text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:text-white rounded-lg disabled:opacity-50"
+                >Cancel</button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={saving}
+                  className="h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-60 disabled:cursor-wait"
+                >{saving
+                  ? "Saving…"
+                  : extraItems.length > 0
+                    ? `Save & add ${extraItems.length} more`
+                    : "Save changes"}</button>
+              </div>
             </div>
           </div>
         </>

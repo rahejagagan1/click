@@ -110,3 +110,35 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json(asset);
   } catch (e) { return serverError(e, "PUT /api/hr/assets/[id]"); }
 }
+
+// DELETE /api/hr/assets/:id — wipe an asset + every AssetAssignment
+// row that referenced it (FK has no ON DELETE CASCADE). Same write
+// gate as PUT — anyone in the asset-manager tier can delete.
+//
+// Hard delete is the right model here: HR's mental model is "remove
+// this from the register". Assignment history is gone with the asset
+// — if you need it preserved, retire (status=retired) instead.
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { session, errorResponse } = await requireAuth();
+  if (errorResponse) return errorResponse;
+  if (!canManageAssets(session?.user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  try {
+    const { id: idParam } = await params;
+    const assetId = Number(idParam);
+    if (!Number.isInteger(assetId)) {
+      return NextResponse.json({ error: "Invalid asset id" }, { status: 400 });
+    }
+    await prisma.$transaction([
+      prisma.assetAssignment.deleteMany({ where: { assetId } }),
+      prisma.asset.delete({ where: { id: assetId } }),
+    ]);
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    if (e?.code === "P2025") {
+      return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+    }
+    return serverError(e, "DELETE /api/hr/assets/[id]");
+  }
+}
