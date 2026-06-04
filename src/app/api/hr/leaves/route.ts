@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
 import { canApplyRestrictedLeave } from "@/lib/access";
-import { notifyUsers } from "@/lib/notifications";
+import { notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
 import { countWorkingDays } from "@/lib/hr/working-days";
 import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
 import { sendEmail } from "@/lib/email/sender";
@@ -277,30 +277,37 @@ export async function POST(req: NextRequest) {
     // Automation — default ON.
     const requesterName = application.user?.name || "An employee";
     const managerId = application.user?.managerId ?? null;
-    const finalApprovers = await prisma.user.findMany({
-      where: {
-        isActive: true,
-        OR: [
-          // CEO + Special Access + HR Manager (role).
-          // Excludes role=admin alone + orgLevel="hr_manager"-only members.
-          { orgLevel: { in: ["ceo", "special_access"] } },
-          { role: "hr_manager" },
-          ...(await devEmailRecipientsClause()),
-        ],
-      },
-      select: { id: true },
-    });
+    // Brand-CEO routing: drop blanket CEOs from the HR pool and re-
+    // add the applicant's brand CEO separately. This keeps Kunal off
+    // every NB Media leave (and vice versa) instead of the old
+    // "every active CEO sees every leave" behaviour.
+    const [finalApprovers, brandCeoId] = await Promise.all([
+      prisma.user.findMany({
+        where: {
+          isActive: true,
+          orgLevel: { not: "ceo" },
+          OR: [
+            { orgLevel: "special_access" },
+            { role: "hr_manager" },
+            ...(await devEmailRecipientsClause()),
+          ],
+        },
+        select: { id: true },
+      }),
+      brandCeoIdForEmployee(subjectUserId),
+    ]);
     const dateLabel = `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}`;
     const daysLabel = `${totalDays} day${totalDays === 1 ? "" : "s"}`;
     const typeName  = application.leaveType?.name || "leave";
 
-    // Approval-queue ping: L1 manager + L2 approvers + any tagged extras.
-    // On the HR-on-behalf path we ALSO ping the subject so they know HR
-    // filed it for them, and skip the HR caller from the L2 list to
-    // avoid notifying themselves.
+    // Approval-queue ping: L1 manager + L2 approvers (brand-scoped) +
+    // any tagged extras. On the HR-on-behalf path we ALSO ping the
+    // subject so they know HR filed it for them, and skip the HR
+    // caller from the L2 list to avoid notifying themselves.
     const approverRecipients = Array.from(new Set([
       ...(managerId ? [managerId] : []),
       ...finalApprovers.map((u) => u.id).filter((id) => id !== myId),
+      ...(brandCeoId && brandCeoId !== myId ? [brandCeoId] : []),
       ...extras,
     ]));
     // Structured email payload — feeds the leave type, real dates, total

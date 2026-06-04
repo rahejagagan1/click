@@ -14,6 +14,7 @@ import { extname } from "node:path";
 import prisma from "@/lib/prisma";
 import { notifyUsers } from "@/lib/notifications";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
+import { enqueueResumeBackfill } from "@/lib/resume-backfill";
 
 export const dynamic = "force-dynamic";
 // File uploads need the Node runtime (Edge can't do fs).
@@ -324,6 +325,15 @@ export async function POST(req: NextRequest) {
             WHERE "id" = $4`,
           resumeBlob, resumeMime, newUrl, applicationId,
         );
+        // Eager background extraction — pulls URLs, skills, education
+        // out of the resume so HR's first drawer open lands on a
+        // populated row instead of waiting on the lazy fallback. The
+        // job runs on the next tick after the response is sent (the
+        // PM2 worker stays alive past the HTTP flush) so the
+        // applicant doesn't pay the 1–2s OCR cost on submit. The
+        // candidates GET route still runs the same logic on first
+        // open as a fallback if this job dies before completing.
+        enqueueResumeBackfill(applicationId);
       } catch (e: any) {
         const code = e?.meta?.code || e?.code;
         const msg  = String(e?.meta?.message || e?.message || "");
@@ -424,22 +434,42 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Notify hiring stakeholders ──
-    // Same recipient set as feedback / report locks: CEO, HR managers,
-    // admins, special_access. Developer accounts gated by the
-    // "Notify developers" toggle in Admin → Emails Automation.
+    // Brand-CEO routing: HR / Special Access / admin pool (CEO
+    // excluded) + the job's brand CEO. The candidate isn't an
+    // employee yet, so we resolve the brand from `opening.brand`
+    // ("nb_media" / "yt_labs") and look up that brand's active CEO.
     try {
-      const recipients = await prisma.user.findMany({
-        where: {
-          isActive: true,
-          OR: [
-            { orgLevel: { in: ["ceo", "hr_manager", "special_access"] } },
-            { role: "admin" },
-            ...(await devEmailRecipientsClause()),
-          ],
-        },
-        select: { id: true },
-      });
-      const userIds = recipients.map(u => u.id);
+      const jobBrand = String(opening.brand || "nb_media").toLowerCase();
+      const jobBrandBu = jobBrand === "yt_labs" ? "YT Labs" : "NB Media";
+      const brandCeoWhere = jobBrandBu === "YT Labs"
+        ? { employeeProfile: { businessUnit: "YT Labs" } }
+        : { OR: [
+            { employeeProfile: { businessUnit: "NB Media" } },
+            { employeeProfile: { businessUnit: null } },
+            { employeeProfile: null },
+          ] };
+      const [recipients, brandCeo] = await Promise.all([
+        prisma.user.findMany({
+          where: {
+            isActive: true,
+            orgLevel: { not: "ceo" },
+            OR: [
+              { orgLevel: { in: ["hr_manager", "special_access"] } },
+              { role: "admin" },
+              ...(await devEmailRecipientsClause()),
+            ],
+          },
+          select: { id: true },
+        }),
+        prisma.user.findFirst({
+          where: { isActive: true, orgLevel: "ceo", ...brandCeoWhere },
+          select: { id: true },
+        }),
+      ]);
+      const userIds = [
+        ...recipients.map(u => u.id),
+        ...(brandCeo ? [brandCeo.id] : []),
+      ];
       if (userIds.length > 0) {
         await notifyUsers({
           actorId: null,

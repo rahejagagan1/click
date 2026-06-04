@@ -1248,6 +1248,30 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
   const menuBtnRef   = useRef<HTMLButtonElement | null>(null);
   const menuPanelRef = useRef<HTMLDivElement | null>(null);
 
+  // Inline reaction + comment state (mirrors /dashboard/hr/engage).
+  // Lets HR react / comment without bouncing into the full feed page.
+  // `myReactionEmoji` is the current user's emoji (null if they
+  // haven't reacted yet) — drives the React-button label so the
+  // user can see at a glance how they reacted.
+  const myCurrentReaction = Array.isArray(post.reactions)
+    ? (post.reactions.find((r: any) => r.userId === sessionUserId)?.emoji ?? null)
+    : null;
+  const [myReactionEmoji, setMyReactionEmoji] = useState<string | null>(myCurrentReaction);
+  const [reactionCount, setReactionCount] = useState(post.reactions?.length ?? 0);
+  const [showComments,  setShowComments]  = useState(false);
+  const [commentText,   setCommentText]   = useState("");
+  const [commentEmojiOpen, setCommentEmojiOpen] = useState(false);
+  const commentInputRef = useRef<HTMLInputElement | null>(null);
+  // Reaction picker popover (anchored to the React button).
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
+  const reactionTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const reactionPickerRef  = useRef<HTMLDivElement | null>(null);
+  // Reaction set — refreshed for expressiveness. The codepoints
+  // render via whichever emoji font the OS ships; on Android 14+
+  // these all come from the new animated/Material-You set.
+  //   Like · Love · Haha · Wow · Sad · Pray · Clap · Party · Cake · Fire
+  const REACTION_EMOJIS = ["👍", "❤️", "🤣", "😮", "😢", "🙏", "👏", "🎉", "🎂", "🔥"];
+
   // The home feed is rendered inside cards with their own clipping. Render
   // the dropdown via a body-level portal at fixed position so the parent
   // overflow can never crop it (same pattern as the engage card).
@@ -1322,8 +1346,189 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
     ? post.content
     : post.content.slice(0, COLLAPSE_AT).trimEnd() + "…";
 
-  const reactionCount = post.reactions?.length || 0;
+  // Optimistic react — picks (or replaces, or removes) the user's
+  // reaction emoji. Three branches, mirroring the API:
+  //   • same emoji  → remove (count -1)
+  //   • new emoji   → replace (count unchanged)
+  //   • no prior    → add (count +1)
+  const pickReaction = async (emoji: string) => {
+    setReactionPickerOpen(false);
+    const prior = myReactionEmoji;
+    if (prior === emoji) {
+      setMyReactionEmoji(null);
+      setReactionCount((c: number) => Math.max(0, c - 1));
+    } else if (prior) {
+      setMyReactionEmoji(emoji); // replace; count unchanged
+    } else {
+      setMyReactionEmoji(emoji);
+      setReactionCount((c: number) => c + 1);
+    }
+    try {
+      await fetch(`/api/hr/engage/posts/${post.id}/react`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ emoji }),
+      });
+    } catch { /* SWR revalidate corrects any drift. */ }
+    revalidatePosts();
+  };
+
+  // React button click: if the user already has a reaction, this
+  // button TOGGLES it off (matches the "click your reaction to
+  // unreact" pattern from Facebook). Otherwise it opens the emoji
+  // picker so the user can pick how they want to react.
+  const onReactButtonClick = () => {
+    if (myReactionEmoji) { pickReaction(myReactionEmoji); return; }
+    setReactionPickerOpen(true);
+  };
+
+  // Close the picker on Esc / click-outside.
+  useEffect(() => {
+    if (!reactionPickerOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setReactionPickerOpen(false); };
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Element | null;
+      if (!t) return;
+      if (reactionTriggerRef.current?.contains(t)) return;
+      if (reactionPickerRef.current?.contains(t))  return;
+      setReactionPickerOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDoc);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDoc);
+    };
+  }, [reactionPickerOpen]);
+
+  const submitComment = async () => {
+    const text = commentText.trim();
+    if (!text) return;
+    setCommentText("");
+    setCommentEmojiOpen(false);
+    try {
+      await fetch(`/api/hr/engage/posts/${post.id}/comments`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: text }),
+      });
+    } catch { /* best-effort; SWR re-fetch fills the comment in on success. */ }
+    revalidatePosts();
+  };
+
+  // Insert an emoji at the current caret position of the comment input.
+  // Keeping the caret math local to the comment input so it doesn't
+  // collide with the parent post-composer's insertAtCursor helper.
+  const insertEmojiIntoComment = (emoji: string) => {
+    const input = commentInputRef.current;
+    if (!input) { setCommentText((t) => t + emoji); return; }
+    const start = input.selectionStart ?? commentText.length;
+    const end   = input.selectionEnd   ?? commentText.length;
+    const next  = commentText.slice(0, start) + emoji + commentText.slice(end);
+    setCommentText(next);
+    // Restore focus + caret position one tick later so React's
+    // controlled-value update has landed.
+    requestAnimationFrame(() => {
+      input.focus();
+      const pos = start + emoji.length;
+      input.setSelectionRange(pos, pos);
+    });
+  };
+
   const commentCount  = post.comments?.length  || 0;
+
+  // Pull reactor display names off the post payload — the /api/hr/
+  // engage/posts endpoint already includes `reactions.user.name`.
+  // The "most recent" reactor is approximated as the last id in
+  // the array; the schema has no createdAt on EngageReaction so
+  // ascending-id is the closest proxy.
+  const reactorNames: string[] = Array.isArray(post.reactions)
+    ? post.reactions.map((r: any) => r.user?.name).filter(Boolean)
+    : [];
+  // Distinct emojis used on this post, ordered by frequency desc
+  // then most-recent. Drives the stacked-emoji chip in the summary
+  // so the surface reflects what people actually picked instead of
+  // a hardcoded 👍.
+  const emojiCounts = new Map<string, number>();
+  if (Array.isArray(post.reactions)) {
+    for (const r of post.reactions) {
+      const e = (r?.emoji as string) || "👍";
+      emojiCounts.set(e, (emojiCounts.get(e) ?? 0) + 1);
+    }
+  }
+  const topEmojis: string[] = [...emojiCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([e]) => e)
+    .slice(0, 3);
+  const latestReactor = reactorNames.length > 0 ? reactorNames[reactorNames.length - 1] : null;
+  const otherReactors = reactorNames.length > 1 ? reactorNames.length - 1 : 0;
+  const initialsOf = (n: string) =>
+    n.split(/\s+/).map((w) => w[0] || "").join("").slice(0, 2).toUpperCase() || "?";
+  // Reactors popover — anchored just above the "+ N others" button.
+  // Portal'd to body so the card's overflow / z-index can't clip it,
+  // but positioned at fixed coordinates derived from the trigger's
+  // bounding rect rather than centered on the viewport.
+  const [reactorsOpen, setReactorsOpen] = useState(false);
+  const [reactorsAnchor, setReactorsAnchor] = useState<{ top: number; left: number } | null>(null);
+  const reactorsTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const reactorsPanelRef   = useRef<HTMLDivElement | null>(null);
+
+  const openReactorsPopover = () => {
+    const btn = reactorsTriggerRef.current;
+    if (!btn) { setReactorsOpen(true); return; }
+    const rect = btn.getBoundingClientRect();
+    const PANEL_W = 200;
+    const PANEL_H_GUESS = Math.min(260, 12 + reactorNames.length * 30);
+    const GAP = 6;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const above = rect.top - GAP - PANEL_H_GUESS;
+    const below = rect.bottom + GAP;
+    const top = above >= 8 ? above : Math.min(below, vh - PANEL_H_GUESS - 8);
+    let left = rect.right - PANEL_W;
+    if (left < 8) left = 8;
+    if (left + PANEL_W > vw - 8) left = vw - PANEL_W - 8;
+    setReactorsAnchor({ top, left });
+    setReactorsOpen(true);
+  };
+
+  // Close on Esc + click-outside. Reposition on scroll/resize so the
+  // popover follows the trigger if the page shifts while open.
+  useEffect(() => {
+    if (!reactorsOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setReactorsOpen(false); };
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Element | null;
+      if (!t) return;
+      if (reactorsTriggerRef.current?.contains(t)) return;
+      if (reactorsPanelRef.current?.contains(t))  return;
+      setReactorsOpen(false);
+    };
+    const onScroll = () => {
+      const btn = reactorsTriggerRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const PANEL_W = 200;
+      const PANEL_H_GUESS = Math.min(260, 12 + reactorNames.length * 30);
+      const GAP = 6;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const above = rect.top - GAP - PANEL_H_GUESS;
+      const below = rect.bottom + GAP;
+      const top = above >= 8 ? above : Math.min(below, vh - PANEL_H_GUESS - 8);
+      let left = rect.right - PANEL_W;
+      if (left < 8) left = 8;
+      if (left + PANEL_W > vw - 8) left = vw - PANEL_W - 8;
+      setReactorsAnchor({ top, left });
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [reactorsOpen, reactorNames.length]);
 
   return (
     // overflow-visible so the portal-fallback dropdown is never clipped
@@ -1436,29 +1641,94 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
       </div>
 
       {/* Single-row footer: Like / Comment on the left, reaction +
-          comment summary on the right — matches the Keka layout the
-          engage card already uses. Like/Comment stay as Links into the
-          full engage feed (this card is read-only on the home page). */}
+          comment summary on the right. Both buttons now act inline —
+          Like toggles the user's reaction directly, Comment expands
+          the comment panel below with a Send + emoji picker so wishes
+          stay quick. */}
       <div className="flex items-center justify-between border-t border-[#eef2f6] px-2 sm:px-3 py-1.5">
         <div className="flex items-center">
-          <Link
-            href="/dashboard/hr/engage"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-[#5f7183] hover:bg-[#f5f7fb] transition-colors"
-          >
-            <ThumbsUp className="h-4 w-4" />Like
-          </Link>
-          <Link
-            href="/dashboard/hr/engage"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-[#5f7183] hover:bg-[#f5f7fb] transition-colors"
+          <div className="relative">
+            <button
+              ref={reactionTriggerRef}
+              type="button"
+              onClick={onReactButtonClick}
+              title={myReactionEmoji ? "Click to remove" : "React"}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium transition-colors hover:bg-[#f5f7fb] ${
+                myReactionEmoji ? "text-[#008CFF]" : "text-[#5f7183]"
+              }`}
+            >
+              {myReactionEmoji ? (
+                <span className="text-[16px] leading-none">{myReactionEmoji}</span>
+              ) : (
+                <ThumbsUp className="h-4 w-4" />
+              )}
+              React
+            </button>
+            {/* Emoji picker — thin pill anchored above the React
+                button. Click any emoji to add / replace / remove.
+                Click-outside / Esc closes. */}
+            {reactionPickerOpen && (
+              <div
+                ref={reactionPickerRef}
+                role="dialog"
+                className="absolute bottom-full left-0 mb-1.5 z-50 flex items-center gap-0.5 px-1 py-1 rounded-full border border-slate-200 bg-white shadow-[0_6px_18px_-4px_rgba(15,23,42,0.18)] animate-in fade-in zoom-in-95 duration-100"
+              >
+                {REACTION_EMOJIS.map((e) => {
+                  const isMine = e === myReactionEmoji;
+                  return (
+                    <button
+                      key={e}
+                      type="button"
+                      onClick={() => pickReaction(e)}
+                      title={isMine ? "Click to remove" : "React"}
+                      className={`h-7 w-7 flex items-center justify-center rounded-full text-[16px] transition-transform hover:scale-110 ${isMine ? "bg-[#e6f3ff]" : "hover:bg-slate-50"}`}
+                    >
+                      {e}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowComments((p) => !p)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium transition-colors hover:bg-[#f5f7fb] ${
+              showComments ? "text-[#008CFF]" : "text-[#5f7183]"
+            }`}
           >
             <MessageSquare className="h-4 w-4" />Comment
-          </Link>
+          </button>
         </div>
         <div className="flex items-center gap-1.5 pr-2 text-[12px] text-[#8393a3]">
           {reactionCount > 0 && (
+            // Compact reactor summary — Instagram-style. Stacked
+            // emojis reflect the distinct reactions used (top 3 by
+            // count), latest reactor name inline, clickable +N for
+            // the full list popover.
             <span className="inline-flex items-center gap-1">
-              <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-[#008CFF] text-white text-[10px] ring-2 ring-white">👍</span>
-              <span>{reactionCount} {reactionCount === 1 ? "reaction" : "reactions"}</span>
+              <span className="inline-flex items-center -space-x-1">
+                {topEmojis.map((e, i) => (
+                  <span
+                    key={e}
+                    className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-white text-[12px] ring-1 ring-slate-200 shadow-sm leading-none"
+                    style={{ zIndex: topEmojis.length - i }}
+                  >
+                    {e}
+                  </span>
+                ))}
+              </span>
+              <span className="truncate max-w-[180px]" title={latestReactor || ""}>{latestReactor}</span>
+              {otherReactors > 0 && (
+                <button
+                  ref={reactorsTriggerRef}
+                  type="button"
+                  onClick={openReactorsPopover}
+                  className="font-semibold text-[#008CFF] hover:underline"
+                >
+                  and +{otherReactors} {otherReactors === 1 ? "other" : "others"}
+                </button>
+              )}
             </span>
           )}
           {commentCount > 0 && (
@@ -1466,6 +1736,98 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
           )}
         </div>
       </div>
+
+      {/* Inline comment panel — same structure as the engage page's
+          composer, plus an emoji picker. Existing comments render
+          above the composer. */}
+      {showComments && (
+        <div className="border-t border-[#eef2f6] bg-[#f9fafc] px-3 sm:px-4 py-3 space-y-3">
+          {Array.isArray(post.comments) && post.comments.length > 0 && (
+            <div className="space-y-2">
+              {post.comments.map((c: any) => (
+                <div key={c.id} className="flex items-start gap-2.5">
+                  <Av name={c.author?.name || "User"} url={c.author?.profilePictureUrl} size={26} />
+                  <div className="flex-1 bg-white border border-[#eef2f6] rounded-xl px-3 py-1.5">
+                    <p className="text-[11.5px] font-semibold text-[#3b4a5a]">{c.author?.name || "Team member"}</p>
+                    <p className="text-[12px] text-[#52647a] whitespace-pre-wrap break-words mt-0.5">{c.content}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-start gap-2.5">
+            <Av name={sessionUser?.name || "You"} url={sessionUser?.profilePictureUrl} size={26} />
+            <div className="relative flex-1">
+              <div className="flex items-center gap-1.5 bg-white border border-[#dbe4ed] rounded-full px-3 py-1.5 focus-within:border-[#008CFF] transition-colors">
+                <input
+                  ref={commentInputRef}
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); }
+                  }}
+                  placeholder="Write a comment…"
+                  className="flex-1 bg-transparent text-[12.5px] text-[#3b4a5a] placeholder-[#97a4b3] focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setCommentEmojiOpen((v) => !v)}
+                  title="Insert emoji"
+                  className={`shrink-0 flex h-7 w-7 items-center justify-center rounded-full transition ${
+                    commentEmojiOpen ? "bg-[#f5f9ff] text-[#008CFF]" : "text-[#5c6b80] hover:bg-[#f5f9ff] hover:text-[#008CFF]"
+                  }`}
+                >
+                  <Smile className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={submitComment}
+                  disabled={!commentText.trim()}
+                  title="Send"
+                  className="shrink-0 flex h-7 w-7 items-center justify-center rounded-full text-[#008CFF] hover:bg-[#f5f9ff] disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {commentEmojiOpen && (
+                <div className="absolute right-0 z-20 mt-1 flex flex-wrap gap-1 rounded-md border border-[#dbe4ed] bg-white p-2 shadow-lg w-[260px]">
+                  {["😀","😂","😍","🥳","🙏","👏","👍","🔥","💯","🎉","🚀","💡","✅","❤️","☕","☀️","🌟","🤝","💪","🙌","😊","😎","✨","📌","📷","🎯","💼","📝","🎂","🏆"].map((e) => (
+                    <button
+                      key={e}
+                      type="button"
+                      onClick={() => insertEmojiIntoComment(e)}
+                      className="flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f9ff] text-[16px]"
+                    >
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reactors popover — minimal anchored card. No header, no
+          close button (click-outside / Esc); just the list. */}
+      {reactorsOpen && reactorsAnchor && typeof document !== "undefined" && createPortal(
+        <div
+          ref={reactorsPanelRef}
+          role="dialog"
+          aria-modal="false"
+          style={{ position: "fixed", top: reactorsAnchor.top, left: reactorsAnchor.left, width: 200, zIndex: 10000 }}
+          className="rounded-lg border border-slate-200 bg-white shadow-[0_6px_18px_-4px_rgba(15,23,42,0.15)] animate-in fade-in duration-100"
+        >
+          <ul className="max-h-[220px] overflow-y-auto py-1.5">
+            {reactorNames.map((name, i) => (
+              <li key={i} className="flex items-center gap-2 px-3 py-1">
+                <span className="truncate text-[12px] text-slate-700">{name}</span>
+              </li>
+            ))}
+          </ul>
+        </div>,
+        document.body,
+      )}
     </article>
   );
 }
@@ -1888,7 +2250,7 @@ export default function HRHomePage() {
 
   const handlePickImage = (file: File | null) => {
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { alert("Image too large (max 5 MB)"); return; }
+    if (file.size > 10 * 1024 * 1024) { alert("Image too large (max 10 MB)"); return; }
     const reader = new FileReader();
     reader.onload = () => setPostMedia(typeof reader.result === "string" ? reader.result : null);
     reader.readAsDataURL(file);
@@ -1918,7 +2280,7 @@ export default function HRHomePage() {
   const addPraiseFile = (file: File | null) => {
     if (!file) return;
     if (praiseFiles.length >= 5) { alert("Max 5 attachments."); return; }
-    if (file.size > 5 * 1024 * 1024) { alert(`"${file.name}" is over 5 MB.`); return; }
+    if (file.size > 10 * 1024 * 1024) { alert(`"${file.name}" is over 10 MB.`); return; }
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === "string") {
@@ -2096,7 +2458,15 @@ export default function HRHomePage() {
   const postsUrl = orgTab === "org"
     ? "/api/hr/engage/posts"
     : `/api/hr/engage/posts?scope=${encodeURIComponent(teamScope)}`;
-  const { data: posts = [] } = useSWR(postsUrl, fetcher);
+  const { data: posts = [], isLoading: postsLoading } = useSWR(postsUrl, fetcher, {
+    // Keep the previous tab's posts on screen while the new tab's
+    // payload is in flight — otherwise switching Organization ↔
+    // My team flashes the empty state for one frame before the
+    // spinner appears. SWR returns the still-cached `data` and
+    // flips `isValidating`, so we render the spinner overlay only
+    // when there's no data yet for the active URL.
+    keepPreviousData: true,
+  });
   const { data: announcements = [] } = useSWR("/api/hr/announcements", fetcher);
 
   // Clock-in / clock-out actions are owned by a shared hook. See
@@ -2114,21 +2484,31 @@ export default function HRHomePage() {
     const t = setTimeout(() => setConfirmingClockOut(false), 6000);
     return () => clearTimeout(t);
   }, [confirmingClockOut, clockingOut]);
+  // Viewer brand for the leave/wfh lists below. Every viewer is
+  // brand-scoped — even CEOs (Kunal sees only YT Labs, Nikit sees
+  // only NB Media) and HR managers. Legacy users with no
+  // businessUnit set bucket as NB Media (parent-brand default).
+  // Developers / super-admins are NOT exempt here per HR's ask.
+  const viewerBrand: "NB Media" | "YT Labs" =
+    user?.businessUnit === "YT Labs" ? "YT Labs" : "NB Media";
+  const matchesViewerBrand = (u: any): boolean =>
+    (u.businessUnit || "NB Media") === viewerBrand;
   // On Leave Today — anyone whose attendance record is `on_leave` today, OR
   // who has an applied leave (pending / partially_approved / approved) that
   // covers today. Approval isn't required to appear here — the moment a
   // colleague applies, they show up so others know they intend to be away.
+  // Brand-scoped to the viewer.
   const onLeave = (boardData?.board || []).filter((u: any) =>
-    u.status === "on_leave" || u.leaveToday === true
+    (u.status === "on_leave" || u.leaveToday === true) && matchesViewerBrand(u)
   );
   // Split clocked-in employees by their actual location mode (from Attendance.location JSON).
-  const clockedIn = (boardData?.board || []).filter((u: any) => u.status === "present" || u.status === "late");
+  const clockedIn = (boardData?.board || []).filter((u: any) => (u.status === "present" || u.status === "late") && matchesViewerBrand(u));
   // Working Remotely — ONLY employees who explicitly applied for WFH
   // today. Permanent remote / hybrid folks who clock in from home as
   // their default mode show up under the "Remote Clock-in" filter on
   // the attendance dashboard, not here. This card flags exception
-  // cases: office-default people who took WFH for a day.
-  const remote = ((boardData?.board || []) as any[]).filter((u: any) => u.wfhToday === true);
+  // cases: office-default people who took WFH for a day. Brand-scoped.
+  const remote = ((boardData?.board || []) as any[]).filter((u: any) => u.wfhToday === true && matchesViewerBrand(u));
   // Show only leave types the user actually has a quota or in-flight
   // activity for — drop fully-zero rows (no quota AND nothing used or
   // pending) so the card doesn't render six "0 days" tiles for every
@@ -2942,7 +3322,7 @@ export default function HRHomePage() {
                             <label className="flex w-fit cursor-pointer items-center gap-2 text-[13px] font-semibold text-[#008CFF] hover:text-[#0070d4]">
                               <Paperclip className="h-4 w-4" />
                               Add Attachment
-                              <span title="Max 5 files, 5 MB each" className="text-[#8a96a8]">
+                              <span title="Max 5 files, 10 MB each" className="text-[#8a96a8]">
                                 <Info className="h-3.5 w-3.5" />
                               </span>
                               <input
@@ -3240,6 +3620,18 @@ export default function HRHomePage() {
               <div className="space-y-3">
                 {posts.length > 0 ? (
                   posts.slice(0, 4).map((post: any) => <FeedPostCard key={post.id} post={post} sessionUser={user} />)
+                ) : postsLoading ? (
+                  // Loading state — keeps the visual area populated
+                  // while the feed payload is in flight, instead of
+                  // flashing the empty state before posts arrive.
+                  <div className={`${C.card} px-5 py-10 flex flex-col items-center justify-center gap-3`}>
+                    <span
+                      className="inline-block h-8 w-8 rounded-full border-[3px] border-[#008CFF]/20 border-t-[#008CFF] animate-spin"
+                      role="status"
+                      aria-label="Loading posts"
+                    />
+                    <p className={`text-[12px] ${C.t3}`}>Loading posts…</p>
+                  </div>
                 ) : analyticsData ? (
                   <div className={`${C.card} px-5 py-8 text-center`}>
                     <p className="text-[13px] font-semibold text-[#334455]">No posts yet</p>

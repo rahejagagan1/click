@@ -568,3 +568,124 @@ html:not(.dark) .glass {
 .animate-toast-in {
   animation: toastIn 0.22s ease-out;
 }
+/* ── JD prose ──────────────────────────────────────────────────────
+   Typography for the sanitised Quill-authored job description body
+   on the public careers page (src/app/jobs/[slug]/page.tsx). The
+   parent .jd-prose wrapper sits inside a Times-New-Roman container,
+   so we only need to size/space the block tags here — the font
+   family is inherited. Mirrors what the legacy plain-text renderer
+   produces so a switch between the two paths is visually seamless.
+
+   Quill's classes for alignment + size are also styled inline below
+   so HR's toolbar choices (Small / Large / Huge, centre / right /
+   justify) flow through to the public render verbatim. */
+/* Word-wrap inside the prose. Long, unbreakable strings (URLs,
+   identifiers, glued tokens) used to overflow the JD card's
+   overflow:hidden clip — letters appeared chopped at the right
+   edge. overflow-wrap:anywhere is the guaranteed fallback; the
+   browser still prefers word boundaries when they exist. */
+.jd-prose,
+.jd-prose * {
+  /* Two-rule wrap that handles both extremes cleanly:
+     - word-break:normal      → standard word boundaries (don't
+                                 break a word mid-letter unless
+                                 there's absolutely no other
+                                 option).
+     - overflow-wrap:anywhere → safety net for a token that's
+                                 wider than the entire line (long
+                                 URL, identifier). Browser prefers
+                                 word boundaries first; only
+                                 cracks the word open when there's
+                                 literally no break point that
+                                 keeps it whole.
+     - hyphens:none           → no auto-hyphenation; ignore &shy;.
+     - text-wrap:wrap         → cancel Chrome 120+'s default
+                                 `pretty` which sometimes breaks
+                                 "in" / "is" to balance line
+                                 widths.
+     - white-space:normal     → ignore any inherited pre / pre-
+                                 line that would suppress wrapping.
+     max-width + box-sizing prevent inline children from pushing
+     beyond the prose container.
+
+     The combination means: normal English words stay intact, and
+     only a pathological 200-char URL would ever break. That's
+     the A4 reading model HR wants. */
+  overflow-wrap: anywhere !important;
+  word-wrap:     break-word !important;
+  word-break:    normal !important;
+  hyphens:       none !important;
+  text-wrap:     wrap !important;
+  white-space:   normal !important;
+  max-width:     100%;
+  box-sizing:    border-box;
+}
+.jd-prose h1, .jd-prose h2 {
+  margin-top: 1.6rem;
+  margin-bottom: 0.5rem;
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.jd-prose h3 {
+  margin-top: 1.4rem;
+  margin-bottom: 0.4rem;
+  font-size: 16.5px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.jd-prose h1:first-child,
+.jd-prose h2:first-child,
+.jd-prose h3:first-child { margin-top: 0; }
+.jd-prose p {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 14.5px;
+  line-height: 1.8;
+  color: #334155;
+}
+.jd-prose ul, .jd-prose ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+.jd-prose ul { list-style: disc; }
+.jd-prose ol { list-style: decimal; }
+.jd-prose li {
+  margin: 0.25rem 0;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: #334155;
+}
+.jd-prose strong, .jd-prose b { font-weight: 700; color: #0f172a; }
+.jd-prose em, .jd-prose i    { font-style: italic; }
+.jd-prose u                  { text-decoration: underline; }
+.jd-prose s, .jd-prose strike{ text-decoration: line-through; }
+/* Quill alignment classes */
+.jd-prose .ql-align-center  { text-align: center;  }
+.jd-prose .ql-align-right   { text-align: right;   }
+.jd-prose .ql-align-justify { text-align: justify; }
+/* Quill size classes */
+.jd-prose .ql-size-small { font-size: 12.5px; }
+.jd-prose .ql-size-large { font-size: 17.5px; }
+.jd-prose .ql-size-huge  { font-size: 22px;   line-height: 1.4; }
+
+/* JD edit modal — Quill toolbar + editor styling. The wrap inherits
+   Times New Roman from the parent so the editor body matches the
+   rendered PDF; the toolbar uses the default sans-serif for clarity. */
+.jd-quill-wrap .ql-toolbar.ql-snow {
+  border: none;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.jd-quill-wrap .ql-container.ql-snow { border: none; }
+.jd-quill-wrap .ql-editor {
+  min-height: 360px;
+  padding: 16px 20px;
+  font-family: "Times New Roman", Georgia, serif;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: #1e293b;
+}

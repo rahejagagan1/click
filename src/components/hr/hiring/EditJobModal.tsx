@@ -230,7 +230,8 @@ export default function EditJobModal({
               value={form.internalNotes}
               onChange={(e) => update("internalNotes", e.target.value)}
               rows={3}
-              className={`${INPUT} resize-y leading-relaxed`}
+              style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
+              className={`${INPUT} resize-y leading-relaxed text-[14px]`}
               placeholder="Anything the team should know about this requisition."
             />
           </Field>

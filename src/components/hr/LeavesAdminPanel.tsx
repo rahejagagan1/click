@@ -26,7 +26,15 @@ type EmpRow       = {
  * quiet slate tone (not "alarming" red) — red is reserved for actually
  * overdrawn balances.
  */
-export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
+export default function LeavesAdminPanel(_props: {
+  leaveTypes?: any[];
+  /** Locks the panel to a specific brand on mount (NB Media / YT Labs)
+   *  — comes from the `?brand=` URL param on /dashboard/hr/admin. When
+   *  null, the panel auto-detects from the viewer's businessUnit (or
+   *  "all" for super-admins) as before. */
+  initialBrand?: "NB Media" | "YT Labs" | "all" | null;
+}) {
+  const initialBrand = _props.initialBrand ?? null;
   const currentYear = new Date().getFullYear();
   const [year, setYear]   = useState<number>(currentYear);
   const [query, setQuery] = useState("");
@@ -44,13 +52,19 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
   type CompanyTab = "NB Media" | "YT Labs" | "all";
   const { data: session } = useSession();
   const me = session?.user as any;
-  const [companyTab, setCompanyTab] = useState<CompanyTab>("all");
-  const [companyTabTouched, setCompanyTabTouched] = useState(false);
+  const [companyTab, setCompanyTab] = useState<CompanyTab>(initialBrand ?? "all");
+  const [companyTabTouched, setCompanyTabTouched] = useState<boolean>(initialBrand != null);
   const { data: viewerProfile } = useSWR<any>(
     me ? "/api/hr/profile" : null,
     fetcher,
     { revalidateOnFocus: false },
   );
+  // Sync to a changing URL param without remounting.
+  useEffect(() => {
+    if (initialBrand == null) return;
+    setCompanyTab(initialBrand);
+    setCompanyTabTouched(true);
+  }, [initialBrand]);
   useEffect(() => {
     if (companyTabTouched) return;
     const isSuperAdmin = me?.orgLevel === "ceo" || me?.isDeveloper;
@@ -486,37 +500,39 @@ export default function LeavesAdminPanel(_props: { leaveTypes?: any[] }) {
             </button>
           </div>
         </div>
-        {/* Company scope tabs — section label matches the Approvals
-            panel so the two pages feel like the same family. */}
-        <div className="px-5 pb-4 border-t border-slate-100 pt-3">
-          <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 mb-2">Brand scope</div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-          {([
-            { key: "NB Media", count: companyCounts.nb  },
-            { key: "YT Labs",  count: companyCounts.yt  },
-            { key: "all",      count: companyCounts.all },
-          ] as const).map(({ key, count }) => {
-            const active = companyTab === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => { setCompanyTab(key as CompanyTab); setCompanyTabTouched(true); }}
-                className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
-                  active
-                    ? "bg-[#008CFF] text-white shadow-sm"
-                    : "bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10"
-                }`}
-              >
-                <span>{key === "all" ? "All" : key}</span>
-                <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
-                  active ? "bg-white/20 text-white" : "bg-[#008CFF] text-white"
-                }`}>{count}</span>
-              </button>
-            );
-          })}
+        {/* Company scope tabs — hidden when initialBrand is set
+            (the HR Dashboard sidebar flyout already chose a brand). */}
+        {initialBrand == null && (
+          <div className="px-5 pb-4 border-t border-slate-100 pt-3">
+            <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 mb-2">Brand scope</div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+            {([
+              { key: "NB Media", count: companyCounts.nb  },
+              { key: "YT Labs",  count: companyCounts.yt  },
+              { key: "all",      count: companyCounts.all },
+            ] as const).map(({ key, count }) => {
+              const active = companyTab === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => { setCompanyTab(key as CompanyTab); setCompanyTabTouched(true); }}
+                  className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
+                    active
+                      ? "bg-[#008CFF] text-white shadow-sm"
+                      : "bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10"
+                  }`}
+                >
+                  <span>{key === "all" ? "All" : key}</span>
+                  <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold !text-white ${
+                    active ? "bg-white/20" : "bg-[#008CFF]"
+                  }`} style={{ color: "#fff" }}>{count}</span>
+                </button>
+              );
+            })}
+            </div>
           </div>
-        </div>
+        )}
       </header>
 
       {/* ── Matrix ─────────────────────────────────────────────────── */}

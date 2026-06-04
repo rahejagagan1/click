@@ -58,6 +58,38 @@ export function istMonthRange(dateOnly: Date): { start: Date; end: Date } {
 }
 
 /**
+ * Parse "YYYY-MM" into a numeric { year, month1Based } pair. Returns null
+ * for unparseable / out-of-range input — callers should treat null as
+ * "no month filter".
+ */
+export function parseYearMonth(s: string | null | undefined): { year: number; month: number } | null {
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{1,2})$/.exec(s);
+  if (!m) return null;
+  const year  = parseInt(m[1], 10);
+  const month = parseInt(m[2], 10);
+  if (!Number.isFinite(year) || year < 2000 || year > 2100) return null;
+  if (month < 1 || month > 12) return null;
+  return { year, month };
+}
+
+/**
+ * UTC `{ gte, lt }` range that covers a full IST calendar month — suitable
+ * for filtering a `DateTime` column (e.g., `appliedAt`, `createdAt`) by the
+ * month it was submitted IN INDIA, without leaking server timezone.
+ *
+ * Example: istCalendarMonthRange(2026, 6) returns
+ *   { gte: 2026-05-31T18:30:00.000Z, lt: 2026-06-30T18:30:00.000Z }
+ * because June 2026 IST starts at 5:30 PM UTC on May 31.
+ */
+export function istCalendarMonthRange(year: number, month1Based: number): { gte: Date; lt: Date } {
+  const IST_OFFSET_MS = 330 * 60 * 1000; // +5:30
+  const gte = new Date(Date.UTC(year, month1Based - 1, 1, 0, 0, 0) - IST_OFFSET_MS);
+  const lt  = new Date(Date.UTC(year, month1Based,     1, 0, 0, 0) - IST_OFFSET_MS);
+  return { gte, lt };
+}
+
+/**
  * Build a precise UTC `Date` for a given HH:MM on the IST calendar day that
  * `dateOnly` represents (which is stored as UTC-midnight of that IST day).
  *

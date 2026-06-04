@@ -8,6 +8,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { Check, X } from "lucide-react";
 import FilterDropdown from "@/components/hr/FilterDropdown";
 import SelectField from "@/components/ui/SelectField";
+import MonthField from "@/components/ui/month-field";
 import {
   deriveEntity,
   deriveDepartment,
@@ -233,7 +234,17 @@ function Avatar({ name, url, size = 32 }: { name: string; url?: string | null; s
  *   • /dashboard/hr/approvals           (standalone page wrapper, embedded=false)
  *   • /dashboard/hr/admin "Approvals" tab (embedded=true — drops the full-screen wash)
  */
-export default function ApprovalsPanel({ embedded = false }: { embedded?: boolean }) {
+export default function ApprovalsPanel({
+  embedded = false,
+  initialBrand = null,
+}: {
+  embedded?: boolean;
+  /** Locks the panel to a specific brand on mount (NB Media / YT Labs)
+   *  — comes from the `?brand=` URL param on /dashboard/hr/admin. When
+   *  null, the panel auto-detects from the viewer's businessUnit (or
+   *  "all" for super-admins) as before. */
+  initialBrand?: "NB Media" | "YT Labs" | "all" | null;
+}) {
   const { data: session } = useSession();
   const me = session?.user as any;
   const isFinalApprover = me?.orgLevel === "ceo" || me?.isDeveloper || me?.orgLevel === "hr_manager";
@@ -255,18 +266,52 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
   const [fLegal,     setFLegal]     = useState<Set<string>>(new Set());
   const [fStatus,    setFStatus]    = useState<Set<string>>(new Set());
 
+  // Month filter — "YYYY-MM" for a specific IST calendar month, "" for
+  // "All time". Drives BOTH the row list AND the per-tab count badges
+  // (appliedAt for leave, createdAt for the rest). Defaults to the
+  // current month so the page opens scoped to "this month's inbox"
+  // instead of the full history.
+  const [monthFilter, setMonthFilter] = useState<string>(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const monthQs = monthFilter ? `&month=${encodeURIComponent(monthFilter)}` : "";
+  // Brand slug for the API — only NB Media / YT Labs narrow the query
+  // server-side; "all" leaves the server's existing org-wide behaviour.
+  // Keeps the server count + tab badge in sync with what the table
+  // renders (the panel still does client-side filtering for the pill
+  // toggle case, but here we want the server to do the heavy lifting).
+  // Note: this uses the same value as `initialBrand`, NOT companyTab —
+  // companyTab can drift via the in-panel pills when the panel is
+  // mounted standalone (no initialBrand). The badges should still
+  // reflect the URL-locked brand specifically.
+  const brandQs =
+    initialBrand === "YT Labs"  ? `&brand=yt-labs` :
+    initialBrand === "NB Media" ? `&brand=nb-media` :
+    "";
+
   // ── Company scope tabs ──────────────────────────────────────────────
   // YT Labs HR manager auto-lands on YT Labs; NB Media HR on NB Media;
   // founder / super-admin (CEO / developer) lands on "all" since they
   // straddle both brands. Falls back to "all" while profile loads.
   type CompanyTab = "NB Media" | "YT Labs" | "all";
-  const [companyTab, setCompanyTab] = useState<CompanyTab>("all");
-  const [companyTabTouched, setCompanyTabTouched] = useState(false);
+  const [companyTab, setCompanyTab] = useState<CompanyTab>(initialBrand ?? "all");
+  // URL-locked initial brand counts as a manual selection so the
+  // viewer-profile auto-detect below doesn't clobber it once /api/hr/
+  // profile resolves. The Brand Scope pills can still re-pick.
+  const [companyTabTouched, setCompanyTabTouched] = useState<boolean>(initialBrand != null);
   const { data: viewerProfile } = useSWR<any>(
     me ? "/api/hr/profile" : null,
     fetcher,
     { revalidateOnFocus: false },
   );
+  // Sync to a changing URL param without remounting (sidebar flyout
+  // navigates between brand variants of the same route).
+  useEffect(() => {
+    if (initialBrand == null) return;
+    setCompanyTab(initialBrand);
+    setCompanyTabTouched(true);
+  }, [initialBrand]);
   useEffect(() => {
     if (companyTabTouched) return;
     const isSuperAdmin = me?.orgLevel === "ceo" || me?.isDeveloper;
@@ -280,7 +325,13 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
   }, [viewerProfile, me, companyTabTouched]);
 
   const { data: summary } = useSWR<{ byTab: Record<string, number>; total: number }>(
-    `/api/hr/approvals/summary`,
+    (() => {
+      const qs = [
+        monthFilter ? `month=${encodeURIComponent(monthFilter)}` : "",
+        brandQs ? brandQs.slice(1) : "", // strip the leading "&"
+      ].filter(Boolean).join("&");
+      return `/api/hr/approvals/summary${qs ? `?${qs}` : ""}`;
+    })(),
     fetcher,
     { refreshInterval: 30_000 }
   );
@@ -290,7 +341,7 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
   // adds the rejected / cancelled audit rows.
   const [scope, setScope] = useState<"pending" | "active" | "all">("active");
   const { data: tabData, isLoading, error } = useSWR(
-    `/api/hr/approvals?tab=${tab}&scope=${scope}`,
+    `/api/hr/approvals?tab=${tab}&scope=${scope}${monthQs}${brandQs}`,
     fetcher,
   );
 
@@ -498,7 +549,7 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
     mutate((k: any) =>
       typeof k === "string" && (
         k.startsWith("/api/hr/approvals") ||
-        k === "/api/hr/approvals/summary" ||
+        k.startsWith("/api/hr/approvals/summary") ||
         k.startsWith("/api/hr/leaves") ||
         k.startsWith("/api/hr/attendance/regularize") ||
         k.startsWith("/api/hr/attendance/wfh") ||
@@ -604,8 +655,8 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
               >
                 {t.label.toUpperCase()}
                 {count > 0 && (
-                  <span className={`ml-2 inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 rounded-full text-[10px] font-bold align-top ${
-                    active ? "bg-[#008CFF] text-white" : "bg-[#008CFF]/15 text-[#008CFF]"
+                  <span className={`ml-2 inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 rounded-full text-[10px] font-bold align-top text-white ${
+                    active ? "bg-[#008CFF]" : "bg-[#008CFF]"
                   }`}>
                     {count > 99 ? "99+" : count}
                   </span>
@@ -655,23 +706,30 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
           </div>
         </div>
 
-        {/* Legal Entity scope — single-select dropdown that scopes the
-            queue to NB Media / YT Labs / All. Replaces the old three-
-            button "Brand scope" strip for a more compact, professional
-            look. Same companyTab state powers the filtering. */}
+        {/* Brand scope — pill toggle strip matching LeavesAdminPanel.
+            Lets HR jump between NB Media, YT Labs, and All with one
+            click, and reads at a glance how many requests live in
+            each. Hidden when the panel is mounted from the HR
+            Dashboard sidebar flyout (initialBrand set) since the
+            brand is already chosen at the navigation step.
+            Month picker sits in its own row below — narrows the list
+            AND the per-tab badge counts to the chosen IST month. */}
         {(tab === "regularize" || tab === "wfh" || tab === "comp_off") && (
-          <div className="mb-4 rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/60 px-5 py-4">
-            <label className="block text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 dark:text-slate-500 mb-2">Legal Entity</label>
-            <SelectField
-              value={companyTab}
-              onChange={(v) => { setCompanyTab(v as CompanyTab); setCompanyTabTouched(true); }}
-              options={[
-                { value: "NB Media", label: `NB Media · ${companyCounts.nb}` },
-                { value: "YT Labs",  label: `YT Labs · ${companyCounts.yt}` },
-                { value: "all",      label: `All brands · ${companyCounts.all}` },
-              ]}
-              className="h-9 w-full sm:w-[260px] rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1e3a] px-3 text-[12.5px] text-slate-800 dark:text-white"
-            />
+          <div className="mb-4 rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/60 px-5 py-4 space-y-4">
+            {initialBrand == null && (
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 dark:text-slate-500 mb-2">Brand scope</div>
+                <BrandScopePills
+                  value={companyTab}
+                  counts={companyCounts}
+                  onChange={(v) => { setCompanyTab(v); setCompanyTabTouched(true); }}
+                />
+              </div>
+            )}
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 dark:text-slate-500 mb-2">Filter by</div>
+              <MonthField label="Month" value={monthFilter} onChange={setMonthFilter} width={170} />
+            </div>
           </div>
         )}
 
@@ -871,22 +929,20 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                 filters) with tiny section labels so HR can scan from
                 top to bottom rather than guessing which row does what. */}
             <div className="mb-4 rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/60 px-5 py-4 space-y-4">
-              {/* Section: Legal Entity scope — single-select dropdown
-                  instead of the previous 3-button "Brand scope" strip
-                  for a cleaner / more professional look. */}
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 dark:text-slate-500 mb-2">Legal Entity</label>
-                <SelectField
-                  value={companyTab}
-                  onChange={(v) => { setCompanyTab(v as CompanyTab); setCompanyTabTouched(true); }}
-                  options={[
-                    { value: "NB Media", label: `NB Media · ${companyCounts.nb}` },
-                    { value: "YT Labs",  label: `YT Labs · ${companyCounts.yt}` },
-                    { value: "all",      label: `All brands · ${companyCounts.all}` },
-                  ]}
-                  className="h-9 w-full sm:w-[260px] rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1e3a] px-3 text-[12.5px] text-slate-800 dark:text-white"
-                />
-              </div>
+              {/* Section: Brand scope — pill toggle strip. One-click
+                  jump between NB Media / YT Labs / All with count
+                  badges visible at a glance. Hidden when initialBrand
+                  is set — the sidebar flyout already locked the brand. */}
+              {initialBrand == null && (
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 dark:text-slate-500 mb-2">Brand scope</div>
+                  <BrandScopePills
+                    value={companyTab}
+                    counts={companyCounts}
+                    onChange={(v) => { setCompanyTab(v); setCompanyTabTouched(true); }}
+                  />
+                </div>
+              )}
 
               {/* Section: Detailed filters (dropdowns) */}
               <div>
@@ -900,10 +956,9 @@ export default function ApprovalsPanel({ embedded = false }: { embedded?: boolea
                   ) : null}
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <FilterDropdown label="Business Unit" options={buOpts}        selected={fBU}        onChange={setFBU}        />
                   <FilterDropdown label="Department"    options={deptOpts}      selected={fDept}      onChange={setFDept}      width={280} />
-                  <FilterDropdown label="Location"      options={locOpts}       selected={fLoc}       onChange={setFLoc}       />
                   <FilterDropdown label="Leave Status"  options={statusOpts}    selected={fStatus}    onChange={setFStatus}    width={220} />
+                  <MonthField label="Month" value={monthFilter} onChange={setMonthFilter} width={170} />
                 </div>
               </div>
             </div>
@@ -1140,6 +1195,51 @@ function RejectReasonModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Brand scope pill toggle ───────────────────────────────────────
+// Three-button strip (NB Media / YT Labs / All) with live count
+// badges. Used in two places in this panel — the standalone scope
+// strip above the regularize/wfh/comp_off tables, and inside the
+// Leave-approvals filter drawer. Same visual treatment as the
+// equivalent control on the Leaves admin matrix.
+type CompanyScope = "NB Media" | "YT Labs" | "all";
+function BrandScopePills({
+  value, counts, onChange,
+}: {
+  value: CompanyScope;
+  counts: { nb: number; yt: number; all: number };
+  onChange: (v: CompanyScope) => void;
+}) {
+  const items: Array<{ key: CompanyScope; label: string; count: number }> = [
+    { key: "NB Media", label: "NB Media", count: counts.nb  },
+    { key: "YT Labs",  label: "YT Labs",  count: counts.yt  },
+    { key: "all",      label: "All",      count: counts.all },
+  ];
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {items.map(({ key, label, count }) => {
+        const active = value === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onChange(key)}
+            className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
+              active
+                ? "bg-[#008CFF] text-white shadow-sm"
+                : "bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10"
+            }`}
+          >
+            <span>{label}</span>
+            <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold !text-white ${
+              active ? "bg-white/20" : "bg-[#008CFF]"
+            }`} style={{ color: "#fff" }}>{count}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
