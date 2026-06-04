@@ -8,10 +8,11 @@ import { useState, useEffect, useRef, useCallback, type MutableRefObject, type R
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
-import { isAdmin as isAdminFn, isHRAdmin as isHRAdminFn, canSeeReports as canSeeReportsFn } from "@/lib/access";
+import { canUseFeedback, isAdmin as isAdminFn, isHRAdmin as isHRAdminFn, canSeeReports as canSeeReportsFn } from "@/lib/access";
 import { can } from "@/lib/permissions/can";
+
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
-import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench, Target, Package } from "lucide-react";
+import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench, Target, Package, Box } from "lucide-react";
 
 // Consistent Keka-style icon: thin outline, fixed size / stroke.
 const icon = (Cmp: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>) => (
@@ -56,19 +57,33 @@ export default function Sidebar() {
     // CEO-only items stay restricted to the actual CEO + developers — `Dashboard`
     // is the org-wide CEO console, not appropriate for special_access.
     const isCeo = user?.orgLevel === "ceo" || user?.isDeveloper === true;
-    // YT Labs CEO (Kunal) is brand-scoped — they see ONLY the 10
+    // YT Labs CEO (Kunal) is brand-scoped — they see ONLY the 9
     // sections HR carved out for the YT Labs sub-dashboard:
-    //   Home · Me · My Finances · Feedback · Tools · KPIs · Violation
-    //   Log · HR Dashboard · My Team · People
+    //   Home · Me · My Finances · Tools · KPIs · Violation Log ·
+    //   HR Dashboard · My Team · People
     // Everything else (Dashboard / Cases / Company / Scores / YouTube /
-    // Admin / Reports) is hidden even though they pass the broader
-    // CEO checks above. NB Media CEO + developers keep full visibility.
+    // Admin / Reports / Feedback) is hidden even though they pass the
+    // broader CEO checks above. NB Media CEO + developers keep full
+    // visibility. (Feedback is now brand-gated separately via
+    // canUseFeedback — hidden for ALL YT Labs users, not just the CEO.)
     const isYtLabsCeo = user?.orgLevel === "ceo" && user?.businessUnit === "YT Labs";
     // Permission-aware (designation-driven) via the shared helpers — they
     // dual-read can() when the session carries permissions, else fall back
     // to the legacy role logic (admin / manager / hod / hr_manager etc.).
     const canSeeReports = canSeeReportsFn(user);
     const canSeeViolationLog = can(user, "VIEW_VIOLATIONS");
+    // Assets in the main sidebar — visible to EVERYONE. The page
+    // itself scopes what they see:
+    //   • MANAGE_ASSETS (IT Security tier / HR / CEO / devs)
+    //     → full register with admin actions.
+    //   • Everyone else → read-only "my assets" view of just the
+    //     items currently assigned to them (the API enforces this
+    //     server-side regardless of any client-side spoofing).
+    // We deliberately KEEP the tile visible for HR admins too —
+    // they previously navigated via HR Dashboard, but having Assets
+    // directly in the sidebar is a small UX win and the HR Dashboard
+    // entry stays there as well.
+    const showAssetsTab = true;
     const showFeedbackSubmenu = canViewFeedbackInbox(user);
 
     // Tab-permission overrides — the caller's personal map from
@@ -83,9 +98,11 @@ export default function Sidebar() {
     const tabAllowed = (key: string) => (perms?.permissions?.[key] ?? true);
 
     // YT Labs CEO allowlist for the global NAV_ITEMS strip — only
-    // Feedback and Tools survive. Everything else (Dashboard, Cases,
-    // Company, Scores, YouTube, Admin) is hidden regardless of role.
-    const YT_CEO_NAV_ALLOWED = new Set(["Feedback", "Tools"]);
+    // Tools survives. Everything else (Dashboard, Cases, Company,
+    // Scores, YouTube, Admin) is hidden regardless of role. Feedback
+    // is brand-gated via canUseFeedback below (hidden for ALL YT Labs
+    // users, including this CEO).
+    const YT_CEO_NAV_ALLOWED = new Set(["Tools"]);
 
     const visibleItems = NAV_ITEMS.filter((item) => {
         const label = (item as any).label as string;
@@ -93,10 +110,15 @@ export default function Sidebar() {
         // brand restriction before any other rule so a role bypass
         // (isCeo / isAdmin) can't accidentally re-grant access.
         if (isYtLabsCeo && !YT_CEO_NAV_ALLOWED.has(label)) return false;
-        // Menu items are gated purely by designation permissions now — the old
-        // per-user tabAllowed layer is replaced by the can()-backed helper flags
-        // below. YouTube keeps its extra brand + VIEW_YOUTUBE_DASHBOARD gate.
-        // Items with NO flag (Feedback, Tools) stay visible to everyone.
+        // Brand-wide: Feedback is hidden for ALL YT Labs users (not just the
+        // CEO). NB Media users + role bypasses unaffected. This brand gate is
+        // orthogonal to the permission migration below and always applies.
+        if (label === "Feedback" && !canUseFeedback(user)) return false;
+        // Menu items are otherwise gated purely by designation permissions
+        // now — the old per-user tabAllowed/keyMap catalog layer is replaced
+        // by the can()-backed helper flags below (ceoOnly / managersOnly /
+        // adminOnly / developerOnly). YouTube keeps its extra brand +
+        // VIEW_YOUTUBE_DASHBOARD gate. Items with NO flag (Tools) stay visible.
         if ((item as any).youtubeDashboardAccess && !userCanAccessYoutubeDashboard(user)) return false;
         if ((item as any).ceoOnly && !isCeo) return false;
         if ((item as any).managersOnly && !canSeeReports) return false;
@@ -661,6 +683,30 @@ export default function Sidebar() {
                                 </svg>
                             </span>
                             Violation Log
+                        </Link>
+                    );
+                })()}
+
+                {/* Assets — surfaced to IT Security / IT Security Intern
+                    designations only (everyone with MANAGE_ASSETS but
+                    NOT MANAGE_HR). HR tiers reach this page through the
+                    HR Dashboard. Links to the standalone
+                    /dashboard/hr/assets route (same AssetsPanel that
+                    HR Dashboard mounts). */}
+                {showAssetsTab && (() => {
+                    const isActive = pathname.startsWith("/dashboard/hr/assets");
+                    return (
+                        <Link
+                            href="/dashboard/hr/assets"
+                            className={cn(
+                                "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
+                                isActive
+                                    ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
+                                    : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
+                            )}
+                        >
+                            <Box size={18} strokeWidth={1.5} className={isActive ? "text-[#0f6ecd]" : ""} />
+                            Assets
                         </Link>
                     );
                 })()}

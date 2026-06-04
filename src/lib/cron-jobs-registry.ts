@@ -12,6 +12,7 @@ export type CronJobId =
   | "ratings"
   | "all_sync"
   | "violation_reminders"
+  | "probation_reminders"
   | "auto_lop";
 
 export type CronJobDefinition = {
@@ -61,10 +62,18 @@ export const CRON_JOB_DEFINITIONS: CronJobDefinition[] = [
   },
   {
     id: "violation_reminders",
-    name: "Violation in-progress reminders",
+    name: "Violation in-progress reminders + manager follow-up",
     description:
-      "Emails HR / CEO / admins / special_access / developers about every violation that has been 'in progress' for 15+ days. Throttled per-violation via lastReminderAt — only nudges every 15 days.",
-    // Run daily; the per-row 15-day throttle keeps the email volume sane.
+      "Two emails fire from this daily cron: (1) Every 15+ days, nudges HR / CEO / admins / special_access / developers about any 'in progress' violation (throttled per-violation via lastReminderAt). (2) Once at day 23 (= 30 - 7), sends a follow-up to the reported employee's reporting manager asking for a status update before the implicit 1-month mark. Dedupe via followUpSentAt — each violation triggers the follow-up exactly once.",
+    // Run daily; per-row throttles (lastReminderAt + followUpSentAt)
+    // keep the actual email volume sane.
+    defaultIntervalHours: 24,
+  },
+  {
+    id: "probation_reminders",
+    name: "Probation ending reminders",
+    description:
+      "Daily sweep: for every active employee whose probationEndDate is within the next 7 days AND hasn't been reminded yet, emails HR + the employee's reporting manager. Stamps probationReminderSentAt so the cron never double-sends — that stamp is auto-cleared when HR edits the end date so extensions re-arm cleanly. Email includes one-click extension links (+1 month / +2 months / custom).",
     defaultIntervalHours: 24,
   },
   {

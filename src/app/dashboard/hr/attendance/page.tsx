@@ -1963,7 +1963,15 @@ export default function AttendancePage() {
                             else if (rec.isRegularized) disableReason = "This date has already been regularized";
                             else if (onLeave)           disableReason = "You're on leave for this date";
                             else if (approvedWfh)       disableReason = "WFH is approved for this date";
-                            else if (met9h)             disableReason = "9 hours already completed — nothing to regularize";
+                            // `met9h` alone isn't a valid disabler when the
+                            // clock-out was actually missed — the row's
+                            // liveMins can hit 9h via a system estimate /
+                            // the missed-clockout sweeper while the real
+                            // clock-out time is still unset, which is
+                            // exactly the case the user needs to
+                            // regularize. Only suppress when the day was
+                            // clocked cleanly end-to-end.
+                            else if (met9h && !missedClockOut) disableReason = "9 hours already completed — nothing to regularize";
                             return (
                               <RowMenu
                                 onRegularize={() => { setRegPrefillDate(dateIso); setShowRegModal(true); }}
