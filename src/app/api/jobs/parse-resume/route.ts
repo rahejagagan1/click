@@ -603,6 +603,51 @@ function clusterEducationByShape(text: string): ExtractedEducation[] {
 // in two-column resumes). Within the window, find runs of adjacent
 // lines where one is institutional and the other is a degree — emit
 // one entry per pair. No year required (left blank if absent).
+// Numbered prose-narrative format common on Indian resumes —
+// "1.Passed Post Graduation in X (Y) from Z, City in 2022." across
+// multiple lines after pdfjs word-wrap. Other scanners can't bridge
+// the wrap, so we whitespace-collapse the whole document then match
+// the very specific shape:
+//   N. Passed <DEGREE+SUBJECT> from <INSTITUTION> in <YEAR | YEAR-RANGE>.
+// Three required anchors (numbered prefix + "Passed" + "from" + "in" +
+// year + terminating ".") keep the false-positive rate low — random
+// English prose almost never hits all of them in order.
+function scanEducationProsePassed(text: string): ExtractedEducation[] {
+  // Collapse every run of whitespace (including newlines from pdfjs's
+  // word-wrap) into a single space so the regex can match across
+  // wrapped lines.
+  const joined = text.replace(/\s+/g, " ");
+  const RE = /\b\d+\.\s*Passed\s+([^.]+?)\s+from\s+([^.]+?)\s+in\s+((?:19|20)\d{2}(?:\s*[-–—]\s*\d{2,4})?)\s*\./gi;
+  const out: ExtractedEducation[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = RE.exec(joined)) !== null) {
+    // Course: degree + subject narrative. Strip the "with X.X%" tail
+    // that sometimes leaks into the degree string (e.g. "Intermediate
+    // with 63.5%").
+    let course = m[1].trim().replace(/\s+with\s+\d+(?:\.\d+)?\s*%.*$/i, "").trim();
+    if (course.length > 100) course = course.slice(0, 100);
+    let university = m[2].trim();
+    if (university.length > 120) university = university.slice(0, 120);
+    const yearStr = m[3].trim();
+    const ys = yearStr.match(/\d{4}/g) ?? [];
+    let startOfCourse = "", endOfCourse = "";
+    if (ys.length === 1) {
+      endOfCourse = ys[0] ?? "";
+    } else if (ys.length >= 2) {
+      const a = ys[0] ?? "";
+      const b = ys[1] ?? "";
+      startOfCourse = a;
+      // "2015-16" → end becomes "2016" (prefix the first two digits
+      // of the start year onto a 2-digit suffix).
+      endOfCourse = b.length === 2 ? a.slice(0, 2) + b : b;
+    }
+    if (course || university) {
+      out.push({ course, branch: "", startOfCourse, endOfCourse, university, location: "" });
+    }
+  }
+  return out.slice(0, 8);
+}
+
 function scanEducationSectionLoose(text: string): ExtractedEducation[] {
   const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
   // Header has to be ALONE on the line (or only with a few decorative
