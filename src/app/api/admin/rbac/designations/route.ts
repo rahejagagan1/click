@@ -15,6 +15,23 @@ export async function GET() {
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!canManageDesignations(session)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
+  // Self-heal: ensure every code-defined permission exists as a row, so a newly
+  // added catalog permission is immediately grantable on ANY database without a
+  // manual re-seed. Prevents the "ticked it but it didn't save" drift that
+  // happens when the code has a permission the DB hasn't been seeded with.
+  try {
+    for (const perm of PERMISSION_CATALOG) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "Permission" ("key","label","description","category","sensitive","createdAt","updatedAt")
+         VALUES ($1,$2,$3,$4,$5,NOW(),NOW())
+         ON CONFLICT ("key") DO UPDATE SET
+           "label"=EXCLUDED."label","description"=EXCLUDED."description",
+           "category"=EXCLUDED."category","sensitive"=EXCLUDED."sensitive","updatedAt"=NOW()`,
+        perm.key, perm.label, perm.description, perm.category, !!perm.sensitive
+      );
+    }
+  } catch { /* RBAC tables missing pre-migration → ignore */ }
+
   const designations = await prisma.$queryRawUnsafe<
     { id: number; key: string; label: string; scorecardFunction: string | null;
       isActive: boolean; isSystem: boolean; sortOrder: number; userCount: number }[]
