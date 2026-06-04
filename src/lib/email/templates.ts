@@ -420,7 +420,17 @@ export function hrLateSummaryEmail(args: {
   absent: Array<{ name: string; department: string | null }>;
   late:   Array<{ name: string; department: string | null; clockIn: Date | null }>;
   totals: { absent: number; late: number; onTime: number; onLeave: number };
+  /** Optional label shown in the header ("Daily Attendance · <fireTimeLabel>")
+   *  and the text-version preamble. Defaults to "10:05 AM IST" to preserve
+   *  the legacy NB-Media-only behavior. The split-brand scheduler passes
+   *  the actual fire time so each brand's email reflects its own send slot. */
+  fireTimeLabel?: string;
+  /** Optional label shown in the "Late · clocked in after X" heading and
+   *  the text-version equivalent. Defaults to "10:00 IST". */
+  cutoffLabel?: string;
 }): EmailContent {
+  const fireTimeLabel = args.fireTimeLabel ?? "10:05 AM IST";
+  const cutoffLabel   = args.cutoffLabel   ?? "10:00 IST";
   const subject = `Attendance — ${fmtDate(args.today)} · ${args.totals.absent} absent · ${args.totals.late} late`;
   const fmtTime = (d: Date | null) =>
     d ? d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "—";
@@ -488,7 +498,7 @@ export function hrLateSummaryEmail(args: {
     <!-- Header: just the date, lightly styled. No coloured banner. -->
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 4px">
       <tr>
-        <td style="font-family:${FONT};font-size:11px;color:#64748b;letter-spacing:0.12em;text-transform:uppercase;font-weight:700">Daily Attendance · 10:05 AM IST</td>
+        <td style="font-family:${FONT};font-size:11px;color:#64748b;letter-spacing:0.12em;text-transform:uppercase;font-weight:700">Daily Attendance · ${fireTimeLabel}</td>
       </tr>
       <tr>
         <td style="font-family:${FONT};font-size:20px;font-weight:700;color:#0f172a;line-height:1.3;padding-top:4px">${weekday}, ${dateStr}</td>
@@ -500,7 +510,7 @@ export function hrLateSummaryEmail(args: {
     ${statsLine}
 
     ${renderSection("Absent · no clock-in, no leave", "#dc2626", args.absent.length, absentRows, "Nobody absent today.")}
-    ${renderSection("Late · clocked in after 10:00 IST", "#ea580c", args.late.length, lateRows, "Everyone clocked in on time.")}
+    ${renderSection(`Late · clocked in after ${cutoffLabel}`, "#ea580c", args.late.length, lateRows, "Everyone clocked in on time.")}
 
     <!-- CTA: simple inline link button. -->
     <div style="margin-top:28px;border-top:1px solid #e2e8f0;padding-top:18px">
@@ -515,13 +525,13 @@ export function hrLateSummaryEmail(args: {
     </p>`;
 
   const textRows = [
-    `Daily Attendance — ${weekday}, ${dateStr} (10:05 AM IST)`,
+    `Daily Attendance — ${weekday}, ${dateStr} (${fireTimeLabel})`,
     `${args.totals.absent} absent · ${args.totals.late} late · ${args.totals.onTime} on time · ${args.totals.onLeave} on leave (${headcount} in scope)`,
     ``,
     `ABSENT (${args.totals.absent})`,
     ...(args.absent.length ? args.absent.map((r) => `  • ${r.name}${r.department ? ` — ${r.department}` : ""}`) : ["  (none)"]),
     ``,
-    `LATE (${args.totals.late}) — clocked in after 10:00 IST`,
+    `LATE (${args.totals.late}) — clocked in after ${cutoffLabel}`,
     ...(args.late.length ? args.late.map((r) => `  • ${r.name}${r.department ? ` — ${r.department}` : ""} · ${fmtTime(r.clockIn)}`) : ["  (none)"]),
     ``,
     `Open: ${link}`,
@@ -1004,6 +1014,194 @@ export function violationInProgressReminderEmail(args: {
     ``,
     `Open: ${link}`,
   ].filter(Boolean).join("\n");
+  return { subject, html: SHELL(subject, body), text };
+}
+
+// ── Pre-resolution follow-up to the reporting manager ────────────────
+// Fires once at ~day 23 (= 30 - 7) of an open / in_progress violation —
+// asks the affected employee's reporting manager for a status check:
+// improvement seen? Any actions taken? Should this be closed or
+// escalated? Distinct from the 15-day "still open" reminder above:
+//   • The 15-day reminder goes to HR / admins (org-wide bystanders)
+//   • This follow-up goes to the manager who's actually accountable
+//     for the person and best placed to give a status update.
+// The cron stamps Violation.followUpSentAt so we send only once per
+// violation; the violations page renders a "follow-up email sent"
+// badge under the Manager row when this is set.
+export function violationFollowUpEmail(args: {
+  recipientName?: string | null;          // manager's name (greeting)
+  affectedUserName: string;               // the reported employee
+  title: string;
+  daysOpen: number;
+  severity: string;
+  category?: string | null;
+  reporterName?: string | null;
+  actionTaken?: string | null;
+}): EmailContent {
+  const subject = `Follow-up: ${args.affectedUserName}'s violation · ${args.title}`;
+  const link = `${appUrl()}/dashboard/violations`;
+  const sev = SEVERITY_LABEL[args.severity] ?? args.severity;
+  const sevTint = SEVERITY_TINT[args.severity] ?? SEVERITY_TINT.medium;
+
+  const rows: string[] = [];
+  rows.push(vRow("Employee", escape(args.affectedUserName)));
+  rows.push(vRow("Title",    escape(args.title)));
+  if (args.category)     rows.push(vRow("Category", escape(args.category)));
+  rows.push(vRow("Severity", `<span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:700;background:${sevTint.bg};color:${sevTint.text}">${escape(sev)}</span>`));
+  rows.push(vRow("Open for", `${args.daysOpen} day${args.daysOpen === 1 ? "" : "s"}`));
+  if (args.reporterName) rows.push(vRow("Reported by", escape(args.reporterName)));
+
+  // Soft callout — phrased as a manager-facing question, not a "you're
+  // behind" warning. The 15-day reminder uses the orange day-counter;
+  // this one uses a calmer indigo so HR can tell the two emails apart.
+  const callout = `
+    <div style="margin:0 0 16px;padding:14px 16px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px">
+      <p style="margin:0;font-size:13px;color:#3730a3;line-height:1.55">
+        This violation has been open for around <strong>${args.daysOpen} days</strong> and is approaching the 1-month mark. Could you share a quick status update — improvement seen, action taken, or anything that should be flagged?
+      </p>
+    </div>`;
+
+  const body = `
+    <p style="margin:0 0 12px;font-size:14px;color:#1f2937;line-height:1.6">
+      ${args.recipientName ? `Hi ${escape(args.recipientName)},` : "Hi,"}
+    </p>
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      A quick check-in on a violation involving someone on your team.
+    </p>
+    ${callout}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      ${rows.join("")}
+    </table>
+    ${args.actionTaken ? sectionCard("Last action taken", args.actionTaken) : ""}
+    <p style="margin:20px 0 0;padding:12px 14px;background:#f8fafc;border-left:3px solid #6366f1;border-radius:0 6px 6px 0;font-size:12.5px;color:#475569;line-height:1.55">
+      Reply with a brief status, or open the dashboard to add an action / close the violation if the issue's resolved.
+    </p>
+    ${ctaButton("Open the violation", link)}
+  `;
+  const text = [
+    args.recipientName ? `Hi ${args.recipientName},` : "Hi,",
+    `Follow-up on a violation involving ${args.affectedUserName} — open for around ${args.daysOpen} days and approaching the 1-month mark.`,
+    ``,
+    `Employee: ${args.affectedUserName}`,
+    `Title: ${args.title}`,
+    args.category ? `Category: ${args.category}` : null,
+    `Severity: ${sev}`,
+    `Open for: ${args.daysOpen} day${args.daysOpen === 1 ? "" : "s"}`,
+    args.reporterName ? `Reported by: ${args.reporterName}` : null,
+    args.actionTaken ? `\nLast action taken:\n${args.actionTaken}` : null,
+    ``,
+    `Could you share a brief status — improvement, action taken, or anything to flag?`,
+    `Open: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html: SHELL(subject, body), text };
+}
+
+// ── Probation ending soon (7 days out) ───────────────────────────────
+// Fires once per employee, ~7 days before EmployeeProfile.probationEndDate.
+// Recipients: HR (special_access + role=hr_manager) + the employee's
+// reporting manager. The email gives HR a chance to plan the
+// confirmation review OR extend probation in one click.
+//
+// Extension CTAs deep-link to the People page with query params the
+// page reads to auto-open the quick-extend modal:
+//   ?extendProbation=1m   → +1 month
+//   ?extendProbation=2m   → +2 months
+//   ?extendProbation=custom → opens the modal with a custom date picker
+// HR still has to confirm in the UI — the email itself doesn't mutate
+// any data, so accidental clicks don't change probation dates.
+export function probationEndingReminderEmail(args: {
+  recipientName?: string | null;            // greets the HR person / manager
+  employeeName: string;                     // the person on probation
+  employeeId?: string | null;               // HRM No.
+  joiningDate?: Date | null;
+  probationEndDate: Date;                   // when probation ends (required)
+  daysRemaining: number;                    // <= 7
+  managerName?: string | null;
+  department?: string | null;
+  /// User ID of the person on probation — used to build the
+  /// deep-link to the People page so HR lands directly on the right
+  /// employee from the email.
+  employeeUserId: number;
+}): EmailContent {
+  const fmt = (d: Date | null | undefined) =>
+    d ? d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
+  const subject = `Probation ending soon · ${args.employeeName} (${args.daysRemaining} day${args.daysRemaining === 1 ? "" : "s"})`;
+
+  const peopleLink = (suffix: string) =>
+    `${appUrl()}/dashboard/hr/people/${args.employeeUserId}${suffix}`;
+
+  // Header callout — calm indigo (matches the violation follow-up
+  // palette so HR can pattern-match "this is a scheduled HR check-in,
+  // not a fire").
+  const callout = `
+    <div style="margin:0 0 16px;padding:16px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;text-align:center">
+      <p style="margin:0;font-size:10.5px;color:#3730a3;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Probation ends in</p>
+      <p style="margin:6px 0 0;font-size:32px;font-weight:700;color:#3730a3;line-height:1">${args.daysRemaining}<span style="font-size:14px;font-weight:600;margin-left:4px">day${args.daysRemaining === 1 ? "" : "s"}</span></p>
+      <p style="margin:6px 0 0;font-size:11.5px;color:#3730a3">${escape(args.employeeName)} · ends ${fmt(args.probationEndDate)}</p>
+    </div>`;
+
+  const rows: string[] = [];
+  rows.push(vRow("Employee",      escape(args.employeeName)));
+  if (args.employeeId)   rows.push(vRow("HRM No.",    escape(args.employeeId)));
+  if (args.department)   rows.push(vRow("Department", escape(args.department)));
+  if (args.managerName)  rows.push(vRow("Reporting Manager", escape(args.managerName)));
+  if (args.joiningDate)  rows.push(vRow("Joined",     fmt(args.joiningDate)));
+  rows.push(vRow("Probation Ends", fmt(args.probationEndDate)));
+
+  // Extension shortcut row — three buttons that deep-link to the
+  // People page with the quick-extend modal pre-opened. Stacked
+  // vertically for predictable rendering on mobile.
+  const extensionCTAs = `
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:18px 0 0;border-collapse:collapse;width:100%">
+      <tr>
+        <td style="padding:0 0 8px;font-family:${FONT};font-size:11px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:0.08em">Need more time? Extend probation:</td>
+      </tr>
+      <tr>
+        <td style="padding:0">
+          <a href="${peopleLink("?extendProbation=1m")}" style="display:inline-block;margin:0 8px 8px 0;background:#ffffff;color:#3730a3;text-decoration:none;font-family:${FONT};font-size:12.5px;font-weight:600;padding:8px 14px;border:1px solid #c7d2fe;border-radius:6px">Extend by 1 month</a>
+          <a href="${peopleLink("?extendProbation=2m")}" style="display:inline-block;margin:0 8px 8px 0;background:#ffffff;color:#3730a3;text-decoration:none;font-family:${FONT};font-size:12.5px;font-weight:600;padding:8px 14px;border:1px solid #c7d2fe;border-radius:6px">Extend by 2 months</a>
+          <a href="${peopleLink("?extendProbation=custom")}" style="display:inline-block;margin:0 0 8px 0;background:#ffffff;color:#3730a3;text-decoration:none;font-family:${FONT};font-size:12.5px;font-weight:600;padding:8px 14px;border:1px solid #c7d2fe;border-radius:6px">Custom date…</a>
+        </td>
+      </tr>
+    </table>`;
+
+  const body = `
+    <p style="margin:0 0 12px;font-size:14px;color:#1f2937;line-height:1.6">
+      ${args.recipientName ? `Hi ${escape(args.recipientName)},` : "Hi,"}
+    </p>
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      Heads-up — ${escape(args.employeeName)}'s probation period is wrapping up. A confirmation review (or an extension) should happen before the end date.
+    </p>
+    ${callout}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      ${rows.join("")}
+    </table>
+    ${extensionCTAs}
+    <p style="margin:18px 0 0;padding:12px 14px;background:#f8fafc;border-left:3px solid #6366f1;border-radius:0 6px 6px 0;font-size:12.5px;color:#475569;line-height:1.55">
+      Extension buttons open the employee's profile with a confirmation modal — they don't change anything until you confirm. Use "Custom date" if you need a specific end date.
+    </p>
+    ${ctaButton("Open employee profile", peopleLink(""))}
+  `;
+
+  const text = [
+    args.recipientName ? `Hi ${args.recipientName},` : "Hi,",
+    `${args.employeeName}'s probation ends in ${args.daysRemaining} day${args.daysRemaining === 1 ? "" : "s"} (${fmt(args.probationEndDate)}).`,
+    ``,
+    `Employee: ${args.employeeName}`,
+    args.employeeId   ? `HRM No.: ${args.employeeId}` : null,
+    args.department   ? `Department: ${args.department}` : null,
+    args.managerName  ? `Reporting Manager: ${args.managerName}` : null,
+    args.joiningDate  ? `Joined: ${fmt(args.joiningDate)}` : null,
+    `Probation Ends: ${fmt(args.probationEndDate)}`,
+    ``,
+    `Need more time? Extend probation:`,
+    `  +1 month  : ${peopleLink("?extendProbation=1m")}`,
+    `  +2 months : ${peopleLink("?extendProbation=2m")}`,
+    `  Custom    : ${peopleLink("?extendProbation=custom")}`,
+    ``,
+    `Open profile: ${peopleLink("")}`,
+  ].filter(Boolean).join("\n");
+
   return { subject, html: SHELL(subject, body), text };
 }
 
