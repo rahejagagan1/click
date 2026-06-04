@@ -61,10 +61,11 @@ export const CRON_JOB_DEFINITIONS: CronJobDefinition[] = [
   },
   {
     id: "violation_reminders",
-    name: "Violation in-progress reminders",
+    name: "Violation in-progress reminders + manager follow-up",
     description:
-      "Emails HR / CEO / admins / special_access / developers about every violation that has been 'in progress' for 15+ days. Throttled per-violation via lastReminderAt — only nudges every 15 days.",
-    // Run daily; the per-row 15-day throttle keeps the email volume sane.
+      "Two emails fire from this daily cron: (1) Every 15+ days, nudges HR / CEO / admins / special_access / developers about any 'in progress' violation (throttled per-violation via lastReminderAt). (2) Once at day 23 (= 30 - 7), sends a follow-up to the reported employee's reporting manager asking for a status update before the implicit 1-month mark. Dedupe via followUpSentAt — each violation triggers the follow-up exactly once.",
+    // Run daily; per-row throttles (lastReminderAt + followUpSentAt)
+    // keep the actual email volume sane.
     defaultIntervalHours: 24,
   },
   {
