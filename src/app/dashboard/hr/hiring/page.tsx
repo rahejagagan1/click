@@ -19,6 +19,7 @@
 // — no new dependency added.
 
 import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import { isHRAdmin } from "@/lib/access";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import { Briefcase, Settings, BarChart3, LayoutDashboard, UserPlus } from "lucide-react";
@@ -47,6 +48,22 @@ export default function HiringPage() {
   // URL-synced so refresh / share-link returns to the same tab.
   const [tab, setTab] = useUrlTab<TabKey>("tab", "dashboard", TAB_KEYS);
 
+  // Brand scope from `?brand=` — the HR Dashboard sidebar flyout
+  // ships kebab-case slugs ("nb-media" / "yt-labs"). The hiring
+  // schema stores them with underscores ("nb_media" / "yt_labs"),
+  // so we convert once here and pass the underscore form down to
+  // JobsTab. Empty string = no scope (same as old behaviour).
+  const searchParams = useSearchParams();
+  const brandSlug = (searchParams?.get("brand") || "").toLowerCase();
+  const initialBrand =
+    brandSlug === "yt-labs" || brandSlug === "yt"      ? "yt_labs" :
+    brandSlug === "nb-media" || brandSlug === "nb"     ? "nb_media" :
+    "";
+  const brandBadge =
+    initialBrand === "yt_labs" ? "YT Labs" :
+    initialBrand === "nb_media" ? "NB Media" :
+    null;
+
   if (!canManage) {
     return (
       <div className="px-6 py-12 text-center text-slate-500 text-[14px]">
@@ -61,6 +78,11 @@ export default function HiringPage() {
       <header className="mb-5">
         <h1 className="text-[20px] font-bold text-slate-800 inline-flex items-center gap-2">
           <Briefcase size={20} className="text-[#008CFF]" /> Hiring
+          {brandBadge && (
+            <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#008CFF]/10 text-[#008CFF]">
+              {brandBadge}
+            </span>
+          )}
         </h1>
         <p className="mt-1 text-[12.5px] text-slate-500">
           Manage job openings, candidate pipelines, interviews, offers, and email automation — all in one console.
@@ -94,7 +116,7 @@ export default function HiringPage() {
 
       {/* Active tab content */}
       {tab === "dashboard"   && <DashboardTab />}
-      {tab === "jobs"        && <JobsTab />}
+      {tab === "jobs"        && <JobsTab initialBrand={initialBrand} />}
       {tab === "preboarding" && <PreboardingTab />}
       {tab === "settings"    && <SettingsTab />}
       {tab === "reports"     && <ReportsTab />}

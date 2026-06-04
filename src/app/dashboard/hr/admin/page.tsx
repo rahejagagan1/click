@@ -1,8 +1,9 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import useSWR, { mutate } from "swr";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { brandFromSlug, slugForBrand, type CompanyBrand } from "@/lib/hr-brand-scope";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
@@ -142,6 +143,24 @@ export default function HRAdminPage() {
   // honoured if it's a valid key for the current viewer.
   const [tab, setTab] = useUrlTab<string>("tab", "attendance-dashboard");
 
+  // ── Brand scope (NB Media vs YT Labs sub-dashboards) ───────────────
+  // The sidebar exposes the HR Dashboard as a hover-flyout with two
+  // brand entries that route here as ?brand=nb-media or ?brand=yt-labs
+  // (and ?brand=all for super-admins). When set, that value is passed
+  // down as `initialBrand` to each panel so they open scoped to that
+  // brand. Absent param → fallback to the in-panel auto-detect (viewer
+  // brand, or "all" for super-admin) — unchanged from before.
+  const searchParams = useSearchParams();
+  const brandParam   = searchParams.get("brand");
+  const initialBrand: CompanyBrand | null = useMemo(
+    () => brandFromSlug(brandParam),
+    [brandParam],
+  );
+  const brandLabel = initialBrand === "NB Media" ? "NB Media"
+                   : initialBrand === "YT Labs"  ? "YT Labs"
+                   : initialBrand === "all"      ? "All brands"
+                   : null;
+
   // If the current tab isn't visible (because tier-curation OR a
   // per-user revoke removed it), snap to the first visible tab. We
   // can't always pick attendance-dashboard since admins might revoke
@@ -162,8 +181,14 @@ export default function HRAdminPage() {
   const { data: employees = [] }  = useSWR("/api/hr/employees?isActive=true", fetcher);
   const { data: holidays = [] }   = useSWR("/api/hr/admin/holidays", fetcher);
   // Pending approvals count — feeds the badge on the "Approvals" rail item.
+  // Forward the URL brand so the badge tracks the current sub-dashboard
+  // (matches what the user sees inside the Approvals panel).
+  const approvalsBrandQs =
+    initialBrand === "YT Labs"  ? "?brand=yt-labs" :
+    initialBrand === "NB Media" ? "?brand=nb-media" :
+    "";
   const { data: approvalsSummary } = useSWR<{ byTab: Record<string, number>; total: number }>(
-    "/api/hr/approvals/summary",
+    `/api/hr/approvals/summary${approvalsBrandQs}`,
     fetcher,
     { refreshInterval: 60_000 }
   );
@@ -344,9 +369,14 @@ export default function HRAdminPage() {
 
   // Company tab scope — splits Department Breakdown into NB Media vs
   // YT Labs so HR can see each brand's org structure in isolation.
-  // "all" combines both. Default to NB Media (parent brand).
+  // "all" combines both. Seeds from the URL brand when present
+  // (sidebar flyout), else default to NB Media (parent brand).
   type CompanyTab = "NB Media" | "YT Labs" | "all";
-  const [companyTab, setCompanyTab] = useState<CompanyTab>("NB Media");
+  const [companyTab, setCompanyTab] = useState<CompanyTab>(initialBrand ?? "NB Media");
+  // Sync to URL brand changes (flyout navigation).
+  useEffect(() => {
+    if (initialBrand != null) setCompanyTab(initialBrand);
+  }, [initialBrand]);
 
   // Apply the company scope to the employees list before grouping by
   // department. Empty businessUnit → bucketed as "NB Media" so legacy
@@ -416,7 +446,14 @@ export default function HRAdminPage() {
         <div className="flex items-center gap-3">
           <Settings className="w-5 h-5 text-[#008CFF]" />
           <div>
-            <h1 className="text-[15px] font-bold text-slate-800 dark:text-white">HR Dashboard</h1>
+            <h1 className="text-[15px] font-bold text-slate-800 dark:text-white">
+              HR Dashboard
+              {brandLabel ? (
+                <span className="ml-2 inline-flex items-center gap-1 align-middle text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#008CFF]/10 text-[#008CFF]">
+                  {brandLabel}
+                </span>
+              ) : null}
+            </h1>
             <p className="text-[12px] text-slate-500 dark:text-slate-400">Attendance, holidays, assets, leave types, shifts & org structure</p>
           </div>
         </div>
@@ -460,7 +497,16 @@ export default function HRAdminPage() {
           <div className="pt-2 mt-2 border-t border-slate-200 dark:border-white/[0.06]" />
           {showOnboardRail && (
             <Link
-              href="/dashboard/hr/onboard"
+              href={
+                // Carry the current brand into onboarding so the form's
+                // Number Series / Legal Entity / Business Unit land
+                // pre-set to YT Labs (or NB Media). The onboarding
+                // page reads ?brand= and seeds its initial form
+                // accordingly; HR can still override.
+                initialBrand && initialBrand !== "all"
+                  ? `/dashboard/hr/onboard?brand=${slugForBrand(initialBrand)}`
+                  : "/dashboard/hr/onboard"
+              }
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
             >
               <UserPlus className="w-4 h-4" />
@@ -470,13 +516,18 @@ export default function HRAdminPage() {
               </svg>
             </Link>
           )}
-          {showTabPermsRail && (
+          {showTabPermsRail && initialBrand !== "YT Labs" && (
             // Permissions group — hover-flyout. Mouse-enter opens the
             // submenu; mouse-leave (anywhere in the wrapper) starts a
             // 200ms grace timer before closing, so the cursor can move
             // from the trigger into the submenu without it snapping shut.
             // The trigger is still a real <button> so keyboard users and
             // touch devices can toggle by click.
+            //
+            // Hidden inside the YT Labs sub-dashboard — Tab Permissions
+            // and Payroll/Attendance toggles are org-wide settings that
+            // shouldn't appear under a single brand. They remain
+            // accessible from NB Media and "All brands".
             <div {...permsHandlers}>
               <button
                 type="button"
@@ -521,70 +572,84 @@ export default function HRAdminPage() {
               )}
             </div>
           )}
-          {showManageKpisRail && (
-            <Link
-              href="/dashboard/kpis/manage"
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
-            >
-              <BarChart3 className="w-4 h-4" />
-              <span className="flex-1">Manage KPIs</span>
-              <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </Link>
-          )}
-          {showMasterSheetRail && (
-            <Link
-              href="/dashboard/hr/admin/master-sheet"
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
-            >
-              <FileSpreadsheet className="w-4 h-4" />
-              <span className="flex-1">Master Sheet</span>
-              <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </Link>
-          )}
-          {showHiringRail && (
-            <Link
-              href="/dashboard/hr/hiring"
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
-            >
-              <Briefcase className="w-4 h-4" />
-              <span className="flex-1">Hiring</span>
-              <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </Link>
-          )}
-          {showOffboardRail && (
-            <Link
-              href="/dashboard/hr/offboard"
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
-            >
-              <UserMinus className="w-4 h-4" />
-              <span className="flex-1">Offboard Employee</span>
-              <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </Link>
-          )}
+          {(() => {
+            // Build a `?brand=…` suffix once so every brand-aware rail
+            // link below stays consistent. We propagate the brand only
+            // when a specific brand is locked (NB Media / YT Labs) —
+            // "all" and the no-param case leave the destination
+            // unfiltered, matching the panel-level behaviour.
+            const brandQs = initialBrand && initialBrand !== "all"
+              ? `?brand=${slugForBrand(initialBrand)}`
+              : "";
+            return (
+              <>
+                {showManageKpisRail && (
+                  <Link
+                    href={`/dashboard/kpis/manage${brandQs}`}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                    <span className="flex-1">Manage KPIs</span>
+                    <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </Link>
+                )}
+                {showMasterSheetRail && (
+                  <Link
+                    href={`/dashboard/hr/admin/master-sheet${brandQs}`}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span className="flex-1">Master Sheet</span>
+                    <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </Link>
+                )}
+                {showHiringRail && (
+                  <Link
+                    href={`/dashboard/hr/hiring${brandQs}`}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+                  >
+                    <Briefcase className="w-4 h-4" />
+                    <span className="flex-1">Hiring</span>
+                    <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </Link>
+                )}
+                {showOffboardRail && (
+                  <Link
+                    href={`/dashboard/hr/offboard${brandQs}`}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+                  >
+                    <UserMinus className="w-4 h-4" />
+                    <span className="flex-1">Offboard Employee</span>
+                    <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </Link>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* Content */}
         <div className="flex-1 p-6 space-y-4">
 
           {/* ── Attendance Dashboard ── */}
-          {tab === "attendance-dashboard" && <AttendanceDashboardPanel />}
+          {tab === "attendance-dashboard" && <AttendanceDashboardPanel initialBrand={initialBrand} />}
 
           {/* ── Approvals — full multi-tab panel (Leave / Comp Offs / WFH / …) ── */}
-          {tab === "approvals" && <ApprovalsPanel embedded />}
+          {tab === "approvals" && <ApprovalsPanel embedded initialBrand={initialBrand} />}
 
           {/* ── Regularization Balance — per-user monthly quota usage ── */}
-          {tab === "regularize-balance" && <RegularizationBalancePanel />}
+          {tab === "regularize-balance" && <RegularizationBalancePanel initialBrand={initialBrand} />}
 
           {/* ── Leaves — admin can edit / cancel / delete any leave ── */}
-          {tab === "leaves" && <LeavesAdminPanel leaveTypes={leaveTypes} />}
+          {tab === "leaves" && <LeavesAdminPanel leaveTypes={leaveTypes} initialBrand={initialBrand} />}
 
           {/* ── Assets ── */}
           {tab === "assets" && <AssetsPanel />}
@@ -739,34 +804,36 @@ export default function HRAdminPage() {
 
             return (
               <>
-                {/* Company tab strip — scopes the entire Department /
-                    Manager breakdown to one brand. */}
-                <div className="flex items-center gap-1.5 mb-2">
-                  {([
-                    { key: "NB Media", count: nbCount },
-                    { key: "YT Labs",  count: ytCount },
-                    { key: "all",      count: employees.length },
-                  ] as const).map(({ key, count }) => {
-                    const active = companyTab === key;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setCompanyTab(key as CompanyTab)}
-                        className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
-                          active
-                            ? "bg-[#008CFF] text-white shadow-sm"
-                            : "bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10"
-                        }`}
-                      >
-                        <span>{key === "all" ? "All" : key}</span>
-                        <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
-                          active ? "bg-white/20 text-white" : "bg-[#008CFF] text-white"
-                        }`}>{count}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+                {/* Company tab strip — hidden when initialBrand is set
+                    (the HR Dashboard sidebar flyout already chose). */}
+                {initialBrand == null && (
+                  <div className="flex items-center gap-1.5 mb-2">
+                    {([
+                      { key: "NB Media", count: nbCount },
+                      { key: "YT Labs",  count: ytCount },
+                      { key: "all",      count: employees.length },
+                    ] as const).map(({ key, count }) => {
+                      const active = companyTab === key;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setCompanyTab(key as CompanyTab)}
+                          className={`px-3.5 h-8 rounded-lg text-[12px] font-semibold transition-colors inline-flex items-center gap-2 ${
+                            active
+                              ? "bg-[#008CFF] text-white shadow-sm"
+                              : "bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10"
+                          }`}
+                        >
+                          <span>{key === "all" ? "All" : key}</span>
+                          <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold !text-white ${
+                            active ? "bg-white/20" : "bg-[#008CFF]"
+                          }`} style={{ color: "#fff" }}>{count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Header + sub-tabs */}
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

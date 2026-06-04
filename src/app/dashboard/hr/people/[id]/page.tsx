@@ -822,6 +822,8 @@ export default function EmployeeDetailPage() {
                     workLocation={p?.workLocation ?? null}
                     targetOrgLevel={user.orgLevel ?? null}
                     targetIsDeveloper={user.isDeveloper === true}
+                    shiftStartTime={user.shift?.startTime ?? null}
+                    shiftBreakMinutes={user.shift?.breakMinutes ?? null}
                   />
                 )}
               </section>
@@ -2014,12 +2016,18 @@ function TimelineBar({
 function EmployeeTimePanel({
   userId, userName, isHRAdmin, meDbId, joiningDate, workLocation,
   targetOrgLevel, targetIsDeveloper,
+  shiftStartTime, shiftBreakMinutes,
 }: {
   userId: number; userName: string; isHRAdmin: boolean; meDbId: number | null;
   joiningDate?: string | null;
   workLocation?: string | null;
   targetOrgLevel?: string | null;
   targetIsDeveloper?: boolean;
+  // Shift coords drive the LATE-chip cutoff per row. Passed in from
+  // the parent so we don't refetch — /api/hr/people/[id] already
+  // includes shift in its response.
+  shiftStartTime?: string | null;
+  shiftBreakMinutes?: number | null;
 }) {
   // CEO + developers don't punch a clock — flexible schedules mean the
   // daily "Absent" cross-marks for every non-clocked-in day are noise.
@@ -2810,11 +2818,21 @@ function EmployeeTimePanel({
                 ? new Date(sess[0].clockIn)
                 : (rec.clockIn ? new Date(rec.clockIn) : null);
               const isLateFirstIn = !!firstIn && (() => {
-                // First clock-in at or past 10:00 IST → Late.
-                // UTC + 5:30 → IST hour. Don't use getHours() — that uses
-                // the SERVER's local timezone and would skew the cutoff.
-                const istHr = (firstIn.getUTCHours() + 5 + Math.floor((firstIn.getUTCMinutes() + 30) / 60)) % 24;
-                return istHr >= 10;
+                // Late = first clock-in past the SHIFT-SPECIFIC
+                // cutoff (shift.startTime + breakMinutes grace).
+                // Falls back to 10:00 IST + 0 grace when the
+                // employee has no shift assigned (matches clock-in
+                // route's legacy rule). UTC + 5:30 → IST minutes-of-
+                // day; don't use getHours() — that's the SERVER's
+                // local TZ and would skew the cutoff.
+                const totalUtcMin = firstIn.getUTCHours() * 60 + firstIn.getUTCMinutes();
+                const istMin      = (totalUtcMin + 330) % (24 * 60);
+                const [sh, sm]    = shiftStartTime
+                  ? String(shiftStartTime).split(":").map((n: string) => Number(n) || 0)
+                  : [10, 0];
+                const grace       = Number.isFinite(shiftBreakMinutes) ? Number(shiftBreakMinutes) : (shiftStartTime ? 15 : 0);
+                const cutoffMin   = sh * 60 + sm + grace;
+                return istMin > cutoffMin;
               })();
               const missedClockOut = !!rec.clockIn && !rec.clockOut && !isToday && !rec.isRegularized && !isLeaveRow;
               // "On break" — today, all closed sessions, day-total still < 9h.
@@ -3154,8 +3172,8 @@ function EmployeeTimePanel({
       {/* Regularize-on-behalf modal — admin only */}
       {regOpen && isHRAdmin ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div className="w-full max-w-md flex flex-col max-h-[90vh] rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 flex-shrink-0">
               <div>
                 <h3 className="text-[14px] font-semibold text-slate-800">Regularize attendance</h3>
                 <p className="text-[11.5px] text-slate-500">For {userName} · {regForm.date}</p>
@@ -3165,7 +3183,7 @@ function EmployeeTimePanel({
               </button>
             </div>
 
-            <div className="space-y-3 px-5 py-4">
+            <div className="space-y-3 px-5 py-4 flex-1 overflow-y-auto">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Clock-in</label>
@@ -3205,7 +3223,7 @@ function EmployeeTimePanel({
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 flex-shrink-0">
               <button
                 onClick={() => setRegOpen(false)}
                 className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50"
@@ -3228,8 +3246,8 @@ function EmployeeTimePanel({
       {/* ── HR on-behalf: On Duty modal ────────────────────────────── */}
       {odOpen && isHRAdmin ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div className="w-full max-w-md flex flex-col max-h-[90vh] rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 flex-shrink-0">
               <div>
                 <h3 className="text-[14px] font-semibold text-slate-800">Submit On Duty</h3>
                 <p className="text-[11.5px] text-slate-500">For {userName}</p>
@@ -3238,7 +3256,7 @@ function EmployeeTimePanel({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-3 px-5 py-4">
+            <div className="space-y-3 px-5 py-4 flex-1 overflow-y-auto">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">From</label>
@@ -3290,7 +3308,7 @@ function EmployeeTimePanel({
                 onNaChange={setHandoffPocNa}
               />
             </div>
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 flex-shrink-0">
               <button
                 onClick={() => { setOdOpen(false); resetHandoff(); }}
                 className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50"
@@ -3311,8 +3329,8 @@ function EmployeeTimePanel({
 
       {wfhOpen && isHRAdmin ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div className="w-full max-w-md flex flex-col max-h-[90vh] rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 flex-shrink-0">
               <div>
                 <h3 className="text-[14px] font-semibold text-slate-800">Grant Work From Home</h3>
                 <p className="text-[11.5px] text-slate-500">For {userName}</p>
@@ -3321,7 +3339,7 @@ function EmployeeTimePanel({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-3 px-5 py-4">
+            <div className="space-y-3 px-5 py-4 flex-1 overflow-y-auto">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">From</label>
@@ -3353,7 +3371,7 @@ function EmployeeTimePanel({
                 />
               </div>
             </div>
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 flex-shrink-0">
               <button
                 onClick={() => setWfhOpen(false)}
                 className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50"
@@ -3375,8 +3393,13 @@ function EmployeeTimePanel({
       {/* ── HR on-behalf: Leave + WFH unified modal ───────────────────── */}
       {leaveOpen && isHRAdmin ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          {/* Flex column with capped height so the form body scrolls
+              while the header + tab strip stay pinned to the top and
+              the action footer stays pinned to the bottom. Fixes the
+              small-screen bug where the Apply leave / Grant WFH button
+              was pushed off the viewport. */}
+          <div className="w-full max-w-md flex flex-col max-h-[90vh] rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 flex-shrink-0">
               <div>
                 <h3 className="text-[14px] font-semibold text-slate-800">
                   {leaveModalTab === "leave" ? "Apply Leave on behalf" : "Grant Work From Home"}
@@ -3389,7 +3412,7 @@ function EmployeeTimePanel({
             </div>
 
             {/* Tab strip */}
-            <div className="flex border-b border-slate-100 px-2">
+            <div className="flex border-b border-slate-100 px-2 flex-shrink-0">
               {(["leave", "wfh"] as const).map((t) => (
                 <button
                   key={t}
@@ -3406,6 +3429,8 @@ function EmployeeTimePanel({
               ))}
             </div>
 
+            {/* Scrollable form body — only this region scrolls. */}
+            <div className="flex-1 overflow-y-auto">
             {leaveModalTab === "leave" ? (
               <div className="space-y-3 px-5 py-4">
                 <div>
@@ -3594,8 +3619,9 @@ function EmployeeTimePanel({
                 />
               </div>
             )}
+            </div>
 
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3 flex-shrink-0">
               <button
                 onClick={() => { setLeaveOpen(false); resetHandoff(); }}
                 className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-50"
