@@ -555,6 +555,13 @@ export default function HRAdminPage() {
                     <span className="flex-1">Tab Permissions</span>
                   </Link>
                   <Link
+                    href="/dashboard/hr/admin/designations"
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[12.5px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+                  >
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-300" />
+                    <span className="flex-1">Designations</span>
+                  </Link>
+                  <Link
                     href="/dashboard/hr/admin/permissions/payroll-attendance"
                     className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[12.5px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
                   >

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { can, hasResolvedPermissions } from "@/lib/permissions/can";
 
 /**
  * Safely handles API errors — logs the real message server-side,
@@ -70,6 +71,9 @@ export async function requireAuth() {
  *   • orgLevel === "hr_manager"       (HR Manager + "normal HR")
  */
 export function isHRAdmin(user: any): boolean {
+    // Permission-based once the session carries permissions; legacy fallback
+    // for bare DB objects (no permissions field) during the migration.
+    if (hasResolvedPermissions(user)) return can(user, "MANAGE_HR");
     return (
         user?.orgLevel === "ceo" ||
         user?.isDeveloper === true ||
@@ -115,6 +119,7 @@ export function isSalaryDeveloper(user: any): boolean {
  *   • email     === SALARY_DEV_EMAIL  (AND isDeveloper === true)
  */
 export function canViewSalary(user: any): boolean {
+    if (hasResolvedPermissions(user)) return can(user, "VIEW_SALARY");
     return (
         user?.orgLevel === "ceo" ||
         user?.orgLevel === "hr_manager" ||
@@ -152,10 +157,11 @@ export async function requireAdmin() {
     if (errorResponse) return { session: null, errorResponse };
 
     const user = session!.user as any;
-    const isAdmin =
-        user.orgLevel === "ceo" ||
-        user.orgLevel === "special_access" ||
-        user.isDeveloper === true;
+    const isAdmin = hasResolvedPermissions(user)
+        ? can(user, "SYSTEM_ADMIN")
+        : (user.orgLevel === "ceo" ||
+           user.orgLevel === "special_access" ||
+           user.isDeveloper === true);
 
     if (!isAdmin) {
         return {
