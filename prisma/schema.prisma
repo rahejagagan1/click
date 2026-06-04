@@ -1148,6 +1148,25 @@ model EmployeeProfile {
   /// twice for the same probation window. HR clearing or extending
   /// probationEndDate re-arms the reminder on the next eligible day.
   probationReminderSentAt  DateTime?
+  /// Structured education history. Array of
+  /// { degree, institution, startOfCourse, endOfCourse, branch?, location? }
+  /// matching the JobApplication.educationDetails shape used by the
+  /// candidate apply form. Required for compliance (at least one
+  /// entry with degree + institution filled) — drives the
+  /// missing-docs cron alongside PAN / Aadhaar.
+  educationDetails         Json?
+  /// Compliance cron — first nudge stamped here when the cron has
+  /// sent the "your PAN / Aadhaar / education is missing" email.
+  /// 2 days after this fires AND docs still missing, the cron auto-
+  /// creates a Violation and stamps docViolationCreatedAt. Cleared
+  /// automatically when the employee becomes compliant so a future
+  /// regression triggers a fresh warn → escalate cycle.
+  docWarningSentAt         DateTime?
+  /// Compliance cron — set when the auto-violation has been created
+  /// for missing PAN / Aadhaar / education. Acts as a hard dedupe so
+  /// the cron never creates a second violation for the same gap.
+  /// Cleared when the employee becomes compliant.
+  docViolationCreatedAt    DateTime?
   internshipEndDate  DateTime?
   leavePlan          String?
   holidayList        String?
@@ -1517,9 +1536,18 @@ model AssetAssignment {
 model EmployeeDocument {
   id              Int       @id @default(autoincrement())
   userId          Int
-  category        String    // offer_letter | id_proof | pan_card | aadhar | contract | payslip | experience_letter | other
+  category        String    // offer_letter | id_proof | pan_card | aadhar | education_certificate | contract | payslip | experience_letter | other
   fileName        String
+  /// Legacy external URL (used for the old API). New uploads store
+  /// content in `fileBlob` and HR serves it via /api/hr/documents/:id/file.
   fileUrl         String
+  /// File bytes for the new upload path. The serve endpoint reads
+  /// this column and streams it with fileMime as Content-Type. Null
+  /// for pre-migration rows that still rely on fileUrl.
+  fileBlob        Bytes?
+  /// Content-Type of the uploaded blob. e.g. "application/pdf",
+  /// "image/png". Null for legacy fileUrl rows.
+  fileMime        String?
   uploadedById    Int
   expiryDate      DateTime?
   isVerified      Boolean   @default(false)

@@ -81,6 +81,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       const erows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
         `SELECT "secondaryJobTitle", "legalEntity", "jobLocation",
                 "probationPolicy", "probationEndDate", "probationReminderSentAt",
+                "educationDetails",
                 "internshipEndDate",
                 "leavePlan", "holidayList", "weeklyOff",
                 "attendanceNumber", "timeTrackingPolicy", "penalizationPolicy",
@@ -181,7 +182,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       noticePeriodDays,
       // Extended onboarding fields — every wizard input is now editable.
       workCountry, nationality,
-      secondaryJobTitle, legalEntity, jobLocation, probationPolicy, probationEndDate, internshipEndDate,
+      secondaryJobTitle, legalEntity, jobLocation, probationPolicy, probationEndDate, educationDetails, internshipEndDate,
       leavePlan, holidayList, weeklyOff, attendanceNumber, timeTrackingPolicy, penalizationPolicy,
       // ── Keka-parity additions (extended profile) ──
       homePhone, physicallyHandicapped,
@@ -468,6 +469,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (internshipEndDate  !== undefined) {
         setParts.push(`"internshipEndDate" = $${i++}`);
         args.push(internshipEndDate ? new Date(internshipEndDate) : null);
+      }
+      // educationDetails — JSON array on EmployeeProfile mirroring
+      // the JobApplication.educationDetails shape. Accepts an array
+      // verbatim, or a JSON-encoded string from older clients. Empty
+      // array / null clears the field. Used by the compliance cron
+      // (at least one entry with degree + institution required).
+      if (educationDetails !== undefined) {
+        let val: any = educationDetails;
+        if (typeof val === "string") {
+          try { val = JSON.parse(val); } catch { val = null; }
+        }
+        if (!Array.isArray(val)) val = null;
+        setParts.push(`"educationDetails" = $${i++}::jsonb`);
+        args.push(val === null ? null : JSON.stringify(val));
       }
       if (leavePlan          !== undefined) { setParts.push(`"leavePlan" = $${i++}`);          args.push(leavePlan          || null); }
       if (holidayList        !== undefined) { setParts.push(`"holidayList" = $${i++}`);        args.push(holidayList        || null); }
