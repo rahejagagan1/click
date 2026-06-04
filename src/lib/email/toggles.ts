@@ -44,6 +44,7 @@ export type EmailKey =
   // Cron-job-driven
   | "violation_reminders"
   | "missed_attendance"
+  | "probation_reminders"
   // Recipient-list controls (don't gate a specific email kind — they
   // gate whether a class of recipient is added to ANY admin-broadcast
   // recipient lookup).
@@ -82,6 +83,7 @@ export const EMAIL_TOGGLE_CATALOG: Array<{
   { key: "job_application",     group: "Recruiting",          label: "Job applications",      description: "Inbound job-application notifications to HR + CEO." },
   { key: "violation_reminders", group: "Cron jobs",           label: "Violation reminders",   description: "Daily reminder for violations in-progress for 15+ days." },
   { key: "missed_attendance",   group: "Cron jobs",           label: "Missed attendance",     description: "Daily nudge to employees who didn't clock in." },
+  { key: "probation_reminders", group: "Cron jobs",           label: "Probation ending",      description: "Heads-up email 7 days before a new hire's probation ends. Goes to HR + the employee's reporting manager. Includes one-click extension links." },
   { key: "dev_emails",          group: "Recipients",          label: "Notify developers",     description: "When ON, accounts listed in DEVELOPER_EMAILS env get copied on every admin-broadcast email (leave / WFH / on-duty / comp-off / regularize / feedback / job applications / reports / cron jobs). When OFF, developer accounts are silently dropped from every recipient list while still appearing in the system as users." },
 ];
 
