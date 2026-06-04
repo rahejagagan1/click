@@ -979,7 +979,10 @@ export default function Sidebar() {
                                 Both brand entries route to the same page with
                                 a ?brand= param; the page reads it and seeds
                                 each panel's brand filter. "All brands" is
-                                gated to founders / super-admins only.
+                                gated to DEVELOPERS ONLY now — CEOs (and every
+                                other tier) only see their own brand entries.
+                                Per HR's ask: CEOs should stay brand-scoped
+                                everywhere, including this dashboard switcher.
                                 Active state is brand-aware: we can't reuse
                                 `fl()` here because pathname doesn't include
                                 the query string. */}
@@ -1012,7 +1015,9 @@ export default function Sidebar() {
                                             <>
                                                 {brandEntry("nb-media", "NB Media")}
                                                 {brandEntry("yt-labs",  "YT Labs")}
-                                                {isCeo && (
+                                                {/* Developer-only — CEOs are deliberately
+                                                    excluded so they stay brand-scoped. */}
+                                                {user?.isDeveloper === true && (
                                                     <>
                                                         <div className="my-1 mx-3 border-t border-[#d1dae5]" />
                                                         {brandEntry("all", "All brands")}
