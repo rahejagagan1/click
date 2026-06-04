@@ -8,8 +8,9 @@ import { useState, useEffect, useRef, useCallback, type MutableRefObject, type R
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
-import { isAdmin as isAdminFn, isHRAdmin as isHRAdminFn, canSeeReports as canSeeReportsFn } from "@/lib/access";
+import { canUseFeedback, isAdmin as isAdminFn, isHRAdmin as isHRAdminFn, canSeeReports as canSeeReportsFn } from "@/lib/access";
 import { can } from "@/lib/permissions/can";
+
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
 import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench, Target } from "lucide-react";
 
@@ -56,13 +57,15 @@ export default function Sidebar() {
     // CEO-only items stay restricted to the actual CEO + developers — `Dashboard`
     // is the org-wide CEO console, not appropriate for special_access.
     const isCeo = user?.orgLevel === "ceo" || user?.isDeveloper === true;
-    // YT Labs CEO (Kunal) is brand-scoped — they see ONLY the 10
+    // YT Labs CEO (Kunal) is brand-scoped — they see ONLY the 9
     // sections HR carved out for the YT Labs sub-dashboard:
-    //   Home · Me · My Finances · Feedback · Tools · KPIs · Violation
-    //   Log · HR Dashboard · My Team · People
+    //   Home · Me · My Finances · Tools · KPIs · Violation Log ·
+    //   HR Dashboard · My Team · People
     // Everything else (Dashboard / Cases / Company / Scores / YouTube /
-    // Admin / Reports) is hidden even though they pass the broader
-    // CEO checks above. NB Media CEO + developers keep full visibility.
+    // Admin / Reports / Feedback) is hidden even though they pass the
+    // broader CEO checks above. NB Media CEO + developers keep full
+    // visibility. (Feedback is now brand-gated separately via
+    // canUseFeedback — hidden for ALL YT Labs users, not just the CEO.)
     const isYtLabsCeo = user?.orgLevel === "ceo" && user?.businessUnit === "YT Labs";
     // Permission-aware (designation-driven) via the shared helpers — they
     // dual-read can() when the session carries permissions, else fall back
@@ -83,9 +86,11 @@ export default function Sidebar() {
     const tabAllowed = (key: string) => (perms?.permissions?.[key] ?? true);
 
     // YT Labs CEO allowlist for the global NAV_ITEMS strip — only
-    // Feedback and Tools survive. Everything else (Dashboard, Cases,
-    // Company, Scores, YouTube, Admin) is hidden regardless of role.
-    const YT_CEO_NAV_ALLOWED = new Set(["Feedback", "Tools"]);
+    // Tools survives. Everything else (Dashboard, Cases, Company,
+    // Scores, YouTube, Admin) is hidden regardless of role. Feedback
+    // is brand-gated via canUseFeedback below (hidden for ALL YT Labs
+    // users, including this CEO).
+    const YT_CEO_NAV_ALLOWED = new Set(["Tools"]);
 
     const visibleItems = NAV_ITEMS.filter((item) => {
         const label = (item as any).label as string;
@@ -93,6 +98,9 @@ export default function Sidebar() {
         // brand restriction before any other rule so a role bypass
         // (isCeo / isAdmin) can't accidentally re-grant access.
         if (isYtLabsCeo && !YT_CEO_NAV_ALLOWED.has(label)) return false;
+        // Brand-wide: Feedback is hidden for ALL YT Labs users (not
+        // just the CEO). NB Media users + role bypasses unaffected.
+        if (label === "Feedback" && !canUseFeedback(user)) return false;
         // Items that ARE in the Tab Permissions catalog let the per-user
         // permission win — that's what makes the Permissions UI actually
         // grant access. tabPermissionsForUser() already incorporates role
