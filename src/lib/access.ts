@@ -3,6 +3,8 @@
 // from here instead of inlining the same predicate — when the rules
 // change, they change once.
 
+import { can, hasResolvedPermissions } from "./permissions/can";
+
 type ClientUser = {
   orgLevel?: string | null;
   role?: string | null;
@@ -18,6 +20,7 @@ type ClientUser = {
  */
 export function isAdmin(user: ClientUser): boolean {
   if (!user) return false;
+  if (hasResolvedPermissions(user)) return can(user, "SYSTEM_ADMIN");
   return (
     user.orgLevel === "ceo" ||
     user.isDeveloper === true ||
@@ -32,6 +35,7 @@ export function isAdmin(user: ClientUser): boolean {
  * approvals, etc.).
  */
 export function isHRAdmin(user: ClientUser): boolean {
+  if (hasResolvedPermissions(user)) return can(user, "MANAGE_HR");
   return isAdmin(user) || user?.orgLevel === "hr_manager";
 }
 
@@ -65,6 +69,7 @@ export function isSalaryDeveloper(user: ClientUser): boolean {
  */
 export function canViewSalary(user: ClientUser): boolean {
   if (!user) return false;
+  if (hasResolvedPermissions(user)) return can(user, "VIEW_SALARY");
   return (
     user.orgLevel === "ceo" ||
     user.orgLevel === "hr_manager" ||
@@ -84,6 +89,7 @@ export function canViewSalary(user: ClientUser): boolean {
  */
 export function canApplyRestrictedLeave(user: ClientUser): boolean {
   if (!user) return false;
+  if (hasResolvedPermissions(user)) return can(user, "APPLY_RESTRICTED_LEAVE");
   return (
     user.orgLevel === "ceo" ||
     user.isDeveloper === true ||
@@ -96,6 +102,7 @@ export function canApplyRestrictedLeave(user: ClientUser): boolean {
  * managers. Mirrors `canSeeReports` in the sidebar.
  */
 export function canSeeReports(user: ClientUser): boolean {
+  if (hasResolvedPermissions(user)) return can(user, "VIEW_REPORTS");
   return (
     isAdmin(user) ||
     user?.orgLevel === "manager" ||
@@ -162,6 +169,7 @@ export const HR_MANAGER_ALLOWED_RAIL_LINKS = new Set<string>([
  * tabs in HR_MANAGER_ALLOWED_TABS / HR_MANAGER_ALLOWED_RAIL_LINKS.
  */
 export function isFullHRAdmin(user: ClientUser): boolean {
+  if (hasResolvedPermissions(user)) return can(user, "MANAGE_TAB_PERMISSIONS");
   return isAdmin(user) || user?.role === "hr_manager";
 }
 
