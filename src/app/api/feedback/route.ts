@@ -37,6 +37,19 @@ export async function GET() {
         if (!canViewFeedbackInbox(session?.user as any)) {
             return NextResponse.json({ error: "Access denied" }, { status: 403 });
         }
+        // Brand gate — YT Labs admins (e.g. the YT Labs CEO) don't read
+        // the inbox. Source businessUnit from the DB so a stale session
+        // can't bypass the brand check.
+        const viewerEmail = session?.user?.email;
+        if (viewerEmail) {
+            const viewer = await prisma.user.findUnique({
+                where: { email: viewerEmail },
+                select: { employeeProfile: { select: { businessUnit: true } } },
+            });
+            if (viewer?.employeeProfile?.businessUnit === "YT Labs") {
+                return NextResponse.json({ error: "Access denied" }, { status: 403 });
+            }
+        }
 
         const rows = await prisma.userFeedback.findMany({
             orderBy: { createdAt: "desc" },
@@ -73,6 +86,18 @@ export async function POST(request: NextRequest) {
         const userId = await resolveSessionUserId(session);
         if (userId == null) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+        // Brand gate — Feedback is NB Media only. Reject submissions
+        // from YT Labs users (CEO + employees). Mirrors the sidebar's
+        // canUseFeedback gate and the page-level useEffect redirect.
+        // Source businessUnit from the DB rather than the session so a
+        // stale session payload can't bypass the brand check.
+        const submitter = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { employeeProfile: { select: { businessUnit: true } } },
+        });
+        if (submitter?.employeeProfile?.businessUnit === "YT Labs") {
+            return NextResponse.json({ error: "Feedback isn't available for this brand" }, { status: 403 });
         }
 
         const parsed = await parseBody(request, FeedbackBody);
