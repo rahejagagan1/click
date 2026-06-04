@@ -1,6 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { canUseFeedback } from "@/lib/access";
 import PopupPanel from "@/components/ui/PopupPanel";
 
 const CATEGORIES = [
@@ -42,6 +45,18 @@ const CATEGORIES = [
 ] as const;
 
 export default function FeedbackPage() {
+    const router = useRouter();
+    const { data: session, status: sessionStatus } = useSession();
+    // YT Labs users (CEO + all employees) can't use the Feedback form
+    // — it's NB Media only. Mirror the sidebar gate so the page can't
+    // be reached via direct URL or stale tab. Bounce to /dashboard.
+    useEffect(() => {
+        if (sessionStatus === "loading") return;
+        if (!canUseFeedback(session?.user as any)) {
+            router.replace("/dashboard");
+        }
+    }, [sessionStatus, session, router]);
+
     const [category, setCategory] = useState<string>("");
     const [message, setMessage] = useState("");
     const [status, setStatus] = useState<"idle" | "sending" | "done" | "error">("idle");

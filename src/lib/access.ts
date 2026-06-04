@@ -8,6 +8,7 @@ type ClientUser = {
   role?: string | null;
   isDeveloper?: boolean | null;
   email?: string | null;
+  businessUnit?: string | null;
 } | null | undefined;
 
 /**
@@ -162,6 +163,19 @@ export const HR_MANAGER_ALLOWED_RAIL_LINKS = new Set<string>([
  */
 export function isFullHRAdmin(user: ClientUser): boolean {
   return isAdmin(user) || user?.role === "hr_manager";
+}
+
+/**
+ * Feedback (the org-wide /dashboard/feedback form + its API) is an
+ * NB Media program. YT Labs employees — including the YT Labs CEO —
+ * shouldn't see the tab or be able to submit. Gate the sidebar nav
+ * item, the page-level useEffect redirect, AND the POST /api/feedback
+ * server check on this so all three stay in sync (see auto-memory
+ * note "Access gates must stay in sync").
+ */
+export function canUseFeedback(user: ClientUser): boolean {
+  if (!user) return false;
+  return user.businessUnit !== "YT Labs";
 }
 
 /**

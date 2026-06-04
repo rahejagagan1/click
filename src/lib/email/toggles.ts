@@ -92,9 +92,20 @@ export type EmailToggles = Record<EmailKey, boolean>;
  *  semantics: missing = ON (default). */
 export type PerRoleToggles = Record<EmailRole, Partial<EmailToggles>>;
 
+/** Last-changed metadata per toggle. Stored alongside the toggle map
+ *  inside the same SyncConfig row so the Admin UI can render a
+ *  "Last changed by X · DATE" badge without a separate audit query.
+ *  History keys:
+ *    • "<emailKey>"            → global toggle
+ *    • "<emailKey>:<role>"     → per-role override
+ *  Missing keys = never changed since the toggle landed (default ON). */
+export type ToggleHistoryEntry = { by: string; byId: number | null; at: string };
+export type ToggleHistory = Record<string, ToggleHistoryEntry>;
+
 export interface EmailToggleState {
   global:  EmailToggles;
   perRole: PerRoleToggles;
+  history: ToggleHistory;
 }
 
 function defaultGlobal(): EmailToggles {
@@ -113,7 +124,7 @@ function defaultPerRole(): PerRoleToggles {
 }
 
 function defaultState(): EmailToggleState {
-  return { global: defaultGlobal(), perRole: defaultPerRole() };
+  return { global: defaultGlobal(), perRole: defaultPerRole(), history: {} };
 }
 
 /** Read the full toggle state, filling defaults for missing keys. */
@@ -134,6 +145,20 @@ export async function getEmailToggleState(): Promise<EmailToggleState> {
         }
       }
     }
+    // History is freeform — keep any entry whose shape matches.
+    const rawHistory = (raw._history ?? {}) as Record<string, unknown>;
+    for (const [k, v] of Object.entries(rawHistory)) {
+      if (!v || typeof v !== "object") continue;
+      const entry = v as Record<string, unknown>;
+      const by = typeof entry.by === "string" ? entry.by : null;
+      const at = typeof entry.at === "string" ? entry.at : null;
+      if (!by || !at) continue;
+      out.history[k] = {
+        by,
+        byId: typeof entry.byId === "number" ? entry.byId : null,
+        at,
+      };
+    }
   } catch { /* table missing pre-migrate → defaults */ }
   return out;
 }
@@ -145,15 +170,27 @@ export async function getEmailToggles(): Promise<EmailToggles> {
 }
 
 /** Patch the toggle state. Both `global` and `perRole` are optional;
- *  whichever is supplied is merged into the stored value. Returns the
- *  updated full state. */
+ *  whichever is supplied is merged into the stored value. When `actor`
+ *  is supplied, every CHANGED key (vs the prior value) gets its
+ *  history entry stamped — global keys land under `"<key>"`, per-role
+ *  keys under `"<key>:<role>"`. Returns the updated full state. */
 export async function saveEmailToggleState(
   patch: { global?: Partial<EmailToggles>; perRole?: Partial<Record<EmailRole, Partial<EmailToggles>>> },
+  actor?: { name: string; id: number | null },
 ): Promise<EmailToggleState> {
   const current = await getEmailToggleState();
+  const now = new Date().toISOString();
+  const stamp = (k: string) => {
+    if (!actor) return;
+    current.history[k] = { by: actor.name, byId: actor.id, at: now };
+  };
   if (patch.global) {
     for (const t of EMAIL_TOGGLE_CATALOG) {
-      if (typeof patch.global[t.key] === "boolean") current.global[t.key] = patch.global[t.key]!;
+      if (typeof patch.global[t.key] === "boolean") {
+        const next = patch.global[t.key]!;
+        if (current.global[t.key] !== next) stamp(t.key);
+        current.global[t.key] = next;
+      }
     }
   }
   if (patch.perRole) {
@@ -161,13 +198,25 @@ export async function saveEmailToggleState(
       const roleMap = patch.perRole[r.key];
       if (!roleMap) continue;
       for (const t of EMAIL_TOGGLE_CATALOG) {
-        if (typeof roleMap[t.key] === "boolean") current.perRole[r.key][t.key] = roleMap[t.key]!;
+        if (typeof roleMap[t.key] === "boolean") {
+          const next = roleMap[t.key]!;
+          const prev = current.perRole[r.key][t.key];
+          // Both undefined/true count as ON; only stamp on a real flip.
+          const prevOn = prev !== false;
+          const nextOn = next !== false;
+          if (prevOn !== nextOn) stamp(`${t.key}:${r.key}`);
+          current.perRole[r.key][t.key] = next;
+        }
       }
     }
   }
-  // Serialised shape: global keys + nested perRole — matches what the
-  // reader expects, no schema migration needed.
-  const payload: Record<string, unknown> = { ...current.global, perRole: current.perRole };
+  // Serialised shape: global keys + nested perRole + history map —
+  // matches the reader's expected layout, no schema migration needed.
+  const payload: Record<string, unknown> = {
+    ...current.global,
+    perRole: current.perRole,
+    _history: current.history,
+  };
   await prisma.syncConfig.upsert({
     where:  { key: SYNC_KEY },
     create: { key: SYNC_KEY, value: payload as object },
