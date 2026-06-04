@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 
@@ -37,6 +38,20 @@ export default function HeaderSearch() {
   const inputRef  = useRef<HTMLInputElement>(null);
   // Bump tick on resize/scroll so the portalled panel re-reads anchor rect.
   const [, tick]  = useState(0);
+
+  // Search continuity: when the viewer is already on a person profile
+  // and switches to another person via search, carry their current
+  // ?tab= over so the new profile opens to the same sub-page (Edit
+  // Profile → Edit Profile, Assets → Assets, etc.). Outside the
+  // people-profile route this stays empty so other searches behave
+  // normally.
+  const pathname    = usePathname() ?? "";
+  const searchParams = useSearchParams();
+  const tabQuery = useMemo(() => {
+    if (!pathname.startsWith("/dashboard/hr/people/")) return "";
+    const tab = searchParams?.get("tab");
+    return tab ? `?tab=${encodeURIComponent(tab)}` : "";
+  }, [pathname, searchParams]);
 
   // Debounce to 220ms so we don't hammer the APIs on every keystroke.
   useEffect(() => {
@@ -185,7 +200,7 @@ export default function HeaderSearch() {
                     return (
                       <Link
                         key={`p-${u.id}`}
-                        href={`/dashboard/hr/people/${u.id}`}
+                        href={`/dashboard/hr/people/${u.id}${tabQuery}`}
                         onClick={close}
                         className="flex items-center gap-2.5 px-3 py-2 border-b border-slate-100 dark:border-white/[0.04] last:border-b-0 hover:bg-[#008CFF]/[0.06] dark:hover:bg-[#008CFF]/[0.1] transition-colors"
                       >
