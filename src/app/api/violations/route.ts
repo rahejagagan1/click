@@ -128,6 +128,10 @@ export async function GET(request: NextRequest) {
                     violationDate: true,
                     responsiblePersonId: true,
                     resolvedAt: true,
+                    // Surfaced to the UI so the violation card can render
+                    // a "Follow-up email sent" badge under the Manager
+                    // row once the cron has fired for this violation.
+                    followUpSentAt: true,
                     createdAt: true,
                     updatedAt: true,
                     user: { select: { id: true, name: true, role: true, profilePictureUrl: true, teamCapsule: true } },
