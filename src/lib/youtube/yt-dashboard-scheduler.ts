@@ -224,7 +224,15 @@ export function startInternalCronScheduler(): void {
             claimDailyGate(SYNC_KEY_HR_SUMMARY_NB, t.day)
                 .then(async (claimed) => {
                     if (!claimed) return;
-                    const n = await sendHrLateClockInSummary({ brand: "NB Media", lateCutoffHour: 10, lateCutoffMin: 0 });
+                    const n = await sendHrLateClockInSummary({
+                        brand: "NB Media",
+                        // Brand fallback only — actual per-employee cutoff comes
+                        // from their UserShift (startTime + breakMinutes grace).
+                        lateCutoffHour: 10,
+                        lateCutoffMin:  5,
+                        fireTimeLabel:  "10:10 AM IST",
+                        cutoffLabel:    "their shift's grace time",
+                    });
                     if (n > 0) console.log(`[CronScheduler/hr] Sent NB Media late-summary email(s): ${n}`);
                 })
                 .catch((e) => logSchedulerError("hr-late-summary-nb", e));
@@ -238,7 +246,15 @@ export function startInternalCronScheduler(): void {
             claimDailyGate(SYNC_KEY_HR_SUMMARY_YT, t.day)
                 .then(async (claimed) => {
                     if (!claimed) return;
-                    const n = await sendHrLateClockInSummary({ brand: "YT Labs", lateCutoffHour: 11, lateCutoffMin: 0 });
+                    const n = await sendHrLateClockInSummary({
+                        brand: "YT Labs",
+                        // Brand fallback only — actual per-employee cutoff comes
+                        // from their UserShift (startTime + breakMinutes grace).
+                        lateCutoffHour: 11,
+                        lateCutoffMin:  0,
+                        fireTimeLabel:  "11:15 AM IST",
+                        cutoffLabel:    "their shift's grace time",
+                    });
                     if (n > 0) console.log(`[CronScheduler/hr] Sent YT Labs late-summary email(s): ${n}`);
                 })
                 .catch((e) => logSchedulerError("hr-late-summary-yt", e));

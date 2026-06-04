@@ -145,7 +145,18 @@ export async function sendMissedClockInReminders(): Promise<number> {
  * Defaults to 10:00 IST when omitted, matching the pre-split behavior.
  */
 export async function sendHrLateClockInSummary(
-  opts: { brand?: string; lateCutoffHour?: number; lateCutoffMin?: number } = {},
+  opts: {
+    brand?: string;
+    lateCutoffHour?: number;
+    lateCutoffMin?: number;
+    /** Header label in the rendered email — e.g. "10:10 AM IST" for NB
+     *  Media, "11:15 AM IST" for YT Labs. Defaults to "10:05 AM IST" to
+     *  preserve the legacy behavior. */
+    fireTimeLabel?: string;
+    /** Late-section heading label — e.g. "10:05 AM IST" / "11:00 AM IST".
+     *  Defaults to "10:00 IST" (legacy). */
+    cutoffLabel?: string;
+  } = {},
 ): Promise<number> {
   if (!(await isEmailEnabled("missed_attendance"))) {
     console.log("[missed-attendance] HR late summary skipped — disabled in admin toggles");
@@ -158,11 +169,14 @@ export async function sendHrLateClockInSummary(
   const holidayHit = await prisma.holidayCalendar.findFirst({ where: { date: today } });
   if (holidayHit) return 0;
 
-  // Brand-specific IST cutoff for the "late" threshold. Defaults to
-  // 10:00 IST so existing callers without the option behave as before.
-  const tenAmIst = istTimeOnDate(today, opts.lateCutoffHour ?? 10, opts.lateCutoffMin ?? 0);
+  // Fallback IST cutoff — used for any user without a UserShift row.
+  // Per-shift cutoffs (computed below from Shift.startTime + Shift.
+  // breakMinutes) take precedence so each employee is judged against
+  // their own grace window, not a flat org-wide cutoff. The brand-
+  // default cutoff stays as the safety net.
+  const defaultCutoffIst = istTimeOnDate(today, opts.lateCutoffHour ?? 10, opts.lateCutoffMin ?? 0);
 
-  const [users, todays, leaves] = await Promise.all([
+  const [users, todays, leaves, userShifts] = await Promise.all([
     prisma.user.findMany({
       where: { isActive: true },
       select: {
@@ -182,7 +196,30 @@ export async function sendHrLateClockInSummary(
       },
       select: { userId: true },
     }),
+    // Each user's assigned shift — drives the per-user late cutoff.
+    // breakMinutes is repurposed as grace in this codebase (see
+    // src/app/dashboard/hr/attendance/page.tsx#L668), matching the
+    // user-facing LATE chip rule on the attendance page.
+    prisma.userShift.findMany({
+      select: {
+        userId: true,
+        shift:  { select: { startTime: true, breakMinutes: true } },
+      },
+    }),
   ]);
+
+  // userId → personal "late after" IST instant for `today`. Users
+  // without a UserShift row aren't in the map and fall back to
+  // defaultCutoffIst below.
+  const userCutoffByUser = new Map<number, Date>();
+  for (const us of userShifts) {
+    const st = us.shift?.startTime;
+    if (!st) continue;
+    const [hh, mm] = String(st).split(":").map((n) => Number(n) || 0);
+    const grace = Number.isFinite(us.shift?.breakMinutes) ? Number(us.shift!.breakMinutes) : 0;
+    const cutoff = istTimeOnDate(today, hh, mm + grace);
+    userCutoffByUser.set(us.userId, cutoff);
+  }
 
   const attByUser  = new Map(todays.map((a) => [a.userId, a]));
   const onLeaveIds = new Set(leaves.map((l) => l.userId));
@@ -216,7 +253,11 @@ export async function sendHrLateClockInSummary(
       absent.push({ userId: u.id, managerId: u.managerId, businessUnit: buOf(u), name: u.name, department: u.employeeProfile?.department ?? null, status: "absent", clockIn: null });
       continue;
     }
-    if (rec.clockIn.getTime() > tenAmIst.getTime()) {
+    // Per-shift late cutoff — only flagged when this user's clock-in
+    // is past THEIR shift's start + grace (breakMinutes). Falls back
+    // to the brand default for users with no assigned shift.
+    const cutoff = userCutoffByUser.get(u.id) ?? defaultCutoffIst;
+    if (rec.clockIn.getTime() > cutoff.getTime()) {
       late.push({ userId: u.id, managerId: u.managerId, businessUnit: buOf(u), name: u.name, department: u.employeeProfile?.department ?? null, status: "late", clockIn: rec.clockIn });
     }
   }
@@ -296,6 +337,8 @@ export async function sendHrLateClockInSummary(
         onTime:  Math.max(0, candidates - brandAbsent.length - brandLate.length),
         onLeave,
       },
+      fireTimeLabel: opts.fireTimeLabel,
+      cutoffLabel:   opts.cutoffLabel,
     });
     try {
       await sendEmail({ to: r.email!, content: brandContent });
@@ -337,6 +380,8 @@ export async function sendHrLateClockInSummary(
       absent: ceoAbsent,
       late:   ceoLate,
       totals: { absent: ceoAbsent.length, late: ceoLate.length, onTime: ceoOnTime, onLeave: ceoOnLeave },
+      fireTimeLabel: opts.fireTimeLabel,
+      cutoffLabel:   opts.cutoffLabel,
     });
     try {
       await sendEmail({ to: ceo.email, content: ceoContent });
