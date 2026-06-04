@@ -120,7 +120,7 @@ export async function GET(req: NextRequest) {
     }
 
     const today = istTodayDateOnly();
-    const [todayRecord, odToday] = await Promise.all([
+    const [todayRecord, odToday, userShift] = await Promise.all([
       prisma.attendance.findUnique({
         where: { userId_date: { userId: targetUserId, date: today } },
       }),
@@ -137,7 +137,17 @@ export async function GET(req: NextRequest) {
         },
         select: { id: true },
       }),
+      // The viewer's assigned shift — drives the Timings widget, the
+      // shift-progress bar, "time left", AND the absent / weekly-off synthesis
+      // (working-day decision). Raw SQL so the saturday* columns work before
+      // `prisma generate` picks them up.
+      prisma.$queryRawUnsafe<Array<{ effectiveFrom: Date; startTime: string; endTime: string; breakMinutes: number; workDays: unknown; saturdayPolicy: string; saturdayWeeks: number[] }>>(
+        `SELECT us."effectiveFrom", s."startTime", s."endTime", s."breakMinutes", s."workDays", s."saturdayPolicy", s."saturdayWeeks"
+           FROM "UserShift" us JOIN "Shift" s ON s.id = us."shiftId" WHERE us."userId" = $1`,
+        targetUserId,
+      ),
     ]);
+    const usRow = Array.isArray(userShift) ? userShift[0] : null;
     let todayRecordWithSessions: any = todayRecord;
     if (todayRecord) {
       // Today's record may not be in the requested range (e.g. when the
@@ -168,6 +178,13 @@ export async function GET(req: NextRequest) {
       // unreleased client code still works during the deploy window.
       hasOdToday: !!odToday,
       hasApprovedOdToday: !!odToday,
+      // Assigned shift (null = none → page falls back to the 9–18 default /
+      // Mon–Fri working days).
+      shift: usRow ? {
+        startTime: usRow.startTime, endTime: usRow.endTime, breakMinutes: usRow.breakMinutes,
+        workDays: usRow.workDays, saturdayPolicy: usRow.saturdayPolicy, saturdayWeeks: usRow.saturdayWeeks,
+      } : null,
+      shiftEffectiveFrom: usRow?.effectiveFrom ?? null,
     });
   } catch (e) {
     return serverError(e, "GET /api/hr/attendance");

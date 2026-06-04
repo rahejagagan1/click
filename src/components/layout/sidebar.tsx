@@ -8,6 +8,8 @@ import { useState, useEffect, useRef, useCallback, type MutableRefObject, type R
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
+import { isAdmin as isAdminFn, isHRAdmin as isHRAdminFn, canSeeReports as canSeeReportsFn } from "@/lib/access";
+import { can } from "@/lib/permissions/can";
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
 import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench, Target } from "lucide-react";
 
@@ -47,14 +49,12 @@ export default function Sidebar() {
     // per the auth.ts session callback comment "Full visibility but NOT
     // CEO". Include both so they see Cases / Company / Admin / HR
     // Dashboard / Reports / Scores like ceo + developers do.
-    const isAdmin =
-      user?.orgLevel === "ceo" ||
-      user?.isDeveloper === true ||
-      user?.orgLevel === "special_access" ||
-      user?.role === "admin";
-    const isHRAdmin = isAdmin || user?.orgLevel === "hr_manager";
+    // Permission-aware (designation-driven) via the shared helpers — they
+    // dual-read can() when the session carries permissions, else legacy.
+    const isAdmin = isAdminFn(user);
+    const isHRAdmin = isHRAdminFn(user);
     // CEO-only items stay restricted to the actual CEO + developers — `Dashboard`
-    // for instance is the org-wide CEO console, not appropriate for special_access.
+    // is the org-wide CEO console, not appropriate for special_access.
     const isCeo = user?.orgLevel === "ceo" || user?.isDeveloper === true;
     // YT Labs CEO (Kunal) is brand-scoped — they see ONLY the 10
     // sections HR carved out for the YT Labs sub-dashboard:
@@ -64,11 +64,11 @@ export default function Sidebar() {
     // Admin / Reports) is hidden even though they pass the broader
     // CEO checks above. NB Media CEO + developers keep full visibility.
     const isYtLabsCeo = user?.orgLevel === "ceo" && user?.businessUnit === "YT Labs";
-    const canSeeReports = isAdmin
-        || user?.orgLevel === "manager"
-        || user?.orgLevel === "hod"
-        || user?.orgLevel === "hr_manager";
-    const canSeeViolationLog = isAdmin || user?.orgLevel === "special_access" || user?.role === "hr_manager";
+    // Permission-aware (designation-driven) via the shared helpers — they
+    // dual-read can() when the session carries permissions, else fall back
+    // to the legacy role logic (admin / manager / hod / hr_manager etc.).
+    const canSeeReports = canSeeReportsFn(user);
+    const canSeeViolationLog = can(user, "VIEW_VIOLATIONS");
     const showFeedbackSubmenu = canViewFeedbackInbox(user);
 
     // Tab-permission overrides — the caller's personal map from
@@ -749,8 +749,8 @@ export default function Sidebar() {
                         <>
                             <p className="hidden text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mt-5 mb-2 px-1 text-center">HR & People</p>
 
-                            {/* MY TEAM trigger — gated by hr_my_team toggle */}
-                            {tabAllowed("hr_my_team") && (
+                            {/* MY TEAM trigger — gated by the VIEW_MY_TEAM permission (designation-driven) */}
+                            {can(user, "VIEW_MY_TEAM") && (
                                 <div ref={hrTeamTrigger} {...teamHandlers}
                                     className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px] cursor-pointer", isTeamActive || hrTeamOpen ? A : E)}>
                                     <span className="relative inline-flex">
