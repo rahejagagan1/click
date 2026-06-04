@@ -29,8 +29,17 @@ const HOUR_MS    = 60 * 60 * 1000;
 //     past-midnight, t.day rolls over and the gate is fresh).
 const CLOCK_IN_HOUR  = 9;
 const CLOCK_IN_MIN   = 50;
-const HR_SUMMARY_HOUR = 10;
-const HR_SUMMARY_MIN  = 5;
+// HR late-summary digest splits by brand — each brand fires at the
+// time HR chose to match that brand's shift cadence:
+//   • NB Media: 10:10 IST (shift starts 10:00 → 10 min grace)
+//   • YT Labs : 11:15 IST (shift starts ~11:00 → 15 min grace)
+// Both have a 2-hour upper window so a late restart still catches the
+// fire window. Per-day SyncConfig gates (one per brand) prevent
+// double-fire across restarts.
+const NB_SUMMARY_HOUR = 10;
+const NB_SUMMARY_MIN  = 10;
+const YT_SUMMARY_HOUR = 11;
+const YT_SUMMARY_MIN  = 15;
 const CLOCK_OUT_HOUR = 19;
 const CLOCK_OUT_MIN  = 0;
 
@@ -70,9 +79,13 @@ function logSchedulerError(label: string, err: any): void {
 // post-window restart wipes the gate and the next tick re-fires the
 // emails. SyncConfig keys + payload shape mirror the leave-accrual
 // helper.
-const SYNC_KEY_CLOCK_IN   = "hr_missed_clockin_last_day";
-const SYNC_KEY_HR_SUMMARY = "hr_late_summary_last_day";
-const SYNC_KEY_CLOCK_OUT  = "hr_missed_clockout_last_day";
+const SYNC_KEY_CLOCK_IN          = "hr_missed_clockin_last_day";
+// Per-brand gates so each brand's fire window can be claimed
+// independently. The legacy SYNC_KEY_HR_SUMMARY key is no longer used
+// (the row may still exist in the DB — harmless, just stale).
+const SYNC_KEY_HR_SUMMARY_NB     = "hr_late_summary_last_day_nb_media";
+const SYNC_KEY_HR_SUMMARY_YT     = "hr_late_summary_last_day_yt_labs";
+const SYNC_KEY_CLOCK_OUT         = "hr_missed_clockout_last_day";
 
 /**
  * Try to claim today's "fired" slot for the given SyncConfig key.
@@ -180,7 +193,11 @@ export function startInternalCronScheduler(): void {
         const pastClockInWindow =
             (t.hour > CLOCK_IN_HOUR) ||
             (t.hour === CLOCK_IN_HOUR && t.minute >= CLOCK_IN_MIN);
-        const stillInClockInWindow = t.hour < HR_SUMMARY_HOUR;
+        // Clock-in reminder still caps when the FIRST brand's summary
+        // kicks in (NB Media at 10:00 IST) — past that point, the
+        // brand-specific late summary takes over the "you missed it"
+        // framing.
+        const stillInClockInWindow = t.hour < NB_SUMMARY_HOUR;
         if (pastClockInWindow && stillInClockInWindow) {
             claimDailyGate(SYNC_KEY_CLOCK_IN, t.day)
                 .then(async (claimed) => {
@@ -191,21 +208,56 @@ export function startInternalCronScheduler(): void {
                 .catch((e) => logSchedulerError("hr-clock-in", e));
         }
 
-        // HR Manager daily summary — 10:05 IST. One consolidated email
-        // per HR-admin recipient with absent + late tables. Window cap
-        // at 11:59 IST so a noon restart doesn't email after lunch.
-        const pastHrSummaryWindow =
-            (t.hour > HR_SUMMARY_HOUR) ||
-            (t.hour === HR_SUMMARY_HOUR && t.minute >= HR_SUMMARY_MIN);
-        const stillInHrSummaryWindow = t.hour < (HR_SUMMARY_HOUR + 2);
-        if (pastHrSummaryWindow && stillInHrSummaryWindow) {
-            claimDailyGate(SYNC_KEY_HR_SUMMARY, t.day)
+        // HR Manager daily summary — TWO brand-specific windows, each
+        // with its own per-day gate. Each fires only for ITS brand's
+        // employees + recipients.
+        //   NB Media: 10:10 IST  → 12:10 IST window cap
+        //   YT Labs : 11:15 IST  → 13:15 IST window cap
+        // Per-brand functions filter both the roster (only their brand's
+        // late/absent) and the recipient list (only HR / special_access
+        // belonging to that brand, plus the brand's CEO).
+        const pastNbWindow =
+            (t.hour > NB_SUMMARY_HOUR) ||
+            (t.hour === NB_SUMMARY_HOUR && t.minute >= NB_SUMMARY_MIN);
+        const stillInNbWindow = t.hour < (NB_SUMMARY_HOUR + 2);
+        if (pastNbWindow && stillInNbWindow) {
+            claimDailyGate(SYNC_KEY_HR_SUMMARY_NB, t.day)
                 .then(async (claimed) => {
                     if (!claimed) return;
-                    const n = await sendHrLateClockInSummary();
-                    if (n > 0) console.log(`[CronScheduler/hr] Sent HR late-summary email`);
+                    const n = await sendHrLateClockInSummary({
+                        brand: "NB Media",
+                        // Brand fallback only — actual per-employee cutoff comes
+                        // from their UserShift (startTime + breakMinutes grace).
+                        lateCutoffHour: 10,
+                        lateCutoffMin:  5,
+                        fireTimeLabel:  "10:10 AM IST",
+                        cutoffLabel:    "their shift's grace time",
+                    });
+                    if (n > 0) console.log(`[CronScheduler/hr] Sent NB Media late-summary email(s): ${n}`);
                 })
-                .catch((e) => logSchedulerError("hr-late-summary", e));
+                .catch((e) => logSchedulerError("hr-late-summary-nb", e));
+        }
+
+        const pastYtWindow =
+            (t.hour > YT_SUMMARY_HOUR) ||
+            (t.hour === YT_SUMMARY_HOUR && t.minute >= YT_SUMMARY_MIN);
+        const stillInYtWindow = t.hour < (YT_SUMMARY_HOUR + 2);
+        if (pastYtWindow && stillInYtWindow) {
+            claimDailyGate(SYNC_KEY_HR_SUMMARY_YT, t.day)
+                .then(async (claimed) => {
+                    if (!claimed) return;
+                    const n = await sendHrLateClockInSummary({
+                        brand: "YT Labs",
+                        // Brand fallback only — actual per-employee cutoff comes
+                        // from their UserShift (startTime + breakMinutes grace).
+                        lateCutoffHour: 11,
+                        lateCutoffMin:  0,
+                        fireTimeLabel:  "11:15 AM IST",
+                        cutoffLabel:    "their shift's grace time",
+                    });
+                    if (n > 0) console.log(`[CronScheduler/hr] Sent YT Labs late-summary email(s): ${n}`);
+                })
+                .catch((e) => logSchedulerError("hr-late-summary-yt", e));
         }
 
         // Clock-out reminder — 19:00 IST. Wide cap (until midnight IST)

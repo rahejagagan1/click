@@ -130,7 +130,34 @@ export async function sendMissedClockInReminders(): Promise<number> {
  * orgLevel=hr_manager, role=hr_manager. Mirrors the gate used in the
  * rest of the HR module.
  */
-export async function sendHrLateClockInSummary(): Promise<number> {
+/**
+ * `brand` — when set, the digest is restricted to ONE brand: only
+ * employees of that brand show up in the absent/late rosters, and only
+ * recipients belonging to that brand (HR / special_access + the brand's
+ * CEO) receive an email. Unset → original "all brands mixed" behavior
+ * (kept for any external caller; the cron now calls with a brand).
+ *
+ * `lateCutoffHour` / `lateCutoffMin` — the IST clock time after which
+ * a clock-in counts as "late". Each brand uses its own cutoff because
+ * the shift starts differ:
+ *   NB Media: 10:00 IST   (matches the 10:10 fire window)
+ *   YT Labs : 11:00 IST   (matches the 11:15 fire window)
+ * Defaults to 10:00 IST when omitted, matching the pre-split behavior.
+ */
+export async function sendHrLateClockInSummary(
+  opts: {
+    brand?: string;
+    lateCutoffHour?: number;
+    lateCutoffMin?: number;
+    /** Header label in the rendered email — e.g. "10:10 AM IST" for NB
+     *  Media, "11:15 AM IST" for YT Labs. Defaults to "10:05 AM IST" to
+     *  preserve the legacy behavior. */
+    fireTimeLabel?: string;
+    /** Late-section heading label — e.g. "10:05 AM IST" / "11:00 AM IST".
+     *  Defaults to "10:00 IST" (legacy). */
+    cutoffLabel?: string;
+  } = {},
+): Promise<number> {
   if (!(await isEmailEnabled("missed_attendance"))) {
     console.log("[missed-attendance] HR late summary skipped — disabled in admin toggles");
     return 0;
@@ -142,11 +169,14 @@ export async function sendHrLateClockInSummary(): Promise<number> {
   const holidayHit = await prisma.holidayCalendar.findFirst({ where: { date: today } });
   if (holidayHit) return 0;
 
-  // 10:00 IST as a UTC instant for the chosen IST calendar day — anything
-  // strictly past this is "late."
-  const tenAmIst = istTimeOnDate(today, 10, 0);
+  // Fallback IST cutoff — used for any user without a UserShift row.
+  // Per-shift cutoffs (computed below from Shift.startTime + Shift.
+  // breakMinutes) take precedence so each employee is judged against
+  // their own grace window, not a flat org-wide cutoff. The brand-
+  // default cutoff stays as the safety net.
+  const defaultCutoffIst = istTimeOnDate(today, opts.lateCutoffHour ?? 10, opts.lateCutoffMin ?? 0);
 
-  const [users, todays, leaves] = await Promise.all([
+  const [users, todays, leaves, userShifts] = await Promise.all([
     prisma.user.findMany({
       where: { isActive: true },
       select: {
@@ -166,7 +196,30 @@ export async function sendHrLateClockInSummary(): Promise<number> {
       },
       select: { userId: true },
     }),
+    // Each user's assigned shift — drives the per-user late cutoff.
+    // breakMinutes is repurposed as grace in this codebase (see
+    // src/app/dashboard/hr/attendance/page.tsx#L668), matching the
+    // user-facing LATE chip rule on the attendance page.
+    prisma.userShift.findMany({
+      select: {
+        userId: true,
+        shift:  { select: { startTime: true, breakMinutes: true } },
+      },
+    }),
   ]);
+
+  // userId → personal "late after" IST instant for `today`. Users
+  // without a UserShift row aren't in the map and fall back to
+  // defaultCutoffIst below.
+  const userCutoffByUser = new Map<number, Date>();
+  for (const us of userShifts) {
+    const st = us.shift?.startTime;
+    if (!st) continue;
+    const [hh, mm] = String(st).split(":").map((n) => Number(n) || 0);
+    const grace = Number.isFinite(us.shift?.breakMinutes) ? Number(us.shift!.breakMinutes) : 0;
+    const cutoff = istTimeOnDate(today, hh, mm + grace);
+    userCutoffByUser.set(us.userId, cutoff);
+  }
 
   const attByUser  = new Map(todays.map((a) => [a.userId, a]));
   const onLeaveIds = new Set(leaves.map((l) => l.userId));
@@ -192,12 +245,19 @@ export async function sendHrLateClockInSummary(): Promise<number> {
     if (!u.email || excluded.has(u.email.toLowerCase())) continue;
     if (onLeaveIds.has(u.id)) continue;
     if (policies.get(u.id)?.attendanceEnabled === false) continue;
+    // Brand filter — when opts.brand is set, skip employees of other
+    // brands so the roster only contains the brand we're sending to.
+    if (opts.brand && buOf(u) !== opts.brand) continue;
     const rec = attByUser.get(u.id);
     if (!rec?.clockIn) {
       absent.push({ userId: u.id, managerId: u.managerId, businessUnit: buOf(u), name: u.name, department: u.employeeProfile?.department ?? null, status: "absent", clockIn: null });
       continue;
     }
-    if (rec.clockIn.getTime() > tenAmIst.getTime()) {
+    // Per-shift late cutoff — only flagged when this user's clock-in
+    // is past THEIR shift's start + grace (breakMinutes). Falls back
+    // to the brand default for users with no assigned shift.
+    const cutoff = userCutoffByUser.get(u.id) ?? defaultCutoffIst;
+    if (rec.clockIn.getTime() > cutoff.getTime()) {
       late.push({ userId: u.id, managerId: u.managerId, businessUnit: buOf(u), name: u.name, department: u.employeeProfile?.department ?? null, status: "late", clockIn: rec.clockIn });
     }
   }
@@ -213,6 +273,11 @@ export async function sendHrLateClockInSummary(): Promise<number> {
   // direct reports below. Also excluded: role=admin alone, orgLevel=
   // "hr_manager" alone (HR-team members are role=member). Developer
   // accounts are conditional on the "Notify developers" toggle.
+  //
+  // Each recipient gets a BRAND-FILTERED digest — NB Media HR sees only
+  // NB Media employees, YT Labs HR sees only YT Labs. Mirrors the
+  // brand-CEO digest below. Recipients without a businessUnit default
+  // to NB Media (parent brand).
   const recipients = await prisma.user.findMany({
     where: {
       isActive: true,
@@ -223,7 +288,10 @@ export async function sendHrLateClockInSummary(): Promise<number> {
         ...(await devEmailRecipientsClause()),
       ],
     },
-    select: { email: true, name: true, orgLevel: true, role: true },
+    select: {
+      email: true, name: true, orgLevel: true, role: true,
+      employeeProfile: { select: { businessUnit: true } },
+    },
   });
   // Per-role email-toggle filter (Admin → Emails Automation →
   // "Recipients by role"). Drops anyone whose role override for
@@ -236,28 +304,44 @@ export async function sendHrLateClockInSummary(): Promise<number> {
     if (await isEmailEnabledForRoles("missed_attendance", roles)) filteredRecipients.push(r);
   }
 
-  // Headcount totals for the footer. WFH/OD are now folded into present/
-  // late/absent based on whether they actually clocked in, so the only
-  // separate bucket left is leave.
-  const totalCandidates = users.filter((u) => !!u.email && !excluded.has(u.email!.toLowerCase()) && !onLeaveIds.has(u.id)).length;
-  const onTime = Math.max(0, totalCandidates - absent.length - late.length);
-
-  const content = hrLateSummaryEmail({
-    today,
-    absent,
-    late,
-    totals: {
-      absent:  absent.length,
-      late:    late.length,
-      onTime,
-      onLeave: onLeaveIds.size,
-    },
-  });
+  // Per-brand denominator helper — reused for HR-recipient + CEO digests.
+  const brandTotals = (brand: string) => {
+    const candidates = users.filter((u) =>
+      buOf(u) === brand && !!u.email && !excluded.has(u.email!.toLowerCase()) && !onLeaveIds.has(u.id),
+    ).length;
+    const onLeave = users.filter((u) => buOf(u) === brand && onLeaveIds.has(u.id)).length;
+    return { candidates, onLeave };
+  };
 
   let sent = 0;
   for (const r of filteredRecipients) {
+    // Recipient's brand drives the roster filter. Default to NB Media
+    // (parent brand) when no businessUnit is set — covers developers /
+    // role=admin accounts without an EmployeeProfile.businessUnit.
+    const brand = r.employeeProfile?.businessUnit || "NB Media";
+    // When the caller specified a brand, only send to recipients of
+    // that brand — skip everyone else so the NB Media 10:10 fire
+    // doesn't email YT Labs HR, and vice versa.
+    if (opts.brand && brand !== opts.brand) continue;
+    const brandAbsent = absent.filter((row) => row.businessUnit === brand);
+    const brandLate   = late.filter((row)   => row.businessUnit === brand);
+    if (brandAbsent.length === 0 && brandLate.length === 0) continue;
+    const { candidates, onLeave } = brandTotals(brand);
+    const brandContent = hrLateSummaryEmail({
+      today,
+      absent: brandAbsent,
+      late:   brandLate,
+      totals: {
+        absent:  brandAbsent.length,
+        late:    brandLate.length,
+        onTime:  Math.max(0, candidates - brandAbsent.length - brandLate.length),
+        onLeave,
+      },
+      fireTimeLabel: opts.fireTimeLabel,
+      cutoffLabel:   opts.cutoffLabel,
+    });
     try {
-      await sendEmail({ to: r.email!, content });
+      await sendEmail({ to: r.email!, content: brandContent });
       sent++;
     } catch (e) {
       console.error(`[hr-late-summary] ${r.email}:`, e);
@@ -283,20 +367,21 @@ export async function sendHrLateClockInSummary(): Promise<number> {
   for (const ceo of ceos) {
     if (!ceo.email) continue;
     const ceoBrand = ceo.employeeProfile?.businessUnit || "NB Media";
+    // Brand-scoped fire: NB Media 10:10 only emails Nikit, YT Labs
+    // 11:15 only emails Kunal.
+    if (opts.brand && ceoBrand !== opts.brand) continue;
     const ceoAbsent = absent.filter((r) => r.businessUnit === ceoBrand);
     const ceoLate   = late.filter((r) => r.businessUnit === ceoBrand);
     if (ceoAbsent.length === 0 && ceoLate.length === 0) continue;
-    // Per-brand denominators for the on-time / on-leave totals.
-    const ceoCandidates = users.filter((u) =>
-      buOf(u) === ceoBrand && !!u.email && !excluded.has(u.email!.toLowerCase()) && !onLeaveIds.has(u.id),
-    ).length;
-    const ceoOnLeave = users.filter((u) => buOf(u) === ceoBrand && onLeaveIds.has(u.id)).length;
-    const ceoOnTime  = Math.max(0, ceoCandidates - ceoAbsent.length - ceoLate.length);
+    const { candidates: ceoCandidates, onLeave: ceoOnLeave } = brandTotals(ceoBrand);
+    const ceoOnTime = Math.max(0, ceoCandidates - ceoAbsent.length - ceoLate.length);
     const ceoContent = hrLateSummaryEmail({
       today,
       absent: ceoAbsent,
       late:   ceoLate,
       totals: { absent: ceoAbsent.length, late: ceoLate.length, onTime: ceoOnTime, onLeave: ceoOnLeave },
+      fireTimeLabel: opts.fireTimeLabel,
+      cutoffLabel:   opts.cutoffLabel,
     });
     try {
       await sendEmail({ to: ceo.email, content: ceoContent });
