@@ -12,7 +12,7 @@ import { canUseFeedback, isAdmin as isAdminFn, isHRAdmin as isHRAdminFn, canSeeR
 import { can } from "@/lib/permissions/can";
 
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
-import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench, Target } from "lucide-react";
+import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench, Target, Box } from "lucide-react";
 
 // Consistent Keka-style icon: thin outline, fixed size / stroke.
 const icon = (Cmp: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>) => (
@@ -72,6 +72,18 @@ export default function Sidebar() {
     // to the legacy role logic (admin / manager / hod / hr_manager etc.).
     const canSeeReports = canSeeReportsFn(user);
     const canSeeViolationLog = can(user, "VIEW_VIOLATIONS");
+    // Assets in the main sidebar — visible to EVERYONE. The page
+    // itself scopes what they see:
+    //   • MANAGE_ASSETS (IT Security tier / HR / CEO / devs)
+    //     → full register with admin actions.
+    //   • Everyone else → read-only "my assets" view of just the
+    //     items currently assigned to them (the API enforces this
+    //     server-side regardless of any client-side spoofing).
+    // We deliberately KEEP the tile visible for HR admins too —
+    // they previously navigated via HR Dashboard, but having Assets
+    // directly in the sidebar is a small UX win and the HR Dashboard
+    // entry stays there as well.
+    const showAssetsTab = true;
     const showFeedbackSubmenu = canViewFeedbackInbox(user);
 
     // Tab-permission overrides — the caller's personal map from
@@ -688,6 +700,30 @@ export default function Sidebar() {
                                 </svg>
                             </span>
                             Violation Log
+                        </Link>
+                    );
+                })()}
+
+                {/* Assets — surfaced to IT Security / IT Security Intern
+                    designations only (everyone with MANAGE_ASSETS but
+                    NOT MANAGE_HR). HR tiers reach this page through the
+                    HR Dashboard. Links to the standalone
+                    /dashboard/hr/assets route (same AssetsPanel that
+                    HR Dashboard mounts). */}
+                {showAssetsTab && (() => {
+                    const isActive = pathname.startsWith("/dashboard/hr/assets");
+                    return (
+                        <Link
+                            href="/dashboard/hr/assets"
+                            className={cn(
+                                "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
+                                isActive
+                                    ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
+                                    : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
+                            )}
+                        >
+                            <Box size={18} strokeWidth={1.5} className={isActive ? "text-[#0f6ecd]" : ""} />
+                            Assets
                         </Link>
                     );
                 })()}
