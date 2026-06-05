@@ -8,14 +8,54 @@ import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import SelectField from "@/components/ui/SelectField";
 
 // Doc folder taxonomy + categories that land in each. Mirrors the
-// HR-side DocumentsPanel so the two views stay consistent.
+// HR-side DocumentsPanel so the two views stay consistent. See
+// the matching DOC_FOLDERS / CAT_LABEL_OVERRIDES in
+// /dashboard/hr/people/[id]/page.tsx for the rationale.
 const SELF_DOC_FOLDERS: { key: string; label: string; cats: string[] }[] = [
-  { key: "identity",    label: "Identity Docs",       cats: ["id_proof", "aadhar", "pan_card"] },
+  { key: "identity",    label: "Identity Docs",          cats: ["pan_card", "aadhar", "passport", "driving_license"] },
   { key: "education",   label: "Degrees & Certificates", cats: ["education_certificate"] },
-  { key: "letters",     label: "Employee Letters",    cats: ["offer_letter", "experience_letter", "contract"] },
-  { key: "previous",    label: "Previous Experience", cats: ["experience_letter", "payslip"] },
-  { key: "other",       label: "Other",               cats: ["other"] },
+  { key: "letters",     label: "Employee Letters",       cats: ["offer_letter"] },
+  { key: "previous",    label: "Previous Experience",    cats: ["previous_relieving_letter", "previous_offer_letter"] },
+  { key: "other",       label: "Other",                  cats: ["other"] },
 ];
+
+const CAT_LABEL_OVERRIDES: Record<string, string> = {
+  pan_card:                  "PAN Card",
+  aadhar:                    "Aadhaar",
+  passport:                  "Passport",
+  driving_license:           "Driving License",
+  education_certificate:     "Latest Degree / Marksheet",
+  offer_letter:              "Offer Letter",
+  previous_relieving_letter: "Previous Relieving Letter",
+  previous_offer_letter:     "Previous Offer Letter",
+  // legacy keys kept so old uploads still render readably
+  id_proof:                  "ID Proof",
+  voter_id:                  "Voter ID",
+  tenth:                     "10th",
+  twelfth:                   "12th",
+  degree:                    "Degree",
+  experience_letter:         "Experience Letter",
+  contract:                  "Contract",
+  payslip:                   "Payslip",
+};
+const REQUIRED_CATS = new Set<string>([
+  "pan_card", "aadhar", "education_certificate", "offer_letter",
+]);
+const OPTIONAL_HINT: Record<string, string> = {
+  passport:                  "optional",
+  driving_license:           "optional",
+  previous_relieving_letter: "if available",
+  previous_offer_letter:     "if available",
+};
+const prettyCategory = (c: string): string =>
+  CAT_LABEL_OVERRIDES[c]
+    ?? c.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+const dropdownCategoryLabel = (c: string): string => {
+  const base = prettyCategory(c);
+  if (REQUIRED_CATS.has(c)) return `${base} *`;
+  if (OPTIONAL_HINT[c])      return `${base} (${OPTIONAL_HINT[c]})`;
+  return base;
+};
 
 const F = "w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]";
 
@@ -823,17 +863,17 @@ function SelfDocumentsPanel() {
   const [uploadOpen, setUploadOpen]   = useState(false);
   const [uploadFile, setUploadFile]   = useState<File | null>(null);
   const [uploadName, setUploadName]   = useState<string>("");
-  const [uploadCategory, setUploadCategory] = useState<string>("id_proof");
+  const [uploadCategory, setUploadCategory] = useState<string>("pan_card");
   const [uploading, setUploading]     = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragOver, setDragOver]       = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const defaultCategoryFor = (key: string): string =>
-    key === "identity"  ? "id_proof"
+    key === "identity"  ? "pan_card"
   : key === "education" ? "education_certificate"
   : key === "letters"   ? "offer_letter"
-  : key === "previous"  ? "experience_letter"
+  : key === "previous"  ? "previous_relieving_letter"
   : "other";
 
   const openUpload = () => {
@@ -893,9 +933,9 @@ function SelfDocumentsPanel() {
     if (file) pickFile(file);
   };
 
-  const categoryOptions = active.cats.map((c) => ({
+  const categoryOptions = active.cats.map((c: string) => ({
     value: c,
-    label: c.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase()),
+    label: dropdownCategoryLabel(c),
   }));
 
   const folderCounts: Record<string, number> = {};
@@ -987,7 +1027,7 @@ function SelfDocumentsPanel() {
                       >
                         <p className="truncate text-[13px] font-semibold text-slate-800 dark:text-white">{doc.fileName || "Untitled"}</p>
                         <p className="truncate text-[11px] text-slate-500">
-                          {(doc.category || "Document").replace(/_/g, " ")}
+                          {prettyCategory(doc.category || "Document")}
                           {doc.createdAt ? ` · ${new Date(doc.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}` : ""}
                         </p>
                       </a>
