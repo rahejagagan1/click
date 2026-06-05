@@ -2685,6 +2685,38 @@ model CandidateActivity {
   @@index([createdAt])
 }
 
+/// HR letter templates — FnF settlement, internship completion,
+/// probation confirmation, revised offer letter, etc. Body is
+/// stored as HTML (HR can edit in the Templates page); placeholders
+/// in `{{Section.Field}}` form are substituted at render time from
+/// the picked employee + manually-entered custom fields.
+///
+/// `customFields` is a JSON array of `{ key, label, type }` entries
+/// describing the per-template manual inputs (e.g. FnFAmount,
+/// ReferenceNo, InternshipMonths) HR fills in when generating.
+model LetterTemplate {
+  id           Int      @id @default(autoincrement())
+  // NOT @unique anymore — the same `key` can have one row per brand.
+  // See @@unique([key, businessUnit]) below.
+  key          String
+  title        String                // display name in the Templates page
+  category     String   @default("general")  // "offboarding" | "onboarding" | "appraisal" | …
+  /// "NB Media" | "YT Labs" | null (universal fallback). Picker
+  /// at generate time matches the employee's brand first, then
+  /// falls back to a NULL-tagged row.
+  businessUnit String?
+  bodyHtml     String   @db.Text    // template body with {{Section.Field}} placeholders
+  customFields Json?    @db.JsonB   // [{ key, label, type, required }]
+  isActive     Boolean  @default(true)
+  updatedById  Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([key, businessUnit])
+  @@index([category])
+  @@index([key, businessUnit])
+}
+
 /// Per-field visibility/required toggles for the public application form.
 /// Seeded once with the canonical field set; HR can flip visibility/required
 /// from the Hiring → Form Settings tab. Name / email / job opening / resume
