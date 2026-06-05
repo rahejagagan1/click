@@ -1,0 +1,468 @@
+// Server-side renderer for HR letter templates. Takes a template
+// bodyHtml + the picked employee + HR's custom inputs, and returns
+// the fully-substituted HTML (and, for the PDF flow, a DOCX-styled
+// version we hand to docx-to-pdf for letterhead-quality output).
+//
+// Placeholder grammar: `{{Section.Field}}`. Unknown placeholders
+// render as the literal string with a [missing: ...] suffix so HR
+// can see what's not resolving instead of getting an empty letter.
+//
+// Security:
+//   • Placeholder values are HTML-escaped before insertion so an
+//     employee name containing `<script>…</script>` can't break out
+//     of text into markup.
+//   • sanitizeLetterHtml() runs the body through `sanitize-html`
+//     (a parser-based sanitiser) with an explicit allowlist before
+//     we persist or render — replaces the earlier regex approach
+//     which had known bypass classes.
+
+import prisma from "@/lib/prisma";
+import sanitizeHtml from "sanitize-html";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
+// Lazy-cache the NB Media logo as a base64 data URL so the preview
+// iframe can render it without a network fetch (the iframe is
+// sandboxed with default-src 'none' + img-src data:). One-time read
+// per server lifetime — small file, fine to keep in memory.
+let cachedLogoDataUrl: string | null = null;
+async function getLogoDataUrl(): Promise<string> {
+  if (cachedLogoDataUrl) return cachedLogoDataUrl;
+  try {
+    const path = resolve(process.cwd(), "public", "logo.png");
+    const bytes = await readFile(path);
+    cachedLogoDataUrl = `data:image/png;base64,${bytes.toString("base64")}`;
+    return cachedLogoDataUrl;
+  } catch {
+    return "";
+  }
+}
+
+// Same idea for the founder's signature image. Looks for
+// `public/signatures/nikit-bassi.png` first, falls back to .jpg.
+// Returns empty string when neither file exists — the wrapper then
+// silently skips rendering the signature image, so HR can drop the
+// file in later without a code change.
+let cachedSignatureDataUrl: string | null = null;
+let cachedSignatureLoaded = false;
+async function getSignatureDataUrl(): Promise<string> {
+  if (cachedSignatureLoaded) return cachedSignatureDataUrl ?? "";
+  const candidates: Array<{ path: string; mime: string }> = [
+    { path: resolve(process.cwd(), "public", "signatures", "nikit-bassi.png"), mime: "image/png" },
+    { path: resolve(process.cwd(), "public", "signatures", "nikit-bassi.jpg"), mime: "image/jpeg" },
+    { path: resolve(process.cwd(), "public", "signatures", "nikit-bassi.jpeg"), mime: "image/jpeg" },
+  ];
+  for (const c of candidates) {
+    try {
+      const bytes = await readFile(c.path);
+      cachedSignatureDataUrl = `data:${c.mime};base64,${bytes.toString("base64")}`;
+      cachedSignatureLoaded = true;
+      return cachedSignatureDataUrl;
+    } catch { /* try next */ }
+  }
+  cachedSignatureLoaded = true;
+  cachedSignatureDataUrl = null;
+  return "";
+}
+
+/** Inject the founder's signature image into the body HTML right
+ *  before the first occurrence of "Regards,". Returns body
+ *  unchanged when no signature file exists at
+ *  public/signatures/nikit-bassi.{png|jpg|jpeg} — no synthetic
+ *  fallback (a stand-in cursive font never matches the real
+ *  hand-signature and looks worse than a blank gap). */
+async function injectSignatureBeforeRegards(bodyHtml: string): Promise<string> {
+  const sig = await getSignatureDataUrl();
+  if (!sig) return bodyHtml;
+  // Per HR's layout: signature sits BELOW the "Founder & CEO" line,
+  // not above "Regards,". Small gap above the image, left-aligned,
+  // ~38pt tall.
+  // Professional sign-off — small height (~18pt ≈ 24px) so the
+  // signature reads as a refined accent below the typed name, not
+  // a hero element. Source ratio is 260×48 (post-crop) so 18pt
+  // high gives roughly 100pt wide.
+  const sigBlock = `<p style="margin:6pt 0 4pt 0; padding:0; line-height:1; text-align:left"><img src="${sig}" alt="Nikit Bassi" style="height:18pt; width:auto; display:block"/></p>`;
+  // Anchor: the FIRST block element containing "Founder & CEO".
+  // The block may use a literal "&" or the HTML entity, so match
+  // both via [&&amp;]. Insert sigBlock RIGHT AFTER that block's
+  // closing tag.
+  const re = /(<(p|div|h[1-6])[^>]*>[\s\S]*?Founder\s*(?:&|&amp;)\s*CEO[\s\S]*?<\/\2>)/i;
+  if (re.test(bodyHtml)) return bodyHtml.replace(re, "$1" + sigBlock);
+  // Fallback — append at the end (still below the signoff block in
+  // every template I've seen, since "Regards / Nikit Bassi /
+  // Founder & CEO" is usually near the end).
+  return bodyHtml + sigBlock;
+}
+
+export type RenderContext = {
+  employeeId: number;
+  customFields: Record<string, string>;
+};
+
+/** Build a placeholder resolver bound to one employee + custom
+ *  inputs. Shared by both the HTML preview path and the DOCX
+ *  substitution path (letter-docx-render.ts) so the two can never
+ *  disagree on what `{{Section.Field}}` means. */
+export async function buildPlaceholderResolver(ctx: RenderContext): Promise<{
+  resolve: (key: string) => string | null;
+  user: any;
+  profile: any;
+  exit: any;
+}> {
+  const user = await prisma.user.findUnique({
+    where: { id: ctx.employeeId },
+    include: { employeeProfile: true },
+  });
+  if (!user) throw new Error(`Employee #${ctx.employeeId} not found.`);
+
+  let exit: any = null;
+  try {
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT "resignationDate", "lastWorkingDay", "noticePeriodDays", "exitType", status
+         FROM "EmployeeExit" WHERE "userId" = $1 LIMIT 1`,
+      ctx.employeeId,
+    );
+    exit = rows[0] ?? null;
+  } catch { /* employee may not have an exit row */ }
+
+  let extended: any = {};
+  try {
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT "probationEndDate", "internshipEndDate"
+         FROM "EmployeeProfile" WHERE "userId" = $1`,
+      ctx.employeeId,
+    );
+    extended = rows[0] ?? {};
+  } catch { /* columns may be missing on older deploys */ }
+
+  const profile = { ...(user.employeeProfile ?? {}), ...extended };
+  const renderCtx = { user, profile, exit, customFields: ctx.customFields ?? {} };
+  return {
+    resolve: (key: string) => resolvePlaceholder(key, renderCtx),
+    user, profile, exit,
+  };
+}
+
+const fmtDate = (d: Date | null | undefined): string => {
+  if (!d) return "—";
+  const date = d instanceof Date ? d : new Date(d as any);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
+};
+const fmtShortDate = (d: Date | null | undefined): string => {
+  if (!d) return new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  const date = d instanceof Date ? d : new Date(d as any);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+};
+
+// Resolves a placeholder against the employee row + custom inputs.
+// Returns the substituted string or null if the placeholder isn't
+// known.
+function resolvePlaceholder(
+  fullKey: string,
+  ctx: {
+    user: any;
+    profile: any;
+    exit: any | null;
+    customFields: Record<string, string>;
+  },
+): string | null {
+  const [section, field] = fullKey.split(".");
+  if (!section || !field) return null;
+  const u = ctx.user;
+  const p = ctx.profile;
+  const ex = ctx.exit;
+
+  switch (section) {
+    case "EmployeeBasicInfo":
+      if (field === "DisplayName")    return u?.name || "";
+      if (field === "Email")          return u?.email || "";
+      break;
+    case "EmployeeBasicHeaderInfo":
+      if (field === "EmployeeNumber") return p?.employeeId || "";
+      if (field === "ShortDate")      return fmtShortDate(new Date());
+      break;
+    case "EmployeeJobInfo":
+      if (field === "JobTitle")        return p?.designation || u?.role || "";
+      if (field === "DateJoined")      return fmtDate(p?.joiningDate);
+      if (field === "ResignationDate") return fmtDate(ex?.resignationDate);
+      if (field === "LastWorkingDay")  return fmtDate(ex?.lastWorkingDay);
+      if (field === "ProbationEndDate")return fmtDate(p?.probationEndDate);
+      break;
+    case "EmployeeCustomFields":
+      if (field === "InternshipEndDate") return fmtDate(p?.internshipEndDate);
+      break;
+    case "DocumentFilterInfo":
+      if (field === "ShortDate") return fmtShortDate(new Date());
+      if (field === "HeShe") {
+        const g = (p?.gender || "").toLowerCase();
+        if (g === "male")   return "He";
+        if (g === "female") return "She";
+        return "They";
+      }
+      if (field === "HisHer") {
+        const g = (p?.gender || "").toLowerCase();
+        if (g === "male")   return "His";
+        if (g === "female") return "Her";
+        return "Their";
+      }
+      break;
+    case "CustomAttributes":
+      // HR-supplied per-render values (FnFAmount, ReferenceNo, …)
+      return ctx.customFields?.[field] ?? "";
+  }
+  return null;
+}
+
+export type RenderResult = {
+  html: string;
+  /** Unresolved placeholders, surfaced so the editor can flag them. */
+  missing: string[];
+};
+
+export async function renderLetterHtml(
+  bodyHtml: string,
+  ctx: RenderContext,
+): Promise<RenderResult> {
+  // Pull employee + profile + exit in one query so the renderer is
+  // O(1) DB hits regardless of how many placeholders are used.
+  const user = await prisma.user.findUnique({
+    where: { id: ctx.employeeId },
+    include: {
+      employeeProfile: true,
+    },
+  });
+  if (!user) throw new Error(`Employee #${ctx.employeeId} not found.`);
+
+  // Exit row (if present) drives the FnF / relieving placeholders.
+  let exit: any = null;
+  try {
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT "resignationDate", "lastWorkingDay", "noticePeriodDays", "exitType", status
+         FROM "EmployeeExit" WHERE "userId" = $1 LIMIT 1`,
+      ctx.employeeId,
+    );
+    exit = rows[0] ?? null;
+  } catch { /* exit may not exist for non-leavers */ }
+
+  // Extended profile fields (probationEndDate, internshipEndDate)
+  // via raw SQL — same pattern used in /api/hr/people/[id] to dodge
+  // stale Prisma client deployments.
+  let extended: any = {};
+  try {
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT "probationEndDate", "internshipEndDate"
+         FROM "EmployeeProfile" WHERE "userId" = $1`,
+      ctx.employeeId,
+    );
+    extended = rows[0] ?? {};
+  } catch { /* columns may be missing on older deploys */ }
+
+  const profile = { ...(user.employeeProfile ?? {}), ...extended };
+  const renderCtx = {
+    user,
+    profile,
+    exit,
+    customFields: ctx.customFields ?? {},
+  };
+
+  const missing: string[] = [];
+  // Placeholder values are PLAIN TEXT — escape them before
+  // inserting into HTML so an employee name like
+  // `Manpreet <script>alert(1)</script>` can't break out of text.
+  // The body itself is HTML (sanitised separately) so we don't
+  // escape it again here.
+  const html = bodyHtml.replace(/\{\{\s*([A-Za-z][A-Za-z0-9_.]*)\s*\}\}/g, (_match, key: string) => {
+    const v = resolvePlaceholder(key, renderCtx);
+    if (v == null) {
+      if (!missing.includes(key)) missing.push(key);
+      return `[missing: ${escapeHtml(key)}]`;
+    }
+    return escapeHtml(v);
+  });
+  return { html, missing };
+}
+
+/**
+ * Wrap a substituted body in a complete A4-sized preview HTML
+ * document — letterhead, embedded logo, faint background watermark,
+ * Times New Roman body. The PDF pipeline doesn't use this (the
+ * DOCX template already supplies the same chrome) but the live
+ * editor preview pane does, so HR sees the final layout before
+ * generating.
+ *
+ * The logo is base64-embedded so the sandboxed iframe doesn't need
+ * any network access — its CSP can stay at `default-src 'none'`
+ * with just `img-src data:` and `style-src 'unsafe-inline'`.
+ */
+export async function wrapLetterPreviewHtml(
+  bodyHtml: string,
+  title: string,
+): Promise<string> {
+  const logoDataUrl = await getLogoDataUrl();
+  const logoImg = logoDataUrl
+    ? `<img class="lh-logo" src="${logoDataUrl}" alt="NB Media" />`
+    : "";
+  // Auto-inject Nikit's signature image above the body's "Regards,"
+  // block if the PNG is on disk. No-op otherwise so HR can ship
+  // without the asset and add it later.
+  bodyHtml = await injectSignatureBeforeRegards(bodyHtml);
+  // Watermark rendered as a separate, absolutely-positioned <img>
+  // with very low opacity instead of a CSS background, so we can
+  // dial in the exact fade. ~8% opacity is roughly the level HR's
+  // source PDFs use — visible but doesn't muddy the body text.
+  const watermarkImg = logoDataUrl
+    ? `<img class="lh-watermark" src="${logoDataUrl}" alt="" aria-hidden="true" />`
+    : "";
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    @page { size: A4; margin: 22mm 18mm; }
+    html, body { margin: 0; padding: 0; background: #f8fafc; font-family: "Times New Roman", Times, serif; color: #1f2937; }
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto;
+      padding: 22mm 18mm;
+      background: white;
+      box-shadow: 0 0 0 1px rgba(15,23,42,0.06), 0 2px 16px rgba(15,23,42,0.06);
+      box-sizing: border-box;
+      position: relative;
+      overflow: hidden;
+    }
+    /* Faded NB Media watermark — sits behind everything via z-index. */
+    .lh-watermark {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 60%;
+      max-width: 360pt;
+      opacity: 0.06;
+      pointer-events: none;
+      z-index: 0;
+      user-select: none;
+    }
+    /* Body content sits on its own stacking context above the watermark. */
+    .page > :not(.lh-watermark) {
+      position: relative;
+      z-index: 1;
+    }
+    .letterhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 24pt; margin-bottom: 18pt; padding-bottom: 12pt; border-bottom: 1pt solid #e5e7eb; }
+    .letterhead .lh-text { font-size: 10.5pt; line-height: 1.45; }
+    .letterhead .lh-text .company { font-size: 12pt; font-weight: bold; margin-bottom: 4pt; }
+    .letterhead .lh-logo { width: 86pt; height: auto; }
+    h1.letter-title { font-size: 16pt; font-weight: bold; text-align: center; margin: 14pt 0 16pt; }
+    p { font-size: 12pt; line-height: 1.55; margin: 6pt 0; text-align: justify; }
+    p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; }
+    h2 { font-size: 14pt; margin: 16pt 0 8pt; }
+    h3 { font-size: 13pt; margin: 14pt 0 8pt; }
+    ol, ul { padding-left: 22pt; margin: 8pt 0; }
+    ol li, ul li { margin-bottom: 6pt; font-size: 12pt; line-height: 1.55; }
+    table { width: 100%; border-collapse: collapse; margin: 10pt 0 14pt; }
+    table th, table td { border: 1pt solid #1f2937; padding: 6pt 9pt; font-size: 11pt; text-align: left; }
+    table th { background: #f3f4f6; }
+    .page-break { display: block; height: 22pt; border-top: 1pt dashed #cbd5e1; margin: 18pt 0; padding-top: 8pt; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    ${watermarkImg}
+    <div class="letterhead">
+      <div class="lh-text">
+        <div class="company">YT Money Productions Pvt. Ltd.</div>
+        <strong>Registered Office:</strong> 1st Floor, 209, NB Media,<br/>
+        Model Town, Main Road, Phase 2,<br/>
+        Bathinda, Punjab, 151001<br/>
+        <strong>Phone:</strong> 8146891380<br/>
+        <strong>Email:</strong> HRD@nbmediaproductions.com<br/>
+        <strong>CIN :</strong> U92113PB2022PTC055026
+      </div>
+      ${logoImg}
+    </div>
+    <h1 class="letter-title">${escapeHtml(title)}</h1>
+    ${bodyHtml}
+  </div>
+</body>
+</html>`;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[m] as string));
+}
+
+/**
+ * Parser-based HTML sanitiser for letter-template bodies. Uses
+ * `sanitize-html` with an explicit allowlist of tags/attributes —
+ * unknown elements are stripped, attribute URLs are restricted to
+ * safe schemes, and the parser handles every bypass class that a
+ * regex would miss (malformed/nested tags, CDATA tricks, namespaced
+ * elements, mixed-case `<sCrIpT>`, etc.).
+ *
+ * Allowed surface is intentionally tight — covers the letter
+ * templates HR uses today (text blocks, lists, tables, formatting).
+ * If HR ever needs an extra element (e.g. images), add it here.
+ */
+export function sanitizeLetterHtml(input: string): string {
+  if (typeof input !== "string") return "";
+  return sanitizeHtml(input, {
+    // Allowed elements — letter content shape only. Anything outside
+    // this list (script / iframe / object / embed / svg / form /
+    // input / etc.) is dropped wholesale by the parser.
+    allowedTags: [
+      "h1", "h2", "h3", "h4", "h5", "h6",
+      "p", "div", "span", "br", "hr",
+      "strong", "em", "b", "i", "u", "sub", "sup",
+      "ul", "ol", "li",
+      "table", "thead", "tbody", "tfoot", "tr", "th", "td",
+    ],
+    allowedAttributes: {
+      "*":     ["class", "style"],
+      "td":    ["class", "style", "colspan", "rowspan", "align"],
+      "th":    ["class", "style", "colspan", "rowspan", "align"],
+      "ol":    ["class", "type", "start"],
+      "table": ["class", "style", "border", "cellpadding", "cellspacing"],
+    },
+    // Restrict inline styles to layout properties. Drops anything
+    // that could be used for exfiltration via `background:url(...)`
+    // or scripty `behavior:` properties — only the literal subset
+    // below is allowed and the value must match the regex.
+    allowedStyles: {
+      "*": {
+        "color":           [/^[#\w\(\),\s.%-]+$/],
+        "background":      [/^[#\w\(\),\s.%-]+$/],
+        "background-color":[/^[#\w\(\),\s.%-]+$/],
+        "font-family":     [/^[\w\s,"'-]+$/],
+        "font-size":       [/^[\d.]+(px|pt|em|rem|%)$/],
+        "font-weight":     [/^(bold|normal|\d+)$/],
+        "font-style":      [/^(italic|normal)$/],
+        "text-align":      [/^(left|right|center|justify)$/],
+        "text-decoration": [/^(underline|line-through|none)$/],
+        "margin":          [/^[\d.\s\-pxptemrm%]+$/],
+        "margin-top":      [/^[\d.\-pxptemrm%]+$/],
+        "margin-bottom":   [/^[\d.\-pxptemrm%]+$/],
+        "padding":         [/^[\d.\s\-pxptemrm%]+$/],
+        "line-height":     [/^[\d.]+(px|pt|em|rem|%)?$/],
+        "width":           [/^[\d.]+(px|pt|em|rem|%)$/],
+        "border":          [/^[\d.]+(px|pt) (solid|dashed|dotted) [#\w]+$/],
+      },
+    },
+    // Restrict href/src URL schemes. The default block list already
+    // covers javascript: / data: / vbscript: but we're explicit
+    // about what's allowed for clarity. No external resources are
+    // expected in letter templates anyway.
+    allowedSchemes: ["http", "https", "mailto"],
+    allowedSchemesAppliedToAttributes: ["href", "src", "cite"],
+    // CSS class names are arbitrary strings; sanitize-html keeps
+    // them when allowed in allowedAttributes above. Comments are
+    // stripped by default.
+    selfClosing: ["br", "hr"],
+  });
+}
