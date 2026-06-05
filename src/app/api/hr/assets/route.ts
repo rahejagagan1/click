@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     }
 
     const assets = await prisma.asset.findMany({
-      where, include: { assignments: { where: { returnedAt: null }, include: { user: { select: { id: true, name: true } } }, take: 1 } },
+      where, include: { assignments: { where: { returnedAt: null }, include: { user: { select: { id: true, name: true, profilePictureUrl: true } } }, take: 1 } },
       orderBy: { name: "asc" },
     });
     return NextResponse.json(assets);
