@@ -13,21 +13,58 @@ import { sanitizeLetterHtml } from "@/lib/hr/letter-render";
 export const dynamic = "force-dynamic";
 export const runtime  = "nodejs";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   if (!isLeadershipOrHR(session!.user)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   try {
-    // Raw SQL — the Prisma client may be stale on VPS until the
-    // first build picks up the LetterTemplate model. We return the
-    // same shape the typed client would.
+    // Brand resolution — three sources, in priority order:
+    //   1. ?all=1            → developer-only cross-brand listing
+    //   2. ?brand=NB Media   → explicit URL override (from the HR
+    //                          Dashboard brand-switcher)
+    //   3. session.user.businessUnit (default fallback)
+    // Default to "NB Media" when nothing is set (parent brand).
+    // The ?all=1 path is gated to developers so a regular HR user
+    // can't escape their brand by typing the param in the URL.
+    const url = new URL(req.url);
+    const wantAll = url.searchParams.get("all") === "1";
+    const urlBrand = url.searchParams.get("brand")?.trim() || null;
+    const viewer = session!.user as any;
+    const viewerBrand: string = viewer?.businessUnit || "NB Media";
+
+    if (wantAll) {
+      if (viewer?.isDeveloper !== true) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      const rows = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT id, key, title, category, "businessUnit", "customFields", "isActive", "updatedAt"
+           FROM "LetterTemplate"
+          WHERE "isActive" = true
+          ORDER BY category ASC, "businessUnit" NULLS FIRST, title ASC`,
+      );
+      return NextResponse.json(rows);
+    }
+
+    // SECURITY: only honor ?brand= when the resulting brand IS the
+    // viewer's session brand, or the viewer is a developer.
+    // Otherwise an NB Media HR could navigate to ?brand=yt-labs and
+    // read YT Labs templates — classic IDOR. Unauthorized override
+    // attempts silently fall back to the viewer's brand.
+    const requestedBrand = urlBrand && (urlBrand === "NB Media" || urlBrand === "YT Labs")
+      ? urlBrand
+      : null;
+    const mayCrossBrand = viewer?.isDeveloper === true || requestedBrand === viewerBrand;
+    const effectiveBrand = mayCrossBrand && requestedBrand ? requestedBrand : viewerBrand;
+
     const rows = await prisma.$queryRawUnsafe<any[]>(
       `SELECT id, key, title, category, "businessUnit", "customFields", "isActive", "updatedAt"
          FROM "LetterTemplate"
         WHERE "isActive" = true
-        ORDER BY category ASC, title ASC, "businessUnit" NULLS FIRST`,
+          AND ("businessUnit" = $1 OR "businessUnit" IS NULL)
+        ORDER BY category ASC, title ASC`,
+      effectiveBrand,
     );
     return NextResponse.json(rows);
   } catch (e) {
@@ -46,24 +83,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   try {
-    // Seed installs the default 4 templates as NB Media — they're
-    // authored against the NB Media letterhead + signature. YT Labs
-    // variants are uploaded separately by HR once the source DOCX
-    // files are ready (the picker falls back to the NULL-tagged or
-    // brand-matched row at generate time).
+    // Seed inserts every template in LETTER_TEMPLATE_SEEDS that
+    // isn't already in the DB for its brand. Each seed entry now
+    // carries an explicit `businessUnit` ("NB Media" or "YT Labs"),
+    // defaulting to "NB Media" when omitted to stay backwards-
+    // compatible with the original 5 seeds.
     let inserted = 0;
     let skipped  = 0;
     for (const t of LETTER_TEMPLATE_SEEDS) {
+      const brand = t.businessUnit ?? "NB Media";
       const existing = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT id FROM "LetterTemplate" WHERE key = $1 AND "businessUnit" = 'NB Media' LIMIT 1`,
-        t.key,
+        `SELECT id FROM "LetterTemplate" WHERE key = $1 AND "businessUnit" = $2 LIMIT 1`,
+        t.key, brand,
       );
       if (existing[0]) { skipped++; continue; }
       await prisma.$executeRawUnsafe(
         `INSERT INTO "LetterTemplate"
            (key, title, category, "businessUnit", "bodyHtml", "customFields", "isActive", "createdAt", "updatedAt")
-         VALUES ($1, $2, $3, 'NB Media', $4, $5::jsonb, true, NOW(), NOW())`,
-        t.key, t.title, t.category, sanitizeLetterHtml(t.bodyHtml), JSON.stringify(t.customFields),
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, true, NOW(), NOW())`,
+        t.key, t.title, t.category, brand, sanitizeLetterHtml(t.bodyHtml), JSON.stringify(t.customFields),
       );
       inserted++;
     }

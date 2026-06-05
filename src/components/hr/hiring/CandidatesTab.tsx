@@ -13,7 +13,7 @@ import {
   Download, MoreHorizontal, Users, CheckCircle2, XCircle,
   ExternalLink, MessageSquare, LayoutList, Columns3, Filter,
   ArrowRightCircle, Calendar, ClipboardList, MessageCircle, Archive,
-  Send, UserCog, Tag, X,
+  Send, UserCog, Tag, X, Check,
 } from "lucide-react";
 import CandidateDrawer from "./CandidateDrawer";
 import CandidateActionModal, { type CandidateAction } from "./CandidateActionModal";
@@ -32,6 +32,9 @@ type Candidate = {
   tags?: string[] | null;
   expectedSalary?: number | null;
   availableToJoinDays?: number | null;
+  /** ISO timestamp of the most recent rejection email send, if any.
+   *  Drives the "Email sent" badge in the candidate row. */
+  rejectionEmailSentAt?: string | null;
 };
 
 // Initials + deterministic colour for the avatar circle. Same name
@@ -349,7 +352,24 @@ export default function CandidatesTab() {
                       <div className="flex items-center gap-3 min-w-0">
                         <CandidateAvatar name={c.fullName} photoUrl={c.photoUrl} size={36} />
                         <div className="min-w-0">
-                          <p className="text-[13px] font-semibold text-slate-900 uppercase tracking-wide truncate">{c.fullName}</p>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <p className="text-[13px] font-semibold text-slate-900 uppercase tracking-wide truncate">{c.fullName}</p>
+                            {/* "Email sent" badge — appears only when
+                                the Candidate Rejection email has been
+                                sent to this applicant (either via the
+                                auto-send pipeline on stage change OR
+                                manually from the drawer). Same source
+                                of truth: CandidateActivity. */}
+                            {c.rejectionEmailSentAt && (
+                              <span
+                                className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-px text-[9px] font-bold uppercase tracking-wider text-emerald-700 ring-1 ring-inset ring-emerald-200 shrink-0"
+                                title={`Rejection email sent ${new Date(c.rejectionEmailSentAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}`}
+                              >
+                                <Check size={8} strokeWidth={3} />
+                                Email sent
+                              </span>
+                            )}
+                          </div>
                           {(c.roleTitle || c.overallRating != null) && (
                             <p className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5 truncate">
                               {c.overallRating != null && (
