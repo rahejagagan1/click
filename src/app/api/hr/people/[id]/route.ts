@@ -125,6 +125,44 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       hasOpenSession = open.length > 0;
     }
 
+    // Exit row, if any. Drives the "On Notice Period" / "Exited"
+    // badge on the profile header. Visible only to HR team
+    // (orgLevel=hr_manager), developers, and the profile owner —
+    // mirrors canViewExitBadge in src/lib/access.ts. CEO and
+    // special_access / role=admin are intentionally excluded.
+    // Only one EmployeeExit row exists per user (userId is @unique).
+    const sUserBadge = session?.user as any;
+    const isSelfForBadge = (await resolveUserId(session)) === id;
+    const canSeeExitBadge =
+      isSelfForBadge ||
+      sUserBadge?.orgLevel === "hr_manager" ||
+      sUserBadge?.isDeveloper === true;
+    let activeExit: {
+      id: number;
+      status: string;
+      exitType: string;
+      resignationDate: string | null;
+      lastWorkingDay: string | null;
+      noticePeriodDays: number | null;
+    } | null = null;
+    if (canSeeExitBadge) {
+      try {
+        const exitRows = await prisma.$queryRawUnsafe<Array<any>>(
+          `SELECT id, status, "exitType",
+                  to_char("resignationDate", 'YYYY-MM-DD') AS "resignationDate",
+                  to_char("lastWorkingDay",  'YYYY-MM-DD') AS "lastWorkingDay",
+                  "noticePeriodDays"
+             FROM "EmployeeExit"
+            WHERE "userId" = $1
+            LIMIT 1`,
+          id,
+        );
+        if (exitRows[0]) activeExit = exitRows[0];
+      } catch (e) {
+        console.warn("[people GET] activeExit lookup failed:", e);
+      }
+    }
+
     // Reshape to what the detail page reads.
     const { employeeProfile, heldAssets, ownedDocuments, teamMembers, userShift, ...rest } = user;
     // Documents are PII (PAN / Aadhaar / education / employee letters)
@@ -153,6 +191,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       todayAttendance: todayAtt
         ? { ...todayAtt, hasOpenSession }
         : null,
+      activeExit,
     };
     return NextResponse.json(serializeBigInt(payload));
   } catch (e) {
