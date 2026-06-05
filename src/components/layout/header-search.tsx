@@ -4,7 +4,9 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import useSWR from "swr";
+import { useSession } from "next-auth/react";
 import { fetcher } from "@/lib/swr";
+import { canViewExitBadge } from "@/lib/access";
 
 // Next.js 16 + Turbopack require any consumer of useSearchParams() to
 // sit under a <Suspense> boundary, otherwise pages that try to
@@ -72,6 +74,9 @@ function HeaderSearchInner() {
   // normally.
   const pathname    = usePathname() ?? "";
   const searchParams = useSearchParams();
+  const { data: session } = useSession();
+  const sessionUser = session?.user as any;
+  const sessionUserId = sessionUser?.dbId;
   const tabQuery = useMemo(() => {
     if (!pathname.startsWith("/dashboard/hr/people/")) return "";
     const tab = searchParams?.get("tab");
@@ -222,6 +227,21 @@ function HeaderSearchInner() {
                     const initials = (u.name || "?").split(" ").map((p: string) => p[0]).join("").slice(0, 2).toUpperCase();
                     const dept = u.employeeProfile?.department;
                     const desg = u.employeeProfile?.designation;
+                    // Exit-lifecycle badge — "On Notice" (amber)
+                    // while serving notice; "Exited" (slate) once
+                    // HR finalises or the LWD has passed. Gated to
+                    // HR team + developer + self only — see
+                    // canViewExitBadge in src/lib/access.ts.
+                    const exit = u.employeeExit;
+                    const isSelfRow = sessionUserId != null && Number(sessionUserId) === u.id;
+                    const canSeeBadge = canViewExitBadge(sessionUser, isSelfRow);
+                    const exFinalised = exit && (exit.status === "exited" || exit.status === "offboarded");
+                    const exLwdMs = exit?.lastWorkingDay ? new Date(exit.lastWorkingDay).getTime() : 0;
+                    const exLwdPassed = exLwdMs > 0 && Date.now() > exLwdMs + 86400000;
+                    const exitState: "on_notice" | "exited" | null =
+                      !exit || !canSeeBadge
+                        ? null
+                        : (exFinalised || exLwdPassed) ? "exited" : "on_notice";
                     return (
                       <Link
                         key={`p-${u.id}`}
@@ -235,7 +255,27 @@ function HeaderSearchInner() {
                           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#008CFF] text-[10px] font-bold text-white">{initials}</span>
                         )}
                         <div className="min-w-0 flex-1">
-                          <p className="text-[12.5px] font-medium text-slate-800 dark:text-white truncate leading-snug">{u.name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-[12.5px] font-medium text-slate-800 dark:text-white truncate leading-snug">{u.name}</p>
+                            {exitState === "on_notice" && (
+                              <span
+                                className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-px text-[8.5px] font-bold uppercase tracking-wider text-amber-700 ring-1 ring-inset ring-amber-200 shrink-0"
+                                title={exit?.lastWorkingDay ? `Last working day: ${String(exit.lastWorkingDay).slice(0, 10)}` : "On notice"}
+                              >
+                                <span className="inline-block h-1 w-1 rounded-full bg-amber-500" />
+                                On Notice
+                              </span>
+                            )}
+                            {exitState === "exited" && (
+                              <span
+                                className="inline-flex items-center gap-0.5 rounded-full bg-slate-100 px-1.5 py-px text-[8.5px] font-bold uppercase tracking-wider text-slate-700 ring-1 ring-inset ring-slate-300 shrink-0"
+                                title={exit?.lastWorkingDay ? `Exited on ${String(exit.lastWorkingDay).slice(0, 10)}` : "Exited"}
+                              >
+                                <span className="inline-block h-1 w-1 rounded-full bg-slate-500" />
+                                Exited
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[10.5px] text-slate-500 truncate">
                             {desg ? `${desg}${dept ? ` · ${dept}` : ""}` : u.email}
                           </p>

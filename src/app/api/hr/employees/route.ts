@@ -26,6 +26,15 @@ export async function GET(req: NextRequest) {
       .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
     const hideDevs = !viewerIsDev && devEmails.length > 0;
 
+    // Exit-badge data is HR-confidential. Only include the
+    // employeeExit relation when the viewer is HR team
+    // (orgLevel=hr_manager) or a developer. Other viewers get the
+    // row without it — their UI also gates on canViewExitBadge, but
+    // stripping at the API is defense in depth (a curl can't pull
+    // exit status either way).
+    const canSeeExitBadge =
+      viewer?.orgLevel === "hr_manager" || viewer?.isDeveloper === true;
+
     const users = await prisma.user.findMany({
       where: {
         AND: [
@@ -45,9 +54,32 @@ export async function GET(req: NextRequest) {
       include: {
         employeeProfile: true,
         manager: { select: { id: true, name: true } },
+        // Conditional include — see canSeeExitBadge above.
+        ...(canSeeExitBadge
+          ? { employeeExit: { select: { id: true, status: true, lastWorkingDay: true } } }
+          : {}),
       },
       orderBy: { name: "asc" },
     });
+
+    // For non-HR / non-developer viewers, leave self-row badges
+    // visible (an employee should still see their own exit state in
+    // search results pointing back to themselves). Add it back via
+    // a single lookup when applicable.
+    if (!canSeeExitBadge) {
+      const viewerId = Number(viewer?.dbId ?? 0);
+      const selfRow = viewerId > 0 ? users.find((u: any) => u.id === viewerId) : null;
+      if (selfRow) {
+        try {
+          const selfExit = await prisma.$queryRawUnsafe<Array<any>>(
+            `SELECT id, status, "lastWorkingDay"
+               FROM "EmployeeExit" WHERE "userId" = $1 LIMIT 1`,
+            viewerId,
+          );
+          if (selfExit[0]) (selfRow as any).employeeExit = selfExit[0];
+        } catch { /* ignore */ }
+      }
+    }
 
     return NextResponse.json(serializeBigInt(users));
   } catch (e) {
