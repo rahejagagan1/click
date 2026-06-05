@@ -434,7 +434,11 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
   };
 
   return (
-    <>
+    // Scope Times New Roman to the assets panel (and its slide-in
+    // panels, which inherit font-family via the DOM tree even though
+    // they render as fixed-position overlays). Page chrome outside
+    // AssetsPanel keeps the app's default sans-serif.
+    <div style={{ fontFamily: '"Times New Roman", Times, serif' }}>
       {showHeader && (
         <div className="bg-white dark:bg-[#001529] border-b border-slate-200 dark:border-white/[0.06] px-6 py-5">
           <div className="flex items-center text-xs text-slate-500 mb-3 gap-1.5">
@@ -1022,6 +1026,6 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
           </div>
         </>
       )}
-    </>
+    </div>
   );
 }
