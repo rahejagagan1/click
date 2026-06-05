@@ -24,7 +24,7 @@ const CAT_LABEL_OVERRIDES: Record<string, string> = {
   aadhar:                    "Aadhaar",
   passport:                  "Passport",
   driving_license:           "Driving License",
-  education_certificate:     "Latest Degree / Marksheet",
+  education_certificate:     "Degree/marksheet",
   offer_letter:              "Offer Letter",
   previous_relieving_letter: "Previous Relieving Letter",
   previous_offer_letter:     "Previous Offer Letter",
