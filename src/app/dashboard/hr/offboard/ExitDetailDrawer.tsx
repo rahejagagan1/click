@@ -23,7 +23,7 @@ import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import {
   X, CheckCircle2, Circle, RefreshCw, FileText, Star, ClipboardList,
-  Plus, Trash2, Save, AlertCircle, CalendarDays, ArrowRight,
+  Plus, Trash2, Save, AlertCircle, CalendarDays, ArrowRight, Pencil,
 } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 import ExitFinaliseWizard from "./ExitFinaliseWizard";
@@ -215,6 +215,104 @@ function SummaryTab({
     onChanged();
   };
 
+  // Summary-card editor modal. HR can correct any of the
+  // exit-type / dates / notice / reason / rehire fields without
+  // having to rebuild the whole offboarding flow.
+  const [editingSummary, setEditingSummary] = useState(false);
+  const [editForm, setEditForm] = useState<{
+    exitType: string;
+    resignationDate: string;
+    lastWorkingDay: string;
+    noticePeriodDays: string;
+    reason: string;
+    okToRehire: boolean;
+  }>({
+    exitType: e.exitType,
+    resignationDate: (e.resignationDate || "").slice(0, 10),
+    lastWorkingDay:  (e.lastWorkingDay  || "").slice(0, 10),
+    noticePeriodDays: String(e.noticePeriodDays ?? 30),
+    reason: e.reason ?? "",
+    okToRehire: !!e.okToRehire,
+  });
+  const [savingSummary, setSavingSummary] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  // Add `days` calendar days to a YYYY-MM-DD string. Returns "" if
+  // the input isn't a valid date. Used to keep last-working-day in
+  // sync with resignationDate + noticePeriodDays — HR types one,
+  // the other auto-recalcs.
+  const addDays = (ymd: string, days: number): string => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return "";
+    if (!Number.isFinite(days)) return "";
+    const d = new Date(`${ymd}T00:00:00Z`);
+    if (Number.isNaN(d.getTime())) return "";
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  // When notice period changes, recompute LWD from the (possibly
+  // updated) resignation date. Same when resignation date changes —
+  // LWD slides to keep the notice constant.
+  const onNoticeChange = (v: string) => {
+    setEditForm((f) => {
+      const n = Number(v);
+      const lwd = Number.isInteger(n) && n >= 0 && f.resignationDate
+        ? addDays(f.resignationDate, n)
+        : f.lastWorkingDay;
+      return { ...f, noticePeriodDays: v, lastWorkingDay: lwd };
+    });
+  };
+  const onResignationChange = (v: string) => {
+    setEditForm((f) => {
+      const n = Number(f.noticePeriodDays);
+      const lwd = Number.isInteger(n) && n >= 0 && v ? addDays(v, n) : f.lastWorkingDay;
+      return { ...f, resignationDate: v, lastWorkingDay: lwd };
+    });
+  };
+
+  const openSummaryEdit = () => {
+    setEditForm({
+      exitType: e.exitType,
+      resignationDate: (e.resignationDate || "").slice(0, 10),
+      lastWorkingDay:  (e.lastWorkingDay  || "").slice(0, 10),
+      noticePeriodDays: String(e.noticePeriodDays ?? 30),
+      reason: e.reason ?? "",
+      okToRehire: !!e.okToRehire,
+    });
+    setSummaryError(null);
+    setEditingSummary(true);
+  };
+  const saveSummary = async () => {
+    setSavingSummary(true);
+    setSummaryError(null);
+    try {
+      const n = Number(editForm.noticePeriodDays);
+      if (!Number.isInteger(n) || n < 0 || n > 365) {
+        setSummaryError("Notice period must be a whole number between 0 and 365.");
+        return;
+      }
+      const res = await fetch(`/api/hr/exits/${e.id}`, {
+        method:  "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          exitType:         editForm.exitType,
+          resignationDate:  editForm.resignationDate,
+          lastWorkingDay:   editForm.lastWorkingDay,
+          noticePeriodDays: n,
+          reason:           editForm.reason,
+          okToRehire:       editForm.okToRehire,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setSummaryError(j?.error || `Save failed (${res.status})`);
+        return;
+      }
+      setEditingSummary(false);
+      onChanged();
+    } finally {
+      setSavingSummary(false);
+    }
+  };
+
   const [noteDraft, setNoteDraft] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const postNote = async () => {
@@ -234,7 +332,15 @@ function SummaryTab({
   return (
     <div className="p-5 space-y-4 max-w-3xl">
       {/* Header card */}
-      <section className="bg-white border border-slate-200 rounded-xl p-5">
+      <section className="bg-white border border-slate-200 rounded-xl p-5 relative">
+        <button
+          type="button"
+          onClick={openSummaryEdit}
+          aria-label="Edit exit summary"
+          className="absolute top-3 right-3 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11.5px] font-medium text-slate-500 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.06] transition-colors"
+        >
+          <Pencil size={12} /> Edit
+        </button>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-[12.5px]">
           <div>
             <p className="text-slate-500 text-[11px] uppercase font-semibold mb-0.5">Exit Type</p>
@@ -262,6 +368,121 @@ function SummaryTab({
           </div>
         </div>
       </section>
+
+      {/* Edit-summary modal — appears centered on top of the drawer */}
+      {editingSummary && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/40 z-[60]"
+            onClick={() => !savingSummary && setEditingSummary(false)}
+          />
+          <div className="fixed inset-0 z-[61] flex items-start justify-center pt-20 px-4 pointer-events-none">
+            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md pointer-events-auto">
+              <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="text-[14px] font-semibold text-slate-800">Edit exit summary</h3>
+                <button
+                  type="button"
+                  onClick={() => !savingSummary && setEditingSummary(false)}
+                  className="text-slate-400 hover:text-slate-700"
+                  aria-label="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="p-5 space-y-3.5">
+                <div>
+                  <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Exit Type</label>
+                  <select
+                    value={editForm.exitType}
+                    onChange={(ev) => setEditForm((f) => ({ ...f, exitType: ev.target.value }))}
+                    className="mt-1 w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]"
+                  >
+                    <option value="resignation">Resignation</option>
+                    <option value="termination">Termination</option>
+                    <option value="contract_end">Contract end</option>
+                    <option value="retirement">Retirement</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Resignation Date</label>
+                    <DateField
+                      value={editForm.resignationDate}
+                      onChange={onResignationChange}
+                      className="mt-1 w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Last Working Day</label>
+                    <DateField
+                      value={editForm.lastWorkingDay}
+                      onChange={(v) => setEditForm((f) => ({ ...f, lastWorkingDay: v }))}
+                      className="mt-1 w-full"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Notice Period (days)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={365}
+                    value={editForm.noticePeriodDays}
+                    onChange={(ev) => onNoticeChange(ev.target.value)}
+                    className="mt-1 w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]"
+                  />
+                  <p className="mt-1 text-[10.5px] text-slate-400">
+                    Last Working Day auto-updates as Resignation Date + Notice.
+                  </p>
+                </div>
+                <div>
+                  <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Reason</label>
+                  <input
+                    type="text"
+                    value={editForm.reason}
+                    onChange={(ev) => setEditForm((f) => ({ ...f, reason: ev.target.value }))}
+                    placeholder="e.g. Performance, Better opportunity"
+                    className="mt-1 w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-[13px] text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={editForm.okToRehire}
+                    onChange={(ev) => setEditForm((f) => ({ ...f, okToRehire: ev.target.checked }))}
+                    className="w-4 h-4 rounded border-slate-300 text-[#008CFF] focus:ring-[#008CFF]"
+                  />
+                  Ok to rehire
+                </label>
+                {summaryError && (
+                  <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[12px] text-rose-700">
+                    {summaryError}
+                  </div>
+                )}
+              </div>
+              <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => !savingSummary && setEditingSummary(false)}
+                  disabled={savingSummary}
+                  className="h-8 px-4 text-[12.5px] text-slate-500 hover:text-slate-800 rounded-md disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={saveSummary}
+                  disabled={savingSummary}
+                  className="h-8 px-4 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-md text-[12.5px] font-semibold disabled:opacity-60 disabled:cursor-wait"
+                >
+                  {savingSummary ? "Saving…" : "Save changes"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Status pipeline — "Under Review" was retired (all new exits
           land in_progress). Legacy under_review / notice_period /

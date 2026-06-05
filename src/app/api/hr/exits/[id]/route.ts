@@ -148,6 +148,44 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (body[k] !== undefined) { sets.push(`"${k}" = $${i++}`); args.push(!!body[k]); }
     }
     if (body.notes !== undefined) { sets.push(`notes = $${i++}`); args.push(body.notes || null); }
+
+    // Summary-card editable fields. exitType is validated against the
+    // documented set; the two dates land via ::date casts so anything
+    // beyond a valid YYYY-MM-DD throws at the DB layer; noticePeriodDays
+    // requires a positive integer.
+    if (body.exitType !== undefined) {
+      const VALID_EXIT_TYPES = new Set(["resignation","termination","contract_end","retirement","other"]);
+      const v = String(body.exitType || "").toLowerCase().trim();
+      if (!VALID_EXIT_TYPES.has(v)) {
+        return NextResponse.json({ error: "Invalid exitType" }, { status: 400 });
+      }
+      sets.push(`"exitType" = $${i++}`); args.push(v);
+    }
+    if (body.resignationDate !== undefined) {
+      const v = String(body.resignationDate || "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+        return NextResponse.json({ error: "Invalid resignationDate (expected YYYY-MM-DD)" }, { status: 400 });
+      }
+      sets.push(`"resignationDate" = $${i++}::date`); args.push(v);
+    }
+    if (body.lastWorkingDay !== undefined) {
+      const v = String(body.lastWorkingDay || "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+        return NextResponse.json({ error: "Invalid lastWorkingDay (expected YYYY-MM-DD)" }, { status: 400 });
+      }
+      sets.push(`"lastWorkingDay" = $${i++}::date`); args.push(v);
+    }
+    if (body.noticePeriodDays !== undefined) {
+      const n = Number(body.noticePeriodDays);
+      if (!Number.isInteger(n) || n < 0 || n > 365) {
+        return NextResponse.json({ error: "Invalid noticePeriodDays (0–365)" }, { status: 400 });
+      }
+      sets.push(`"noticePeriodDays" = $${i++}`); args.push(n);
+    }
+    if (body.reason !== undefined) {
+      const r = typeof body.reason === "string" ? body.reason.trim() : "";
+      sets.push(`reason = $${i++}`); args.push(r || null);
+    }
     if (sets.length === 0) return NextResponse.json({ ok: true });
     sets.push(`"updatedAt" = now()`);
     args.push(id);

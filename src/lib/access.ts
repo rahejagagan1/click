@@ -82,6 +82,28 @@ export function canViewEmployeeDocuments(
 }
 
 /**
+ * Tight gate for the "On Notice Period" / "Exited" badge on
+ * employee profiles + search results. Visible ONLY to:
+ *   • The employee themselves (self-view)
+ *   • The HR team (orgLevel=hr_manager — covers HR Manager + HR
+ *     team members like Vanshika)
+ *   • Developers (isDeveloper=true)
+ *
+ * Per HR policy (2026-06-05): the CEO and special_access /
+ * role=admin should NOT see this badge on other people's profiles
+ * — exit status is HR's confidential signal, not a company-wide
+ * one. The page itself stays accessible; just the chip hides.
+ */
+export function canViewExitBadge(
+  user: ClientUser,
+  isSelfView: boolean,
+): boolean {
+  if (isSelfView) return true;
+  if (!user) return false;
+  return user.orgLevel === "hr_manager" || user.isDeveloper === true;
+}
+
+/**
  * The one developer who is trusted with salary data. Other developers
  * (e.g. anyone else in DEVELOPER_EMAILS) pass `isDeveloper` for every
  * other dev-only surface but NOT for compensation. Must stay in sync
