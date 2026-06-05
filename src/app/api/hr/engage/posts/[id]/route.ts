@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
+import { requireAuth, isLeadershipOrHR, serverError } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +30,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!post) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const isAuthor = post.authorId === user.dbId;
-    if (!isAuthor && !isHRAdmin(user)) {
+    if (!isAuthor && !isLeadershipOrHR(user)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -68,7 +68,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     if (!post) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const isAuthor = post.authorId === user.dbId;
-    if (!isAuthor && !isHRAdmin(user)) {
+    if (!isAuthor && !isLeadershipOrHR(user)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

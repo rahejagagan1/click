@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, serverError } from "@/lib/api-auth";
+import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
 import { istTodayDateOnly } from "@/lib/ist-date";
 
@@ -23,7 +23,7 @@ function canEditOthers(session: any): boolean {
 // Returns the shape expected by /dashboard/hr/people/[id]/page.tsx:
 //   { id, name, email, role, orgLevel, profilePictureUrl, profile, documents, assets, directReports, manager, shift, leaveBalances }
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { errorResponse } = await requireAuth();
+  const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
 
   try {
@@ -127,10 +127,24 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
     // Reshape to what the detail page reads.
     const { employeeProfile, heldAssets, ownedDocuments, teamMembers, userShift, ...rest } = user;
+    // Documents are PII (PAN / Aadhaar / education / employee letters)
+    // — strict policy: only the profile owner, HR team
+    // (orgLevel=hr_manager), CEO, and developers. Excludes
+    // special_access and role=admin (which pass canEditOthers for
+    // most other things). Mirrors canViewEmployeeDocuments in
+    // src/lib/access.ts and the GET /api/hr/documents gate below.
+    const callerId = await resolveUserId(session);
+    const sUser = session?.user as any;
+    const isSelfRequest = callerId != null && callerId === id;
+    const isDocViewer =
+      sUser?.orgLevel === "ceo" ||
+      sUser?.isDeveloper === true ||
+      sUser?.orgLevel === "hr_manager";
+    const docsAllowed = isSelfRequest || isDocViewer;
     const payload = {
       ...rest,
       profile:       employeeProfile ? { ...employeeProfile, ...extended } : null,
-      documents:     ownedDocuments,
+      documents:     docsAllowed ? ownedDocuments : [],
       assets:        heldAssets.map((a) => ({ ...a.asset, assignedAt: a.assignedAt })),
       directReports: teamMembers,
       shift:         userShift?.shift ?? null,
