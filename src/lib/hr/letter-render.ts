@@ -21,47 +21,92 @@ import sanitizeHtml from "sanitize-html";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-// Lazy-cache the NB Media logo as a base64 data URL so the preview
-// iframe can render it without a network fetch (the iframe is
-// sandboxed with default-src 'none' + img-src data:). One-time read
-// per server lifetime — small file, fine to keep in memory.
-let cachedLogoDataUrl: string | null = null;
-async function getLogoDataUrl(): Promise<string> {
-  if (cachedLogoDataUrl) return cachedLogoDataUrl;
+// Lazy-cache logos as base64 data URLs so the preview iframe
+// (sandboxed with default-src 'none' + img-src data:) can render
+// them without any network. One-time read per server lifetime.
+const logoCache: Record<string, string> = {};
+async function getLogoDataUrl(filename: string): Promise<string> {
+  if (logoCache[filename] !== undefined) return logoCache[filename];
   try {
-    const path = resolve(process.cwd(), "public", "logo.png");
+    const path = resolve(process.cwd(), "public", filename);
     const bytes = await readFile(path);
-    cachedLogoDataUrl = `data:image/png;base64,${bytes.toString("base64")}`;
-    return cachedLogoDataUrl;
+    logoCache[filename] = `data:image/png;base64,${bytes.toString("base64")}`;
+    return logoCache[filename];
   } catch {
+    logoCache[filename] = "";
     return "";
   }
 }
+/** Resolve the right logo + letterhead data per business unit.
+ *  YT Labs uses public/logo-ytlabs.png + the BILLION FILMS letterhead.
+ *  NB Media uses public/logo.png + the YT Money Productions letterhead.
+ *  Falls back to NB Media chrome when an unknown brand is passed. */
+async function getBrandChrome(businessUnit: string | null | undefined): Promise<{
+  logoDataUrl: string;
+  company: string;
+  addressHtml: string;
+  altText: string;
+}> {
+  if (businessUnit === "YT Labs") {
+    // YT Labs uses its own hash icon — DO NOT fall back to the
+    // NB Media logo when public/logo-ytlabs.png is missing. A
+    // letter going to a YT Labs employee with the NB Media logo
+    // is worse than a letter with no logo at all. The header
+    // layout still renders correctly; HR just sees an empty slot
+    // top-right until the asset is dropped in.
+    const logo = await getLogoDataUrl("logo-ytlabs.png");
+    return {
+      logoDataUrl: logo,
+      altText: "YT Labs",
+      company: "BILLION FILMS PRIVATE LIMITED",
+      addressHtml: `
+        <strong>Registered Office:</strong> 2nd Floor, NAAR Tower,<br/>
+        Sector 74 A, Industrial Area, Sector 74,<br/>
+        Sahibzada Ajit Singh Nagar,<br/>
+        Punjab 140307<br/>
+        <strong>Phone:</strong> 8146891380<br/>
+        <strong>CIN :</strong> U18200PB2024PTC061355`,
+    };
+  }
+  // NB Media (default)
+  return {
+    logoDataUrl: await getLogoDataUrl("logo.png"),
+    altText: "NB Media",
+    company: "YT Money Productions Pvt. Ltd.",
+    addressHtml: `
+      <strong>Registered Office:</strong> 1st Floor, 209, NB Media,<br/>
+      Model Town, Main Road, Phase 2,<br/>
+      Bathinda, Punjab, 151001<br/>
+      <strong>Phone:</strong> 8146891380<br/>
+      <strong>Email:</strong> HRD@nbmediaproductions.com<br/>
+      <strong>CIN :</strong> U92113PB2022PTC055026`,
+  };
+}
 
-// Same idea for the founder's signature image. Looks for
-// `public/signatures/nikit-bassi.png` first, falls back to .jpg.
-// Returns empty string when neither file exists — the wrapper then
-// silently skips rendering the signature image, so HR can drop the
-// file in later without a code change.
-let cachedSignatureDataUrl: string | null = null;
-let cachedSignatureLoaded = false;
-async function getSignatureDataUrl(): Promise<string> {
-  if (cachedSignatureLoaded) return cachedSignatureDataUrl ?? "";
+// Founder signature images, cached per-brand on first read so the
+// preview iframe (sandboxed with img-src data:) can embed without
+// any network access. NB Media letters use Nikit Bassi's
+// signature; YT Labs letters use Kunal Lall's. Returns "" when the
+// file isn't present, so the wrapper silently skips rendering the
+// signature image and HR can drop the asset in later.
+const signatureCache: Record<string, { loaded: boolean; dataUrl: string }> = {};
+async function getSignatureDataUrl(businessUnit?: string | null): Promise<string> {
+  const slug = businessUnit === "YT Labs" ? "kunal-lall" : "nikit-bassi";
+  if (signatureCache[slug]?.loaded) return signatureCache[slug].dataUrl;
   const candidates: Array<{ path: string; mime: string }> = [
-    { path: resolve(process.cwd(), "public", "signatures", "nikit-bassi.png"), mime: "image/png" },
-    { path: resolve(process.cwd(), "public", "signatures", "nikit-bassi.jpg"), mime: "image/jpeg" },
-    { path: resolve(process.cwd(), "public", "signatures", "nikit-bassi.jpeg"), mime: "image/jpeg" },
+    { path: resolve(process.cwd(), "public", "signatures", `${slug}.png`), mime: "image/png" },
+    { path: resolve(process.cwd(), "public", "signatures", `${slug}.jpg`), mime: "image/jpeg" },
+    { path: resolve(process.cwd(), "public", "signatures", `${slug}.jpeg`), mime: "image/jpeg" },
   ];
   for (const c of candidates) {
     try {
       const bytes = await readFile(c.path);
-      cachedSignatureDataUrl = `data:${c.mime};base64,${bytes.toString("base64")}`;
-      cachedSignatureLoaded = true;
-      return cachedSignatureDataUrl;
+      const dataUrl = `data:${c.mime};base64,${bytes.toString("base64")}`;
+      signatureCache[slug] = { loaded: true, dataUrl };
+      return dataUrl;
     } catch { /* try next */ }
   }
-  cachedSignatureLoaded = true;
-  cachedSignatureDataUrl = null;
+  signatureCache[slug] = { loaded: true, dataUrl: "" };
   return "";
 }
 
@@ -71,26 +116,22 @@ async function getSignatureDataUrl(): Promise<string> {
  *  public/signatures/nikit-bassi.{png|jpg|jpeg} — no synthetic
  *  fallback (a stand-in cursive font never matches the real
  *  hand-signature and looks worse than a blank gap). */
-async function injectSignatureBeforeRegards(bodyHtml: string): Promise<string> {
-  const sig = await getSignatureDataUrl();
+async function injectSignatureBeforeRegards(bodyHtml: string, businessUnit?: string | null): Promise<string> {
+  const sig = await getSignatureDataUrl(businessUnit);
   if (!sig) return bodyHtml;
-  // Per HR's layout: signature sits BELOW the "Founder & CEO" line,
-  // not above "Regards,". Small gap above the image, left-aligned,
-  // ~38pt tall.
-  // Professional sign-off — small height (~18pt ≈ 24px) so the
-  // signature reads as a refined accent below the typed name, not
-  // a hero element. Source ratio is 260×48 (post-crop) so 18pt
-  // high gives roughly 100pt wide.
-  const sigBlock = `<p style="margin:6pt 0 4pt 0; padding:0; line-height:1; text-align:left"><img src="${sig}" alt="Nikit Bassi" style="height:18pt; width:auto; display:block"/></p>`;
+  // Signature sits BELOW the "Founder & CEO" line, left-aligned.
+  // Kunal's signature is rendered larger than Nikit's because his
+  // source-image strokes are thinner — at 18pt they read as
+  // tiny-and-stretched. Bumping to 28pt matches the visual weight
+  // HR's source PDFs use for YT Labs letters.
+  const altText  = businessUnit === "YT Labs" ? "Kunal Lall" : "Nikit Bassi";
+  const sigHeight = businessUnit === "YT Labs" ? "28pt" : "18pt";
+  const sigBlock = `<p style="margin:6pt 0 4pt 0; padding:0; line-height:1; text-align:left"><img src="${sig}" alt="${altText}" style="height:${sigHeight}; width:auto; display:block"/></p>`;
   // Anchor: the FIRST block element containing "Founder & CEO".
   // The block may use a literal "&" or the HTML entity, so match
-  // both via [&&amp;]. Insert sigBlock RIGHT AFTER that block's
-  // closing tag.
+  // both. Insert sigBlock RIGHT AFTER that block's closing tag.
   const re = /(<(p|div|h[1-6])[^>]*>[\s\S]*?Founder\s*(?:&|&amp;)\s*CEO[\s\S]*?<\/\2>)/i;
   if (re.test(bodyHtml)) return bodyHtml.replace(re, "$1" + sigBlock);
-  // Fallback — append at the end (still below the signoff block in
-  // every template I've seen, since "Regards / Nikit Bassi /
-  // Founder & CEO" is usually near the end).
   return bodyHtml + sigBlock;
 }
 
@@ -185,6 +226,7 @@ function resolvePlaceholder(
       break;
     case "EmployeeJobInfo":
       if (field === "JobTitle")        return p?.designation || u?.role || "";
+      if (field === "Department")      return p?.department || "";
       if (field === "DateJoined")      return fmtDate(p?.joiningDate);
       if (field === "ResignationDate") return fmtDate(ex?.resignationDate);
       if (field === "LastWorkingDay")  return fmtDate(ex?.lastWorkingDay);
@@ -206,6 +248,14 @@ function resolvePlaceholder(
         if (g === "male")   return "His";
         if (g === "female") return "Her";
         return "Their";
+      }
+      // Object pronoun — used after verbs ("we wish him/her good
+      // luck"). Falls back to "them" for non-binary / unknown.
+      if (field === "HimHer") {
+        const g = (p?.gender || "").toLowerCase();
+        if (g === "male")   return "him";
+        if (g === "female") return "her";
+        return "them";
       }
       break;
     case "CustomAttributes":
@@ -299,21 +349,22 @@ export async function renderLetterHtml(
 export async function wrapLetterPreviewHtml(
   bodyHtml: string,
   title: string,
+  businessUnit: string | null = "NB Media",
 ): Promise<string> {
-  const logoDataUrl = await getLogoDataUrl();
-  const logoImg = logoDataUrl
-    ? `<img class="lh-logo" src="${logoDataUrl}" alt="NB Media" />`
+  // Brand-aware chrome — letterhead text, logo image, watermark are
+  // all picked from getBrandChrome(). YT Labs renders the BILLION
+  // FILMS letterhead with the YT Labs hash icon; NB Media renders
+  // the YT Money Productions letterhead with the nb-media logo.
+  const chrome = await getBrandChrome(businessUnit);
+  const logoImg = chrome.logoDataUrl
+    ? `<img class="lh-logo" src="${chrome.logoDataUrl}" alt="${escapeHtml(chrome.altText)}" />`
     : "";
-  // Auto-inject Nikit's signature image above the body's "Regards,"
-  // block if the PNG is on disk. No-op otherwise so HR can ship
-  // without the asset and add it later.
-  bodyHtml = await injectSignatureBeforeRegards(bodyHtml);
-  // Watermark rendered as a separate, absolutely-positioned <img>
-  // with very low opacity instead of a CSS background, so we can
-  // dial in the exact fade. ~8% opacity is roughly the level HR's
-  // source PDFs use — visible but doesn't muddy the body text.
-  const watermarkImg = logoDataUrl
-    ? `<img class="lh-watermark" src="${logoDataUrl}" alt="" aria-hidden="true" />`
+  // Auto-inject the founder signature image (Nikit for NB Media,
+  // Kunal for YT Labs) below the body's "Founder & CEO" line if
+  // the PNG is on disk. No-op otherwise.
+  bodyHtml = await injectSignatureBeforeRegards(bodyHtml, businessUnit);
+  const watermarkImg = chrome.logoDataUrl
+    ? `<img class="lh-watermark" src="${chrome.logoDataUrl}" alt="" aria-hidden="true" />`
     : "";
   return `<!doctype html>
 <html lang="en">
@@ -375,13 +426,8 @@ export async function wrapLetterPreviewHtml(
     ${watermarkImg}
     <div class="letterhead">
       <div class="lh-text">
-        <div class="company">YT Money Productions Pvt. Ltd.</div>
-        <strong>Registered Office:</strong> 1st Floor, 209, NB Media,<br/>
-        Model Town, Main Road, Phase 2,<br/>
-        Bathinda, Punjab, 151001<br/>
-        <strong>Phone:</strong> 8146891380<br/>
-        <strong>Email:</strong> HRD@nbmediaproductions.com<br/>
-        <strong>CIN :</strong> U92113PB2022PTC055026
+        <div class="company">${escapeHtml(chrome.company)}</div>
+        ${chrome.addressHtml}
       </div>
       ${logoImg}
     </div>
@@ -419,7 +465,7 @@ export function sanitizeLetterHtml(input: string): string {
     allowedTags: [
       "h1", "h2", "h3", "h4", "h5", "h6",
       "p", "div", "span", "br", "hr",
-      "strong", "em", "b", "i", "u", "sub", "sup",
+      "strong", "em", "b", "i", "u", "s", "del", "sub", "sup",
       "ul", "ol", "li",
       "table", "thead", "tbody", "tfoot", "tr", "th", "td",
     ],
