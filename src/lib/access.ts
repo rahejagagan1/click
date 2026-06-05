@@ -40,6 +40,48 @@ export function isHRAdmin(user: ClientUser): boolean {
 }
 
 /**
+ * Leadership + HR tier — CEO, developers, and the HR team
+ * (orgLevel=hr_manager, which is set on every HR team member,
+ * not just the HR Manager role). Use for any feature that
+ * should be scoped to "ops leadership only": engage post
+ * moderation, employee-documents access, etc.
+ *
+ * Deliberately tighter than isHRAdmin — special_access and
+ * role=admin are NOT included. Those tiers pass most other gates
+ * but should not be on the same permission level as the HR team
+ * for sensitive things like editing other people's posts /
+ * viewing colleagues' PAN/Aadhaar.
+ */
+export function isLeadershipOrHR(user: ClientUser): boolean {
+  if (!user) return false;
+  return (
+    user.orgLevel === "ceo" ||
+    user.isDeveloper === true ||
+    user.orgLevel === "hr_manager"
+  );
+}
+
+/**
+ * Tighter gate for an EMPLOYEE'S DOCUMENTS tab — PAN / Aadhaar /
+ * education / employee letters are PII. Per explicit HR policy
+ * (2026-06-05): only the profile owner, anyone in the HR team
+ * (orgLevel=hr_manager — covers both HR Manager + HR team members
+ * like Vanshika), developers, and the CEO may view another
+ * employee's documents.
+ *
+ * Pass `isSelfView` true when the viewer IS the employee whose
+ * profile is being looked at — self-view always passes regardless
+ * of role.
+ */
+export function canViewEmployeeDocuments(
+  user: ClientUser,
+  isSelfView: boolean,
+): boolean {
+  if (isSelfView) return true;
+  return isLeadershipOrHR(user);
+}
+
+/**
  * The one developer who is trusted with salary data. Other developers
  * (e.g. anyone else in DEVELOPER_EMAILS) pass `isDeveloper` for every
  * other dev-only surface but NOT for compensation. Must stay in sync

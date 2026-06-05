@@ -84,6 +84,23 @@ export function isHRAdmin(user: any): boolean {
 }
 
 /**
+ * Tighter than isHRAdmin — CEO, developers, and the HR team
+ * (orgLevel=hr_manager) only. Excludes special_access and
+ * role=admin even though they pass isHRAdmin elsewhere.
+ *
+ * Server-side mirror of `isLeadershipOrHR` in src/lib/access.ts.
+ * Use for endpoints whose access should match the client gate
+ * (engage post create / edit / delete, employee documents, etc.).
+ */
+export function isLeadershipOrHR(user: any): boolean {
+    return (
+        user?.orgLevel === "ceo" ||
+        user?.isDeveloper === true ||
+        user?.orgLevel === "hr_manager"
+    );
+}
+
+/**
  * The one developer who is trusted with salary data. Other developers
  * (e.g. anyone else listed in DEVELOPER_EMAILS) pass `isDeveloper` for
  * every other dev-only surface but NOT for compensation. Update here if

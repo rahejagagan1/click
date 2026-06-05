@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, serverError } from "@/lib/api-auth";
+import { requireAuth, isLeadershipOrHR, serverError } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -39,20 +39,51 @@ export async function POST(req: NextRequest) {
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
 
+  // Engage post creation is leadership/HR-tier only — CEO,
+  // developers, and the HR team (orgLevel=hr_manager). Mirrors the
+  // `canCompose` gate on the composer card; the server check makes
+  // it a real ACL rather than a UI suggestion. Excludes
+  // special_access and role=admin per the same policy used for
+  // employee documents.
+  if (!isLeadershipOrHR(user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   try {
     const body = await req.json();
     const { content, type, praiseToId, scope, department, mediaUrl } = body;
-    if (!content?.trim()) return NextResponse.json({ error: "content required" }, { status: 400 });
+    // Require EITHER a non-empty caption OR an attached image —
+    // image-only posts (work anniversaries, posters) are valid.
+    const safeContent = typeof content === "string" ? content.trim() : "";
+    const safeMediaUrl = typeof mediaUrl === "string" ? mediaUrl.trim() : "";
+    if (!safeContent && !safeMediaUrl) {
+      return NextResponse.json({ error: "content or image required" }, { status: 400 });
+    }
+    // Only accept data: URIs for images or http(s) URLs — anything
+    // else (javascript:, file:, etc.) is rejected. Hard-cap data URI
+    // size at ~3 MB encoded so a single row can't bloat the table.
+    if (safeMediaUrl) {
+      const isHttp = /^https?:\/\//i.test(safeMediaUrl);
+      // SVG intentionally excluded — it can carry inline JS / XSS.
+      // Same rule as the safe-MIME allowlist in /api/hr/documents.
+      const isDataImage = /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(safeMediaUrl);
+      if (!isHttp && !isDataImage) {
+        return NextResponse.json({ error: "Invalid image URL" }, { status: 400 });
+      }
+      if (safeMediaUrl.length > 3 * 1024 * 1024) {
+        return NextResponse.json({ error: "Image too large" }, { status: 413 });
+      }
+    }
 
     const post = await prisma.engagePost.create({
       data: {
         authorId: user.dbId,
         type: type || "post",
-        content: content.trim(),
+        content: safeContent,
         praiseToId: praiseToId ? parseInt(praiseToId) : null,
         scope: scope || "org",
         department: department || null,
-        mediaUrl: mediaUrl || null,
+        mediaUrl: safeMediaUrl || null,
       },
       include: INCLUDE,
     });
