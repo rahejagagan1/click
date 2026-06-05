@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
@@ -370,6 +370,62 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
   const { data: assets = [], isLoading } = useSWR(assetsUrl, fetcher);
   const filtered = category === "All" ? assets : assets.filter((a: any) => a.category === category);
 
+  // Admin-view accordion state: which assignee groups are currently
+  // expanded. Keyed by user id (number) for assigned rows and by the
+  // literal "unassigned" for stock items. First-render default = all
+  // collapsed; HR opens the ones they care about.
+  const [expandedGroups, setExpandedGroups] = useState<Set<number | "unassigned">>(new Set());
+  // Search input that filters the user list (not the assets directly).
+  // Typing "anjali" hides everyone else's group entirely instead of
+  // filtering down the table — matches HR's "I'm looking at one
+  // person's kit" mental model.
+  const [userQuery, setUserQuery] = useState("");
+  const toggleGroup = (key: number | "unassigned") =>
+    setExpandedGroups((prev) => {
+      const n = new Set(prev);
+      if (n.has(key)) n.delete(key); else n.add(key);
+      return n;
+    });
+
+  // Group the (already category-filtered) assets by their current
+  // open assignment's user. "Unassigned" stock collects everything
+  // without an active assignment row.
+  type Group = {
+    key: number | "unassigned";
+    name: string;
+    userId: number | null;
+    profilePictureUrl: string | null;
+    assets: any[];
+  };
+  const grouped: Group[] = (() => {
+    const map = new Map<number | "unassigned", Group>();
+    for (const a of filtered) {
+      const u = a.assignments?.[0]?.user;
+      const key = u?.id ?? "unassigned";
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          name: u?.name ?? "Unassigned (stock)",
+          userId: u?.id ?? null,
+          profilePictureUrl: u?.profilePictureUrl ?? null,
+          assets: [],
+        });
+      }
+      map.get(key)!.assets.push(a);
+    }
+    // Sort: assigned users alphabetically, "Unassigned" pinned to end.
+    const groups = [...map.values()];
+    groups.sort((a, b) => {
+      if (a.key === "unassigned") return 1;
+      if (b.key === "unassigned") return -1;
+      return a.name.localeCompare(b.name);
+    });
+    return groups;
+  })();
+  const visibleGroups = userQuery.trim()
+    ? grouped.filter((g) => g.name.toLowerCase().includes(userQuery.trim().toLowerCase()))
+    : grouped;
+
   const counts = {
     total: assets.length,
     assigned: assets.filter((a: any) => a.status === "assigned").length,
@@ -378,7 +434,11 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
   };
 
   return (
-    <>
+    // Scope Times New Roman to the assets panel (and its slide-in
+    // panels, which inherit font-family via the DOM tree even though
+    // they render as fixed-position overlays). Page chrome outside
+    // AssetsPanel keeps the app's default sans-serif.
+    <div style={{ fontFamily: '"Times New Roman", Times, serif' }}>
       {showHeader && (
         <div className="bg-white dark:bg-[#001529] border-b border-slate-200 dark:border-white/[0.06] px-6 py-5">
           <div className="flex items-center text-xs text-slate-500 mb-3 gap-1.5">
@@ -443,60 +503,157 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
 
         {isLoading ? (
           <div className="flex items-center justify-center h-40"><div className="w-8 h-8 border-2 border-[#008CFF] border-t-transparent rounded-full animate-spin" /></div>
-        ) : (
+        ) : employeeView ? (
+          // ── EMPLOYEE VIEW — single user, flat table. No need to
+          // group; "Assigned To" column dropped since every row is
+          // them.
           <div className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-x-auto">
             <table className="w-full">
-              {/* Employee view drops the "Assigned To" column since
-                  every row is them — keeps the table focused on the
-                  attributes that actually vary per row. */}
-              <thead><tr className="border-b border-slate-200 dark:border-white/[0.06]">{(employeeView
-                ? ["Asset Name", "Type", "Serial No.", "Condition", "Status", "Date"]
-                : ["Asset Name", "Type", "Serial No.", "Assigned To", "Condition", "Status", "Date", ""]
-              ).map((h, i) => <th key={`${h}-${i}`} className="px-5 py-3 text-left text-[11px] uppercase tracking-wider text-slate-500 font-medium">{h}</th>)}</tr></thead>
+              <thead><tr className="border-b border-slate-200 dark:border-white/[0.06]">{["Asset Name","Type","Serial No.","Condition","Date"].map((h, i) => <th key={`${h}-${i}`} className="px-5 py-3 text-left text-[11px] uppercase tracking-wider text-slate-500 font-medium">{h}</th>)}</tr></thead>
               <tbody>
-                {filtered.map((a: any, i: number) => {
-                  const assignment = a.assignments?.[0];
-                  const assignedUser = assignment?.user;
-                  return (
-                    <tr key={a.id} className={`border-b border-slate-100 dark:border-white/[0.03] ${i % 2 === 0 ? "" : "bg-slate-50 dark:bg-white/[0.01]"}`}>
-                      <td className="px-5 py-3"><span className="text-[13px] text-slate-800 dark:text-white font-medium">{a.name}</span></td>
-                      <td className="px-5 py-3"><span className="text-[12px] px-2 py-0.5 rounded bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300">{a.category}</span></td>
-                      <td className="px-5 py-3 text-[13px] text-slate-500 dark:text-slate-400 font-mono">{a.serialNumber || "—"}</td>
-                      {!employeeView && (
-                        <td className="px-5 py-3">
-                          {assignedUser ? (
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white text-[10px] font-bold">{assignedUser.name?.charAt(0)}</div>
-                              <span className="text-[13px] text-slate-800 dark:text-white">{assignedUser.name}</span>
-                            </div>
-                          ) : <span className="text-[12px] text-slate-500">Unassigned</span>}
-                        </td>
-                      )}
-                      <td className="px-5 py-3"><span className={`text-[11px] px-2 py-0.5 rounded-full ${a.condition === "good" || a.condition === "new" ? "bg-emerald-500/10 text-emerald-600" : a.condition === "fair" ? "bg-amber-500/10 text-amber-600" : "bg-red-500/10 text-red-600"}`}>{a.condition}</span></td>
-                      <td className="px-5 py-3"><span className={`text-[11px] px-2 py-0.5 rounded-full capitalize ${a.status === "assigned" ? "bg-blue-500/10 text-[#008CFF]" : a.status === "available" ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-600"}`}>{a.status?.replace("_"," ")}</span></td>
-                      <td className="px-5 py-3 text-[13px] text-slate-500">{new Date(a.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
-                      {!employeeView && (
-                        <td className="px-5 py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => openEdit(a)}
-                            className="inline-flex items-center gap-1 text-[12px] font-medium text-slate-500 hover:text-[#008CFF] transition-colors"
-                            aria-label={`Edit ${a.name}`}
-                          >
-                            <Pencil size={13} />
-                            Edit
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
+                {filtered.map((a: any, i: number) => (
+                  <tr key={a.id} className={`border-b border-slate-100 dark:border-white/[0.03] ${i % 2 === 0 ? "" : "bg-slate-50 dark:bg-white/[0.01]"}`}>
+                    <td className="px-5 py-3"><span className="text-[13px] text-slate-800 dark:text-white font-medium">{a.name}</span></td>
+                    <td className="px-5 py-3"><span className="text-[12px] px-2 py-0.5 rounded bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300">{a.category}</span></td>
+                    <td className="px-5 py-3 text-[13px] text-slate-500 dark:text-slate-400 font-mono">{a.serialNumber || "—"}</td>
+                    <td className="px-5 py-3"><span className={`text-[11px] px-2 py-0.5 rounded-full ${a.condition === "good" || a.condition === "new" ? "bg-emerald-500/10 text-emerald-600" : a.condition === "fair" ? "bg-amber-500/10 text-amber-600" : "bg-red-500/10 text-red-600"}`}>{a.condition}</span></td>
+                    <td className="px-5 py-3 text-[13px] text-slate-500">{new Date(a.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
             {filtered.length === 0 && (
-              <p className="text-[13px] text-slate-500 text-center py-12">
-                {employeeView ? "No assets are currently assigned to you." : "No assets found"}
-              </p>
+              <p className="text-[13px] text-slate-500 text-center py-12">No assets are currently assigned to you.</p>
+            )}
+          </div>
+        ) : (
+          // ── ADMIN VIEW — accordion grouped by assignee. Click a
+          // person to expand their kit. CPU rows surface specs from
+          // the `notes` field as inline chips.
+          <div className="space-y-2">
+            <div className="flex items-center justify-between mb-2">
+              <input
+                type="text"
+                value={userQuery}
+                onChange={(e) => setUserQuery(e.target.value)}
+                placeholder="Search by employee name…"
+                className="w-72 max-w-full text-[13px] px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#001529] text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-[#008CFF]"
+              />
+              <p className="text-[12px] text-slate-500">{visibleGroups.length} {visibleGroups.length === 1 ? "person" : "people"} · {filtered.length} asset{filtered.length === 1 ? "" : "s"}</p>
+            </div>
+
+            {visibleGroups.map((g) => {
+              const isOpen = expandedGroups.has(g.key);
+              const types = [...new Set(g.assets.map((a) => a.category))];
+              return (
+                <div key={String(g.key)} className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(g.key)}
+                    className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors text-left"
+                    aria-expanded={isOpen}
+                  >
+                    <div className="flex items-center gap-3">
+                      {g.userId ? (
+                        g.profilePictureUrl ? (
+                          // Real headshot when the user has one
+                          // uploaded. object-cover keeps the circle
+                          // crop crisp regardless of source aspect.
+                          <img
+                            src={g.profilePictureUrl}
+                            alt={g.name}
+                            className="w-9 h-9 rounded-full object-cover border border-slate-200 dark:border-white/10"
+                          />
+                        ) : (
+                          // Fallback: gradient circle with first
+                          // initial. !text-white because a global
+                          // pill-override rule otherwise demotes
+                          // white text on rounded-full elements.
+                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center !text-white text-[13px] font-bold">
+                            {g.name.charAt(0).toUpperCase()}
+                          </div>
+                        )
+                      ) : (
+                        <div className="w-9 h-9 rounded-full bg-slate-200 dark:bg-white/10 flex items-center justify-center text-slate-500 text-[13px] font-bold">?</div>
+                      )}
+                      <div>
+                        <p className="text-[14px] font-medium text-slate-800 dark:text-white">{g.name}</p>
+                        <p className="text-[11.5px] text-slate-500">
+                          {g.assets.length} item{g.assets.length === 1 ? "" : "s"}
+                          {types.length > 0 ? ` · ${types.join(", ")}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`}><polyline points="6 9 12 15 18 9" /></svg>
+                  </button>
+
+                  {isOpen && (
+                    <div className="border-t border-slate-100 dark:border-white/[0.04]">
+                      <table className="w-full">
+                        <thead><tr className="border-b border-slate-100 dark:border-white/[0.04] bg-slate-50/50 dark:bg-white/[0.02]">{["Asset Name","Type","Serial No.","Condition","Date",""].map((h, i) => <th key={`${h}-${i}`} className="px-5 py-2 text-left text-[11px] uppercase tracking-wider text-slate-500 font-medium">{h}</th>)}</tr></thead>
+                        <tbody>
+                          {g.assets.map((a: any) => {
+                            // CPU rows surface the `notes` field
+                            // (free-text specs like "i7-12700K /
+                            // RTX 4060Ti / 32GB") as chips below the
+                            // main row. Split on newlines and commas;
+                            // no deeper parsing — HR writes the
+                            // format they want.
+                            const isCpu = a.category === "CPU";
+                            const specLines = isCpu && a.notes
+                              ? String(a.notes).split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean)
+                              : [];
+                            return (
+                              <Fragment key={a.id}>
+                                <tr className="border-b border-slate-100 dark:border-white/[0.03]">
+                                  <td className="px-5 py-2.5"><span className="text-[13px] text-slate-800 dark:text-white font-medium">{a.name}</span></td>
+                                  <td className="px-5 py-2.5"><span className="text-[12px] px-2 py-0.5 rounded bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300">{a.category}</span></td>
+                                  <td className="px-5 py-2.5 text-[13px] text-slate-500 dark:text-slate-400 font-mono">{a.serialNumber || "—"}</td>
+                                  <td className="px-5 py-2.5"><span className={`text-[11px] px-2 py-0.5 rounded-full ${a.condition === "good" || a.condition === "new" ? "bg-emerald-500/10 text-emerald-600" : a.condition === "fair" ? "bg-amber-500/10 text-amber-600" : "bg-red-500/10 text-red-600"}`}>{a.condition}</span></td>
+                                  <td className="px-5 py-2.5 text-[13px] text-slate-500">{new Date(a.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
+                                  <td className="px-5 py-2.5 text-right">
+                                    <button
+                                      type="button"
+                                      onClick={() => openEdit(a)}
+                                      className="inline-flex items-center gap-1 text-[12px] font-medium text-slate-500 hover:text-[#008CFF] transition-colors"
+                                      aria-label={`Edit ${a.name}`}
+                                    >
+                                      <Pencil size={13} />
+                                      Edit
+                                    </button>
+                                  </td>
+                                </tr>
+                                {specLines.length > 0 && (
+                                  <tr className="border-b border-slate-100 dark:border-white/[0.03] bg-blue-50/40 dark:bg-blue-500/[0.04]">
+                                    <td colSpan={6} className="px-5 pb-3 pt-1">
+                                      <div className="flex items-start gap-2">
+                                        <span className="text-[10px] uppercase tracking-wider text-blue-600 dark:text-blue-400 font-semibold mt-1 whitespace-nowrap">CPU Specs</span>
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {specLines.map((line: string, idx: number) => (
+                                            <span key={idx} className="text-[12px] px-2 py-0.5 rounded bg-white dark:bg-white/5 border border-blue-200/60 dark:border-blue-500/20 text-slate-700 dark:text-slate-200 font-mono">{line}</span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {visibleGroups.length === 0 && (
+              <div className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl">
+                <p className="text-[13px] text-slate-500 text-center py-12">
+                  {userQuery.trim() ? `No employees match "${userQuery}".` : "No assets found"}
+                </p>
+              </div>
             )}
           </div>
         )}
@@ -615,12 +772,12 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
                   <DateField value={sharedPurchaseDate} onChange={setSharedPurchaseDate} className="mt-1 w-full max-w-[180px]" />
                 </div>
                 <div>
-                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Notes <span className="text-slate-400 font-normal normal-case tracking-normal">(optional)</span></label>
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">CPU Specs</label>
                   <textarea
                     value={sharedNotes}
                     onChange={(e) => setSharedNotes(e.target.value)}
                     rows={2}
-                    placeholder="Warranty, batch number, or anything else…"
+                    placeholder="e.g. intel i7-12700K, RTX 4060Ti, 32GB RAM…"
                     className="mt-1 w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-slate-300 resize-none"
                   />
                 </div>
@@ -733,12 +890,12 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
                   <DateField value={editForm.purchaseDate} onChange={(v) => setE("purchaseDate", v)} className="mt-1 w-full max-w-[180px]" />
                 </div>
                 <div>
-                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Notes <span className="text-slate-400 font-normal normal-case tracking-normal">(optional)</span></label>
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">CPU Specs</label>
                   <textarea
                     value={editForm.notes}
                     onChange={(e) => setE("notes", e.target.value)}
                     rows={2}
-                    placeholder="Warranty, batch number, or anything else…"
+                    placeholder="e.g. intel i7-12700K, RTX 4060Ti, 32GB RAM…"
                     className="mt-1 w-full px-3 py-2 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-slate-300 resize-none"
                   />
                 </div>
@@ -869,6 +1026,6 @@ export default function AssetsPanel({ showHeader = false }: { showHeader?: boole
           </div>
         </>
       )}
-    </>
+    </div>
   );
 }
