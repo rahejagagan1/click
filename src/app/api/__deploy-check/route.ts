@@ -1,54 +1,49 @@
-// Deploy-check endpoint. Returns markers that prove which build of
-// the application is actually running in this Node process — used
-// to diagnose stale-build issues after a VPS redeploy.
+// Deploy-check endpoint. Returns ONLY a single boolean marker that
+// proves whether commit 1811053 (rolesForUser CEO-exclusive fix) is
+// in the running binary — used to diagnose stale-build issues
+// after a VPS redeploy.
 //
-// No auth: only returns non-sensitive metadata + the result of
-// calling internal helpers (rolesForUser) on synthetic inputs.
+// Token-gated: caller must present a matching DEPLOY_CHECK_TOKEN
+// either as ?token=... query param or via x-deploy-check-token
+// header. Unmatched requests get a generic 404 to avoid leaking
+// the endpoint's existence.
+//
+// Earlier version of this route also returned pid, uptime, sha,
+// and the raw rolesForUser output; the boolean alone is enough to
+// confirm the build, so the rest was dropped to limit the
+// information footprint of an unauthenticated probe.
 //
 // Hit it like:
-//   curl https://<vps>/api/__deploy-check
-//
-// The key marker is `ceoExclusive`. If TRUE, commit 1811053 is in
-// the running binary; if FALSE, the build is stale and the fix
-// needs a redeploy / clean rebuild.
+//   curl -H "x-deploy-check-token: $DEPLOY_CHECK_TOKEN" \
+//     https://<vps>/api/__deploy-check
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { rolesForUser } from "@/lib/email/toggles";
+import { timingSafeEqual } from "crypto";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+function tokensMatch(provided: string, expected: string): boolean {
+  if (provided.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+}
+
+const NOT_FOUND = NextResponse.json({ error: "Not found" }, { status: 404 });
+
+export async function GET(req: NextRequest) {
+  const expected = (process.env.DEPLOY_CHECK_TOKEN ?? "").trim();
+  if (!expected) return NOT_FOUND;
+  const provided = (
+    req.headers.get("x-deploy-check-token") ??
+    new URL(req.url).searchParams.get("token") ??
+    ""
+  ).trim();
+  if (!provided || !tokensMatch(provided, expected)) return NOT_FOUND;
+
   // Marker for the rolesForUser CEO-exclusive fix (commit 1811053).
-  // Before fix: returns ["ceo", "admin"] (or similar) for a user
-  // with orgLevel=ceo, role=admin. After fix: returns ["ceo"] only.
-  const rolesForCeoAdmin = rolesForUser({ orgLevel: "ceo", role: "admin" });
-  const ceoExclusive =
-    rolesForCeoAdmin.length === 1 && rolesForCeoAdmin[0] === "ceo";
-
-  // Best-effort git info. In a typical Next.js build the .git
-  // directory isn't on the server, so these may be empty — but if
-  // you wire NEXT_PUBLIC_GIT_SHA / GIT_SHA during build, they'll
-  // appear here.
-  const sha =
-    process.env.GIT_SHA ||
-    process.env.NEXT_PUBLIC_GIT_SHA ||
-    process.env.VERCEL_GIT_COMMIT_SHA ||
-    process.env.RAILWAY_GIT_COMMIT_SHA ||
-    null;
-
-  return NextResponse.json({
-    ok: true,
-    nodeVersion: process.version,
-    pid: process.pid,
-    uptimeSeconds: Math.round(process.uptime()),
-    serverStartedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
-    nowAt: new Date().toISOString(),
-    sha,
-    markers: {
-      // TRUE = commit 1811053 (CEO-exclusive role gate) is live.
-      // FALSE = stale build, redeploy needed.
-      ceoExclusive,
-      rolesForUserOutput: rolesForCeoAdmin,
-    },
-  });
+  // Before fix: returns ["ceo", "admin"] for a user with
+  // orgLevel=ceo, role=admin. After fix: returns ["ceo"] only.
+  const r = rolesForUser({ orgLevel: "ceo", role: "admin" });
+  const ceoExclusive = r.length === 1 && r[0] === "ceo";
+  return NextResponse.json({ ceoExclusive });
 }
