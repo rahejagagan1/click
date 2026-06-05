@@ -998,6 +998,12 @@ export default function Sidebar() {
                                             const active = currentBrand === slug;
                                             return (
                                                 <Link key={slug} href={`/dashboard/hr/admin?brand=${slug}`}
+                                                    // Auto-close the flyout the moment the user
+                                                    // commits to a brand — otherwise the menu
+                                                    // hangs around as the page navigates,
+                                                    // covering content. Same hover-trigger logic
+                                                    // re-opens it on the next hover.
+                                                    onClick={() => setHrAdminOpen(false)}
                                                     className={cn(
                                                         "flex items-center justify-between px-4 py-2 text-[13px] transition-all duration-150",
                                                         active

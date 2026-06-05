@@ -33,6 +33,7 @@ export const TEMPLATE_DOCX_MAP: Record<string, string> = {
   fnf_settlement:         "letter-fnf-settlement.docx",
   internship_completion:  "letter-internship-completion.docx",
   probation_confirmation: "letter-probation-confirmation.docx",
+  relieving_service:      "letter-relieving-service.docx",
   revised_offer_letter:   "offer-letter-template.docx",
 };
 

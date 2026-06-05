@@ -7,10 +7,22 @@
 
 import Link from "next/link";
 import useSWR from "swr";
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { isLeadershipOrHR } from "@/lib/access";
-import { FileText, FileSignature, Briefcase, Award, BadgeCheck, Sparkles } from "lucide-react";
+import { FileText, FileSignature, Briefcase, Award, BadgeCheck, Sparkles, FileCheck2 } from "lucide-react";
+
+// Map the URL ?brand= slug to the LetterTemplate.businessUnit value
+// stored in the DB. The HR Dashboard's brand-switcher sends slugs
+// (nb-media / yt-labs / all); the API expects the proper case.
+function slugToBrand(slug: string | null | undefined): string | null {
+  if (slug === "yt-labs") return "YT Labs";
+  if (slug === "nb-media") return "NB Media";
+  if (slug === "all") return null; // developer "all brands" view
+  return null;
+}
 
 const CATEGORY_META: Record<string, { label: string; icon: any; bg: string; text: string }> = {
   onboarding:   { label: "Onboarding",   icon: Briefcase,    bg: "bg-emerald-50",   text: "text-emerald-700" },
@@ -23,16 +35,40 @@ const TEMPLATE_ICONS: Record<string, any> = {
   fnf_settlement:        FileSignature,
   internship_completion: BadgeCheck,
   probation_confirmation:Award,
+  relieving_service:     FileCheck2,
   revised_offer_letter:  Briefcase,
 };
 
 export default function TemplatesPage() {
+  // Next.js 16 + Turbopack require a Suspense boundary around any
+  // useSearchParams() consumer for the page to prerender. Wrap the
+  // body so the chrome (sidebar, header) doesn't depend on it.
+  return (
+    <Suspense fallback={null}>
+      <TemplatesPageInner />
+    </Suspense>
+  );
+}
+
+function TemplatesPageInner() {
   const { data: session } = useSession();
   const me = session?.user as any;
+  // Brand context comes from ?brand= in the URL (set by the
+  // HR-Dashboard brand-switcher). If absent, fall back to the
+  // viewer's profile.businessUnit (default NB Media when null).
+  const searchParams = useSearchParams();
+  const brandSlug = searchParams?.get("brand") ?? null;
+  const urlBrand = slugToBrand(brandSlug);                       // YT Labs | NB Media | null (for "all")
+  const sessionBrand: string = me?.businessUnit || "NB Media";   // legacy fallback
+  // If the URL says "all", we WANT cross-brand listing → pass
+  // `all=1` to the API. Otherwise use the URL brand if set, else
+  // the session brand.
+  const effectiveBrand = brandSlug === "all" ? null : (urlBrand ?? sessionBrand);
+  const apiUrl = brandSlug === "all"
+    ? "/api/hr/letter-templates?all=1"
+    : `/api/hr/letter-templates?brand=${encodeURIComponent(effectiveBrand ?? "NB Media")}`;
 
-  const { data: templates = [], isLoading, mutate } = useSWR<any[]>(
-    "/api/hr/letter-templates", fetcher,
-  );
+  const { data: templates = [], isLoading, mutate } = useSWR<any[]>(apiUrl, fetcher);
 
   if (!isLeadershipOrHR(me)) {
     return (
@@ -60,6 +96,26 @@ export default function TemplatesPage() {
             The PDF auto-saves under the employee's Documents.
           </p>
         </div>
+        {/* Sync button — idempotent re-seed. Inserts any template
+            present in the code seeds but missing from the DB (e.g.
+            a newly-added letter type). Existing rows are never
+            touched, so HR's edits stay intact. */}
+        {!empty && !isLoading && (
+          <button
+            type="button"
+            onClick={async () => {
+              const res = await fetch("/api/hr/letter-templates", { method: "POST" });
+              if (!res.ok) { alert("Sync failed"); return; }
+              const j = await res.json().catch(() => ({}));
+              await mutate();
+              alert(`Sync complete — ${j?.inserted ?? 0} added, ${j?.skipped ?? 0} already present.`);
+            }}
+            className="inline-flex items-center gap-1.5 h-9 px-3 border border-slate-200 hover:border-slate-300 rounded-lg text-[12.5px] font-medium text-slate-600 hover:text-slate-800 transition-colors"
+            title="Insert any new template definitions from the code seeds into the DB. Existing rows are skipped."
+          >
+            <Sparkles className="w-3.5 h-3.5" /> Sync templates
+          </button>
+        )}
       </div>
 
       {isLoading && (
@@ -93,8 +149,13 @@ export default function TemplatesPage() {
             const Icon = TEMPLATE_ICONS[t.key] ?? cat.icon ?? FileText;
             return (
               <Link
-                key={t.key}
-                href={`/dashboard/hr/admin/templates/${t.key}`}
+                key={`${t.key}:${t.businessUnit ?? "any"}`}
+                // Carry the current brand context into the editor
+                // so opening a card from the YT Labs dashboard
+                // opens the YT Labs variant. Falls back to the
+                // viewer's session brand when the URL doesn't
+                // specify one.
+                href={`/dashboard/hr/admin/templates/${t.key}${brandSlug ? `?brand=${brandSlug}` : ""}`}
                 className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.04)] hover:border-[#008CFF]/40 hover:shadow-[0_4px_18px_rgba(15,23,42,0.06)] transition-all"
               >
                 <div className="flex items-start gap-3">
