@@ -16,10 +16,11 @@ import {
   Mail, Phone, MapPin, Briefcase, Calendar, Building2, IdCard, FileText, Laptop,
   Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
   MoreVertical, UserMinus, TreePine, Coffee,
+  CheckCircle2, AlertCircle, Circle, Upload as UploadIcon, Eye, Trash2, RefreshCw,
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
-import { isHRAdmin as canViewAsHRAdmin, canViewSalary, canViewEmployeeDocuments } from "@/lib/access";
+import { isHRAdmin as canViewAsHRAdmin, canViewSalary, canViewEmployeeDocuments, canViewExitBadge } from "@/lib/access";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
 import EmployeeFinancesPanel from "@/components/hr/EmployeeFinancesPanel";
@@ -361,6 +362,38 @@ export default function EmployeeDetailPage() {
                       >
                         <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`} />
                         {label}
+                      </span>
+                    );
+                  })()}
+                  {/* Exit-lifecycle badge — "On Notice Period"
+                      (amber) while the employee is still serving
+                      notice; "Exited" (slate) once HR finalises the
+                      status OR the LWD has passed. See
+                      exitBadgeState helper inlined below. */}
+                  {(() => {
+                    const ex = user.activeExit as any;
+                    if (!ex) return null;
+                    if (!canViewExitBadge(me, isSelfView)) return null;
+                    const finalised = ex.status === "exited" || ex.status === "offboarded";
+                    const lwdMs = ex.lastWorkingDay ? new Date(`${ex.lastWorkingDay}T00:00:00Z`).getTime() : 0;
+                    // Past LWD (UTC date compare) ⇒ effectively exited.
+                    const lwdPassed = lwdMs > 0 && Date.now() > lwdMs + 86400000;
+                    const isExited = finalised || lwdPassed;
+                    return isExited ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-700 ring-1 ring-inset ring-slate-300"
+                        title={ex.lastWorkingDay ? `Exited on ${ex.lastWorkingDay}` : "Exited"}
+                      >
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-500" />
+                        Exited
+                      </span>
+                    ) : (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 ring-1 ring-inset ring-amber-200"
+                        title={ex.lastWorkingDay ? `Last working day: ${ex.lastWorkingDay}` : "On notice"}
+                      >
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+                        On Notice Period
                       </span>
                     );
                   })()}
@@ -2005,7 +2038,7 @@ const CAT_LABEL_OVERRIDES: Record<string, string> = {
   aadhar:                   "Aadhaar",
   passport:                 "Passport",
   driving_license:          "Driving License",
-  education_certificate:    "Latest Degree / Marksheet",
+  education_certificate:    "Degree/marksheet",
   offer_letter:             "Offer Letter",
   previous_relieving_letter:"Previous Relieving Letter",
   previous_offer_letter:    "Previous Offer Letter",
@@ -2047,29 +2080,9 @@ const dropdownCategoryLabel = (c: string): string => {
 const DOC_FIELD_CLS = "mt-1 w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]";
 
 function DocumentsPanel({ profile, documents, userId }: { profile: any; documents: any[]; userId: number }) {
-  const [folder, setFolder] = useState<string>("identity");
-  const active = DOC_FOLDERS.find((f) => f.key === folder)!;
-  const filesInFolder = documents.filter((d) => active.cats.includes((d.category || "").toLowerCase()));
-
-  // Per-folder file counts for the sidebar badges.
-  const folderCounts = useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const f of DOC_FOLDERS) {
-      out[f.key] = documents.filter((d) => f.cats.includes((d.category || "").toLowerCase())).length;
-    }
-    return out;
-  }, [documents]);
-
-  // Default category for new uploads per folder. Lands on the first
-  // *required* cat in each folder (e.g. PAN for Identity) so HR /
-  // the employee sees the most important pick by default; they can
-  // still switch in the dropdown.
-  const defaultCategoryFor = (key: string): string =>
-    key === "identity"  ? "pan_card"
-  : key === "education" ? "education_certificate"
-  : key === "letters"   ? "offer_letter"
-  : key === "previous"  ? "previous_relieving_letter"
-  : "other";
+  // Folder concept retired in the new layout — kept the
+  // DOC_FOLDERS catalog only so the modal can build a category
+  // dropdown that includes every known category.
 
   const [uploadOpen, setUploadOpen]   = useState(false);
   const [uploadFile, setUploadFile]   = useState<File | null>(null);
@@ -2083,7 +2096,9 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
   const openUpload = () => {
     setUploadFile(null);
     setUploadName("");
-    setUploadCategory(defaultCategoryFor(folder));
+    // Default to "other" since the inline per-card uploads cover the
+    // catalog cases — this modal is now for free-form uploads.
+    setUploadCategory("other");
     setUploadError(null);
     setUploadOpen(true);
   };
@@ -2137,13 +2152,13 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
     await mutate(`/api/hr/people/${userId}`);
   };
 
-  // Category options shown in the upload modal — limited to what's
-  // sensible for the current folder so HR doesn't accidentally drop a
-  // PAN under "Letters".
-  const categoryOptions = active.cats.map((c) => ({
-    value: c,
-    label: dropdownCategoryLabel(c),
-  }));
+  // Category options for the modal — full cross-folder list now
+  // that we no longer have a folder context. Per-card inline uploads
+  // (above) handle the common required cases; the modal is for
+  // ad-hoc uploads, so showing every option is fine.
+  const categoryOptions = DOC_FOLDERS.flatMap((f) =>
+    f.cats.map((c) => ({ value: c, label: dropdownCategoryLabel(c) }))
+  );
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -2152,131 +2167,274 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
     if (file) pickFile(file);
   };
 
+  // ── Section-grouped checklist layout ─────────────────────────
+  // Catalog drives the layout. Each required card always renders so
+  // HR can see at a glance which docs are missing. Optional + "if
+  // available" cards also always render — the per-card action
+  // adapts to whether a document is already on file.
+  type CatMeta = { key: string; label: string; required: boolean; hint?: string };
+  const SECTION_CATALOG: Array<{ key: string; label: string; subtitle?: string; cats: CatMeta[] }> = [
+    {
+      key: "required",
+      label: "Required documents",
+      subtitle: "Every employee must upload these.",
+      cats: [
+        { key: "pan_card",              label: "PAN Card",          required: true },
+        { key: "aadhar",                label: "Aadhaar",           required: true },
+        { key: "education_certificate", label: "Degree / Marksheet", required: true },
+        { key: "offer_letter",          label: "Offer Letter",       required: true },
+      ],
+    },
+    {
+      key: "optional",
+      label: "Optional identity proofs",
+      cats: [
+        { key: "passport",         label: "Passport",         required: false },
+        { key: "driving_license",  label: "Driving License",  required: false },
+      ],
+    },
+    {
+      key: "previous",
+      label: "Previous experience",
+      subtitle: "Upload only if available from prior employer.",
+      cats: [
+        { key: "previous_relieving_letter", label: "Relieving Letter",        required: false, hint: "If available" },
+        { key: "previous_offer_letter",     label: "Offer Letter (Previous)", required: false, hint: "If available" },
+      ],
+    },
+  ];
+  const KNOWN_KEYS = new Set<string>(SECTION_CATALOG.flatMap((s) => s.cats.map((c) => c.key)));
+  // Latest doc per category — newest upload wins so a "Replace"
+  // shows the freshly uploaded file.
+  const docByCat = new Map<string, any>();
+  for (const d of documents.slice().sort((a: any, b: any) =>
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  )) {
+    const k = (d.category || "").toLowerCase();
+    if (!docByCat.has(k)) docByCat.set(k, d);
+  }
+  // Anything outside the catalog (legacy uploads, "other") goes
+  // into the bottom "Other files" group.
+  const otherDocs = documents.filter((d: any) => !KNOWN_KEYS.has((d.category || "").toLowerCase()));
+
+  // Required completion bar.
+  const requiredCats = SECTION_CATALOG[0].cats;
+  const requiredDone = requiredCats.filter((c) => docByCat.has(c.key)).length;
+  const requiredPct  = Math.round((requiredDone / requiredCats.length) * 100);
+
+  // Direct (no-modal) upload for a specific category — the row's
+  // file input fires this with the category baked in. Bypasses the
+  // category dropdown entirely so the user just picks a file.
+  const inlineUpload = async (categoryKey: string, file: File | null) => {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert("File is larger than the 10 MB limit.");
+      return;
+    }
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("userId", String(userId));
+    fd.append("category", categoryKey);
+    fd.append("fileName", file.name);
+    const res = await fetch("/api/hr/documents", { method: "POST", body: fd });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      alert(j?.error || `Upload failed (${res.status})`);
+      return;
+    }
+    await mutate(`/api/hr/people/${userId}`);
+  };
+
   return (
     <section className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-hidden">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <h3 className="text-[14px] font-semibold text-slate-800">Employee Documents</h3>
-        <button
-          type="button"
-          onClick={openUpload}
-          className="inline-flex items-center gap-1.5 h-8 px-3 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12.5px] font-semibold transition-colors"
-        >
-          + Upload
-        </button>
+      {/* Header + progress strip */}
+      <div className="px-6 py-4 border-b border-slate-100">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-[14px] font-semibold text-slate-800">Employee Documents</h3>
+            <p className="mt-0.5 text-[11.5px] text-slate-500">
+              {requiredDone === requiredCats.length
+                ? "All required documents on file."
+                : `${requiredDone} of ${requiredCats.length} required documents uploaded.`}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={openUpload}
+            className="inline-flex items-center gap-1.5 h-8 px-3 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12.5px] font-semibold transition-colors"
+          >
+            <Plus size={14} /> Other upload
+          </button>
+        </div>
+        <div className="mt-3 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+          <div
+            className={`h-full transition-all ${requiredPct === 100 ? "bg-emerald-500" : "bg-[#008CFF]"}`}
+            style={{ width: `${requiredPct}%` }}
+          />
+        </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-[220px_1fr]">
-        {/* Folder sidebar with counts */}
-        <div className="border-b md:border-b-0 md:border-r border-slate-100 py-2 bg-slate-50/40">
-          <p className="px-4 py-1.5 text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Folders</p>
-          {DOC_FOLDERS.map((f) => {
-            const count = folderCounts[f.key] ?? 0;
-            return (
-              <button
-                key={f.key}
-                type="button"
-                onClick={() => setFolder(f.key)}
-                className={`w-full text-left px-4 py-2.5 text-[13px] flex items-center justify-between gap-2 transition-colors ${
-                  folder === f.key
-                    ? "bg-[#008CFF]/10 text-[#008CFF] font-semibold"
-                    : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                <span className="flex items-center gap-2">
-                  <FileText size={14} className="shrink-0" />
-                  {f.label}
-                </span>
-                {count > 0 && (
-                  <span className={`text-[11px] font-semibold rounded-full px-1.5 ${
-                    folder === f.key ? "bg-[#008CFF]/15 text-[#008CFF]" : "bg-slate-200/70 text-slate-500"
-                  }`}>{count}</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-        {/* Folder body */}
-        <div className="p-6 space-y-5">
-          {folder === "identity" && (
-            <>
-              {(profile.aadhaarNumber || profile.aadhaarEnrollment) && (
-                <IdDocCard
-                  flag="🇮🇳" title="Aadhaar Card"
-                  status={profile.aadhaarNumber ? "verified" : "pending"}
-                  rows={[
-                    ["Aadhaar Number",     maskAadhaar(profile.aadhaarNumber) || "—"],
-                    ["Enrollment Number",  profile.aadhaarEnrollment || "Not Available"],
-                    ["Date of Birth",      fmtDate(profile.dateOfBirth)],
-                    ["Name",               [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "—"],
-                    ["Address",            (profile.address || "—").slice(0, 28) + ((profile.address || "").length > 28 ? "…" : "")],
-                    ["Gender",             profile.gender ? profile.gender[0].toUpperCase() + profile.gender.slice(1) : "—"],
-                  ]}
-                />
-              )}
-              {(profile.panNumber || profile.parentName) && (
-                <IdDocCard
-                  flag="🇮🇳" title="Pan Card"
-                  status={profile.panNumber ? "verified" : "pending"}
-                  rows={[
-                    ["Permanent Account Number", maskPan(profile.panNumber) || "—"],
-                    ["Name",                     [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "—"],
-                    ["Date of Birth",            fmtDate(profile.dateOfBirth)],
-                    ["Parent's Name",            profile.parentName || "—"],
-                  ]}
-                />
-              )}
-            </>
-          )}
 
-          {/* File list */}
-          {filesInFolder.length > 0 ? (
-            <div>
-              <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">
-                Uploaded files ({filesInFolder.length})
-              </p>
-              <div className="space-y-2">
-                {filesInFolder.map((doc: any) => (
-                  <div
-                    key={doc.id}
-                    className="group flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 hover:border-[#008CFF]/40 transition-colors"
-                  >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#008CFF]/10 text-[#008CFF]">
-                      <FileText size={16} />
-                    </div>
-                    <a
-                      href={doc.fileUrl?.startsWith("http") ? doc.fileUrl : `/api/hr/documents/${doc.id}/file`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="min-w-0 flex-1 cursor-pointer"
-                    >
-                      <p className="truncate text-[13px] font-semibold text-slate-800">{doc.fileName || "Untitled"}</p>
-                      <p className="truncate text-[11px] text-slate-500">
-                        {prettyCategory(doc.category || "Document")} · {fmtDate(doc.createdAt)}
-                      </p>
-                    </a>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(doc)}
-                      title="Delete"
-                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-slate-400 hover:text-rose-500"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={openUpload}
-              className="w-full rounded-xl border-2 border-dashed border-slate-200 hover:border-[#008CFF]/40 hover:bg-[#008CFF]/[0.02] transition-colors py-10 text-center"
-            >
-              <FileText size={28} className="mx-auto text-slate-300 mb-2" strokeWidth={1.5} />
-              <p className="text-[13px] font-semibold text-slate-700">Upload to {active.label}</p>
-              <p className="mt-0.5 text-[11.5px] text-slate-500">Click here or drop a file. PDF / image / DOCX, up to 10 MB.</p>
-            </button>
+      {/* Identity profile cards — only render when data is present */}
+      {(profile.aadhaarNumber || profile.aadhaarEnrollment || profile.panNumber || profile.parentName) && (
+        <div className="px-6 pt-5 grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {(profile.aadhaarNumber || profile.aadhaarEnrollment) && (
+            <IdDocCard
+              flag="🇮🇳" title="Aadhaar Card"
+              status={profile.aadhaarNumber ? "verified" : "pending"}
+              rows={[
+                ["Aadhaar Number",     maskAadhaar(profile.aadhaarNumber) || "—"],
+                ["Enrollment Number",  profile.aadhaarEnrollment || "Not Available"],
+                ["Date of Birth",      fmtDate(profile.dateOfBirth)],
+                ["Name",               [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "—"],
+              ]}
+            />
+          )}
+          {(profile.panNumber || profile.parentName) && (
+            <IdDocCard
+              flag="🇮🇳" title="PAN Card"
+              status={profile.panNumber ? "verified" : "pending"}
+              rows={[
+                ["Permanent Account Number", maskPan(profile.panNumber) || "—"],
+                ["Name",                     [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "—"],
+                ["Date of Birth",            fmtDate(profile.dateOfBirth)],
+                ["Parent's Name",            profile.parentName || "—"],
+              ]}
+            />
           )}
         </div>
+      )}
+
+      {/* Section-grouped checklist */}
+      <div className="p-6 space-y-6">
+        {SECTION_CATALOG.map((section) => (
+          <div key={section.key}>
+            <div className="mb-2.5 flex items-baseline justify-between gap-2">
+              <h4 className="text-[12px] uppercase tracking-wider font-semibold text-slate-500">{section.label}</h4>
+              {section.subtitle && (
+                <p className="text-[11px] text-slate-400">{section.subtitle}</p>
+              )}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {section.cats.map((cat) => {
+                const doc = docByCat.get(cat.key);
+                const hasDoc = !!doc;
+                const stateBorder = hasDoc
+                  ? "border-emerald-300 bg-emerald-50/40"
+                  : cat.required
+                    ? "border-amber-300 bg-amber-50/30"
+                    : "border-slate-200 bg-white";
+                return (
+                  <div key={cat.key} className={`rounded-xl border ${stateBorder} px-4 py-3 transition-colors`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          {hasDoc
+                            ? <CheckCircle2 size={14} className="text-emerald-600 shrink-0" />
+                            : cat.required
+                              ? <AlertCircle size={14} className="text-amber-500 shrink-0" />
+                              : <Circle size={14} className="text-slate-300 shrink-0" />}
+                          <p className="text-[13px] font-semibold text-slate-800 truncate">{cat.label}</p>
+                          {cat.required && (
+                            <span className="text-[9.5px] font-bold tracking-wider text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">REQUIRED</span>
+                          )}
+                          {cat.hint && (
+                            <span className="text-[10.5px] text-slate-400">· {cat.hint}</span>
+                          )}
+                        </div>
+                        {hasDoc ? (
+                          <div className="mt-1 flex items-center gap-2 text-[11.5px] text-slate-500">
+                            <FileText size={11} className="shrink-0" />
+                            <span className="truncate">{doc.fileName || "Untitled"}</span>
+                            <span className="text-slate-400">· {fmtDate(doc.createdAt)}</span>
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-[11.5px] text-slate-400">
+                            {cat.required ? "Not yet uploaded — required." : "Not uploaded."}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center justify-end gap-1.5">
+                      {hasDoc && (
+                        <>
+                          <a
+                            href={doc.fileUrl?.startsWith("http") ? doc.fileUrl : `/api/hr/documents/${doc.id}/file`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] text-slate-600 hover:text-[#008CFF] hover:bg-[#008CFF]/5"
+                          >
+                            <Eye size={13} /> View
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(doc)}
+                            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] text-slate-500 hover:text-rose-600 hover:bg-rose-50"
+                          >
+                            <Trash2 size={13} /> Delete
+                          </button>
+                        </>
+                      )}
+                      <label className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-semibold cursor-pointer bg-[#008CFF] hover:bg-[#0070cc] text-white">
+                        {hasDoc ? <><RefreshCw size={13} /> Replace</> : <><UploadIcon size={13} /> Upload</>}
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept=".pdf,image/*,.doc,.docx"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            // Reset value so the same file can be re-selected (Replace flow).
+                            e.target.value = "";
+                            inlineUpload(cat.key, f ?? null);
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        {/* Other files — uploads outside the catalog (legacy + ad-hoc) */}
+        {otherDocs.length > 0 && (
+          <div>
+            <div className="mb-2.5">
+              <h4 className="text-[12px] uppercase tracking-wider font-semibold text-slate-500">Other files</h4>
+            </div>
+            <div className="space-y-2">
+              {otherDocs.map((doc: any) => (
+                <div
+                  key={doc.id}
+                  className="group flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 hover:border-[#008CFF]/40 transition-colors"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#008CFF]/10 text-[#008CFF]">
+                    <FileText size={16} />
+                  </div>
+                  <a
+                    href={doc.fileUrl?.startsWith("http") ? doc.fileUrl : `/api/hr/documents/${doc.id}/file`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="min-w-0 flex-1 cursor-pointer"
+                  >
+                    <p className="truncate text-[13px] font-semibold text-slate-800">{doc.fileName || "Untitled"}</p>
+                    <p className="truncate text-[11px] text-slate-500">
+                      {prettyCategory(doc.category || "Document")} · {fmtDate(doc.createdAt)}
+                    </p>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(doc)}
+                    title="Delete"
+                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-slate-400 hover:text-rose-500"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Upload drawer */}
@@ -2287,7 +2445,7 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
             <div className="flex items-start justify-between px-6 py-4 border-b border-slate-200">
               <div>
                 <h2 className="text-[16px] font-semibold text-slate-800">Upload document</h2>
-                <p className="mt-0.5 text-[11.5px] text-slate-500">Adds to <strong className="text-slate-700">{active.label}</strong>.</p>
+                <p className="mt-0.5 text-[11.5px] text-slate-500">Pick a file and a category.</p>
               </div>
               <button onClick={closeUpload} aria-label="Close" disabled={uploading} className="text-slate-400 hover:text-slate-700 -mt-1 disabled:opacity-50">
                 <X size={18} />
