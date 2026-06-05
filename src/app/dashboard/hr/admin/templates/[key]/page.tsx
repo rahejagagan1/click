@@ -6,13 +6,41 @@
 // action=pdf which renders, saves to the employee's Documents, and
 // streams the PDF for inline view.
 
-import { use, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
+import dynamic from "next/dynamic";
+import { useSearchParams } from "next/navigation";
+import "react-quill-new/dist/quill.snow.css";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { isLeadershipOrHR } from "@/lib/access";
 import { Search, Save, FileText, RefreshCw } from "lucide-react";
+
+// Reuse the same Quill build the JD editor uses so HR gets a
+// consistent Word-doc-like authoring experience across all
+// rich-text fields. Dynamic + ssr:false because Quill touches
+// `document` on import.
+const ReactQuill = dynamic(
+  async () => (await import("react-quill-new")).default,
+  { ssr: false, loading: () => <div className="px-4 py-3 text-[12.5px] text-slate-400">Loading editor…</div> },
+);
+
+const LETTER_QUILL_MODULES = {
+  toolbar: [
+    [{ header: [1, 2, 3, false] }],
+    [{ size: ["small", false, "large", "huge"] }],
+    ["bold", "italic", "underline", "strike"],
+    [{ color: [] }, { background: [] }],
+    [{ list: "ordered" }, { list: "bullet" }],
+    [{ align: [] }],
+    ["clean"],
+  ],
+};
+const LETTER_QUILL_FORMATS = [
+  "header", "size", "bold", "italic", "underline", "strike",
+  "color", "background", "list", "bullet", "align",
+];
 
 type CustomFieldDef = {
   key: string;
@@ -27,6 +55,10 @@ type Template = {
   key: string;
   title: string;
   category: string;
+  /** "NB Media" | "YT Labs" | null. Determines which letterhead +
+   *  logo + watermark chrome the preview wraps the body in, and
+   *  which set of employees the picker filters to. */
+  businessUnit?: string | null;
   bodyHtml: string;
   customFields: CustomFieldDef[] | null;
 };
@@ -39,13 +71,32 @@ type Employee = {
   employeeProfile?: { designation?: string | null; department?: string | null } | null;
 };
 
+// Next.js 16 + Turbopack requires every useSearchParams() consumer
+// to live under a Suspense boundary, otherwise the static-prerender
+// pass aborts. We split the body into an Inner component and wrap
+// it here so the rest of the tree prerenders cleanly.
 export default function TemplateEditorPage({ params }: { params: Promise<{ key: string }> }) {
+  return (
+    <Suspense fallback={null}>
+      <TemplateEditorPageInner params={params} />
+    </Suspense>
+  );
+}
+
+function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> }) {
   const { key } = use(params);
   const { data: session } = useSession();
   const me = session?.user as any;
+  // Brand context from the URL (set by the HR-Dashboard brand-
+  // switcher). When absent, the API falls back to the viewer's
+  // session brand. Forward it on every fetch so we always pull the
+  // right brand variant of the template.
+  const searchParams = useSearchParams();
+  const brandSlug = searchParams?.get("brand") ?? null;
+  const brandQs = brandSlug ? `?brand=${encodeURIComponent(brandSlug)}` : "";
 
   const { data: tpl, mutate: mutateTpl } = useSWR<Template>(
-    `/api/hr/letter-templates/${key}`, fetcher,
+    `/api/hr/letter-templates/${key}${brandQs}`, fetcher,
   );
 
   const [employee, setEmployee] = useState<Employee | null>(null);
@@ -167,9 +218,12 @@ export default function TemplateEditorPage({ params }: { params: Promise<{ key: 
   return (
     <div className="px-6 py-5">
       <div className="flex items-center gap-1.5 text-[11.5px] text-slate-500 mb-2">
-        <Link href="/dashboard/hr/admin" className="hover:text-slate-800 transition-colors">HR Dashboard</Link>
+        {/* Both breadcrumb links preserve the current `?brand=` so
+            navigating back lands on the same brand's HR Dashboard +
+            Templates page (not the viewer's session-default brand). */}
+        <Link href={`/dashboard/hr/admin${brandQs}`} className="hover:text-slate-800 transition-colors">HR Dashboard</Link>
         <span>/</span>
-        <Link href="/dashboard/hr/admin/templates" className="hover:text-slate-800 transition-colors">Templates</Link>
+        <Link href={`/dashboard/hr/admin/templates${brandQs}`} className="hover:text-slate-800 transition-colors">Templates</Link>
         <span>/</span>
         <span className="text-slate-700 font-medium">{tpl.title}</span>
       </div>
@@ -195,7 +249,19 @@ export default function TemplateEditorPage({ params }: { params: Promise<{ key: 
         <div className="space-y-4">
           <section className="rounded-xl border border-slate-200 bg-white p-5">
             <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Employee</label>
-            <EmployeePicker value={employee} onChange={(v) => { setEmployee(v); setPreview(null); }} />
+            <EmployeePicker
+              value={employee}
+              onChange={(v) => { setEmployee(v); setPreview(null); }}
+              // Prefer the URL brand (set by the HR-Dashboard
+              // brand-switcher) over the viewer's session brand so
+              // a developer navigating into the YT Labs FnF
+              // template sees only YT Labs employees in the picker.
+              brand={
+                brandSlug === "yt-labs" ? "YT Labs"
+                : brandSlug === "nb-media" ? "NB Media"
+                : (tpl?.businessUnit ?? me?.businessUnit ?? "NB Media")
+              }
+            />
           </section>
 
           {cats.length > 0 && (
@@ -295,7 +361,11 @@ export default function TemplateEditorPage({ params }: { params: Promise<{ key: 
         </div>
       </div>
 
-      {/* Template body editor — appears when HR clicks "Edit template body" */}
+      {/* Template body editor — Word-doc-style rich-text editor
+          (Quill, Times New Roman, full formatting toolbar). HR
+          types/edits the letter content visually; placeholders
+          stay as plain text so `{{Section.Field}}` round-trips
+          through Quill unchanged. */}
       {editingBody && (
         <>
           <div className="fixed inset-0 bg-black/40 z-40" onClick={() => !savingBody && setEditingBody(false)} />
@@ -304,15 +374,30 @@ export default function TemplateEditorPage({ params }: { params: Promise<{ key: 
               <h3 className="text-[14px] font-semibold text-slate-800">Edit template body</h3>
               <button onClick={() => !savingBody && setEditingBody(false)} className="text-slate-400 hover:text-slate-700" disabled={savingBody}>✕</button>
             </div>
-            <textarea
-              value={draftBody}
-              onChange={(e) => setDraftBody(e.target.value)}
-              className="flex-1 px-4 py-3 text-[12.5px] font-mono leading-relaxed border-0 focus:outline-none resize-none"
-              spellCheck={false}
-              style={{ minHeight: "400px" }}
-            />
-            <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between gap-2">
-              <p className="text-[11.5px] text-slate-500">Use <code>{`{{Section.Field}}`}</code> placeholders — they auto-fill from the picked employee.</p>
+            <div
+              className="flex-1 overflow-y-auto"
+              // Force Times New Roman + 12pt as the default authoring
+              // font so the on-screen editor matches the rendered PDF.
+              style={{
+                fontFamily: '"Times New Roman", Times, serif',
+                fontSize: "12pt",
+                lineHeight: 1.5,
+              }}
+            >
+              <ReactQuill
+                theme="snow"
+                value={draftBody}
+                onChange={(html) => setDraftBody(html)}
+                modules={LETTER_QUILL_MODULES}
+                formats={LETTER_QUILL_FORMATS}
+                placeholder="Type or paste the letter content. Use {{Section.Field}} placeholders to auto-fill employee data."
+              />
+            </div>
+            <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-[11.5px] text-slate-500">
+                Use <code className="px-1 py-0.5 bg-slate-100 rounded">{`{{Section.Field}}`}</code> placeholders — they auto-fill from the picked employee.
+                Letters render in Times New Roman.
+              </p>
               <div className="flex gap-2">
                 <button
                   onClick={() => !savingBody && setEditingBody(false)}
@@ -323,7 +408,11 @@ export default function TemplateEditorPage({ params }: { params: Promise<{ key: 
                   onClick={async () => {
                     setSavingBody(true);
                     try {
-                      const res = await fetch(`/api/hr/letter-templates/${tpl.key}`, {
+                      // Forward the brand slug from the URL so the
+                      // PATCH targets the right brand variant
+                      // (otherwise we'd update both the NB Media
+                      // AND YT Labs rows that share the same key).
+                      const res = await fetch(`/api/hr/letter-templates/${tpl.key}${brandQs}`, {
                         method:  "PATCH",
                         headers: { "Content-Type": "application/json" },
                         body:    JSON.stringify({ bodyHtml: draftBody }),
@@ -343,15 +432,28 @@ export default function TemplateEditorPage({ params }: { params: Promise<{ key: 
           </div>
         </>
       )}
+      {/* Quill-snow uses Helvetica by default — override to Times New
+          Roman so the on-screen editor matches the rendered PDF. */}
+      <style jsx global>{`
+        .ql-editor {
+          font-family: "Times New Roman", Times, serif !important;
+          font-size: 12pt !important;
+          line-height: 1.5 !important;
+          min-height: 400px;
+        }
+      `}</style>
     </div>
   );
 }
 
 // Debounced employee search picker. Hits /api/hr/employees and
 // renders a small dropdown. Same shape used in AssetsPanel.
+// `brand` (optional) restricts results to one businessUnit so HR
+// generating an NB Media letter never accidentally picks a YT Labs
+// employee (and vice versa).
 function EmployeePicker({
-  value, onChange,
-}: { value: Employee | null; onChange: (v: Employee | null) => void }) {
+  value, onChange, brand,
+}: { value: Employee | null; onChange: (v: Employee | null) => void; brand?: string | null }) {
   const [open, setOpen]       = useState(false);
   const [query, setQuery]     = useState("");
   const [debounced, setDebounced] = useState("");
@@ -362,8 +464,11 @@ function EmployeePicker({
     return () => clearTimeout(t);
   }, [query]);
 
+  const fetchUrl = open
+    ? `/api/hr/employees?search=${encodeURIComponent(debounced)}&isActive=true${brand ? `&businessUnit=${encodeURIComponent(brand)}` : ""}`
+    : null;
   const { data: results = [] as Employee[], isLoading } = useSWR<Employee[]>(
-    open ? `/api/hr/employees?search=${encodeURIComponent(debounced)}&isActive=true` : null,
+    fetchUrl,
     fetcher,
     { keepPreviousData: true },
   );
