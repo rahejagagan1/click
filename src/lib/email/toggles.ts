@@ -243,14 +243,21 @@ export async function isEmailEnabled(kind: EmailKey): Promise<boolean> {
 }
 
 /** Given a user's orgLevel + role, return every role key that applies.
- *  A user may match multiple (e.g. CEO with role=admin); the dispatch
- *  filter uses an OR over them so they keep receiving emails any one
- *  of their roles is allowed to receive. */
+ *  A user may match multiple roles (e.g. HR Manager with role=admin);
+ *  the dispatch filter uses an OR over them so they keep receiving
+ *  emails any one of their roles is allowed to receive.
+ *
+ *  CEO is the lone exception — when orgLevel === "ceo" we return
+ *  ONLY ["ceo"], even if the CEO/owner account also carries
+ *  role="admin". Otherwise the Admin panel toggle could override the
+ *  CEO panel: HR turns Nikit's WFH OFF in the CEO panel but if Admin
+ *  WFH is ON, the OR-gate let him through anyway. The per-role CEO
+ *  panel needs to be the sole gate for CEO recipients. */
 export function rolesForUser(u: { orgLevel?: string | null; role?: string | null }): EmailRole[] {
-  const out = new Set<EmailRole>();
   const org = (u.orgLevel || "").toLowerCase();
-  const r   = (u.role     || "").toLowerCase();
-  if (org === "ceo")                                  out.add("ceo");
+  if (org === "ceo") return ["ceo"];
+  const out = new Set<EmailRole>();
+  const r = (u.role || "").toLowerCase();
   if (org === "hr_manager" || r === "hr_manager")     out.add("hr_manager");
   if (org === "special_access")                       out.add("special_access");
   if (r === "admin")                                  out.add("admin");

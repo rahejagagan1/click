@@ -380,13 +380,11 @@ export async function approverIdsForUser(actorId: number): Promise<number[]> {
         isActive: true,
         // CEO excluded from the blanket fan-out — re-added per-brand
         // below so the YT Labs CEO never sees NB Media submissions
-        // (and vice versa). Top-level NOT because the CEO/owner
-        // account also carries role="admin" / may be a dev email.
+        // (and vice versa). Whether the CEO actually receives the
+        // mail is controlled by the per-role "CEO" toggle in Admin →
+        // Emails Automation (see rolesForUser CEO-exclusive rule).
         orgLevel: { not: "ceo" },
         OR: [
-          // Special Access + HR Manager (role).
-          // EXCLUDES role=admin alone and orgLevel="hr_manager"-only
-          // members (HR-team folks like Vanshika are role=member).
           { orgLevel: "special_access" },
           { role: "hr_manager" },
           ...devClause,
@@ -397,7 +395,10 @@ export async function approverIdsForUser(actorId: number): Promise<number[]> {
     brandCeoIdForEmployee(actorId),
   ]);
   const ids = new Set<number>(admins.map((u) => u.id));
-  // Brand-CEO (NB Media → NB Media CEO, YT Labs → YT Labs CEO).
+  // Brand-CEO is added to the recipient list. The per-role CEO
+  // toggle in Admin → Emails Automation gates whether they actually
+  // receive the email — turning a per-kind CEO toggle OFF drops
+  // them silently at the email-dispatch layer.
   if (brandCeoId) ids.add(brandCeoId);
   // The actor's direct manager — explicit add covers non-CEO chain
   // (peer manager, team lead, etc.) that the admin pool doesn't.
