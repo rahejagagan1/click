@@ -20,6 +20,13 @@ const PUBLIC_PATHS = [
     "/jobs",
     "/api/jobs",
     "/api/public",
+    // Deploy-check has its own DEPLOY_CHECK_TOKEN gate (constant-
+    // time compare + generic 404 on mismatch), so it bypasses the
+    // session-redirect — otherwise the middleware would redirect
+    // unauthenticated curls to /login before the token check could
+    // run. Safe to keep public because the route returns only a
+    // single boolean marker and refuses requests without the token.
+    "/api/__deploy-check",
 ];
 
 export async function proxy(request: NextRequest) {
