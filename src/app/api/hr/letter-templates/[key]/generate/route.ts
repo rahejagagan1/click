@@ -77,11 +77,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
     const { html, missing } = await renderLetterHtml(tpl.bodyHtml, { employeeId, customFields });
 
     if (action === "preview") {
-      // Wrap the body in a full A4-shaped preview HTML doc with the
-      // NB Media letterhead, embedded base64 logo (top-right) and
-      // faint background watermark — so the editor preview matches
-      // the actual PDF layout.
-      const fullHtml = await wrapLetterPreviewHtml(html, tpl.title);
+      // Wrap the body in a full A4-shaped preview HTML doc. The
+      // wrapper picks the right brand chrome (letterhead text +
+      // logo + watermark) from the matched template's businessUnit:
+      // NB Media → YT Money Productions letterhead with nb-media
+      // logo; YT Labs → BILLION FILMS letterhead with the YT Labs
+      // hash icon.
+      const fullHtml = await wrapLetterPreviewHtml(html, tpl.title, tpl.businessUnit);
       return NextResponse.json({ html: fullHtml, missing, title: tpl.title });
     }
 
@@ -133,7 +135,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
       // the parser-based sanitiser can't execute scripts on the
       // app origin. Add nosniff + frame DENY headers as
       // belt-and-braces against MIME-confusion / clickjacking.
-      const safeHtml = await wrapLetterPreviewHtml(html, tpl.title);
+      const safeHtml = await wrapLetterPreviewHtml(html, tpl.title, tpl.businessUnit);
       return new NextResponse(safeHtml, {
         headers: {
           "Content-Type":             "text/html; charset=utf-8",

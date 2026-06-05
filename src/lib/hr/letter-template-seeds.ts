@@ -18,6 +18,9 @@ export type LetterTemplateSeed = {
   key: string;
   title: string;
   category: "offboarding" | "onboarding" | "appraisal" | "general";
+  /** Brand variant. Defaults to "NB Media" when omitted, matching
+   *  the rows backfilled by the businessUnit migration. */
+  businessUnit?: "NB Media" | "YT Labs";
   bodyHtml: string;
   customFields: CustomFieldDef[];
 };
@@ -35,6 +38,13 @@ export type LetterTemplateSeed = {
 
 const SIGNOFF_HTML = `
 <p style="margin-top:48px">Regards,<br/>Nikit Bassi<br/>Founder &amp; CEO</p>
+`;
+
+// YT Labs letters are signed by the YT Labs CEO. The render layer
+// injects the matching signature image (Kunal's, not Nikit's) into
+// the SIGNOFF block based on the template's businessUnit.
+const SIGNOFF_HTML_YT_LABS = `
+<p style="margin-top:48px">Regards,<br/>Kunal Lall<br/>Founder &amp; CEO</p>
 `;
 
 export const LETTER_TEMPLATE_SEEDS: LetterTemplateSeed[] = [
@@ -102,7 +112,35 @@ ${SIGNOFF_HTML}
 `.trim(),
   },
 
-  // ── 4. Revised Offer Letter ───────────────────────────────────
+  // ── 4. Employment Relieving & Service Letter ─────────────────
+  // Issued after an exit is finalised. Confirms the employee's
+  // tenure, role, department, and that all dues are settled.
+  // Carries the standard confidentiality / IP reminder boilerplate
+  // HR shared.
+  {
+    key: "relieving_service",
+    title: "Employment Relieving and Service Letter",
+    category: "offboarding",
+    customFields: [],
+    bodyHtml: `
+<p>Date: {{EmployeeBasicHeaderInfo.ShortDate}}</p>
+<p>Dear {{EmployeeBasicInfo.DisplayName}},</p>
+<p>It is to certify that <strong>{{EmployeeBasicInfo.DisplayName}}</strong> was employed as <strong>{{EmployeeJobInfo.JobTitle}}</strong> in the <strong>{{EmployeeJobInfo.Department}}</strong> department of YT Money Productions Pvt. Ltd. (operating under the brand name NB Media) from <strong>{{EmployeeJobInfo.DateJoined}}</strong> to <strong>{{EmployeeJobInfo.LastWorkingDay}}</strong>.</p>
+<p>{{EmployeeBasicInfo.DisplayName}} fulfilled {{DocumentFilterInfo.HisHer}} roles and responsibilities diligently with dedication and commitment to company policy and rules and we wish {{DocumentFilterInfo.HimHer}} good luck for his/her future career and endeavors.</p>
+<p>Please be advised that all outstanding dues, including salary, benefits, and any other entitlements, have been settled as per company policies.</p>
+<p style="font-size:11pt">We would also like to remind you of the obligations of the confidentiality and non-disclosure agreement that you had signed during your employment with the Company. We earnestly hope that you will continue to bestow the same degree of commitment in protecting the Intellectual Property of the company as you have agreed to uphold as per the terms of the confidentiality and non-disclosure agreement. We request you to strive and ensure that the trade secrets, confidential and the intellectual property that were developed when you were in the employment of the company continue to be protected and are not compromised in anyway.</p>
+<p>We wish you all the best in your future endeavors!</p>
+${SIGNOFF_HTML}
+<p style="margin-top:36px">
+  Acknowledged and Accepted<br/>
+  {{EmployeeBasicHeaderInfo.EmployeeNumber}}<br/>
+  {{EmployeeBasicInfo.DisplayName}}<br/>
+  Signature
+</p>
+`.trim(),
+  },
+
+  // ── 5. Revised Offer Letter ───────────────────────────────────
   // Multi-page (annexures + terms). HR can edit any section in the
   // Templates page; defaults preserve the exact 6-page wording HR
   // shared as the source of truth.
@@ -228,6 +266,224 @@ ${SIGNOFF_HTML}
 </ol>
 <p><strong>Note:</strong> You are requested to bring all the above-specified documents in Original &amp; Xerox for joining. These documents are MANDATORY at the time of joining.</p>
 <p>In case of any query related to the joining process, please feel free to get in touch with us at Tanvi@nbmediaproductions.com.</p>
+`.trim(),
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // YT Labs variants — same wording as NB Media versions but with
+  // "Billion Films Private Limited (operating under the brand name
+  // YT Labs)" instead of "YT Money Productions Pvt. Ltd. (operating
+  // under the brand name NB Media)". The letterhead text, address,
+  // CIN, and logo come from the brand-aware preview wrapper +
+  // (when supplied) per-template DOCX file under
+  // public/templates/letter-<key>-ytlabs.docx.
+  // ─────────────────────────────────────────────────────────────
+
+  // ── YT Labs · Full & Final Settlement Letter ─────────────────
+  {
+    key: "fnf_settlement",
+    title: "Full & Final Settlement Letter",
+    category: "offboarding",
+    businessUnit: "YT Labs",
+    customFields: [
+      { key: "FnFAmount",   label: "FnF Amount (INR)", type: "text", required: true,  placeholder: "e.g. 75,000" },
+      { key: "ReferenceNo", label: "Reference No.",     type: "text", required: false, placeholder: "e.g. FF-2026-014" },
+    ],
+    bodyHtml: `
+<p>Date: {{DocumentFilterInfo.ShortDate}}</p>
+<p>Dear {{EmployeeBasicInfo.DisplayName}},</p>
+<p>With reference to your resignation letter dated {{EmployeeJobInfo.ResignationDate}} and subsequent relieving from your duties on {{EmployeeJobInfo.LastWorkingDay}} your full and final letter has been prepared, in accordance with the terms &amp; conditions of your joining and compensation letter.</p>
+<p>The company shall pay you a sum of INR {{CustomAttributes.FnFAmount}} only on account of full &amp; final settlement {{CustomAttributes.ReferenceNo}}</p>
+<p>With this, your account will be settled with our company and nothing will be due from the company to you.</p>
+${SIGNOFF_HTML_YT_LABS}
+<p style="margin-top:36px">
+  Acknowledged and Accepted<br/>
+  {{EmployeeBasicHeaderInfo.EmployeeNumber}}<br/>
+  {{EmployeeBasicInfo.DisplayName}}<br/>
+  Signature
+</p>
+`.trim(),
+  },
+
+  // ── YT Labs · Internship Completion Letter ───────────────────
+  {
+    key: "internship_completion",
+    title: "Internship Completion Letter",
+    category: "offboarding",
+    businessUnit: "YT Labs",
+    customFields: [
+      { key: "InternshipMonths", label: "Duration (e.g. 3 months)", type: "text", required: true, placeholder: "e.g. 6 months" },
+    ],
+    bodyHtml: `
+<p>Date: {{EmployeeBasicHeaderInfo.ShortDate}}</p>
+<p>This is to certify that <strong>{{EmployeeBasicInfo.DisplayName}}</strong> successfully completed an internship as <strong>{{EmployeeJobInfo.JobTitle}}</strong> at Billion Films Private Limited (operating under the brand name of YouTuber Labs), located at 2nd Floor, NAAR Tower, Sector 74 A, Industrial Area, Sector 74, Sahibzada Ajit Singh Nagar, Punjab 140307.</p>
+<p>The internship program began on <strong>{{EmployeeJobInfo.DateJoined}}</strong> and concluded on <strong>{{EmployeeCustomFields.InternshipEndDate}}</strong> lasting for <strong>{{CustomAttributes.InternshipMonths}}</strong>.</p>
+<p><strong>{{EmployeeBasicInfo.DisplayName}}</strong> consistently displayed a strong work ethic, a positive attitude, and a willingness to learn. {{DocumentFilterInfo.HeShe}} was a valuable asset to our team, and we are confident {{DocumentFilterInfo.HeShe}} will achieve great success in their future endeavors.</p>
+${SIGNOFF_HTML_YT_LABS}
+`.trim(),
+  },
+
+  // ── YT Labs · Probation Confirmation Letter ──────────────────
+  {
+    key: "probation_confirmation",
+    title: "Probation Confirmation Letter",
+    category: "onboarding",
+    businessUnit: "YT Labs",
+    customFields: [],
+    bodyHtml: `
+<p>Dear {{EmployeeBasicInfo.DisplayName}},</p>
+<p>Following the completion of your probationary period at Billion Films Private Limited (operating under the brand name of YouTuber Labs,) we have reviewed your performance and found the same to be satisfactory.</p>
+<p>Given the above, we are pleased to inform you that your employment has been confirmed for the position of <strong>{{EmployeeJobInfo.JobTitle}}</strong> at Billion Films Private Limited (operating under the brand name of YouTuber Labs,) with effect from <strong>{{EmployeeJobInfo.ProbationEndDate}}</strong>.</p>
+<p>This letter serves as an official appointment document and is governed by the same terms and conditions as that of your initial offer letter. In addition, you shall be entitled to receive Bonuses, perks other benefits that the company may at its discretion make available to its employees as stipulated in the relevant provisions of the Employee policy, under the terms and requirements relating to the benefits imposed by the organization.</p>
+<p>We are happy to have you as part of our team and wish you the best of luck in your job.</p>
+${SIGNOFF_HTML_YT_LABS}
+<p style="margin-top:36px">
+  Acknowledged and Accepted,<br/>
+  {{EmployeeBasicHeaderInfo.EmployeeNumber}}<br/>
+  {{EmployeeBasicInfo.DisplayName}}<br/>
+  Signature:
+</p>
+`.trim(),
+  },
+
+  // ── YT Labs · Employment Relieving & Service Letter ──────────
+  {
+    key: "relieving_service",
+    title: "Employment Relieving and Service Letter",
+    category: "offboarding",
+    businessUnit: "YT Labs",
+    customFields: [],
+    bodyHtml: `
+<p>Date: {{EmployeeBasicHeaderInfo.ShortDate}}</p>
+<p>Dear {{EmployeeBasicInfo.DisplayName}},</p>
+<p>It is to certify that <strong>{{EmployeeBasicInfo.DisplayName}}</strong> was employed as <strong>{{EmployeeJobInfo.JobTitle}}</strong> in the <strong>{{EmployeeJobInfo.Department}}</strong> department of Billion Films Private Limited (operating under the brand name of YouTuber Labs) from <strong>{{EmployeeJobInfo.DateJoined}}</strong> to <strong>{{EmployeeJobInfo.LastWorkingDay}}</strong>.</p>
+<p>{{EmployeeBasicInfo.DisplayName}} fulfilled {{DocumentFilterInfo.HisHer}} roles and responsibilities diligently with dedication and commitment to company policy and rules and we wish {{DocumentFilterInfo.HimHer}} good luck for his/her future career and endeavors.</p>
+<p>Please be advised that all outstanding dues, including salary, benefits, and any other entitlements, have been settled as per company policies.</p>
+<p style="font-size:11pt">We would also like to remind you of the obligations of the confidentiality and non-disclosure agreement that you had signed during your employment with the Company. We earnestly hope that you will continue to bestow the same degree of commitment in protecting the Intellectual Property of the company as you have agreed to uphold as per the terms of the confidentiality and non-disclosure agreement. We request you to strive and ensure that the trade secrets, confidential and the intellectual property that were developed when you were in the employment of the company continue to be protected and are not compromised in anyway.</p>
+<p>We wish you all the best in your future endeavors!</p>
+${SIGNOFF_HTML_YT_LABS}
+<p style="margin-top:36px">
+  Acknowledged and Accepted<br/>
+  {{EmployeeBasicHeaderInfo.EmployeeNumber}}<br/>
+  {{EmployeeBasicInfo.DisplayName}}<br/>
+  Signature
+</p>
+`.trim(),
+  },
+
+  // ── YT Labs · Revised Offer Letter ──────────────────────────
+  {
+    key: "revised_offer_letter",
+    title: "Revised Offer Letter",
+    category: "onboarding",
+    businessUnit: "YT Labs",
+    customFields: [
+      { key: "JoiningDate",       label: "Joining Date",        type: "date",   required: true },
+      { key: "ReportingTime",     label: "Reporting Time",       type: "text",   required: true, placeholder: "10:00 AM" },
+      { key: "AcceptanceDeadline",label: "Acceptance Deadline",  type: "date",   required: true },
+      { key: "AnnualCTC",         label: "Annual CTC (LPA)",     type: "text",   required: true, placeholder: "e.g. 6" },
+      { key: "BasicPay",          label: "Basic Pay (Monthly)",  type: "text",   required: false },
+      { key: "HRA",               label: "HRA (Monthly)",        type: "text",   required: false },
+      { key: "DA",                label: "DA (Monthly)",         type: "text",   required: false },
+      { key: "Conveyance",        label: "Conveyance (Monthly)", type: "text",   required: false },
+      { key: "Medical",           label: "Medical (Monthly)",    type: "text",   required: false },
+      { key: "Special",           label: "Special (Monthly)",    type: "text",   required: false },
+      { key: "TotalMonthly",      label: "Total Monthly CTC",    type: "text",   required: true, placeholder: "Sum of the above" },
+    ],
+    bodyHtml: `
+<p class="note">NOTE: This is a temporary/ Conditional offer and cannot be used for Negotiations with other companies.</p>
+<p>{{DocumentFilterInfo.ShortDate}}</p>
+<p>Dear <strong>{{EmployeeBasicInfo.DisplayName}}</strong></p>
+<p>With reference to your application dated and subsequent interview with us, we are pleased to offer you employment for the position of <strong>{{EmployeeJobInfo.JobTitle}}</strong> with <strong>Billion Films Private Limited</strong> (operating under the brand name of YouTuber Labs) We trust that your knowledge, skills, and experience will be among our most valuable assets.</p>
+<p>Annexure "A" below includes your salary and benefits information and Annexure "B" includes your joining requirement information.</p>
+<p>Your signing of these documents confirms your acceptance of the terms and conditions.</p>
+<p>Joining Date: <strong>{{CustomAttributes.JoiningDate}}</strong></p>
+<p>Reporting Time: <strong>{{CustomAttributes.ReportingTime}}</strong></p>
+<p>Location: <strong>2nd Floor, NAAR Tower, Sector 74 A, Industrial Area, Sector 74, Sahibzada Ajit Singh Nagar, Punjab 140307</strong></p>
+<p>Employment Type: <strong>Full-Time</strong></p>
+<p>Working Hours: <strong>09:00 AM to 6.00 PM (Monday to Friday)</strong></p>
+<p><em>*Please note that Saturdays are flexi-offs.</em></p>
+<p>Kindly acknowledge your acceptance by signing the document, and confirming the joining date by <strong>{{CustomAttributes.AcceptanceDeadline}}</strong>. <em>Failure to accept prior to the specified deadline will render this offer null and void automatically.</em></p>
+<p>For any further questions or concerns feel free to reach us.</p>
+<p style="text-align:center"><strong>We extend our heartfelt wishes for an exceptional tenure aboard!</strong></p>
+${SIGNOFF_HTML_YT_LABS}
+
+<div class="page-break"></div>
+<p class="note">This is a temporary/ Conditional offer and cannot be used for Negotiations with other companies.</p>
+<h2 class="section-title">TERMS AND CONDITIONS:</h2>
+<p>Following are the terms and conditions in reference to your employment as <strong>{{EmployeeJobInfo.JobTitle}}</strong> at Billion Films Private Limited (operating under the brand name of YouTuber Labs.)</p>
+<ol class="terms">
+  <li>You will be on probation for a period of three months, which may be extended by another three months at the sole discretion of the management. On satisfied completion of the probation period/extended probation period, your positions shall be confirmed as permanent. During this period, you will not be eligible for any bonuses, perks, or benefits given to permanent employees.</li>
+  <li>Upon attaining the status of a permanent employee, you are required to remain in our organization for a minimum of one year, unless otherwise determined by management (for reasons such as poor performance, disciplinary action, or similar factors). Neglecting to do so will result in the forfeiture of compensation that is owed to you.</li>
+  <li>You shall be entitled to salary allowances and perquisites as per "Annexure A." In addition, you shall be entitled to receive such insurance, health, and other benefits that the company may, at its discretion, make available to its employees as stipulated in the relevant provisions of the employee policy, in accordance with the terms and requirements relating to the benefits imposed by the company. Individual salary and performance ratings should strictly not be shared with other employees.</li>
+  <li>You acknowledge and undertake that your remuneration is a matter purely between yourself and the company, and you are to keep this information and any changes thereto strictly confidential. Your remuneration will be periodically reviewed as per organization guidelines. Your increments and promotions shall be at the discretion of the organization and will be subject to and based on performance.</li>
+  <li>Your hours of work shift, and timing shall be governed by the exigencies of working as determined by the management from time to time at its discretion. A working day shall comprise Nine (9) hours, irrespective of shifts, with a break for an hour (in the aggregate).</li>
+  <li>You will be governed by and will abide by the company's guidelines/code of conduct, and policies, which are in force and may be modified from time to time.</li>
+  <li>Your employment with the company is on a full-time basis. While you are in the services of the company, you are not permitted to directly or indirectly, without permission of management, engage yourself or devote any time or attention to any full-time or part-time employment, trade business, or occupation with or without remuneration for any third person or concern (including self-employment).</li>
+  <li>Confidential information pertaining to the organization, its affiliates, clients, customers, or other entities may be disclosed to you in the course of your employment. It is expected that you consistently uphold the utmost confidence and trust regarding any confidential information.</li>
+  <li>During the course of employment, any new or advanced methods, inventions, designs or improvements you conceive shall remain the sole property of the company.</li>
+  <li>Your entitlement and use of leaves shall be governed as per company policies.</li>
+  <li>In the event of your resignation or termination, One Month's written notice from you is required.</li>
+  <li>After the termination of employment, you shall immediately return all the properties of the company that are in your possession or custody.</li>
+  <li>The continuation of your employment will be subject to your being physically and mentally fit.</li>
+  <li>Unless you separate earlier, either voluntarily or by the company, you shall retire from the employment of the company on the last day of the month in which you attain your 60th birth anniversary.</li>
+  <li>You will be responsible for the safekeeping and return in good condition of all the office properties, equipment, books, etc. that may be given to you for office, custody, and charge.</li>
+  <li>Should there be any issue between the Company and the Employee which may require adjudication then the courts of Mohali shall be the area of Jurisdiction.</li>
+</ol>
+
+<p><strong>Acceptance:</strong></p>
+<p>I <strong>{{EmployeeBasicInfo.DisplayName}}</strong> hereby accept your offer, subject to the conditions mentioned above and shall join my duties on <strong>{{CustomAttributes.JoiningDate}}</strong></p>
+<p><strong>Background Verification:</strong></p>
+<p>I hereby give my consent for background verification.</p>
+<p style="margin-top:36px">
+  Name:<br/>
+  Signature:<br/>
+  Address:<br/>
+  Date:
+</p>
+
+<div class="page-break"></div>
+<h2 class="section-title">Annexure "A"</h2>
+<h3 style="text-align:center">COMPENSATION STRUCTURE</h3>
+<p>Your Annual fixed compensation of Rs. <strong>{{CustomAttributes.AnnualCTC}}</strong> LPA will be divided per the following break up:</p>
+<p style="text-align:center"><strong>FIXED MONTHLY PAY:</strong></p>
+<table class="pay-table">
+  <thead>
+    <tr><th>PAY COMPONENT</th><th>MONTHLY</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Basic Pay</td><td>Rs. {{CustomAttributes.BasicPay}}</td></tr>
+    <tr><td>House Rent Allowance</td><td>Rs. {{CustomAttributes.HRA}}</td></tr>
+    <tr><td>Dearness Allowance</td><td>Rs. {{CustomAttributes.DA}}</td></tr>
+    <tr><td>Conveyance Allowance</td><td>Rs. {{CustomAttributes.Conveyance}}</td></tr>
+    <tr><td>Medical Allowance</td><td>Rs. {{CustomAttributes.Medical}}</td></tr>
+    <tr><td>Special Allowance</td><td>Rs. {{CustomAttributes.Special}}</td></tr>
+    <tr><td><strong>TOTAL MONTHLY CTC</strong></td><td><strong>Rs. {{CustomAttributes.TotalMonthly}}</strong></td></tr>
+  </tbody>
+</table>
+<p><strong>Note:</strong></p>
+<ul>
+  <li>You will also be eligible to receive additional bonus amounts, subject to your job performance at YouTuber Labs.</li>
+  <li>No bonus, whatsoever, shall be payable in the event of resignation by an employee.</li>
+  <li>Applicable taxes (if any) would be borne by the employee.</li>
+</ul>
+
+<div class="page-break"></div>
+<h2 class="section-title">Annexure "B"</h2>
+<ol>
+  <li>Educational Passing certificates and mark sheets (10th, 12th/Diploma/Graduation/PG etc.)</li>
+  <li>Copy of Curriculum Vitae</li>
+  <li>Passport Sized Photographs</li>
+  <li>PAN Card</li>
+  <li>Permanent Address Proof: Aadhar Card / Passport (Optional) / Voter ID card / Driving license / Electricity bill (Optional)</li>
+  <li>Current Address Proof (Rent Agreement)</li>
+  <li>Proof of last 3 month's salary (If applicable)</li>
+  <li>Experience letter / Service report / Relieving letter of all previous employers (If applicable)</li>
+  <li>Form 16 or receiving of Income Tax Return for last year (If applicable)</li>
+  <li>Proof of Bank account i.e. Bank passbook, Bank Cheque, Online statement etc.</li>
+  <li>Marriage certificate (If applicable)</li>
+</ol>
+<p><strong>Note:</strong> You are requested to bring all the above-specified documents in Original &amp; Xerox for joining. These documents are MANDATORY at the time of joining.</p>
 `.trim(),
   },
 ];
