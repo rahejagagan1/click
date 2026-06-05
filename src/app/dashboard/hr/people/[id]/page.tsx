@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
-import { isHRAdmin as canViewAsHRAdmin, canViewSalary } from "@/lib/access";
+import { isHRAdmin as canViewAsHRAdmin, canViewSalary, canViewEmployeeDocuments } from "@/lib/access";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
 import EmployeeFinancesPanel from "@/components/hr/EmployeeFinancesPanel";
@@ -285,10 +285,18 @@ export default function EmployeeDetailPage() {
   const isSelfView = me?.dbId != null && Number(me.dbId) === userId;
   const isMyManager = user?.manager?.id != null && me?.dbId != null && user.manager.id === Number(me.dbId);
   const showAttendanceTab = isSelfView || isMyManager || isHRAdmin;
+  // Documents tab — PAN / Aadhaar / education / employee letters are
+  // PII. Strict access per HR policy: only the profile owner, HR
+  // team (orgLevel=hr_manager — covers HR Manager + HR team), CEO,
+  // and developers. Excludes special_access and role=admin, even
+  // though they pass isHRAdmin elsewhere. See canViewEmployeeDocuments
+  // in src/lib/access.ts.
+  const showDocumentsTab = canViewEmployeeDocuments(me, isSelfView);
   const visibleTabs = TABS.filter((t) => {
     if (t === "Edit Profile" && !showEditTab)       return false;
     if (t === "Finances"     && !showFinancesTab)   return false;
     if (t === "Attendance"   && !showAttendanceTab) return false;
+    if (t === "Documents"    && !showDocumentsTab)  return false;
     return true;
   });
 
@@ -983,7 +991,13 @@ export default function EmployeeDetailPage() {
             ))}
 
             {activeTab === "Documents" && (
-              <DocumentsPanel profile={p} documents={user.documents || []} userId={userId} />
+              showDocumentsTab ? (
+                <DocumentsPanel profile={p} documents={user.documents || []} userId={userId} />
+              ) : (
+                <section className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-[13px] text-amber-800">
+                  Documents are private. Only the employee and HR admins can view this tab.
+                </section>
+              )
             )}
 
             {activeTab === "Assets" && (
@@ -1957,14 +1971,76 @@ function maskPan(v?: string | null): string | null {
   return `XXXXXX${t.slice(-4)}`;
 }
 
-// Folder labels match the categories used in /api/hr/profile uploads.
+// Folder layout per HR policy (2026-06-05):
+//   • Identity:   PAN + Aadhaar are required, Passport + DL are optional.
+//   • Education:  one latest degree / marksheet, required.
+//   • Letters:    NB Media offer letter, required.
+//   • Previous:   relieving letter + offer letter from prior employer,
+//                 BOTH "if available" (no hard requirement).
+//   • Other:      free-form catch-all.
+//
+// Storage keys are kept stable across renames so existing rows + the
+// doc-compliance cron (panFile / aadhaarFile / education_certificate)
+// keep matching. Only the LABEL changes when we want a friendlier
+// display name — see CAT_LABEL_OVERRIDES below.
 const DOC_FOLDERS: { key: string; label: string; cats: string[] }[] = [
-  { key: "identity",    label: "Identity Docs",          cats: ["id_proof", "aadhar", "pan_card"] },
+  { key: "identity",    label: "Identity Docs",          cats: ["pan_card", "aadhar", "passport", "driving_license"] },
   { key: "education",   label: "Education",              cats: ["education_certificate"] },
-  { key: "letters",     label: "Employee Letters",       cats: ["offer_letter", "experience_letter", "contract"] },
-  { key: "previous",    label: "Previous Experience",    cats: ["experience_letter", "payslip"] },
+  { key: "letters",     label: "Employee Letters",       cats: ["offer_letter"] },
+  { key: "previous",    label: "Previous Experience",    cats: ["previous_relieving_letter", "previous_offer_letter"] },
   { key: "other",       label: "Other",                  cats: ["other"] },
 ];
+
+// Display labels for category keys that don't render cleanly under
+// the default `snake_case → Title Case` rule. Anything missing from
+// here falls back to the auto-titlecase used inline below.
+//
+// Old keys (tenth / twelfth / degree / experience_letter / contract /
+// id_proof / voter_id / payslip) are kept here so historical uploads
+// still render readably even though they're no longer offered in the
+// upload picker.
+const CAT_LABEL_OVERRIDES: Record<string, string> = {
+  // current pickers
+  pan_card:                 "PAN Card",
+  aadhar:                   "Aadhaar",
+  passport:                 "Passport",
+  driving_license:          "Driving License",
+  education_certificate:    "Latest Degree / Marksheet",
+  offer_letter:             "Offer Letter",
+  previous_relieving_letter:"Previous Relieving Letter",
+  previous_offer_letter:    "Previous Offer Letter",
+  // legacy — keep so doc cards from before this rework still show clean labels
+  id_proof:                 "ID Proof",
+  voter_id:                 "Voter ID",
+  tenth:                    "10th",
+  twelfth:                  "12th",
+  degree:                   "Degree",
+  experience_letter:        "Experience Letter",
+  contract:                 "Contract",
+  payslip:                  "Payslip",
+};
+// Required = must be uploaded as part of onboarding compliance. The
+// upload picker tags these with a "*" so HR / the employee see which
+// docs the org actually needs. Optional / "if-available" cats get a
+// muted suffix instead.
+const REQUIRED_CATS = new Set<string>([
+  "pan_card", "aadhar", "education_certificate", "offer_letter",
+]);
+const OPTIONAL_HINT: Record<string, string> = {
+  passport:                  "optional",
+  driving_license:           "optional",
+  previous_relieving_letter: "if available",
+  previous_offer_letter:     "if available",
+};
+const prettyCategory = (c: string): string =>
+  CAT_LABEL_OVERRIDES[c]
+    ?? c.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+const dropdownCategoryLabel = (c: string): string => {
+  const base = prettyCategory(c);
+  if (REQUIRED_CATS.has(c)) return `${base} *`;
+  if (OPTIONAL_HINT[c])      return `${base} (${OPTIONAL_HINT[c]})`;
+  return base;
+};
 
 // Tailwind classes for the upload modal's text inputs — kept inline
 // to avoid coupling this file to AssetsPanel's local constant.
@@ -1984,19 +2060,21 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
     return out;
   }, [documents]);
 
-  // Default category for new uploads per folder. Identity defaults to
-  // id_proof but HR can switch to aadhar/pan in the picker.
+  // Default category for new uploads per folder. Lands on the first
+  // *required* cat in each folder (e.g. PAN for Identity) so HR /
+  // the employee sees the most important pick by default; they can
+  // still switch in the dropdown.
   const defaultCategoryFor = (key: string): string =>
-    key === "identity"  ? "id_proof"
+    key === "identity"  ? "pan_card"
   : key === "education" ? "education_certificate"
   : key === "letters"   ? "offer_letter"
-  : key === "previous"  ? "experience_letter"
+  : key === "previous"  ? "previous_relieving_letter"
   : "other";
 
   const [uploadOpen, setUploadOpen]   = useState(false);
   const [uploadFile, setUploadFile]   = useState<File | null>(null);
   const [uploadName, setUploadName]   = useState<string>("");
-  const [uploadCategory, setUploadCategory] = useState<string>("id_proof");
+  const [uploadCategory, setUploadCategory] = useState<string>("pan_card");
   const [uploading, setUploading]     = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragOver, setDragOver]       = useState(false);
@@ -2064,7 +2142,7 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
   // PAN under "Letters".
   const categoryOptions = active.cats.map((c) => ({
     value: c,
-    label: c.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase()),
+    label: dropdownCategoryLabel(c),
   }));
 
   const onDrop = (e: React.DragEvent) => {
@@ -2172,7 +2250,7 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
                     >
                       <p className="truncate text-[13px] font-semibold text-slate-800">{doc.fileName || "Untitled"}</p>
                       <p className="truncate text-[11px] text-slate-500">
-                        {(doc.category || "Document").replace(/_/g, " ")} · {fmtDate(doc.createdAt)}
+                        {prettyCategory(doc.category || "Document")} · {fmtDate(doc.createdAt)}
                       </p>
                     </a>
                     <button

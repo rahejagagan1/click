@@ -2,15 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 
-// Mirrors src/lib/access.ts:isHRAdmin. Used to gate the privileged
-// branches below — admins see / write any user's docs; non-admins see
-// only their own and can't POST.
+// Tighter than the generic isHRAdmin — documents are PII. Per HR
+// policy (2026-06-05): only CEO, developers, and the HR team
+// (orgLevel=hr_manager) can see / write OTHER employees' documents.
+// Excludes special_access and role=admin, which pass isHRAdmin in
+// other contexts. Self-upload is handled separately at each call
+// site (target === myId always allowed). Keeps server semantics in
+// sync with canViewEmployeeDocuments in src/lib/access.ts.
 function isHRAdmin(u: any): boolean {
   return (
     u?.orgLevel === "ceo" ||
     u?.isDeveloper === true ||
-    u?.orgLevel === "special_access" ||
-    u?.role === "admin" ||
     u?.orgLevel === "hr_manager"
   );
 }
