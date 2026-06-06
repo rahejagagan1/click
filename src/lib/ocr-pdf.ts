@@ -22,16 +22,30 @@
 let cachedWorker: any = null;
 let depsAvailable: boolean | null = null;
 
-/** Returns true when mupdf + tesseract.js are loadable. Cached
- *  after the first probe so repeat candidate-GET calls don't redo
- *  the dynamic imports. */
+/** Returns true when mupdf + tesseract.js are loadable AND a
+ *  worker can actually start. Cached after the first probe so
+ *  repeat candidate-GET calls don't redo the dynamic imports.
+ *  Also catches the case where the deps import fine but
+ *  Tesseract's worker fails to spawn (Webpack/Turbopack mangled
+ *  the worker script path) — without this probe, the worker
+ *  spawn would later throw an uncaughtException and crash the
+ *  request. */
 export async function isOcrAvailable(): Promise<boolean> {
   if (depsAvailable != null) return depsAvailable;
   try {
     await import("mupdf");
-    await import("tesseract.js");
+    const Tesseract: any = await import("tesseract.js");
+    // Real probe: try to spawn a worker. If the worker script
+    // path is broken (the /ROOT/... bug we hit on the VPS), this
+    // throws synchronously here instead of letting the error
+    // escape later as an uncaughtException.
+    const createWorker = Tesseract.createWorker ?? Tesseract.default?.createWorker;
+    const w = await createWorker("eng");
+    // Cache the worker so getOcrWorker() reuses it.
+    cachedWorker = w;
     depsAvailable = true;
-  } catch {
+  } catch (e: any) {
+    console.warn("[ocr-pdf] OCR unavailable:", e?.message ?? e);
     depsAvailable = false;
   }
   return depsAvailable;
