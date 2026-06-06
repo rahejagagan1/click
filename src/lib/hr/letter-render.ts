@@ -124,16 +124,21 @@ async function injectSignatureBeforeRegards(bodyHtml: string, businessUnit?: str
   // typed signoff block). Kunal's signature is rendered larger
   // than Nikit's because his source strokes are thinner.
   const altText  = businessUnit === "YT Labs" ? "Kunal Lall" : "Nikit Bassi";
-  const sigHeight = businessUnit === "YT Labs" ? "28pt" : "18pt";
-  // Insert the signature image INSIDE the "Regards," paragraph as
-  // its first child — sharing one block element with a <br/> after
-  // the img puts the cursive on its own line, then "Regards," on
-  // the next. We use <br/> instead of display:block on the img
-  // because LibreOffice's HTML→PDF importer ignores display:block
-  // on inline elements like <img> (it kept rendering the cursive
-  // on the same line as "Regards," — same paragraph, side by side).
-  // The explicit <br/> works in both renderers.
-  const sigImg = `<img src="${sig}" alt="${altText}" style="height:${sigHeight}; width:auto; vertical-align:bottom"/><br/>`;
+  // Pixel dimensions hard-coded from the source PNGs:
+  //   Nikit Bassi : 260×48  → aspect 5.42:1 → render 130×24px (~18pt)
+  //   Kunal Lall  : 252×105 → aspect 2.40:1 →  render  90×37px (~28pt)
+  // We use HTML width/height ATTRIBUTES (not CSS) because
+  // LibreOffice's HTML→PDF importer ignores `style="height:18pt"`
+  // on inline images and falls back to the image's native pixel
+  // size (so the cursive ballooned to ~260px wide in the PDF
+  // while the browser preview rendered at 18pt). HTML4 width/height
+  // attributes are honoured by both renderers.
+  const sigW = businessUnit === "YT Labs" ? 90 : 130;
+  const sigH = businessUnit === "YT Labs" ? 37 : 24;
+  // <br/> after the img forces "Regards," onto the next line. We
+  // can't rely on display:block because LibreOffice ignores it on
+  // inline elements like <img>.
+  const sigImg = `<img src="${sig}" alt="${altText}" width="${sigW}" height="${sigH}" style="vertical-align:bottom"/><br/>`;
   const re = /(<(?:p|div|h[1-6])[^>]*>)(\s*Regards\s*,)/i;
   if (re.test(bodyHtml)) return bodyHtml.replace(re, `$1${sigImg}$2`);
   // Fallback when no "Regards," anchor exists — append at the
