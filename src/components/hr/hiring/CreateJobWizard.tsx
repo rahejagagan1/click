@@ -120,18 +120,27 @@ function plainTextToQuillHtml(input: string): string {
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) { flushAll(); out.push("<p><br></p>"); continue; }
-    const bullet = line.match(/^[-*•]\s+(.*)$/);
+    // Bullets — supports ASCII "-" / "*" plus Unicode bullet
+    // glyphs that PDF extractors emit (• U+2022, ‣ U+2023,
+    // ⁃ U+2043, ⦁ U+2981, ▪ U+25AA, ◦ U+25E6). The space after
+    // the glyph is REQUIRED so we don't eat hyphens in compound
+    // words like "AI-driven".
+    const bullet = line.match(/^[\-\*•‣⁃⦁▪◦]\s+(.*)$/);
     if (bullet) { flushN(); bulletBuf.push(bullet[1]); continue; }
     const num = line.match(/^\d+[.)]\s+(.*)$/);
     if (num) { flushB(); numberedBuf.push(num[1]); continue; }
     flushAll();
     // ── Job title — "Job Description - Foo" or "Job Title: Foo".
-    //    Promote ONCE to a centered <h2> so it sits above the JD
-    //    body the same way the source PDF does.
+    //    Promote ONCE to a centered <h2>. Uses Quill's native
+    //    `ql-align-center` class because Quill strips inline
+    //    style="text-align:..." during parse (its alignment format
+    //    only honours its own class names). Without this, the
+    //    title rendered left-aligned even though the converter
+    //    emitted the right HTML.
     if (!sawTitle) {
       const titleMatch = line.match(/^(?:Job\s+Description|Job\s+Title)\s*[-–—:]\s*(.+)$/i);
       if (titleMatch) {
-        out.push(`<h2 style="text-align:center">${escape(titleMatch[0])}</h2>`);
+        out.push(`<h2 class="ql-align-center">${escape(titleMatch[0])}</h2>`);
         sawTitle = true;
         continue;
       }
@@ -279,11 +288,16 @@ export default function CreateJobWizard({
   onClose: () => void;
   onCreated: (id: number, status: string) => void;
 }) {
-  const [step, setStep] = useState(0);
-  const [busy, setBusy] = useState<"" | "draft" | "publish">("");
-  const [error, setError] = useState("");
+  // localStorage key for auto-saved draft state. Bumped if the
+  // shape of the persisted payload ever changes so old drafts get
+  // discarded gracefully rather than crashing the wizard.
+  const DRAFT_KEY     = "hr.createJobWizard.draft.v1";
+  const DRAFT_TS_KEY  = "hr.createJobWizard.draft.savedAt";
 
-  const [form, setForm] = useState<WizardForm>({
+  // Default form shape — extracted so we can reuse it for both the
+  // initial state AND when the user explicitly resets / discards
+  // a saved draft.
+  const DEFAULT_FORM: WizardForm = {
     title: "",
     brand: "nb_media",
     department: "",
@@ -311,7 +325,34 @@ export default function CreateJobWizard({
     interviewFeedbackVisibility: "open",
     questions: [],
     publishChannels: ["career_site"],
-  });
+  };
+
+  // Read saved draft from localStorage on mount. Falls back to the
+  // default form when nothing is saved / payload is unparseable.
+  // SSR-safe — useState lazy initialiser doesn't run server-side
+  // because the wizard itself only mounts inside the client modal.
+  function loadDraft(): { form: WizardForm; step: number; jdText: string; jdFileName: string | null } | null {
+    try {
+      if (typeof window === "undefined") return null;
+      const raw = window.localStorage.getItem(DRAFT_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return null;
+      return {
+        form:       { ...DEFAULT_FORM, ...(parsed.form ?? {}) },
+        step:       Number.isInteger(parsed.step) ? Math.max(0, Math.min(STEPS.length - 1, parsed.step)) : 0,
+        jdText:     typeof parsed.jdText === "string" ? parsed.jdText : "",
+        jdFileName: typeof parsed.jdFileName === "string" ? parsed.jdFileName : null,
+      };
+    } catch { return null; }
+  }
+  const draft = (typeof window !== "undefined") ? loadDraft() : null;
+
+  const [step, setStep] = useState(draft?.step ?? 0);
+  const [busy, setBusy] = useState<"" | "draft" | "publish">("");
+  const [error, setError] = useState("");
+
+  const [form, setForm] = useState<WizardForm>(draft?.form ?? DEFAULT_FORM);
   const setField = <K extends keyof WizardForm>(k: K, v: WizardForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
@@ -321,7 +362,45 @@ export default function CreateJobWizard({
   // freely in the inline editor before publishing. Sent alongside
   // the file so the original blob and the curated text both land
   // in the DB.
-  const [jdText, setJdText] = useState<string>("");
+  const [jdText, setJdText] = useState<string>(draft?.jdText ?? "");
+  // We can't restore the actual File blob from localStorage (File
+  // objects don't serialise, and the binary would blow the 5MB
+  // quota anyway), but we remember the original filename so HR
+  // sees a "you had X uploaded — re-attach it" hint when they come
+  // back to the wizard.
+  const [previousJdFileName, setPreviousJdFileName] = useState<string | null>(draft?.jdFileName ?? null);
+
+  // Auto-save draft on every change. Wrapped in a debounce so we
+  // don't hit localStorage on every keystroke — saves 250 ms after
+  // the user stops typing. localStorage write is synchronous so
+  // even a kill -9 mid-typing wouldn't lose more than 250 ms of
+  // input.
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      try {
+        const payload = {
+          form,
+          step,
+          jdText,
+          jdFileName: jdFile?.name ?? previousJdFileName ?? null,
+        };
+        window.localStorage.setItem(DRAFT_KEY, JSON.stringify(payload));
+        window.localStorage.setItem(DRAFT_TS_KEY, String(Date.now()));
+      } catch { /* quota exceeded or storage disabled — silent no-op */ }
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [form, step, jdText, jdFile, previousJdFileName]);
+
+  // Clear the saved draft. Called after a successful publish /
+  // save-draft so the next "Create Job" starts fresh, and exposed
+  // to the user via the resume hint when they want to discard.
+  const clearSavedDraft = () => {
+    try {
+      window.localStorage.removeItem(DRAFT_KEY);
+      window.localStorage.removeItem(DRAFT_TS_KEY);
+    } catch { /* noop */ }
+    setPreviousJdFileName(null);
+  };
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape" && !busy) onClose(); }
@@ -447,6 +526,10 @@ export default function CreateJobWizard({
           } catch { /* non-fatal — job is already saved */ }
         }
       }
+      // Successful create — wipe the saved draft so the next time
+      // HR opens "Create Job" they start with a blank wizard
+      // instead of resuming the one we just published.
+      clearSavedDraft();
       onCreated(Number(id), status);
     } catch (e: any) {
       setError(e?.message || "Something went wrong");
@@ -493,6 +576,25 @@ export default function CreateJobWizard({
           >{busy === "publish" ? "Publishing…" : "Publish"}</button>
         </div>
       </div>
+
+      {/* Resume hint — appears when the wizard restored a saved
+          draft from localStorage. Auto-hidden once HR re-attaches
+          the JD file (then there's no "missing JD" issue to
+          surface) and once the user dismisses it.
+          Hidden when there's no remembered file because the
+          restore is otherwise silent / not worth surfacing. */}
+      {previousJdFileName && !jdFile && (
+        <div className="border-b border-amber-200 bg-amber-50 px-6 py-2.5 flex items-center gap-3">
+          <div className="text-[12px] text-amber-900">
+            Resumed your saved draft. Re-attach the JD file (<span className="font-semibold">{previousJdFileName}</span>) to keep going.
+          </div>
+          <button
+            type="button"
+            onClick={() => { clearSavedDraft(); setForm(DEFAULT_FORM); setStep(0); setJdText(""); }}
+            className="ml-auto text-[11.5px] font-semibold text-amber-700 hover:text-amber-900"
+          >Discard draft</button>
+        </div>
+      )}
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto bg-slate-50">
