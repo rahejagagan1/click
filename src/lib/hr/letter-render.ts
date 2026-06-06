@@ -549,24 +549,22 @@ export async function wrapLetterPreviewHtml(
        gives the text the airy, formal feel of a printed HR letter.
        Margins tightened to 4pt so the 1.5 line-height doesn't
        double-space consecutive paragraphs. */
-    /* letter-spacing is inherited from body (0.5px global) — no
-       per-rule override here so the entire document tracks
-       consistently across paragraphs, headings, and list items.
-       text-align: left avoids the awkward word-gap stretching
-       that text-align: justify creates on short lines (especially
-       visible when Linux font fallbacks are wider than Times New
-       Roman). word-spacing: 0.5px adds a subtle gap between words
-       so the body breathes the same way the letters do.
-       line-height: 1.6 gives more vertical room than the previous
-       1.5 — fixes the "congested" feel users hit on the VPS
-       where the wider serif fallback was crowding the baselines. */
-    p { font-size: 12pt; line-height: 1.6; margin: 5pt 0; text-align: left; word-spacing: 0.5px; }
+    /* Body typography. 12pt / 1.55 line-height / 3pt margins keep
+       the letter on a single A4 page in most cases while still
+       reading airy. Letter + word spacing inherit from body. */
+    p { font-size: 12pt; line-height: 1.55; margin: 3pt 0; text-align: left; word-spacing: 0.5px; }
     p.signoff, p[data-role="signoff"] { text-align: left; margin: 2pt 0; }
     p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; }
-    h2 { font-size: 14pt; margin: 16pt 0 8pt; }
-    h3 { font-size: 13pt; margin: 14pt 0 8pt; }
-    ol, ul { padding-left: 22pt; margin: 8pt 0; }
-    ol li, ul li { margin-bottom: 5pt; font-size: 12pt; line-height: 1.6; word-spacing: 0.5px; }
+    h2 { font-size: 14pt; margin: 12pt 0 6pt; }
+    h3 { font-size: 13pt; margin: 10pt 0 6pt; }
+    ol, ul { padding-left: 22pt; margin: 6pt 0; }
+    ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.55; word-spacing: 0.5px; }
+    /* Keep the signature cluster (Regards / Name / Founder & CEO +
+       cursive image) and the Acknowledgement block together —
+       they look broken when split across pages. CSS3 break-inside
+       is the modern property; page-break-inside is the WebKit /
+       puppeteer-friendly alias. */
+    .no-break, .signature-block, p[data-role="signoff"], .acknowledgement { page-break-inside: avoid; break-inside: avoid; }
     /* Force the same Times-family stack on tables — some user
        agents fall back to a sans-serif default for table cells if
        the family isn't restated. Liberation Serif ensures Linux
