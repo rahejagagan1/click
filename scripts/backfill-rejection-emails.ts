@@ -34,7 +34,15 @@ async function main() {
   console.log(`${DRY_RUN ? "[DRY RUN] " : ""}Backfill rejection emails — starting.`);
 
   // 1. Find every rejected applicant with a plausibly-valid email
-  // that hasn't already received the rejection email.
+  // that hasn't already received the rejection email. We check
+  // BOTH templateKey values:
+  //   • 'rejection'           — what this backfill script logs
+  //   • 'candidate_rejection' — what the in-app auto-send logs
+  //                             (it uses the template's `key` column,
+  //                             which is "candidate_rejection")
+  // Missing this match caused the first backfill run to double-send
+  // to candidates who had been auto-sent between the toggle flip
+  // and the backfill run.
   const apps = await prisma.$queryRawUnsafe<any[]>(
     `SELECT a.id, a."fullName", a.email
        FROM "JobApplication" a
@@ -45,7 +53,7 @@ async function main() {
           SELECT 1 FROM "CandidateActivity" c
            WHERE c."applicationId" = a.id
              AND c.kind = 'email_sent'
-             AND (c.meta->>'templateKey' = 'rejection'
+             AND (c.meta->>'templateKey' IN ('rejection', 'candidate_rejection')
                   OR c.summary ILIKE '%rejection%')
         )
       ORDER BY a.id ASC`,
