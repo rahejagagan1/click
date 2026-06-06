@@ -658,22 +658,7 @@ function ProfileTab({ c }: { c: Candidate }) {
           </Section>
 
           <Section title="Skills">
-            {skillTags.length === 0 ? (
-              <p className="text-[12.5px] text-slate-400 italic">
-                No skills captured. The candidate left this empty on the apply form.
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {skillTags.map((s, i) => (
-                  <span
-                    key={`${s}-${i}`}
-                    className="inline-flex items-center rounded-full bg-[#3b82f6]/10 text-[#1d4ed8] px-2.5 py-0.5 text-[12px] font-semibold"
-                  >
-                    {s}
-                  </span>
-                ))}
-              </div>
-            )}
+            <SkillsEditor candidateId={c.id} initialSkills={skillTags} />
           </Section>
 
           <Section title="Tags" last>
@@ -919,6 +904,136 @@ function EducationEditor({
         onClick={addRow}
         className="w-full h-8 rounded-md border border-dashed border-slate-300 hover:border-[#3b82f6] hover:bg-[#3b82f6]/[0.04] text-[12px] font-semibold text-slate-600"
       >+ Add education</button>
+      {error && <p className="text-[11.5px] text-rose-600">{error}</p>}
+      <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+        <button
+          type="button"
+          onClick={cancel}
+          disabled={saving}
+          className="h-7 px-3 rounded-md text-[11.5px] font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+        >Cancel</button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="h-7 px-3 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[11.5px] font-semibold disabled:opacity-50"
+        >{saving ? "Saving…" : "Save"}</button>
+      </div>
+    </div>
+  );
+}
+
+// Inline editor for the Skills section. Pill chips with × to
+// remove, "Add skill" text input that splits on Enter / comma so
+// HR can paste a comma-separated list and have it expand into
+// individual chips. Save / Cancel on the bottom.
+function SkillsEditor({
+  candidateId, initialSkills,
+}: { candidateId: number; initialSkills: string[] }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft]     = useState<string[]>(initialSkills);
+  const [input, setInput]     = useState("");
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+  useEffect(() => { if (!editing) setDraft(initialSkills); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [JSON.stringify(initialSkills)]);
+
+  const addFromInput = () => {
+    // Split on commas / semicolons / newlines so HR can paste a
+    // bullet list ("HR Policy, Recruitment, Engagement") and have
+    // it expand into separate chips in one keystroke.
+    const parts = input.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
+    if (parts.length === 0) return;
+    setDraft((d) => {
+      const seen = new Set(d.map((x) => x.toLowerCase()));
+      const fresh: string[] = [];
+      for (const p of parts) {
+        if (!seen.has(p.toLowerCase())) { fresh.push(p); seen.add(p.toLowerCase()); }
+      }
+      return [...d, ...fresh];
+    });
+    setInput("");
+  };
+  const removeAt = (idx: number) => setDraft((d) => d.filter((_, i) => i !== idx));
+  const cancel = () => { setDraft(initialSkills); setInput(""); setEditing(false); setError(null); };
+  const save = async () => {
+    setSaving(true); setError(null);
+    try {
+      const res = await fetch(`/api/hr/hiring/candidates/${candidateId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "updateSkills", skills: draft }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || `Save failed (${res.status})`);
+      }
+      setEditing(false);
+      setInput("");
+      globalMutate(`/api/hr/hiring/candidates/${candidateId}`);
+    } catch (e: any) {
+      setError(e?.message || "Save failed");
+    } finally { setSaving(false); }
+  };
+
+  if (!editing) {
+    return (
+      <>
+        {initialSkills.length === 0 ? (
+          <p className="text-[12.5px] text-slate-400 italic">
+            No skills captured. Click <span className="font-semibold">Edit skills</span> to add manually.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {initialSkills.map((s, i) => (
+              <span
+                key={`${s}-${i}`}
+                className="inline-flex items-center rounded-full bg-[#3b82f6]/10 text-[#1d4ed8] px-2.5 py-0.5 text-[12px] font-semibold"
+              >{s}</span>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="mt-3 inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-slate-200 hover:border-slate-300 text-[11.5px] font-semibold text-slate-700"
+        >Edit skills</button>
+      </>
+    );
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {draft.length === 0 ? (
+        <p className="text-[12px] text-slate-400 italic">No skills yet — type a skill below and press Enter.</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {draft.map((s, i) => (
+            <span
+              key={`draft-${i}`}
+              className="inline-flex items-center gap-1 rounded-full bg-[#3b82f6]/10 text-[#1d4ed8] pl-2.5 pr-1 py-0.5 text-[12px] font-semibold"
+            >
+              {s}
+              <button
+                type="button"
+                onClick={() => removeAt(i)}
+                title="Remove"
+                className="h-4 w-4 inline-flex items-center justify-center rounded-full hover:bg-[#3b82f6]/15"
+              >×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <input
+        type="text"
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addFromInput(); }
+        }}
+        onBlur={addFromInput}
+        placeholder="Type a skill and press Enter (or paste comma-separated list)"
+        className="w-full h-8 px-2.5 border border-slate-200 rounded-md text-[12.5px] bg-white text-slate-800 focus:outline-none focus:border-[#3b82f6]"
+      />
       {error && <p className="text-[11.5px] text-rose-600">{error}</p>}
       <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
         <button
