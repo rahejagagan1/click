@@ -230,7 +230,7 @@ ${SIGNOFF_HTML}
 </p>
 
 <div class="page-break"></div>
-<h2 class="section-title">Annexure "A"</h2>
+<h2 class="section-title" style="text-align:center">Annexure "A"</h2>
 <h3 style="text-align:center">COMPENSATION STRUCTURE</h3>
 <p>Your Annual fixed compensation of Rs. <strong>{{Salary.Annual}}</strong> ({{Salary.EnablePfText}}) will be divided per the following break up:</p>
 <p style="text-align:center"><strong>FIXED MONTHLY PAY:</strong></p>
@@ -257,7 +257,7 @@ ${SIGNOFF_HTML}
 </ul>
 
 <div class="page-break"></div>
-<h2 class="section-title">Annexure "B"</h2>
+<h2 class="section-title" style="text-align:center">Annexure "B"</h2>
 <ol>
   <li>Educational Passing certificates and mark sheets (10th, 12th/Diploma/Graduation/PG etc.)</li>
   <li>Copy of Curriculum Vitae</li>
@@ -453,7 +453,7 @@ ${SIGNOFF_HTML_YT_LABS}
 </p>
 
 <div class="page-break"></div>
-<h2 class="section-title">Annexure "A"</h2>
+<h2 class="section-title" style="text-align:center">Annexure "A"</h2>
 <h3 style="text-align:center">COMPENSATION STRUCTURE</h3>
 <p>Your Annual fixed compensation of Rs. <strong>{{Salary.Annual}}</strong> ({{Salary.EnablePfText}}) will be divided per the following break up:</p>
 <p style="text-align:center"><strong>FIXED MONTHLY PAY:</strong></p>
@@ -480,7 +480,7 @@ ${SIGNOFF_HTML_YT_LABS}
 </ul>
 
 <div class="page-break"></div>
-<h2 class="section-title">Annexure "B"</h2>
+<h2 class="section-title" style="text-align:center">Annexure "B"</h2>
 <ol>
   <li>Educational Passing certificates and mark sheets (10th, 12th/Diploma/Graduation/PG etc.)</li>
   <li>Copy of Curriculum Vitae</li>
