@@ -12,9 +12,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, isLeadershipOrHR, resolveUserId, serverError } from "@/lib/api-auth";
-import { renderLetterHtml, wrapLetterPreviewHtml, wrapLetterForPdf } from "@/lib/hr/letter-render";
+import { renderLetterHtml, wrapLetterPreviewHtml } from "@/lib/hr/letter-render";
 import { htmlToPdf } from "@/lib/hr/html-to-pdf";
-import { stampWatermark } from "@/lib/hr/pdf-watermark";
 
 export const dynamic = "force-dynamic";
 export const runtime  = "nodejs";
@@ -100,30 +99,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
     // NB Media chrome. YT Labs letters previewed correctly but
     // generated with NB Media branding. HTML→PDF via LibreOffice
     // unifies the two outputs and removes the brand-divergence bug.
-    // IMPORTANT — use TWO different HTML wrappers depending on what
-    // we're producing:
-    //   • wrapLetterForPdf()        → simple table-based layout
-    //     that LibreOffice's HTML→PDF importer renders correctly.
-    //     No position:absolute, no .page wrapper, no watermark.
-    //   • wrapLetterPreviewHtml()   → rich CSS layout for the
-    //     in-browser iframe preview (kept as a fallback below).
-    // Mixing them caused the recent "huge logos on every page"
-    // blow-out — the rich CSS confused LibreOffice into rendering
-    // each image as a full-page block.
-    const pdfHtml      = await wrapLetterForPdf(html, tpl.title, tpl.businessUnit);
-    const fullHtml     = await wrapLetterPreviewHtml(html, tpl.title, tpl.businessUnit);
+    // Render the SAME HTML the in-app preview iframe uses, then
+    // hand it to headless Chromium. Because Chrome is rendering
+    // both surfaces (in-iframe preview AND server-side PDF), the
+    // two outputs are guaranteed to match byte-for-byte — no more
+    // "preview looks fine but PDF is broken" divergence.
+    //
+    // Previously we used LibreOffice's HTML→PDF importer which
+    // mangled modern CSS (position:absolute, flex, mm widths,
+    // display:block on inline elements). That forced us into a
+    // separate stripped-down wrapLetterForPdf wrapper plus a
+    // pdf-lib watermark stamp — clunky and never quite matched
+    // the preview. Chrome handles all of it natively.
+    const fullHtml = await wrapLetterPreviewHtml(html, tpl.title, tpl.businessUnit);
     let pdfBytes: Buffer | null = null;
     try {
-      pdfBytes = await htmlToPdf(pdfHtml);
-      // Stamp the brand watermark over every page. LibreOffice
-      // can't anchor a backdrop image from CSS — its HTML importer
-      // either drops absolute-positioned images or renders them at
-      // full page size. So we do it in pdf-lib after the fact:
-      // centered, ~50% width, 6% opacity. Faint enough to read as
-      // a backdrop, visible enough to brand the document.
-      pdfBytes = await stampWatermark(pdfBytes, tpl.businessUnit);
+      pdfBytes = await htmlToPdf(fullHtml);
     } catch (e) {
-      console.warn("[letter generate] HTML→PDF (LibreOffice) failed:", (e as any)?.message);
+      console.warn("[letter generate] HTML→PDF (Chromium) failed:", (e as any)?.message);
     }
 
     if (!pdfBytes) {

@@ -384,7 +384,11 @@ export async function wrapLetterPreviewHtml(
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
   <title>${escapeHtml(title)}</title>
   <style>
-    @page { size: A4; margin: 22mm 18mm; }
+    /* Page size for print/PDF generation. Margin is 0 because the
+       inner .page div has its own 22mm × 18mm padding — without
+       this they'd stack and the body content area would be half
+       the page. */
+    @page { size: A4; margin: 0; }
     html, body { margin: 0; padding: 0; background: #f8fafc; font-family: "Times New Roman", Times, serif; color: #1f2937; }
     .page {
       width: 210mm;
