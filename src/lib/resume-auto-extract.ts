@@ -621,22 +621,48 @@ export async function extractResumeData(buf: Buffer, fileName: string): Promise<
 
   // ── LLM FALLBACK (Ollama / Llama 3.2 3B) ───────────────────────
   // Heuristic + OCR can fail on multi-column / sidebar resumes
-  // where text-flow scrambles the section order. When ANY of
-  // educations / skills / languages came back empty, we ask the
-  // local LLM to take a second pass. Hallucination guard is in
-  // the LLM module — every returned entry must fuzzily appear in
-  // the source text or it's dropped. If Ollama isn't installed /
-  // reachable, llmExtractResume returns empty arrays and we
-  // silently keep whatever the heuristic produced.
-  //
-  // Cost gate: only fire when at least one section is empty.
-  // Don't waste 5-15s of CPU on a clean heuristic parse.
-  if (educations.length === 0 || skills.length === 0) {
+  // where text-flow scrambles the section order. Fire the local
+  // LLM when ANY of these hold:
+  //   1. educations is empty
+  //   2. skills is empty
+  //   3. the heuristic produced education entries but they
+  //      LOOK GARBLED — missing course AND missing date, or
+  //      university that contains obvious junk (long phrase
+  //      like "audience eng" appended to a real name).
+  // The garbled detector handles cases like Manya #26 where
+  // the heuristic emitted 1 entry (so the simple `=== 0` check
+  // wouldn't fire), but that entry was clearly broken.
+  const isEduGarbled = (es: ExtractedEducation[]): boolean => {
+    if (es.length === 0) return true;
+    return es.every((e) => {
+      const hasCourse  = !!(e.course || e.branch);
+      const hasInst    = !!(e.university || e.location);
+      const cleanInst  = (e.university ?? "").replace(/\s+/g, " ").trim();
+      const wordCount  = cleanInst.split(/\s+/).filter(Boolean).length;
+      // Heuristic for "junk appended to a real name": 5+ words
+      // and contains lowercase noise (real university names are
+      // mostly title-case proper nouns and 1-4 words).
+      const looksJunky = wordCount >= 5 && /[a-z]{4,}\s+[a-z]{4,}/.test(cleanInst);
+      return !hasCourse || !hasInst || looksJunky;
+    });
+  };
+  const llmNeeded =
+    educations.length === 0 ||
+    skills.length === 0 ||
+    isEduGarbled(educations);
+  if (llmNeeded) {
     try {
       const { llmExtractResume } = await import("./resume-llm-extract");
       const llm = await llmExtractResume(text);
-      if (educations.length === 0 && llm.educations.length > 0) {
-        educations = llm.educations;
+      // Replace educations when:
+      //   • heuristic empty AND llm has any, OR
+      //   • heuristic garbled AND llm has 1+ NON-garbled entries.
+      if (llm.educations.length > 0) {
+        if (educations.length === 0) {
+          educations = llm.educations;
+        } else if (isEduGarbled(educations) && !isEduGarbled(llm.educations)) {
+          educations = llm.educations;
+        }
       }
       if (skills.length === 0 && llm.skills.length > 0) {
         skills = llm.skills;
