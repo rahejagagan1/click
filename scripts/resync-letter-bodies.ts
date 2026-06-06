@@ -27,8 +27,20 @@ async function main() {
       t.key, brand,
     );
     if (!existing[0]) {
-      console.log(`  MISSING  ${t.key} (${brand}) — no row to update`);
-      missing++;
+      const cleanBody = sanitizeLetterHtml(t.bodyHtml);
+      const newFields = JSON.stringify(t.customFields ?? []);
+      console.log(`  INSERT   ${t.key} (${brand}) — new template seed`);
+      if (CONFIRM) {
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO "LetterTemplate"
+             (key, title, category, "businessUnit", "bodyHtml", "customFields", "createdAt", "updatedAt")
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW(), NOW())`,
+          t.key, t.title, t.category, brand, cleanBody, newFields,
+        );
+        updated++;
+      } else {
+        missing++;
+      }
       continue;
     }
     const row = existing[0];
