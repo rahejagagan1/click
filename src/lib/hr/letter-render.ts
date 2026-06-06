@@ -125,19 +125,19 @@ async function injectSignatureBeforeRegards(bodyHtml: string, businessUnit?: str
   // than Nikit's because his source strokes are thinner.
   const altText  = businessUnit === "YT Labs" ? "Kunal Lall" : "Nikit Bassi";
   const sigHeight = businessUnit === "YT Labs" ? "28pt" : "18pt";
-  // Negative margin-bottom pulls the "Regards," paragraph in tight
-  // so the cursive looks attached to the signoff, not floating.
-  // Tighter spacing — small gap above (separates from body), tiny
-  // gap below so "Regards," sits cleanly under the cursive.
-  const sigBlock = `<p style="margin:10pt 0 -4pt 0; padding:0; line-height:1; text-align:left"><img src="${sig}" alt="${altText}" style="height:${sigHeight}; width:auto; display:block"/></p>`;
-  // Anchor: the FIRST block element whose content begins with
-  // "Regards,". Insert the signature block immediately BEFORE
-  // that paragraph's opening tag.
-  const re = /(<(?:p|div|h[1-6])[^>]*>)\s*Regards\s*,/i;
-  if (re.test(bodyHtml)) return bodyHtml.replace(re, sigBlock + "$1Regards,");
+  // Insert the signature image INSIDE the "Regards," paragraph as
+  // its first child. Sharing one block element bypasses CSS
+  // margin-collapse weirdness that left a gap when the cursive
+  // lived in its own <p>: once they're siblings inside one
+  // paragraph, the browser stacks them sequentially with no extra
+  // block spacing. Top margin separates from the body; bottom is
+  // 0 so "Regards," sits directly underneath.
+  const sigImg = `<img src="${sig}" alt="${altText}" style="display:block; height:${sigHeight}; width:auto; margin:8pt 0 0 0"/>`;
+  const re = /(<(?:p|div|h[1-6])[^>]*>)(\s*Regards\s*,)/i;
+  if (re.test(bodyHtml)) return bodyHtml.replace(re, `$1${sigImg}$2`);
   // Fallback when no "Regards," anchor exists — append at the
   // end so HR can still spot the signature.
-  return bodyHtml + sigBlock;
+  return bodyHtml + `<p style="margin:8pt 0 0 0">${sigImg}</p>`;
 }
 
 export type RenderContext = {
