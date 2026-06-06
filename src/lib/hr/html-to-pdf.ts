@@ -1,59 +1,101 @@
-// HTML → PDF via LibreOffice headless. Reuses the same `soffice`
-// binary the docx-to-pdf pipeline already depends on, so the VPS
-// doesn't need a new runtime.
+// HTML → PDF via headless Chromium (puppeteer-core + system Chrome).
 //
-// Writes the HTML to a temp file, runs
-//   soffice --headless --convert-to pdf --outdir <tmp> <input.html>
-// reads the resulting PDF back, and cleans up.
+// Switched from LibreOffice → Chromium because LibreOffice's HTML
+// importer mangles modern CSS (position:absolute, flex, mm widths,
+// background-image positioning, display:block on inline elements).
+// We hit at least four user-visible bugs with it: full-page logo
+// blow-ups, duplicate letterheads, signature stuck inline with
+// "Regards,", and giant native-size cursive in the PDF.
 //
-// On dev Windows machines without LibreOffice the function throws
-// — the calling route catches and falls back to streaming the
-// styled HTML so HR can browser-print.
+// Chromium IS the same engine that renders the in-app iframe
+// preview, so PDF output is guaranteed to match what HR sees on
+// screen byte-for-byte. We use puppeteer-core (no bundled
+// chromium download — looks up system Chrome / Chromium /
+// chromium-browser at runtime).
 
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
-import { tmpdir, platform } from "node:os";
-import { join } from "node:path";
+import puppeteer, { type Browser, type LaunchOptions } from "puppeteer-core";
+import { existsSync } from "node:fs";
+import { platform } from "node:os";
 
-export async function htmlToPdf(html: string): Promise<Buffer> {
-  const dir = await mkdtemp(join(tmpdir(), "nb-letter-"));
-  const htmlPath = join(dir, "letter.html");
-  const pdfPath  = join(dir, "letter.pdf");
-  await writeFile(htmlPath, html, "utf8");
-  try {
-    await runSoffice(["--headless", "--convert-to", "pdf", "--outdir", dir, htmlPath]);
-    return await readFile(pdfPath);
-  } finally {
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
+// Cache the launched browser across requests so we don't pay
+// startup latency on every PDF generation. The browser is closed
+// when the Node process exits.
+let browserPromise: Promise<Browser> | null = null;
+
+function findChromePath(): string | null {
+  // Common system Chrome / Chromium locations across the
+  // platforms the dashboard runs on (Ubuntu VPS, dev macOS,
+  // dev Windows). The first existing path wins.
+  const candidates = platform() === "win32"
+    ? [
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files\\Chromium\\Application\\chrome.exe",
+      ]
+    : platform() === "darwin"
+    ? [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+      ]
+    : [
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/snap/bin/chromium",
+      ];
+  for (const p of candidates) {
+    try { if (existsSync(p)) return p; } catch { /* ignore */ }
   }
+  return null;
 }
 
-function runSoffice(args: string[]): Promise<void> {
-  // Standard binary name on Linux + macOS. On Windows the
-  // LibreOffice installer puts soffice.exe in PATH or
-  // C:\Program Files\LibreOffice\program\.
-  const candidates = platform() === "win32"
-    ? ["soffice", "C:\\Program Files\\LibreOffice\\program\\soffice.exe"]
-    : ["soffice", "libreoffice"];
+async function getBrowser(): Promise<Browser> {
+  if (browserPromise) return browserPromise;
+  const executablePath = findChromePath();
+  if (!executablePath) {
+    throw new Error(
+      "No system Chrome / Chromium found. Install with:\n" +
+      "  Ubuntu : sudo apt-get install -y chromium-browser\n" +
+      "  macOS  : brew install --cask google-chrome\n" +
+      "  Windows: install Chrome via https://www.google.com/chrome/"
+    );
+  }
+  const opts: LaunchOptions = {
+    executablePath,
+    headless: true,
+    args: [
+      // Sandbox needs setuid bits or kernel namespaces; the VPS
+      // typically runs as root so disable it to avoid the launcher
+      // bailing out with EACCES.
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+    ],
+  };
+  browserPromise = puppeteer.launch(opts);
+  return browserPromise;
+}
 
-  return new Promise<void>((resolve, reject) => {
-    let lastErr: any = null;
-    const tryNext = (idx: number) => {
-      if (idx >= candidates.length) {
-        return reject(lastErr ?? new Error("soffice / libreoffice not found"));
-      }
-      const proc = spawn(candidates[idx], args, { stdio: ["ignore", "pipe", "pipe"] });
-      let stderr = "";
-      proc.stderr?.on("data", (d) => { stderr += d.toString(); });
-      proc.on("error", (e) => {
-        lastErr = e;
-        tryNext(idx + 1);
-      });
-      proc.on("close", (code) => {
-        if (code === 0) return resolve();
-        reject(new Error(`soffice exited ${code}: ${stderr || "(no stderr)"}`));
-      });
-    };
-    tryNext(0);
-  });
+export async function htmlToPdf(html: string): Promise<Buffer> {
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+  try {
+    // setContent waits for network idle so data: URIs / inline
+    // styles all finish before we snapshot to PDF.
+    await page.setContent(html, { waitUntil: "networkidle0" });
+    const pdf = await page.pdf({
+      format: "A4",
+      // Margins are already baked into the wrapper's .page padding,
+      // so emit a 0-margin PDF and let the inner layout drive the
+      // whitespace. Matches the in-iframe preview exactly.
+      margin: { top: "0", right: "0", bottom: "0", left: "0" },
+      printBackground: true,
+      preferCSSPageSize: true,
+    });
+    return Buffer.from(pdf);
+  } finally {
+    await page.close().catch(() => {});
+  }
 }
