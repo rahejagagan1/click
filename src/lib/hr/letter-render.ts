@@ -551,15 +551,18 @@ export async function wrapLetterPreviewHtml(
        Margins tightened to 4pt so the 1.5 line-height doesn't
        double-space consecutive paragraphs. */
     /* Body typography. 12pt / 1.55 line-height / 3pt margins keep
-       the letter on a single A4 page in most cases while still
-       reading airy. Letter + word spacing inherit from body. */
-    p { font-size: 12pt; line-height: 1.55; margin: 3pt 0; text-align: left; word-spacing: 0.5px; }
+       the letter on a single A4 page in most cases. Word-spacing
+       bumped to 2px so individual words have visible gaps between
+       them — fixes the "congested / words running together"
+       feel users hit at the 0.5px default. Letter-spacing
+       inherits 0.5px from body. */
+    p { font-size: 12pt; line-height: 1.5; margin: 2pt 0; text-align: left; word-spacing: 2px; }
     p.signoff, p[data-role="signoff"] { text-align: left; margin: 2pt 0; }
     p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; }
     h2 { font-size: 14pt; margin: 12pt 0 6pt; }
     h3 { font-size: 13pt; margin: 10pt 0 6pt; }
     ol, ul { padding-left: 22pt; margin: 6pt 0; }
-    ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.55; word-spacing: 0.5px; }
+    ol li, ul li { margin-bottom: 3pt; font-size: 12pt; line-height: 1.5; word-spacing: 2px; }
     /* Keep the signature cluster (Regards / Name / Founder & CEO +
        cursive image) together — it has the cursive PNG and
        splitting it mid-block would look broken. We deliberately
