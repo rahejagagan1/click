@@ -119,20 +119,25 @@ async function getSignatureDataUrl(businessUnit?: string | null): Promise<string
 async function injectSignatureBeforeRegards(bodyHtml: string, businessUnit?: string | null): Promise<string> {
   const sig = await getSignatureDataUrl(businessUnit);
   if (!sig) return bodyHtml;
-  // Signature sits BELOW the "Founder & CEO" line, left-aligned.
-  // Kunal's signature is rendered larger than Nikit's because his
-  // source-image strokes are thinner — at 18pt they read as
-  // tiny-and-stretched. Bumping to 28pt matches the visual weight
-  // HR's source PDFs use for YT Labs letters.
+  // Signature sits ABOVE the "Regards," line — same placement HR's
+  // source PDFs use (cursive flourish between the body and the
+  // typed signoff block). Kunal's signature is rendered larger
+  // than Nikit's because his source strokes are thinner.
   const altText  = businessUnit === "YT Labs" ? "Kunal Lall" : "Nikit Bassi";
   const sigHeight = businessUnit === "YT Labs" ? "28pt" : "18pt";
-  const sigBlock = `<p style="margin:6pt 0 4pt 0; padding:0; line-height:1; text-align:left"><img src="${sig}" alt="${altText}" style="height:${sigHeight}; width:auto; display:block"/></p>`;
-  // Anchor: the FIRST block element containing "Founder & CEO".
-  // The block may use a literal "&" or the HTML entity, so match
-  // both. Insert sigBlock RIGHT AFTER that block's closing tag.
-  const re = /(<(p|div|h[1-6])[^>]*>[\s\S]*?Founder\s*(?:&|&amp;)\s*CEO[\s\S]*?<\/\2>)/i;
-  if (re.test(bodyHtml)) return bodyHtml.replace(re, "$1" + sigBlock);
-  return bodyHtml + sigBlock;
+  // Insert the signature image INSIDE the "Regards," paragraph as
+  // its first child. Sharing one block element bypasses CSS
+  // margin-collapse weirdness that left a gap when the cursive
+  // lived in its own <p>: once they're siblings inside one
+  // paragraph, the browser stacks them sequentially with no extra
+  // block spacing. Top margin separates from the body; bottom is
+  // 0 so "Regards," sits directly underneath.
+  const sigImg = `<img src="${sig}" alt="${altText}" style="display:block; height:${sigHeight}; width:auto; margin:8pt 0 0 0"/>`;
+  const re = /(<(?:p|div|h[1-6])[^>]*>)(\s*Regards\s*,)/i;
+  if (re.test(bodyHtml)) return bodyHtml.replace(re, `$1${sigImg}$2`);
+  // Fallback when no "Regards," anchor exists — append at the
+  // end so HR can still spot the signature.
+  return bodyHtml + `<p style="margin:8pt 0 0 0">${sigImg}</p>`;
 }
 
 export type RenderContext = {
@@ -409,12 +414,20 @@ export async function wrapLetterPreviewHtml(
     .letterhead .lh-text .company { font-size: 12pt; font-weight: bold; margin-bottom: 4pt; }
     .letterhead .lh-logo { width: 86pt; height: auto; }
     h1.letter-title { font-size: 16pt; font-weight: bold; text-align: center; margin: 14pt 0 16pt; }
-    p { font-size: 12pt; line-height: 1.55; margin: 6pt 0; text-align: justify; }
+    /* 1.5 line spacing on body paragraphs — matches the standard
+       HR letter format. Margins tightened to 4pt so consecutive
+       paragraphs don't double-space visually with the 1.5 line
+       height. */
+    p { font-size: 12pt; line-height: 1.5; margin: 4pt 0; text-align: justify; }
+    /* Tighter signoff cluster — when a paragraph starts with
+       "Regards," / a single name / role, treat it as part of the
+       signature block, no justification, less vertical padding. */
+    p.signoff, p[data-role="signoff"] { text-align: left; margin: 2pt 0; }
     p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; }
     h2 { font-size: 14pt; margin: 16pt 0 8pt; }
     h3 { font-size: 13pt; margin: 14pt 0 8pt; }
     ol, ul { padding-left: 22pt; margin: 8pt 0; }
-    ol li, ul li { margin-bottom: 6pt; font-size: 12pt; line-height: 1.55; }
+    ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.5; }
     table { width: 100%; border-collapse: collapse; margin: 10pt 0 14pt; }
     table th, table td { border: 1pt solid #1f2937; padding: 6pt 9pt; font-size: 11pt; text-align: left; }
     table th { background: #f3f4f6; }
