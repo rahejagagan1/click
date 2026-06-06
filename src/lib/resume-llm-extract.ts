@@ -37,7 +37,13 @@ type ExtractedLanguage = string;
 
 const OLLAMA_URL  = process.env.OLLAMA_URL  ?? "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3.2:3b";
-const TIMEOUT_MS  = 30_000;
+// Bumped from 30s → 60s after observing real-world timings:
+// 3B model warm-call ≈ 5-15s, cold-start ≈ 20-35s (model load
+// from disk into RAM). Nazia #19's reparse hit 30s exactly —
+// almost certainly a cold-start that would have completed at
+// ~35s. 60s gives the buffer we need without making HR wait
+// forever on a genuinely-broken resume.
+const TIMEOUT_MS  = 60_000;
 
 type LlmResult = {
   educations: ExtractedEducation[];
@@ -53,9 +59,21 @@ You output ONLY valid JSON matching the schema you are given. Do not include any
 Rules:
 - Extract only data that EXPLICITLY appears in the resume text. Do not invent entries.
 - If a field is unclear or missing, leave it as an empty string "".
-- Degrees / courses include: Bachelor of …, Master of …, MBA, B.Tech, M.Tech, B.A, M.A, B.Com, M.Com, PhD, Diploma, Higher Secondary, 10th, 12th, etc.
-- Skills are short noun phrases — technologies, methodologies, languages, tools. NOT job duties.
-- Date format: keep the year exactly as written in the resume (e.g. "2022", "May 2024", "Sep 2023 - Sep 2026"). Use "Present" for current education.`;
+
+Education entries — INCLUDE ONLY academic credentials:
+- Degrees: Bachelor of …, Master of …, MBA, B.Tech, M.Tech, B.A, M.A, B.Com, M.Com, PhD, Diploma, MSc, BSc.
+- Schooling: 10th / Class X / SSC / matriculation, 12th / Class XII / HSC / intermediate, Higher Secondary.
+- Certificate / Diploma programs that are clearly academic (e.g. "Diploma in Photography").
+
+Education entries — DO NOT INCLUDE (these are EXPERIENCE / WORK, not education):
+- Job titles like "HR Executive", "Software Engineer", "Manager", "Counsellor", "Intern", "Trainee".
+- Work history at companies (even if "Studied at X University" appears nearby in the resume — match the line to a degree, not a role).
+- Internships, freelance projects, or any line that describes WHAT THE PERSON DID rather than WHAT THEY EARNED.
+
+Test for each candidate entry: "Is this line a DEGREE / QUALIFICATION I'm reporting, or is it a JOB / ROLE the person held?" — only the former goes in educations.
+
+Skills are short noun phrases — technologies, methodologies, languages, tools. NOT job duties, NOT degrees.
+Date format: keep the year exactly as written in the resume (e.g. "2022", "May 2024", "Sep 2023 - Sep 2026"). Use "Present" for current education.`;
 
 function userPrompt(resumeText: string): string {
   // Trim to a sane size so a 50-page resume can't blow the context
@@ -128,6 +146,22 @@ async function callOllama(resumeText: string): Promise<string | null> {
   }
 }
 
+// Job-title sniff. If the model puts a line like "HR Executive &
+// Head Counsellor" into the educations array, drop it. The 3B
+// model occasionally misclassifies experience entries especially
+// when the source line has BOTH a role and an institution
+// (e.g. "HR Executive at IIP — May 2023"). Filter explicitly
+// rather than just trusting the prompt.
+const JOB_ROLE_PATTERNS: RegExp[] = [
+  /\b(executive|manager|engineer|developer|consultant|analyst|specialist|coordinator|assistant|associate|administrator|representative|intern|trainee|fellow|counsell?or|designer|architect|director|officer|technician|operator|writer|editor|teacher|tutor|lecturer)\b/i,
+  /\b(software|hr|sales|marketing|finance|accounting|business|product|content|customer|technical|client|project|operations|graphic|video|social media)\s+(executive|manager|engineer|developer|consultant|analyst|specialist|coordinator|assistant|associate|intern|lead|head)\b/i,
+  /\b(head\s+of|vice\s+president|founder|co[\s-]?founder|ceo|cto|cfo|coo|svp|evp)\b/i,
+];
+function looksLikeJobTitle(s: string): boolean {
+  if (!s) return false;
+  return JOB_ROLE_PATTERNS.some((re) => re.test(s));
+}
+
 /** Strip ANY non-alphanumeric characters then lowercase, so we
  *  can fuzzy-match a model-emitted institution name like
  *  "Indian Institute of Photography" against the source text
@@ -161,12 +195,16 @@ function validate(parsed: any, sourceText: string): LlmResult {
     const endOfCourse   = sliceStr(e.endOfCourse,   20);
     const university = sliceStr(e.university,    200);
     const location   = sliceStr(e.location,      120);
-    // Hallucination guard: a degree without ANY supporting field
-    // is suspicious. Need at least course OR university, and at
-    // least one of them must fuzzily appear in the source text.
+    // Hallucination guard: need at least course OR university,
+    // and at least one of them must fuzzily appear in the source.
     if (!course && !university) continue;
     if (course     && !fuzzyContains(sourceText, course))     continue;
     if (university && !fuzzyContains(sourceText, university)) continue;
+    // Job-title guard: 3B models occasionally misclassify
+    // experience entries as education when the source line has
+    // both a role + an institution ("HR Executive at IIP"). If
+    // the course string looks like a job title, drop the entry.
+    if (course && looksLikeJobTitle(course))   continue;
     educations.push({ course, branch, startOfCourse, endOfCourse, university, location });
   }
 
