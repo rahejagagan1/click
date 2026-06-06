@@ -616,7 +616,38 @@ export async function extractResumeData(buf: Buffer, fileName: string): Promise<
       console.error("[resume-auto-extract] second-chance OCR failed:", e?.message ?? e);
     }
   }
-  const skills    = parseSkills(text);
-  const languages = parseLanguages(text);
+  let skills    = parseSkills(text);
+  let languages = parseLanguages(text);
+
+  // ── LLM FALLBACK (Ollama / Llama 3.2 3B) ───────────────────────
+  // Heuristic + OCR can fail on multi-column / sidebar resumes
+  // where text-flow scrambles the section order. When ANY of
+  // educations / skills / languages came back empty, we ask the
+  // local LLM to take a second pass. Hallucination guard is in
+  // the LLM module — every returned entry must fuzzily appear in
+  // the source text or it's dropped. If Ollama isn't installed /
+  // reachable, llmExtractResume returns empty arrays and we
+  // silently keep whatever the heuristic produced.
+  //
+  // Cost gate: only fire when at least one section is empty.
+  // Don't waste 5-15s of CPU on a clean heuristic parse.
+  if (educations.length === 0 || skills.length === 0) {
+    try {
+      const { llmExtractResume } = await import("./resume-llm-extract");
+      const llm = await llmExtractResume(text);
+      if (educations.length === 0 && llm.educations.length > 0) {
+        educations = llm.educations;
+      }
+      if (skills.length === 0 && llm.skills.length > 0) {
+        skills = llm.skills;
+      }
+      if (languages.length === 0 && llm.languages.length > 0) {
+        languages = llm.languages;
+      }
+    } catch (e: any) {
+      console.warn("[resume-auto-extract] LLM fallback failed:", e?.message ?? e);
+    }
+  }
+
   return { linkedinUrl, portfolioUrl, educations, skills, languages };
 }
