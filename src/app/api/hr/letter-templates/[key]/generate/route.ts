@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, isLeadershipOrHR, resolveUserId, serverError } from "@/lib/api-auth";
-import { renderLetterHtml, wrapLetterPreviewHtml } from "@/lib/hr/letter-render";
+import { renderLetterHtml, wrapLetterPreviewHtml, wrapLetterForPdf } from "@/lib/hr/letter-render";
 import { htmlToPdf } from "@/lib/hr/html-to-pdf";
 
 export const dynamic = "force-dynamic";
@@ -99,10 +99,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
     // NB Media chrome. YT Labs letters previewed correctly but
     // generated with NB Media branding. HTML→PDF via LibreOffice
     // unifies the two outputs and removes the brand-divergence bug.
-    const fullHtml = await wrapLetterPreviewHtml(html, tpl.title, tpl.businessUnit);
+    // IMPORTANT — use TWO different HTML wrappers depending on what
+    // we're producing:
+    //   • wrapLetterForPdf()        → simple table-based layout
+    //     that LibreOffice's HTML→PDF importer renders correctly.
+    //     No position:absolute, no .page wrapper, no watermark.
+    //   • wrapLetterPreviewHtml()   → rich CSS layout for the
+    //     in-browser iframe preview (kept as a fallback below).
+    // Mixing them caused the recent "huge logos on every page"
+    // blow-out — the rich CSS confused LibreOffice into rendering
+    // each image as a full-page block.
+    const pdfHtml      = await wrapLetterForPdf(html, tpl.title, tpl.businessUnit);
+    const fullHtml     = await wrapLetterPreviewHtml(html, tpl.title, tpl.businessUnit);
     let pdfBytes: Buffer | null = null;
     try {
-      pdfBytes = await htmlToPdf(fullHtml);
+      pdfBytes = await htmlToPdf(pdfHtml);
     } catch (e) {
       console.warn("[letter generate] HTML→PDF (LibreOffice) failed:", (e as any)?.message);
     }
