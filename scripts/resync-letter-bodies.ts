@@ -23,7 +23,7 @@ async function main() {
   for (const t of LETTER_TEMPLATE_SEEDS) {
     const brand = t.businessUnit ?? "NB Media";
     const existing = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT id, "bodyHtml" FROM "LetterTemplate" WHERE key = $1 AND "businessUnit" = $2 LIMIT 1`,
+      `SELECT id, "bodyHtml", "customFields" FROM "LetterTemplate" WHERE key = $1 AND "businessUnit" = $2 LIMIT 1`,
       t.key, brand,
     );
     if (!existing[0]) {
@@ -33,16 +33,27 @@ async function main() {
     }
     const row = existing[0];
     const cleanBody = sanitizeLetterHtml(t.bodyHtml);
-    if (row.bodyHtml === cleanBody) {
+    const newFields = JSON.stringify(t.customFields ?? []);
+    const oldFields = JSON.stringify(row.customFields ?? []);
+    const bodyChanged   = row.bodyHtml !== cleanBody;
+    const fieldsChanged = oldFields !== newFields;
+    if (!bodyChanged && !fieldsChanged) {
       console.log(`  =        ${t.key} (${brand})  #${row.id}  already matches`);
       noChange++;
       continue;
     }
-    console.log(`  UPDATE   ${t.key} (${brand})  #${row.id}  ${row.bodyHtml.length} → ${cleanBody.length} chars`);
+    const parts: string[] = [];
+    if (bodyChanged)   parts.push(`body ${row.bodyHtml.length}→${cleanBody.length}`);
+    if (fieldsChanged) parts.push(`fields ${oldFields.length}→${newFields.length}`);
+    console.log(`  UPDATE   ${t.key} (${brand})  #${row.id}  ${parts.join(" + ")}`);
     if (CONFIRM) {
       await prisma.$executeRawUnsafe(
-        `UPDATE "LetterTemplate" SET "bodyHtml" = $1, "updatedAt" = NOW() WHERE id = $2`,
-        cleanBody, row.id,
+        `UPDATE "LetterTemplate"
+            SET "bodyHtml"      = $1,
+                "customFields"  = $2::jsonb,
+                "updatedAt"     = NOW()
+          WHERE id = $3`,
+        cleanBody, newFields, row.id,
       );
       updated++;
     }
