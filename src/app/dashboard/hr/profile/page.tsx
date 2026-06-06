@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { Loader2, Pencil, X, ChevronDown, FileText } from "lucide-react";
+import { Loader2, Pencil, X, ChevronDown, FileText, ShieldCheck, GraduationCap, BriefcaseBusiness, History, FolderClosed, Sparkles, CheckCircle2 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import SelectField from "@/components/ui/SelectField";
 
@@ -11,12 +11,26 @@ import SelectField from "@/components/ui/SelectField";
 // HR-side DocumentsPanel so the two views stay consistent. See
 // the matching DOC_FOLDERS / CAT_LABEL_OVERRIDES in
 // /dashboard/hr/people/[id]/page.tsx for the rationale.
-const SELF_DOC_FOLDERS: { key: string; label: string; cats: string[] }[] = [
-  { key: "identity",    label: "Identity Docs",          cats: ["pan_card", "aadhar", "passport", "driving_license"] },
-  { key: "education",   label: "Degrees & Certificates", cats: ["education_certificate"] },
-  { key: "letters",     label: "Employee Letters",       cats: ["offer_letter"] },
-  { key: "previous",    label: "Previous Experience",    cats: ["previous_relieving_letter", "previous_offer_letter"] },
-  { key: "other",       label: "Other",                  cats: ["other"] },
+// Folder taxonomy for the SELF view. "employee_letter" — the
+// category the HR Letter Templates page auto-saves to when HR
+// clicks "Generate PDF" — lands in the "Other" folder so the
+// employee can find every letter HR has issued them in one place
+// (FnF, Probation Confirmation, Relieving, Revised Offer, etc.).
+// Owner-readable subtitle + icon are paired with each entry to
+// make the sidebar self-documenting.
+type SelfDocFolder = {
+  key:       string;
+  label:     string;
+  subtitle:  string;
+  Icon:      typeof FileText;
+  cats:      string[];
+};
+const SELF_DOC_FOLDERS: SelfDocFolder[] = [
+  { key: "identity",  label: "Identity Documents", subtitle: "PAN, Aadhaar, Passport, Driving License",   Icon: ShieldCheck, cats: ["pan_card", "aadhar", "passport", "driving_license"] },
+  { key: "education", label: "Education",          subtitle: "Degrees, marksheets, transcripts",          Icon: GraduationCap, cats: ["education_certificate"] },
+  { key: "letters",   label: "Employment Letters", subtitle: "Offer letter, contract",                    Icon: BriefcaseBusiness, cats: ["offer_letter"] },
+  { key: "previous",  label: "Previous Experience",subtitle: "Relieving / offer from prior employers",    Icon: History, cats: ["previous_relieving_letter", "previous_offer_letter"] },
+  { key: "other",     label: "Other Documents",    subtitle: "Generated HR letters & misc uploads",       Icon: FolderClosed, cats: ["other", "employee_letter"] },
 ];
 
 const CAT_LABEL_OVERRIDES: Record<string, string> = {
@@ -61,6 +75,51 @@ const F = "w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] roun
 
 const PROFILE_TABS = ["ABOUT", "PROFILE", "JOB", "DOCUMENTS", "ASSETS"] as const;
 type ProfileTab = typeof PROFILE_TABS[number];
+
+// Reusable doc row — emerald accent for HR-issued letters,
+// blue accent for the employee's own uploads.
+function DocCard({ doc, accent, onDelete }: {
+  doc: any;
+  accent: "emerald" | "blue";
+  onDelete: (doc: any) => void;
+}) {
+  const isEmerald = accent === "emerald";
+  return (
+    <div
+      className={`group flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors ${
+        isEmerald
+          ? "border-emerald-200 bg-emerald-50/30 hover:border-emerald-300"
+          : "border-slate-200 bg-white hover:border-[#008CFF]/40"
+      }`}
+    >
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+        isEmerald ? "bg-emerald-500/10 text-emerald-700" : "bg-[#008CFF]/10 text-[#008CFF]"
+      }`}>
+        <FileText size={16} />
+      </div>
+      <a
+        href={doc.fileUrl?.startsWith("http") ? doc.fileUrl : `/api/hr/documents/${doc.id}/file`}
+        target="_blank"
+        rel="noreferrer"
+        className="min-w-0 flex-1 cursor-pointer"
+      >
+        <p className="truncate text-[13px] font-semibold text-slate-800">{doc.fileName || "Untitled"}</p>
+        <p className="truncate text-[11px] text-slate-500">
+          {isEmerald ? "Generated" : (doc.category ? doc.category.replace(/_/g, " ") : "Document")}
+          {doc.createdAt ? ` · ${new Date(doc.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}` : ""}
+        </p>
+      </a>
+      <button
+        type="button"
+        onClick={() => onDelete(doc)}
+        title="Delete"
+        className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-slate-400 hover:text-rose-500"
+      >
+        <X size={16} />
+      </button>
+    </div>
+  );
+}
 
 function EditModal({ title, fields, values, onSave, onClose }: {
   title: string;
@@ -943,116 +1002,144 @@ function SelfDocumentsPanel() {
     folderCounts[f.key] = documents.filter((d: any) => f.cats.includes((d.category || "").toLowerCase())).length;
   }
 
+  // Split the "Other" folder's contents into two visually distinct
+  // groups: HR-issued letters (generated via the Templates page,
+  // category='employee_letter') and everything else.
+  const isGeneratedLetter = (d: any) => (d.category || "").toLowerCase() === "employee_letter";
+  const generatedLetters = folder === "other" ? filesInFolder.filter(isGeneratedLetter) : [];
+  const otherUploads     = folder === "other" ? filesInFolder.filter((d) => !isGeneratedLetter(d)) : filesInFolder;
+
+  const totalDocs = documents.length;
+  const requiredCount = SELF_DOC_FOLDERS[0].cats.length + 1; // PAN, Aadhaar, plus the Education cat
+  const hasPan      = documents.some((d) => (d.category || "").toLowerCase() === "pan_card");
+  const hasAadhaar  = documents.some((d) => (d.category || "").toLowerCase() === "aadhar");
+  const hasEdu      = documents.some((d) => (d.category || "").toLowerCase() === "education_certificate");
+  const requiredDone = [hasPan, hasAadhaar, hasEdu].filter(Boolean).length;
+
   return (
-    <div className="max-w-4xl">
-      <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100 dark:border-white/[0.05] flex items-center justify-between">
-          <h3 className="text-[14px] font-semibold text-slate-800 dark:text-white">Employee Documents</h3>
-          <button
-            type="button"
-            onClick={openUpload}
-            className="inline-flex items-center gap-1.5 h-8 px-3 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12.5px] font-semibold transition-colors"
-          >+ Upload</button>
+    <div className="max-w-5xl">
+      {/* Summary header — total docs + required progress + upload CTA */}
+      <div className="mb-4 rounded-xl border border-slate-200 dark:border-white/[0.06] bg-gradient-to-br from-white to-slate-50/40 dark:from-[#001529] dark:to-[#001529] px-5 py-4 flex items-center gap-5">
+        <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#008CFF]/10 text-[#008CFF]">
+          <FileText size={22} strokeWidth={1.75} />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-[220px_1fr]">
-          {/* Folder sidebar */}
-          <div className="border-b md:border-b-0 md:border-r border-slate-100 dark:border-white/[0.05] py-2">
-            <p className="px-4 py-1.5 text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Employee Document Folders</p>
-            {SELF_DOC_FOLDERS.map((f) => {
-              const count = folderCounts[f.key] ?? 0;
-              return (
-                <button
-                  key={f.key}
-                  type="button"
-                  onClick={() => setFolder(f.key)}
-                  className={`w-full text-left px-4 py-2.5 text-[13px] flex items-center justify-between gap-2 transition-colors ${
-                    folder === f.key
-                      ? "bg-[#008CFF]/10 text-[#008CFF] font-semibold"
-                      : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5"
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    <FileText size={14} className="shrink-0" />
-                    {f.label}
-                  </span>
-                  {count > 0 && (
-                    <span className={`text-[11px] font-semibold rounded-full px-1.5 ${
-                      folder === f.key ? "bg-[#008CFF]/15 text-[#008CFF]" : "bg-slate-200/70 text-slate-500"
-                    }`}>{count}</span>
-                  )}
-                </button>
-              );
-            })}
+        <div className="flex-1 min-w-0">
+          <h3 className="text-[15px] font-semibold text-slate-900 dark:text-white">My documents</h3>
+          <p className="mt-0.5 text-[12px] text-slate-500">
+            {totalDocs} total · {requiredDone}/3 essential documents uploaded
+            {requiredDone < 3 && <span className="text-amber-600 font-medium"> · {3 - requiredDone} pending</span>}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={openUpload}
+          className="inline-flex items-center gap-1.5 h-9 px-3.5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12.5px] font-semibold transition-colors shadow-sm"
+        >+ Upload</button>
+      </div>
+
+      <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-[260px_1fr]">
+          {/* Folder sidebar — icon + label + count chip */}
+          <div className="border-b md:border-b-0 md:border-r border-slate-100 dark:border-white/[0.05] py-3 bg-slate-50/40 dark:bg-transparent">
+            <p className="px-5 py-1.5 text-[10px] text-slate-400 uppercase tracking-[0.12em] font-semibold">Folders</p>
+            <div className="px-2">
+              {SELF_DOC_FOLDERS.map((f) => {
+                const count = folderCounts[f.key] ?? 0;
+                const Icon = f.Icon;
+                const isActive = folder === f.key;
+                return (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => setFolder(f.key)}
+                    className={`w-full text-left px-3 py-2.5 my-0.5 text-[13px] rounded-lg flex items-center gap-3 transition-colors ${
+                      isActive
+                        ? "bg-[#008CFF]/10 text-[#008CFF]"
+                        : "text-slate-700 dark:text-slate-300 hover:bg-slate-100/70 dark:hover:bg-white/5"
+                    }`}
+                  >
+                    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+                      isActive ? "bg-[#008CFF]/15 text-[#008CFF]" : "bg-slate-200/60 text-slate-500"
+                    }`}>
+                      <Icon size={14} strokeWidth={1.75} />
+                    </span>
+                    <span className={`flex-1 ${isActive ? "font-semibold" : ""}`}>{f.label}</span>
+                    {count > 0 && (
+                      <span className={`text-[11px] font-semibold rounded-full px-1.5 ${
+                        isActive ? "bg-[#008CFF]/15 text-[#008CFF]" : "bg-slate-200/70 text-slate-500"
+                      }`}>{count}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
+
           {/* Folder body */}
-          <div className="p-5 space-y-4">
-            <div>
-              <h4 className="text-[13px] font-semibold text-slate-800 dark:text-white">{active.label}</h4>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                {folder === "identity"
-                  ? "Aadhaar, PAN, and other identity proofs"
-                  : folder === "education"
-                    ? "Degrees, certificates, transcripts"
-                    : folder === "letters"
-                      ? "Offer letters, contracts, experience letters"
-                      : folder === "previous"
-                        ? "Previous experience letters, payslips"
-                        : "Anything that doesn't fit the other folders"}
-              </p>
+          <div className="p-6 space-y-5">
+            <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100 dark:border-white/[0.04]">
+              <div className="min-w-0">
+                <h4 className="text-[15px] font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                  <active.Icon size={16} strokeWidth={1.75} className="text-[#008CFF]" />
+                  {active.label}
+                </h4>
+                <p className="text-[11.5px] text-slate-500 mt-1">{active.subtitle}</p>
+              </div>
+              {!isLoading && filesInFolder.length > 0 && (
+                <button
+                  type="button"
+                  onClick={openUpload}
+                  className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 text-[11.5px] font-semibold text-[#008CFF] hover:bg-[#008CFF]/[0.06] rounded-md transition-colors"
+                >+ Add to folder</button>
+              )}
             </div>
 
             {isLoading ? (
               <div className="flex items-center justify-center h-32">
                 <Loader2 size={20} className="animate-spin text-slate-400" />
               </div>
-            ) : filesInFolder.length > 0 ? (
-              <div>
-                <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">
-                  Uploaded files ({filesInFolder.length})
-                </p>
-                <div className="space-y-2">
-                  {filesInFolder.map((doc: any) => (
-                    <div
-                      key={doc.id}
-                      className="group flex items-center gap-3 rounded-lg border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#0a1526] px-4 py-3 hover:border-[#008CFF]/40 transition-colors"
-                    >
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#008CFF]/10 text-[#008CFF]">
-                        <FileText size={16} />
-                      </div>
-                      <a
-                        href={doc.fileUrl?.startsWith("http") ? doc.fileUrl : `/api/hr/documents/${doc.id}/file`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="min-w-0 flex-1 cursor-pointer"
-                      >
-                        <p className="truncate text-[13px] font-semibold text-slate-800 dark:text-white">{doc.fileName || "Untitled"}</p>
-                        <p className="truncate text-[11px] text-slate-500">
-                          {prettyCategory(doc.category || "Document")}
-                          {doc.createdAt ? ` · ${new Date(doc.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}` : ""}
-                        </p>
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(doc)}
-                        title="Delete"
-                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-slate-400 hover:text-rose-500"
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
+            ) : filesInFolder.length === 0 ? (
               <button
                 type="button"
                 onClick={openUpload}
-                className="w-full rounded-xl border-2 border-dashed border-slate-200 hover:border-[#008CFF]/40 hover:bg-[#008CFF]/[0.02] transition-colors py-10 text-center"
+                className="w-full rounded-xl border-2 border-dashed border-slate-200 hover:border-[#008CFF]/40 hover:bg-[#008CFF]/[0.02] transition-colors py-12 text-center"
               >
-                <FileText size={28} className="mx-auto text-slate-300 mb-2" strokeWidth={1.5} />
+                <active.Icon size={32} className="mx-auto text-slate-300 mb-2" strokeWidth={1.5} />
                 <p className="text-[13px] font-semibold text-slate-700 dark:text-slate-200">Upload to {active.label}</p>
-                <p className="mt-0.5 text-[11.5px] text-slate-500">Click here or drop a file. PDF / image / DOCX, up to 10 MB.</p>
+                <p className="mt-1 text-[11.5px] text-slate-500">Click here or drop a file. PDF / image / DOCX, up to 10 MB.</p>
               </button>
+            ) : (
+              <div className="space-y-5">
+                {/* HR-issued letters block — emerald-toned to mark them as generated, not employee-uploaded. */}
+                {generatedLetters.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <Sparkles size={13} className="text-emerald-600" strokeWidth={2} />
+                      <p className="text-[11px] uppercase tracking-[0.12em] font-semibold text-emerald-700">Issued by HR ({generatedLetters.length})</p>
+                    </div>
+                    <div className="space-y-2">
+                      {generatedLetters.map((doc: any) => (
+                        <DocCard key={doc.id} doc={doc} accent="emerald" onDelete={handleDelete} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {otherUploads.length > 0 && (
+                  <div>
+                    {generatedLetters.length > 0 && (
+                      <div className="flex items-center gap-2 mb-2.5">
+                        <FileText size={13} className="text-slate-500" strokeWidth={2} />
+                        <p className="text-[11px] uppercase tracking-[0.12em] font-semibold text-slate-500">Your uploads ({otherUploads.length})</p>
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      {otherUploads.map((doc: any) => (
+                        <DocCard key={doc.id} doc={doc} accent="blue" onDelete={handleDelete} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
