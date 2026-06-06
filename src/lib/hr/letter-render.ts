@@ -419,25 +419,26 @@ export async function wrapLetterPreviewHtml(
       position: relative;
       z-index: 1;
     }
-    .letterhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 24pt; margin-bottom: 18pt; padding-bottom: 12pt; border-bottom: 1pt solid #e5e7eb; }
-    .letterhead .lh-text { font-size: 10.5pt; line-height: 1.45; }
-    .letterhead .lh-text .company { font-size: 12pt; font-weight: bold; margin-bottom: 4pt; }
+    /* Letterhead: no underline rule — gives a cleaner, more
+       professional look. The visual break between the chrome and
+       the body title is created by the title margin + 22pt gap
+       below the letterhead instead. */
+    .letterhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 24pt; margin-bottom: 22pt; padding-bottom: 0; }
+    .letterhead .lh-text { font-size: 10.5pt; line-height: 1.45; letter-spacing: 0.3px; }
+    .letterhead .lh-text .company { font-size: 12pt; font-weight: bold; margin-bottom: 4pt; letter-spacing: 0.5px; }
     .letterhead .lh-logo { width: 86pt; height: auto; }
-    h1.letter-title { font-size: 16pt; font-weight: bold; text-align: center; margin: 14pt 0 16pt; }
-    /* 1.5 line spacing on body paragraphs — matches the standard
-       HR letter format. Margins tightened to 4pt so consecutive
-       paragraphs don't double-space visually with the 1.5 line
-       height. */
-    p { font-size: 12pt; line-height: 1.5; margin: 4pt 0; text-align: justify; }
-    /* Tighter signoff cluster — when a paragraph starts with
-       "Regards," / a single name / role, treat it as part of the
-       signature block, no justification, less vertical padding. */
-    p.signoff, p[data-role="signoff"] { text-align: left; margin: 2pt 0; }
-    p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; }
-    h2 { font-size: 14pt; margin: 16pt 0 8pt; }
-    h3 { font-size: 13pt; margin: 14pt 0 8pt; }
+    h1.letter-title { font-size: 16pt; font-weight: bold; text-align: center; margin: 14pt 0 16pt; letter-spacing: 0.5px; }
+    /* Body paragraphs — 1.5 line height + 0.5px letter-spacing
+       gives the text the airy, formal feel of a printed HR letter.
+       Margins tightened to 4pt so the 1.5 line-height doesn't
+       double-space consecutive paragraphs. */
+    p { font-size: 12pt; line-height: 1.5; margin: 4pt 0; text-align: justify; letter-spacing: 0.5px; }
+    p.signoff, p[data-role="signoff"] { text-align: left; margin: 2pt 0; letter-spacing: 0.5px; }
+    p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; letter-spacing: 0.5px; }
+    h2 { font-size: 14pt; margin: 16pt 0 8pt; letter-spacing: 0.5px; }
+    h3 { font-size: 13pt; margin: 14pt 0 8pt; letter-spacing: 0.5px; }
     ol, ul { padding-left: 22pt; margin: 8pt 0; }
-    ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.5; }
+    ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.5; letter-spacing: 0.5px; }
     table { width: 100%; border-collapse: collapse; margin: 10pt 0 14pt; }
     table th, table td { border: 1pt solid #1f2937; padding: 6pt 9pt; font-size: 11pt; text-align: left; }
     table th { background: #f3f4f6; }
@@ -506,7 +507,6 @@ export async function wrapLetterForPdf(
       ${logoCell}
     </tr>
   </table>
-  <hr style="border:none; border-top:1px solid #e5e7eb; margin-bottom:14px;" />
   <h1 style="font-size:16pt; font-weight:bold; text-align:center; margin:14pt 0 16pt 0;">${escapeHtml(title)}</h1>
   ${bodyHtml}
 </body>
