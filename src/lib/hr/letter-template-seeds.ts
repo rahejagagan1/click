@@ -9,9 +9,16 @@
 export type CustomFieldDef = {
   key: string;
   label: string;
-  type: "text" | "number" | "date" | "textarea";
+  type: "text" | "number" | "date" | "textarea" | "checkbox";
   required?: boolean;
   placeholder?: string;
+  /** For checkbox inputs only — what the unchecked / checked
+   *  values resolve to in the placeholder pipeline. Defaults to
+   *  "false"/"true" so existing seeds don't need to specify. */
+  uncheckedValue?: string;
+  checkedValue?: string;
+  /** Helper text shown below the input. */
+  help?: string;
 };
 
 export type LetterTemplateSeed = {
@@ -148,18 +155,21 @@ ${SIGNOFF_HTML}
     key: "revised_offer_letter",
     title: "Revised Offer Letter",
     category: "onboarding",
+    // HR types the annual package + ticks PF. The salary breakup
+    // table is auto-computed at render time using {{Salary.*}}
+    // placeholders — see resolveSalary() in src/lib/hr/letter-render.ts.
     customFields: [
-      { key: "JoiningDate",       label: "Joining Date",        type: "date",   required: true },
-      { key: "ReportingTime",     label: "Reporting Time",       type: "text",   required: true, placeholder: "10:00 AM" },
-      { key: "AcceptanceDeadline",label: "Acceptance Deadline",  type: "date",   required: true },
-      { key: "AnnualCTC",         label: "Annual CTC (LPA)",     type: "text",   required: true, placeholder: "e.g. 6" },
-      { key: "BasicPay",          label: "Basic Pay (Monthly)",  type: "text",   required: false },
-      { key: "HRA",               label: "HRA (Monthly)",        type: "text",   required: false },
-      { key: "DA",                label: "DA (Monthly)",         type: "text",   required: false },
-      { key: "Conveyance",        label: "Conveyance (Monthly)", type: "text",   required: false },
-      { key: "Medical",           label: "Medical (Monthly)",    type: "text",   required: false },
-      { key: "Special",           label: "Special (Monthly)",    type: "text",   required: false },
-      { key: "TotalMonthly",      label: "Total Monthly CTC",    type: "text",   required: true, placeholder: "Sum of the above" },
+      { key: "JoiningDate",        label: "Joining Date",       type: "date",     required: true },
+      { key: "ReportingTime",      label: "Reporting Time",     type: "text",     required: true, placeholder: "10:00 AM" },
+      { key: "AcceptanceDeadline", label: "Acceptance Deadline",type: "date",     required: true },
+      { key: "AnnualPackage",      label: "Annual Package (₹)", type: "number",   required: true,
+        placeholder: "e.g. 600000",
+        help: "Enter the gross annual CTC in rupees. Monthly breakup (Basic/HRA/DA/Conveyance/Medical/Special) is auto-calculated."
+      },
+      { key: "EnablePf",           label: "Include Provident Fund (PF)",         type: "checkbox", required: false,
+        checkedValue: "true", uncheckedValue: "false",
+        help: "Tick to include a fixed ₹1,800/month PF deduction in the breakup. Special Allowance is reduced accordingly so the monthly CTC stays the same."
+      },
     ],
     bodyHtml: `
 <p class="note">NOTE: This is a temporary/ Conditional offer and cannot be used for Negotiations with other companies.</p>
@@ -224,20 +234,21 @@ ${SIGNOFF_HTML}
 <div class="page-break"></div>
 <h2 class="section-title">Annexure "A"</h2>
 <h3 style="text-align:center">COMPENSATION STRUCTURE</h3>
-<p>Your Annual fixed compensation of Rs. <strong>{{CustomAttributes.AnnualCTC}}</strong> LPA will be divided per the following break up:</p>
+<p>Your Annual fixed compensation of Rs. <strong>{{Salary.Annual}}</strong> ({{Salary.EnablePfText}}) will be divided per the following break up:</p>
 <p style="text-align:center"><strong>FIXED MONTHLY PAY:</strong></p>
 <table class="pay-table">
   <thead>
-    <tr><th>PAY COMPONENT</th><th>MONTHLY</th></tr>
+    <tr><th>PAY COMPONENT</th><th>MONTHLY (₹)</th><th>BASIS</th></tr>
   </thead>
   <tbody>
-    <tr><td>Basic Pay</td><td>Rs. {{CustomAttributes.BasicPay}}</td></tr>
-    <tr><td>House Rent Allowance</td><td>Rs. {{CustomAttributes.HRA}}</td></tr>
-    <tr><td>Dearness Allowance</td><td>Rs. {{CustomAttributes.DA}}</td></tr>
-    <tr><td>Conveyance Allowance</td><td>Rs. {{CustomAttributes.Conveyance}}</td></tr>
-    <tr><td>Medical Allowance</td><td>Rs. {{CustomAttributes.Medical}}</td></tr>
-    <tr><td>Special Allowance</td><td>Rs. {{CustomAttributes.Special}}</td></tr>
-    <tr><td><strong>TOTAL MONTHLY CTC</strong></td><td><strong>Rs. {{CustomAttributes.TotalMonthly}}</strong></td></tr>
+    <tr><td>Basic Pay</td><td>{{Salary.Basic}}</td><td>50%</td></tr>
+    <tr><td>House Rent Allowance</td><td>{{Salary.HRA}}</td><td>20%</td></tr>
+    {{Salary.PfRow}}
+    <tr><td>Dearness Allowance</td><td>{{Salary.DA}}</td><td>10%</td></tr>
+    <tr><td>Conveyance Allowance</td><td>{{Salary.Conveyance}}</td><td>7.50%</td></tr>
+    <tr><td>Medical Allowance</td><td>{{Salary.Medical}}</td><td>₹15,000 / year</td></tr>
+    <tr><td>Special Allowance</td><td>{{Salary.Special}}</td><td>Remaining</td></tr>
+    <tr><td><strong>TOTAL MONTHLY CTC</strong></td><td><strong>{{Salary.Total}}</strong></td><td></td></tr>
   </tbody>
 </table>
 <p><strong>Note:</strong></p>
@@ -377,18 +388,21 @@ ${SIGNOFF_HTML_YT_LABS}
     title: "Revised Offer Letter",
     category: "onboarding",
     businessUnit: "YT Labs",
+    // HR types the annual package + ticks PF. The salary breakup
+    // table is auto-computed at render time using {{Salary.*}}
+    // placeholders — see resolveSalary() in src/lib/hr/letter-render.ts.
     customFields: [
-      { key: "JoiningDate",       label: "Joining Date",        type: "date",   required: true },
-      { key: "ReportingTime",     label: "Reporting Time",       type: "text",   required: true, placeholder: "10:00 AM" },
-      { key: "AcceptanceDeadline",label: "Acceptance Deadline",  type: "date",   required: true },
-      { key: "AnnualCTC",         label: "Annual CTC (LPA)",     type: "text",   required: true, placeholder: "e.g. 6" },
-      { key: "BasicPay",          label: "Basic Pay (Monthly)",  type: "text",   required: false },
-      { key: "HRA",               label: "HRA (Monthly)",        type: "text",   required: false },
-      { key: "DA",                label: "DA (Monthly)",         type: "text",   required: false },
-      { key: "Conveyance",        label: "Conveyance (Monthly)", type: "text",   required: false },
-      { key: "Medical",           label: "Medical (Monthly)",    type: "text",   required: false },
-      { key: "Special",           label: "Special (Monthly)",    type: "text",   required: false },
-      { key: "TotalMonthly",      label: "Total Monthly CTC",    type: "text",   required: true, placeholder: "Sum of the above" },
+      { key: "JoiningDate",        label: "Joining Date",       type: "date",     required: true },
+      { key: "ReportingTime",      label: "Reporting Time",     type: "text",     required: true, placeholder: "10:00 AM" },
+      { key: "AcceptanceDeadline", label: "Acceptance Deadline",type: "date",     required: true },
+      { key: "AnnualPackage",      label: "Annual Package (₹)", type: "number",   required: true,
+        placeholder: "e.g. 600000",
+        help: "Enter the gross annual CTC in rupees. Monthly breakup (Basic/HRA/DA/Conveyance/Medical/Special) is auto-calculated."
+      },
+      { key: "EnablePf",           label: "Include Provident Fund (PF)",         type: "checkbox", required: false,
+        checkedValue: "true", uncheckedValue: "false",
+        help: "Tick to include a fixed ₹1,800/month PF deduction in the breakup. Special Allowance is reduced accordingly so the monthly CTC stays the same."
+      },
     ],
     bodyHtml: `
 <p class="note">NOTE: This is a temporary/ Conditional offer and cannot be used for Negotiations with other companies.</p>
@@ -445,20 +459,21 @@ ${SIGNOFF_HTML_YT_LABS}
 <div class="page-break"></div>
 <h2 class="section-title">Annexure "A"</h2>
 <h3 style="text-align:center">COMPENSATION STRUCTURE</h3>
-<p>Your Annual fixed compensation of Rs. <strong>{{CustomAttributes.AnnualCTC}}</strong> LPA will be divided per the following break up:</p>
+<p>Your Annual fixed compensation of Rs. <strong>{{Salary.Annual}}</strong> ({{Salary.EnablePfText}}) will be divided per the following break up:</p>
 <p style="text-align:center"><strong>FIXED MONTHLY PAY:</strong></p>
 <table class="pay-table">
   <thead>
-    <tr><th>PAY COMPONENT</th><th>MONTHLY</th></tr>
+    <tr><th>PAY COMPONENT</th><th>MONTHLY (₹)</th><th>BASIS</th></tr>
   </thead>
   <tbody>
-    <tr><td>Basic Pay</td><td>Rs. {{CustomAttributes.BasicPay}}</td></tr>
-    <tr><td>House Rent Allowance</td><td>Rs. {{CustomAttributes.HRA}}</td></tr>
-    <tr><td>Dearness Allowance</td><td>Rs. {{CustomAttributes.DA}}</td></tr>
-    <tr><td>Conveyance Allowance</td><td>Rs. {{CustomAttributes.Conveyance}}</td></tr>
-    <tr><td>Medical Allowance</td><td>Rs. {{CustomAttributes.Medical}}</td></tr>
-    <tr><td>Special Allowance</td><td>Rs. {{CustomAttributes.Special}}</td></tr>
-    <tr><td><strong>TOTAL MONTHLY CTC</strong></td><td><strong>Rs. {{CustomAttributes.TotalMonthly}}</strong></td></tr>
+    <tr><td>Basic Pay</td><td>{{Salary.Basic}}</td><td>50%</td></tr>
+    <tr><td>House Rent Allowance</td><td>{{Salary.HRA}}</td><td>20%</td></tr>
+    {{Salary.PfRow}}
+    <tr><td>Dearness Allowance</td><td>{{Salary.DA}}</td><td>10%</td></tr>
+    <tr><td>Conveyance Allowance</td><td>{{Salary.Conveyance}}</td><td>7.50%</td></tr>
+    <tr><td>Medical Allowance</td><td>{{Salary.Medical}}</td><td>₹15,000 / year</td></tr>
+    <tr><td>Special Allowance</td><td>{{Salary.Special}}</td><td>Remaining</td></tr>
+    <tr><td><strong>TOTAL MONTHLY CTC</strong></td><td><strong>{{Salary.Total}}</strong></td><td></td></tr>
   </tbody>
 </table>
 <p><strong>Note:</strong></p>
