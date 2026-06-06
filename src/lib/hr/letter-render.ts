@@ -127,7 +127,9 @@ async function injectSignatureBeforeRegards(bodyHtml: string, businessUnit?: str
   const sigHeight = businessUnit === "YT Labs" ? "28pt" : "18pt";
   // Negative margin-bottom pulls the "Regards," paragraph in tight
   // so the cursive looks attached to the signoff, not floating.
-  const sigBlock = `<p style="margin:14pt 0 -8pt 0; padding:0; line-height:1; text-align:left"><img src="${sig}" alt="${altText}" style="height:${sigHeight}; width:auto; display:block"/></p>`;
+  // Tighter spacing — small gap above (separates from body), tiny
+  // gap below so "Regards," sits cleanly under the cursive.
+  const sigBlock = `<p style="margin:10pt 0 -4pt 0; padding:0; line-height:1; text-align:left"><img src="${sig}" alt="${altText}" style="height:${sigHeight}; width:auto; display:block"/></p>`;
   // Anchor: the FIRST block element whose content begins with
   // "Regards,". Insert the signature block immediately BEFORE
   // that paragraph's opening tag.
@@ -412,12 +414,20 @@ export async function wrapLetterPreviewHtml(
     .letterhead .lh-text .company { font-size: 12pt; font-weight: bold; margin-bottom: 4pt; }
     .letterhead .lh-logo { width: 86pt; height: auto; }
     h1.letter-title { font-size: 16pt; font-weight: bold; text-align: center; margin: 14pt 0 16pt; }
-    p { font-size: 12pt; line-height: 1.55; margin: 6pt 0; text-align: justify; }
+    /* 1.5 line spacing on body paragraphs — matches the standard
+       HR letter format. Margins tightened to 4pt so consecutive
+       paragraphs don't double-space visually with the 1.5 line
+       height. */
+    p { font-size: 12pt; line-height: 1.5; margin: 4pt 0; text-align: justify; }
+    /* Tighter signoff cluster — when a paragraph starts with
+       "Regards," / a single name / role, treat it as part of the
+       signature block, no justification, less vertical padding. */
+    p.signoff, p[data-role="signoff"] { text-align: left; margin: 2pt 0; }
     p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; }
     h2 { font-size: 14pt; margin: 16pt 0 8pt; }
     h3 { font-size: 13pt; margin: 14pt 0 8pt; }
     ol, ul { padding-left: 22pt; margin: 8pt 0; }
-    ol li, ul li { margin-bottom: 6pt; font-size: 12pt; line-height: 1.55; }
+    ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.5; }
     table { width: 100%; border-collapse: collapse; margin: 10pt 0 14pt; }
     table th, table td { border: 1pt solid #1f2937; padding: 6pt 9pt; font-size: 11pt; text-align: left; }
     table th { background: #f3f4f6; }
