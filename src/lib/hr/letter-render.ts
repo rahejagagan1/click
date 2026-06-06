@@ -201,11 +201,15 @@ const fmtDate = (d: Date | null | undefined): string => {
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
 };
+// Despite the legacy name, fmtShortDate uses the FULL month name
+// ("06 June 2026") to match HR's preferred letter-style format.
+// Was 3-letter month previously ("06 Jun 2026"); flipped to long
+// after HR feedback on the Revised Offer Letter preview.
 const fmtShortDate = (d: Date | null | undefined): string => {
-  if (!d) return new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  if (!d) return new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
   const date = d instanceof Date ? d : new Date(d as any);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
 };
 
 // Resolves a placeholder against the employee row + custom inputs.
