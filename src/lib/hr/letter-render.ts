@@ -201,11 +201,15 @@ const fmtDate = (d: Date | null | undefined): string => {
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
 };
+// Despite the legacy name, fmtShortDate uses the FULL month name
+// ("06 June 2026") to match HR's preferred letter-style format.
+// Was 3-letter month previously ("06 Jun 2026"); flipped to long
+// after HR feedback on the Revised Offer Letter preview.
 const fmtShortDate = (d: Date | null | undefined): string => {
-  if (!d) return new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  if (!d) return new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
   const date = d instanceof Date ? d : new Date(d as any);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
 };
 
 // Resolves a placeholder against the employee row + custom inputs.
@@ -272,8 +276,70 @@ function resolvePlaceholder(
     case "CustomAttributes":
       // HR-supplied per-render values (FnFAmount, ReferenceNo, …)
       return ctx.customFields?.[field] ?? "";
+    case "Salary":
+      // Auto-derived salary breakup. HR types the annual package
+      // (e.g. 600000) and ticks the EnablePf checkbox; this section
+      // expands {{Salary.Basic}}, {{Salary.HRA}}, … into the
+      // computed rupees per the NB Media / YT Labs standard:
+      //   Monthly CTC = Annual / 12
+      //   Basic       = 50% × monthly
+      //   HRA         = 20% × monthly
+      //   PF          = 1800 (fixed, only when EnablePf=true)
+      //   DA          = 10% × monthly
+      //   Conveyance  = 7.5% × monthly
+      //   Medical     = 1250 (15K / year)
+      //   Special     = remaining (so the column sums to monthly CTC)
+      return resolveSalary(field, ctx.customFields);
   }
   return null;
+}
+
+/** Compute the standard salary breakup placeholders.
+ *  Reads `AnnualPackage` + `EnablePf` from the HR-entered custom
+ *  fields. Returns "" for unknown fields so renderLetterHtml's
+ *  "missing" list still catches typos. */
+function resolveSalary(field: string, customFields: Record<string, string>): string {
+  const annual = Number(String(customFields?.AnnualPackage ?? "").replace(/[^\d.]/g, ""));
+  if (!Number.isFinite(annual) || annual <= 0) {
+    // Render placeholders as "—" so the table shows empty cells
+    // when HR hasn't entered the package yet.
+    return field === "Annual" || field === "Total" ? "—" : "—";
+  }
+  const enablePf = String(customFields?.EnablePf ?? "false") === "true";
+  const monthly  = annual / 12;
+  const basic    = Math.round(monthly * 0.50);
+  const hra      = Math.round(monthly * 0.20);
+  const da       = Math.round(monthly * 0.10);
+  const conv     = Math.round(monthly * 0.075);
+  const medical  = 1250;
+  const pf       = enablePf ? 1800 : 0;
+  // Special = whatever's left to make the column sum to monthly CTC.
+  // We compute against the rounded values so the totals tie.
+  const monthlyR = Math.round(monthly);
+  const fixedSum = basic + hra + da + conv + medical + pf;
+  const special  = Math.max(0, monthlyR - fixedSum);
+  const fmtRs = (n: number) => n.toLocaleString("en-IN");
+  switch (field) {
+    case "Annual":     return fmtRs(annual);
+    case "Monthly":    return fmtRs(monthlyR);
+    case "Basic":      return fmtRs(basic);
+    case "HRA":        return fmtRs(hra);
+    case "DA":         return fmtRs(da);
+    case "Conveyance": return fmtRs(conv);
+    case "Medical":    return fmtRs(medical);
+    case "PF":         return fmtRs(pf);
+    case "Special":    return fmtRs(special);
+    case "Total":      return fmtRs(monthlyR);
+    // Single placeholder that resolves to the entire PF row when
+    // enabled, or empty when disabled. One template body covers
+    // both PF / no-PF cases without HR touching the HTML.
+    case "PfRow":
+      return enablePf
+        ? `<tr><td>Provident Fund (PF)</td><td>${fmtRs(pf)}</td><td>Fixed</td></tr>`
+        : "";
+    case "EnablePfText": return enablePf ? "with PF" : "without PF";
+    default:           return "";
+  }
 }
 
 export type RenderResult = {
@@ -334,16 +400,32 @@ export async function renderLetterHtml(
   // `Manpreet <script>alert(1)</script>` can't break out of text.
   // The body itself is HTML (sanitised separately) so we don't
   // escape it again here.
+  //
+  // Exception: placeholders whose KEYS are listed in
+  // SAFE_HTML_PLACEHOLDERS resolve to first-party HTML fragments
+  // we generate ourselves (e.g. {{Salary.PfRow}} → "<tr>…</tr>"),
+  // so escaping them would print the literal tags as text in the
+  // output. We trust those values because they're produced by
+  // resolveSalary() with no user-controlled input flowing into
+  // tag positions — only digits + INR commas via fmtRs().
   const html = bodyHtml.replace(/\{\{\s*([A-Za-z][A-Za-z0-9_.]*)\s*\}\}/g, (_match, key: string) => {
     const v = resolvePlaceholder(key, renderCtx);
     if (v == null) {
       if (!missing.includes(key)) missing.push(key);
       return `[missing: ${escapeHtml(key)}]`;
     }
-    return escapeHtml(v);
+    return SAFE_HTML_PLACEHOLDERS.has(key) ? v : escapeHtml(v);
   });
   return { html, missing };
 }
+
+/** Placeholder keys whose resolved value is intentional HTML and
+ *  must NOT be HTML-escaped. Everything else goes through
+ *  escapeHtml() so user-controlled values (names, emails, custom
+ *  fields) can't break out of their text node and inject script. */
+const SAFE_HTML_PLACEHOLDERS = new Set<string>([
+  "Salary.PfRow",
+]);
 
 /**
  * Wrap a substituted body in a complete A4-sized preview HTML
@@ -389,7 +471,13 @@ export async function wrapLetterPreviewHtml(
        this they'd stack and the body content area would be half
        the page. */
     @page { size: A4; margin: 0; }
-    html, body { margin: 0; padding: 0; background: #f8fafc; font-family: "Times New Roman", Times, serif; color: #1f2937; }
+    /* Global letter-spacing of 0.5px on every text element so the
+       letter has the airy, formal feel of a printed HR document.
+       Applied at the body level so every nested element inherits
+       it — letterhead, title, paragraphs, lists, table cells.
+       Brand-agnostic: same rule applies to NB Media and YT Labs
+       letters since they share this wrapper. */
+    html, body { margin: 0; padding: 0; background: #f8fafc; font-family: "Times New Roman", Times, serif; color: #1f2937; letter-spacing: 0.5px; }
     .page {
       width: 210mm;
       min-height: 297mm;
@@ -419,27 +507,35 @@ export async function wrapLetterPreviewHtml(
       position: relative;
       z-index: 1;
     }
-    .letterhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 24pt; margin-bottom: 18pt; padding-bottom: 12pt; border-bottom: 1pt solid #e5e7eb; }
+    /* Letterhead: no underline rule — gives a cleaner, more
+       professional look. The visual break between the chrome and
+       the body title is created by the title margin + 22pt gap
+       below the letterhead instead. */
+    .letterhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 24pt; margin-bottom: 22pt; padding-bottom: 0; }
     .letterhead .lh-text { font-size: 10.5pt; line-height: 1.45; }
     .letterhead .lh-text .company { font-size: 12pt; font-weight: bold; margin-bottom: 4pt; }
     .letterhead .lh-logo { width: 86pt; height: auto; }
     h1.letter-title { font-size: 16pt; font-weight: bold; text-align: center; margin: 14pt 0 16pt; }
-    /* 1.5 line spacing on body paragraphs — matches the standard
-       HR letter format. Margins tightened to 4pt so consecutive
-       paragraphs don't double-space visually with the 1.5 line
-       height. */
+    /* Body paragraphs — 1.5 line height + 0.5px letter-spacing
+       gives the text the airy, formal feel of a printed HR letter.
+       Margins tightened to 4pt so the 1.5 line-height doesn't
+       double-space consecutive paragraphs. */
+    /* letter-spacing is inherited from body (0.5px global) — no
+       per-rule override here so the entire document tracks
+       consistently across paragraphs, headings, and list items. */
     p { font-size: 12pt; line-height: 1.5; margin: 4pt 0; text-align: justify; }
-    /* Tighter signoff cluster — when a paragraph starts with
-       "Regards," / a single name / role, treat it as part of the
-       signature block, no justification, less vertical padding. */
     p.signoff, p[data-role="signoff"] { text-align: left; margin: 2pt 0; }
     p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; }
     h2 { font-size: 14pt; margin: 16pt 0 8pt; }
     h3 { font-size: 13pt; margin: 14pt 0 8pt; }
     ol, ul { padding-left: 22pt; margin: 8pt 0; }
     ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.5; }
-    table { width: 100%; border-collapse: collapse; margin: 10pt 0 14pt; }
-    table th, table td { border: 1pt solid #1f2937; padding: 6pt 9pt; font-size: 11pt; text-align: left; }
+    /* Force Times New Roman on tables too — some user agents fall
+       back to a sans-serif default when the cell content is plain
+       text (e.g. the pay-table breakup). Letter-spacing matches
+       the body for consistent typography. */
+    table { width: 100%; border-collapse: collapse; margin: 10pt 0 14pt; font-family: "Times New Roman", Times, serif; }
+    table th, table td { border: 1pt solid #1f2937; padding: 6pt 9pt; font-size: 11pt; text-align: left; font-family: "Times New Roman", Times, serif; }
     table th { background: #f3f4f6; }
     .page-break { display: block; height: 22pt; border-top: 1pt dashed #cbd5e1; margin: 18pt 0; padding-top: 8pt; }
   </style>
@@ -506,7 +602,6 @@ export async function wrapLetterForPdf(
       ${logoCell}
     </tr>
   </table>
-  <hr style="border:none; border-top:1px solid #e5e7eb; margin-bottom:14px;" />
   <h1 style="font-size:16pt; font-weight:bold; text-align:center; margin:14pt 0 16pt 0;">${escapeHtml(title)}</h1>
   ${bodyHtml}
 </body>
