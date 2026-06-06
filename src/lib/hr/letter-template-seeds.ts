@@ -44,14 +44,14 @@ export type LetterTemplateSeed = {
 // at the top of every page via the template's {{JobTitle}} slot.
 
 const SIGNOFF_HTML = `
-<p style="margin-top:48px">Regards,<br/>Nikit Bassi<br/>Founder &amp; CEO</p>
+<p class="signature-block" style="margin-top:36px">Regards,<br/>Nikit Bassi<br/>Founder &amp; CEO</p>
 `;
 
 // YT Labs letters are signed by the YT Labs CEO. The render layer
 // injects the matching signature image (Kunal's, not Nikit's) into
 // the SIGNOFF block based on the template's businessUnit.
 const SIGNOFF_HTML_YT_LABS = `
-<p style="margin-top:48px">Regards,<br/>Kunal Lall<br/>Founder &amp; CEO</p>
+<p class="signature-block" style="margin-top:36px">Regards,<br/>Kunal Lall<br/>Founder &amp; CEO</p>
 `;
 
 export const LETTER_TEMPLATE_SEEDS: LetterTemplateSeed[] = [
@@ -71,7 +71,7 @@ export const LETTER_TEMPLATE_SEEDS: LetterTemplateSeed[] = [
 <p>The company shall pay you a sum of INR {{CustomAttributes.FnFAmount}} only on account of full &amp; final settlement {{CustomAttributes.ReferenceNo}}</p>
 <p>With this, your account will be settled with our company and nothing will be due from the company to you.</p>
 ${SIGNOFF_HTML}
-<p style="margin-top:36px">
+<p class="acknowledgement" style="margin-top:24px">
   Acknowledged and Accepted<br/>
   {{EmployeeBasicHeaderInfo.EmployeeNumber}}<br/>
   {{EmployeeBasicInfo.DisplayName}}<br/>
@@ -110,7 +110,7 @@ ${SIGNOFF_HTML}
 <p>This letter serves as an official appointment document and is governed by the same terms and conditions as that of your initial offer letter. In addition, you shall be entitled to receive Bonuses, perks other benefits that the company may at its discretion make available to its employees as stipulated in the relevant provisions of the Employee policy, under the terms and requirements relating to the benefits imposed by the organization.</p>
 <p>We are happy to have you as part of our team and wish you the best of luck in your job.</p>
 ${SIGNOFF_HTML}
-<p style="margin-top:36px">
+<p class="acknowledgement" style="margin-top:24px">
   Acknowledged and Accepted,<br/>
   {{EmployeeBasicHeaderInfo.EmployeeNumber}}<br/>
   {{EmployeeBasicInfo.DisplayName}}<br/>
@@ -138,7 +138,7 @@ ${SIGNOFF_HTML}
 <p>We would also like to remind you of the obligations of the confidentiality and non-disclosure agreement that you had signed during your employment with the Company. We earnestly hope that you will continue to bestow the same degree of commitment in protecting the Intellectual Property of the company as you have agreed to uphold as per the terms of the confidentiality and non-disclosure agreement. We request you to strive and ensure that the trade secrets, confidential and the intellectual property that were developed when you were in the employment of the company continue to be protected and are not compromised in anyway.</p>
 <p>We wish you all the best in your future endeavors!</p>
 ${SIGNOFF_HTML}
-<p style="margin-top:36px">
+<p class="acknowledgement" style="margin-top:24px">
   Acknowledged and Accepted<br/>
   {{EmployeeBasicHeaderInfo.EmployeeNumber}}<br/>
   {{EmployeeBasicInfo.DisplayName}}<br/>
@@ -305,7 +305,7 @@ ${SIGNOFF_HTML}
 <p>The company shall pay you a sum of INR {{CustomAttributes.FnFAmount}} only on account of full &amp; final settlement {{CustomAttributes.ReferenceNo}}</p>
 <p>With this, your account will be settled with our company and nothing will be due from the company to you.</p>
 ${SIGNOFF_HTML_YT_LABS}
-<p style="margin-top:36px">
+<p class="acknowledgement" style="margin-top:24px">
   Acknowledged and Accepted<br/>
   {{EmployeeBasicHeaderInfo.EmployeeNumber}}<br/>
   {{EmployeeBasicInfo.DisplayName}}<br/>
@@ -346,7 +346,7 @@ ${SIGNOFF_HTML_YT_LABS}
 <p>This letter serves as an official appointment document and is governed by the same terms and conditions as that of your initial offer letter. In addition, you shall be entitled to receive Bonuses, perks other benefits that the company may at its discretion make available to its employees as stipulated in the relevant provisions of the Employee policy, under the terms and requirements relating to the benefits imposed by the organization.</p>
 <p>We are happy to have you as part of our team and wish you the best of luck in your job.</p>
 ${SIGNOFF_HTML_YT_LABS}
-<p style="margin-top:36px">
+<p class="acknowledgement" style="margin-top:24px">
   Acknowledged and Accepted,<br/>
   {{EmployeeBasicHeaderInfo.EmployeeNumber}}<br/>
   {{EmployeeBasicInfo.DisplayName}}<br/>
@@ -371,7 +371,7 @@ ${SIGNOFF_HTML_YT_LABS}
 <p>We would also like to remind you of the obligations of the confidentiality and non-disclosure agreement that you had signed during your employment with the Company. We earnestly hope that you will continue to bestow the same degree of commitment in protecting the Intellectual Property of the company as you have agreed to uphold as per the terms of the confidentiality and non-disclosure agreement. We request you to strive and ensure that the trade secrets, confidential and the intellectual property that were developed when you were in the employment of the company continue to be protected and are not compromised in anyway.</p>
 <p>We wish you all the best in your future endeavors!</p>
 ${SIGNOFF_HTML_YT_LABS}
-<p style="margin-top:36px">
+<p class="acknowledgement" style="margin-top:24px">
   Acknowledged and Accepted<br/>
   {{EmployeeBasicHeaderInfo.EmployeeNumber}}<br/>
   {{EmployeeBasicInfo.DisplayName}}<br/>
