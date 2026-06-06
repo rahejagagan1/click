@@ -53,10 +53,29 @@ export async function extractText(buf: Buffer, fileName: string): Promise<string
         ).href;
       } catch { /* swallow — caller handles empty text */ }
     }
+    // Point pdfjs at its bundled standard font data so it can
+    // decode embedded fonts that don't fully ship their own glyph
+    // tables. Without this, the parser logs
+    //   "Ensure that the `standardFontDataUrl` API parameter is provided"
+    // on every PDF and extracts garbage for the affected
+    // characters (Nazia #19's resume hit this — extraction was
+    // partial / empty). pdfjs-dist ships the font data under
+    // standard_fonts/ in its package root.
+    let standardFontDataUrl: string | undefined;
+    try {
+      const req = createRequire(import.meta.url);
+      const fontPkg = req.resolve("pdfjs-dist/package.json");
+      // package.json sits at <root>/package.json; fonts are at
+      // <root>/standard_fonts/ — strip the filename and append.
+      const pkgDir = fontPkg.replace(/[\\/]package\.json$/, "");
+      standardFontDataUrl = pathToFileURL(`${pkgDir}/standard_fonts/`).href;
+      if (!standardFontDataUrl.endsWith("/")) standardFontDataUrl += "/";
+    } catch { /* fall through — extraction still works, just noisy */ }
     const doc = await pdfjs.getDocument({
       data: new Uint8Array(buf),
       isEvalSupported: false,
       useSystemFonts: false,
+      ...(standardFontDataUrl ? { standardFontDataUrl } : {}),
     }).promise;
     const annotUrls = new Set<string>();
     const pages: string[] = [];
