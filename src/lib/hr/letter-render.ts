@@ -126,13 +126,14 @@ async function injectSignatureBeforeRegards(bodyHtml: string, businessUnit?: str
   const altText  = businessUnit === "YT Labs" ? "Kunal Lall" : "Nikit Bassi";
   const sigHeight = businessUnit === "YT Labs" ? "28pt" : "18pt";
   // Insert the signature image INSIDE the "Regards," paragraph as
-  // its first child. Sharing one block element bypasses CSS
-  // margin-collapse weirdness that left a gap when the cursive
-  // lived in its own <p>: once they're siblings inside one
-  // paragraph, the browser stacks them sequentially with no extra
-  // block spacing. Top margin separates from the body; bottom is
-  // 0 so "Regards," sits directly underneath.
-  const sigImg = `<img src="${sig}" alt="${altText}" style="display:block; height:${sigHeight}; width:auto; margin:8pt 0 0 0"/>`;
+  // its first child — sharing one block element with a <br/> after
+  // the img puts the cursive on its own line, then "Regards," on
+  // the next. We use <br/> instead of display:block on the img
+  // because LibreOffice's HTML→PDF importer ignores display:block
+  // on inline elements like <img> (it kept rendering the cursive
+  // on the same line as "Regards," — same paragraph, side by side).
+  // The explicit <br/> works in both renderers.
+  const sigImg = `<img src="${sig}" alt="${altText}" style="height:${sigHeight}; width:auto; vertical-align:bottom"/><br/>`;
   const re = /(<(?:p|div|h[1-6])[^>]*>)(\s*Regards\s*,)/i;
   if (re.test(bodyHtml)) return bodyHtml.replace(re, `$1${sigImg}$2`);
   // Fallback when no "Regards," anchor exists — append at the
