@@ -487,6 +487,58 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ ok: true });
     }
 
+    if (action === "updateEducation") {
+      // HR-side inline edit of the candidate's education history.
+      // Use case: the resume auto-parser picks up junk (a bullet
+      // from a different section gets tagged as a degree) or misses
+      // entries entirely, and HR needs to clean it up before
+      // shortlisting. Body shape:
+      //   { action: "updateEducation",
+      //     entries: [{ course, branch, startOfCourse, endOfCourse,
+      //                  university, location }, …] }
+      const raw = Array.isArray(body?.entries) ? body.entries : null;
+      if (!raw) {
+        return NextResponse.json({ error: "entries array required" }, { status: 400 });
+      }
+      // Whitelist keys + cap lengths so HR can't paste a 1MB blob
+      // into "course" and balloon the row.
+      const TRUNC = (s: any, n: number) =>
+        typeof s === "string" ? s.trim().slice(0, n) : "";
+      const cleaned = raw
+        .map((e: any) => ({
+          course:        TRUNC(e?.course,        120),
+          branch:        TRUNC(e?.branch,        120),
+          startOfCourse: TRUNC(e?.startOfCourse,  20),
+          endOfCourse:   TRUNC(e?.endOfCourse,    20),
+          university:    TRUNC(e?.university,    200),
+          location:      TRUNC(e?.location,      120),
+        }))
+        // Drop entries where every field is empty — those are
+        // half-filled rows the user added then abandoned.
+        .filter((e: any) => Object.values(e).some((v) => typeof v === "string" && v.length > 0));
+      if (cleaned.length > 20) {
+        return NextResponse.json({ error: "Too many education entries (max 20)" }, { status: 400 });
+      }
+      // Column is text holding JSON — match the storage shape
+      // CandidateDrawer's parseJsonList<T>() reads.
+      await prisma.$executeRawUnsafe(
+        `UPDATE "JobApplication"
+            SET "educationDetails" = $1,
+                "updatedAt"        = NOW()
+          WHERE "id" = $2`,
+        JSON.stringify(cleaned), id,
+      );
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "CandidateActivity" ("applicationId", "kind", "summary", "meta", "actorId")
+         VALUES ($1, 'profile_edit', $2, $3::jsonb, $4)`,
+        id,
+        `Education updated — ${cleaned.length} entr${cleaned.length === 1 ? "y" : "ies"}`,
+        JSON.stringify({ field: "educationDetails", count: cleaned.length }),
+        actorId,
+      );
+      return NextResponse.json({ ok: true, count: cleaned.length });
+    }
+
     if (action === "setOwner") {
       // Set or clear the recruiter owner for this candidate. ownerId
       // can be null to unassign.
