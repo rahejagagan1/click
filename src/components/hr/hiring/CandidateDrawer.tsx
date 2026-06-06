@@ -654,29 +654,7 @@ function ProfileTab({ c }: { c: Candidate }) {
         {/* Education / Skills / Tags row */}
         <Card>
           <Section title="Education">
-            {educationEntries.length === 0 ? (
-              <p className="text-[12.5px] text-slate-400 italic">
-                No education details on file. Candidates can add education on the apply form.
-              </p>
-            ) : (
-              <ul className="space-y-3">
-                {educationEntries.map((e, i) => (
-                  <li key={`edu-${i}`} className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3">
-                    <p className="text-[13px] font-semibold text-slate-800">
-                      {e.course || "—"}
-                      {e.branch ? <span className="text-slate-500 font-medium"> · {e.branch}</span> : null}
-                    </p>
-                    <p className="mt-0.5 text-[11.5px] text-slate-500">
-                      {e.university || ""}
-                      {e.university && e.location ? <span className="text-slate-400"> · {e.location}</span> : null}
-                    </p>
-                    <p className="mt-0.5 text-[11px] text-slate-400">
-                      {fmtDateRange(e.startOfCourse, e.endOfCourse, false)}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <EducationEditor candidateId={c.id} entries={educationEntries} />
           </Section>
 
           <Section title="Skills">
@@ -834,6 +812,150 @@ function fmtExperience(
 // (experienceDetails, educationDetails). Returns [] on any failure so
 // the Profile tab degrades gracefully when the value is missing or
 // malformed (legacy rows, hand-edits in the DB, etc.).
+// Inline editor for the Education section. Read-only by default;
+// HR clicks "Edit" to enter add/edit/remove mode, then "Save" to
+// commit to the DB. Used when the resume auto-parser produces
+// garbage (a bullet from the wrong section gets tagged as a
+// degree) or misses entries entirely — common with non-standard
+// resume templates and OCR-recovered scans.
+function EducationEditor({
+  candidateId, entries,
+}: { candidateId: number; entries: EducationEntry[] }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft]     = useState<EducationEntry[]>(entries);
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+  // Re-seed the draft whenever the parent's entries change (e.g.
+  // after a SWR refetch). We deliberately DON'T blow away the
+  // draft mid-edit even if the server data shifts underneath.
+  useEffect(() => { if (!editing) setDraft(entries); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [JSON.stringify(entries)]);
+  const cancel = () => { setDraft(entries); setEditing(false); setError(null); };
+  const updateRow = (idx: number, patch: Partial<EducationEntry>) =>
+    setDraft((d) => d.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
+  const removeRow = (idx: number) =>
+    setDraft((d) => d.filter((_, i) => i !== idx));
+  const addRow = () =>
+    setDraft((d) => [...d, { course: "", branch: "", startOfCourse: "", endOfCourse: "", university: "", location: "" }]);
+  const save = async () => {
+    setSaving(true); setError(null);
+    try {
+      const res = await fetch(`/api/hr/hiring/candidates/${candidateId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "updateEducation", entries: draft }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || `Save failed (${res.status})`);
+      }
+      setEditing(false);
+      globalMutate(`/api/hr/hiring/candidates/${candidateId}`);
+    } catch (e: any) {
+      setError(e?.message || "Save failed");
+    } finally { setSaving(false); }
+  };
+
+  if (!editing) {
+    return (
+      <>
+        {entries.length === 0 ? (
+          <p className="text-[12.5px] text-slate-400 italic">
+            No education details on file. Click <span className="font-semibold">Edit</span> to add manually.
+          </p>
+        ) : (
+          <ul className="space-y-3">
+            {entries.map((e, i) => (
+              <li key={`edu-${i}`} className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3">
+                <p className="text-[13px] font-semibold text-slate-800">
+                  {e.course || "—"}
+                  {e.branch ? <span className="text-slate-500 font-medium"> · {e.branch}</span> : null}
+                </p>
+                <p className="mt-0.5 text-[11.5px] text-slate-500">
+                  {e.university || ""}
+                  {e.university && e.location ? <span className="text-slate-400"> · {e.location}</span> : null}
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  {fmtDateRange(e.startOfCourse, e.endOfCourse, false)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="mt-3 inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-slate-200 hover:border-slate-300 text-[11.5px] font-semibold text-slate-700"
+        >Edit education</button>
+      </>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {draft.length === 0 ? (
+        <p className="text-[12.5px] text-slate-400 italic">No entries yet — click "Add education" to begin.</p>
+      ) : (
+        draft.map((e, i) => (
+          <div key={`edu-edit-${i}`} className="rounded-lg border border-slate-200 bg-white px-3.5 py-3 space-y-2 relative">
+            <button
+              type="button"
+              onClick={() => removeRow(i)}
+              title="Remove this entry"
+              className="absolute top-2 right-2 text-slate-400 hover:text-rose-500 h-5 w-5 inline-flex items-center justify-center"
+            >×</button>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Degree / Course"   value={e.course || ""}        onChange={(v) => updateRow(i, { course: v })}        placeholder="e.g. Bachelor of Engineering" />
+              <Field label="Branch / Major"    value={e.branch || ""}        onChange={(v) => updateRow(i, { branch: v })}        placeholder="e.g. Computer Science" />
+              <Field label="University / Institution" value={e.university || ""}    onChange={(v) => updateRow(i, { university: v })}    placeholder="e.g. Punjab Engineering College" />
+              <Field label="Location"          value={e.location || ""}      onChange={(v) => updateRow(i, { location: v })}      placeholder="e.g. Chandigarh, India" />
+              <Field label="Start"             value={e.startOfCourse || ""} onChange={(v) => updateRow(i, { startOfCourse: v })} placeholder="e.g. 2020" />
+              <Field label="End"               value={e.endOfCourse || ""}   onChange={(v) => updateRow(i, { endOfCourse: v })}   placeholder="e.g. 2024 or Present" />
+            </div>
+          </div>
+        ))
+      )}
+      <button
+        type="button"
+        onClick={addRow}
+        className="w-full h-8 rounded-md border border-dashed border-slate-300 hover:border-[#3b82f6] hover:bg-[#3b82f6]/[0.04] text-[12px] font-semibold text-slate-600"
+      >+ Add education</button>
+      {error && <p className="text-[11.5px] text-rose-600">{error}</p>}
+      <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+        <button
+          type="button"
+          onClick={cancel}
+          disabled={saving}
+          className="h-7 px-3 rounded-md text-[11.5px] font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+        >Cancel</button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="h-7 px-3 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[11.5px] font-semibold disabled:opacity-50"
+        >{saving ? "Saving…" : "Save"}</button>
+      </div>
+    </div>
+  );
+}
+
+// Compact labelled input — shared by every cell in EducationEditor.
+function Field({
+  label, value, onChange, placeholder,
+}: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <label className="block">
+      <span className="block text-[10.5px] uppercase tracking-wider font-semibold text-slate-500 mb-1">{label}</span>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full h-8 px-2.5 border border-slate-200 rounded-md text-[12.5px] bg-white text-slate-800 focus:outline-none focus:border-[#3b82f6]"
+      />
+    </label>
+  );
+}
+
 function parseJsonList<T>(raw: string | null | undefined): T[] {
   if (!raw) return [];
   try {
