@@ -57,9 +57,38 @@ const JD_QUILL_FORMATS = [
 ];
 
 /** Plain-text (extractor output) → Quill HTML. Same heuristic as
- *  the Replace-JD modal so the two editors behave identically:
- *  lines ending in ":" → <h3>, "- " / "* " / "• " → <ul>,
- *  "1." → <ol>, the rest → <p>. Already-HTML input passes through. */
+ *  the Replace-JD modal so the two editors behave identically.
+ *  Detects:
+ *    • Job title (line starting "Job Description - …" or "Job Title:")
+ *      → <h2 style="text-align:center"> — same prominence the PDF
+ *      gives it.
+ *    • Standard JD section headings (Job Overview, Role &
+ *      Responsibilities, Required Skills, Qualifications, About
+ *      the Company, Benefits, How to Apply, etc.) → <h3>.
+ *    • ALL-CAPS short lines (≤ 60 chars) → <h3>.
+ *    • Lines ending in ":" with no trailing content → <h3>.
+ *    • "- " / "* " / "• " bullets → <ul>.
+ *    • "1." / "1)" numbered items → <ol>.
+ *    • Everything else → <p>.
+ *  Already-HTML input passes through unchanged. */
+
+// Common JD section labels — case-insensitive match on the FULL line
+// (after stripping trailing colons / dashes). When the line matches
+// any of these we promote it to a <h3>, even if it doesn't end in ":".
+const JD_SECTION_HEADINGS = new Set([
+  "job overview", "job description", "job summary", "overview", "summary",
+  "role & responsibilities", "roles & responsibilities", "responsibilities",
+  "key responsibilities", "what you'll do", "what you will do",
+  "required skills", "required qualifications", "qualifications",
+  "preferred skills", "preferred qualifications", "nice to have",
+  "requirements", "must have", "must-haves", "minimum requirements",
+  "skills", "skills required", "technical skills",
+  "what we offer", "benefits", "perks", "compensation",
+  "about us", "about the company", "about nb media",
+  "how to apply", "application process", "next steps",
+  "education", "experience", "key skills",
+]);
+
 function plainTextToQuillHtml(input: string): string {
   if (!input) return "";
   const trimmed = input.trim();
@@ -68,6 +97,7 @@ function plainTextToQuillHtml(input: string): string {
   const out: string[] = [];
   let bulletBuf: string[] = [];
   let numberedBuf: string[] = [];
+  let sawTitle = false; // only promote the FIRST job-title line
   const escape = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const flushB = () => {
@@ -83,6 +113,10 @@ function plainTextToQuillHtml(input: string): string {
     }
   };
   const flushAll = () => { flushB(); flushN(); };
+  const isSectionHeading = (line: string): boolean => {
+    const norm = line.replace(/[:\s]+$/, "").trim().toLowerCase();
+    return JD_SECTION_HEADINGS.has(norm);
+  };
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) { flushAll(); out.push("<p><br></p>"); continue; }
@@ -91,11 +125,34 @@ function plainTextToQuillHtml(input: string): string {
     const num = line.match(/^\d+[.)]\s+(.*)$/);
     if (num) { flushB(); numberedBuf.push(num[1]); continue; }
     flushAll();
+    // ── Job title — "Job Description - Foo" or "Job Title: Foo".
+    //    Promote ONCE to a centered <h2> so it sits above the JD
+    //    body the same way the source PDF does.
+    if (!sawTitle) {
+      const titleMatch = line.match(/^(?:Job\s+Description|Job\s+Title)\s*[-–—:]\s*(.+)$/i);
+      if (titleMatch) {
+        out.push(`<h2 style="text-align:center">${escape(titleMatch[0])}</h2>`);
+        sawTitle = true;
+        continue;
+      }
+    }
+    // ── Known section heading anywhere in the document.
+    if (isSectionHeading(line)) {
+      out.push(`<h3>${escape(line.replace(/[:\s]+$/, ""))}</h3>`);
+      continue;
+    }
+    // ── Lines ending in ":" with no trailing content → heading.
     if (/:\s*$/.test(line) && line.length <= 60) {
       out.push(`<h3>${escape(line.replace(/:\s*$/, ""))}</h3>`);
-    } else {
-      out.push(`<p>${escape(line)}</p>`);
+      continue;
     }
+    // ── ALL-CAPS short lines → heading (handles "ROLE &
+    //    RESPONSIBILITIES" style headers).
+    if (line.length <= 60 && line.length >= 3 && line === line.toUpperCase() && /[A-Z]/.test(line)) {
+      out.push(`<h3>${escape(line)}</h3>`);
+      continue;
+    }
+    out.push(`<p>${escape(line)}</p>`);
   }
   flushAll();
   return out.join("");
