@@ -471,7 +471,13 @@ export async function wrapLetterPreviewHtml(
        this they'd stack and the body content area would be half
        the page. */
     @page { size: A4; margin: 0; }
-    html, body { margin: 0; padding: 0; background: #f8fafc; font-family: "Times New Roman", Times, serif; color: #1f2937; }
+    /* Global letter-spacing of 0.5px on every text element so the
+       letter has the airy, formal feel of a printed HR document.
+       Applied at the body level so every nested element inherits
+       it — letterhead, title, paragraphs, lists, table cells.
+       Brand-agnostic: same rule applies to NB Media and YT Labs
+       letters since they share this wrapper. */
+    html, body { margin: 0; padding: 0; background: #f8fafc; font-family: "Times New Roman", Times, serif; color: #1f2937; letter-spacing: 0.5px; }
     .page {
       width: 210mm;
       min-height: 297mm;
@@ -506,27 +512,30 @@ export async function wrapLetterPreviewHtml(
        the body title is created by the title margin + 22pt gap
        below the letterhead instead. */
     .letterhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 24pt; margin-bottom: 22pt; padding-bottom: 0; }
-    .letterhead .lh-text { font-size: 10.5pt; line-height: 1.45; letter-spacing: 0.3px; }
-    .letterhead .lh-text .company { font-size: 12pt; font-weight: bold; margin-bottom: 4pt; letter-spacing: 0.5px; }
+    .letterhead .lh-text { font-size: 10.5pt; line-height: 1.45; }
+    .letterhead .lh-text .company { font-size: 12pt; font-weight: bold; margin-bottom: 4pt; }
     .letterhead .lh-logo { width: 86pt; height: auto; }
-    h1.letter-title { font-size: 16pt; font-weight: bold; text-align: center; margin: 14pt 0 16pt; letter-spacing: 0.5px; }
+    h1.letter-title { font-size: 16pt; font-weight: bold; text-align: center; margin: 14pt 0 16pt; }
     /* Body paragraphs — 1.5 line height + 0.5px letter-spacing
        gives the text the airy, formal feel of a printed HR letter.
        Margins tightened to 4pt so the 1.5 line-height doesn't
        double-space consecutive paragraphs. */
-    p { font-size: 12pt; line-height: 1.5; margin: 4pt 0; text-align: justify; letter-spacing: 0.5px; }
-    p.signoff, p[data-role="signoff"] { text-align: left; margin: 2pt 0; letter-spacing: 0.5px; }
-    p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; letter-spacing: 0.5px; }
-    h2 { font-size: 14pt; margin: 16pt 0 8pt; letter-spacing: 0.5px; }
-    h3 { font-size: 13pt; margin: 14pt 0 8pt; letter-spacing: 0.5px; }
+    /* letter-spacing is inherited from body (0.5px global) — no
+       per-rule override here so the entire document tracks
+       consistently across paragraphs, headings, and list items. */
+    p { font-size: 12pt; line-height: 1.5; margin: 4pt 0; text-align: justify; }
+    p.signoff, p[data-role="signoff"] { text-align: left; margin: 2pt 0; }
+    p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; }
+    h2 { font-size: 14pt; margin: 16pt 0 8pt; }
+    h3 { font-size: 13pt; margin: 14pt 0 8pt; }
     ol, ul { padding-left: 22pt; margin: 8pt 0; }
-    ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.5; letter-spacing: 0.5px; }
+    ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.5; }
     /* Force Times New Roman on tables too — some user agents fall
        back to a sans-serif default when the cell content is plain
        text (e.g. the pay-table breakup). Letter-spacing matches
        the body for consistent typography. */
     table { width: 100%; border-collapse: collapse; margin: 10pt 0 14pt; font-family: "Times New Roman", Times, serif; }
-    table th, table td { border: 1pt solid #1f2937; padding: 6pt 9pt; font-size: 11pt; text-align: left; font-family: "Times New Roman", Times, serif; letter-spacing: 0.4px; }
+    table th, table td { border: 1pt solid #1f2937; padding: 6pt 9pt; font-size: 11pt; text-align: left; font-family: "Times New Roman", Times, serif; }
     table th { background: #f3f4f6; }
     .page-break { display: block; height: 22pt; border-top: 1pt dashed #cbd5e1; margin: 18pt 0; padding-top: 8pt; }
   </style>
