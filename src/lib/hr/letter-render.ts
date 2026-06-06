@@ -252,13 +252,30 @@ function resolvePlaceholder(
       break;
     case "DocumentFilterInfo":
       if (field === "ShortDate") return fmtShortDate(new Date());
+      // Pronouns return lowercase by default because every existing
+      // template uses them MID-SENTENCE ("Arpit fulfilled his roles",
+      // "we wish him good luck") — capitalized would read as a
+      // typo. Templates that need the capitalized form (first word
+      // of a sentence) should use {{…HeSheCap}} / {{…HisHerCap}}.
       if (field === "HeShe") {
+        const g = (p?.gender || "").toLowerCase();
+        if (g === "male")   return "he";
+        if (g === "female") return "she";
+        return "they";
+      }
+      if (field === "HeSheCap") {
         const g = (p?.gender || "").toLowerCase();
         if (g === "male")   return "He";
         if (g === "female") return "She";
         return "They";
       }
       if (field === "HisHer") {
+        const g = (p?.gender || "").toLowerCase();
+        if (g === "male")   return "his";
+        if (g === "female") return "her";
+        return "their";
+      }
+      if (field === "HisHerCap") {
         const g = (p?.gender || "").toLowerCase();
         if (g === "male")   return "His";
         if (g === "female") return "Her";
@@ -491,7 +508,10 @@ export async function wrapLetterPreviewHtml(
       width: 210mm;
       min-height: 297mm;
       margin: 0 auto;
-      padding: 22mm 18mm;
+      /* More vertical breathing room on the page — 26mm top so
+         content doesn't hug the letterhead, 22mm bottom for the
+         footer area. Horizontal stays at 18mm. */
+      padding: 26mm 18mm 22mm 18mm;
       background: white;
       box-shadow: 0 0 0 1px rgba(15,23,42,0.06), 0 2px 16px rgba(15,23,42,0.06);
       box-sizing: border-box;
@@ -551,9 +571,26 @@ export async function wrapLetterPreviewHtml(
        agents fall back to a sans-serif default for table cells if
        the family isn't restated. Liberation Serif ensures Linux
        VPS renders look the same as local. */
-    table { width: 100%; border-collapse: collapse; margin: 10pt 0 14pt; font-family: "Times New Roman", "Liberation Serif", "Nimbus Roman", "DejaVu Serif", Times, serif; }
-    table th, table td { border: 1pt solid #1f2937; padding: 6pt 9pt; font-size: 11pt; text-align: left; font-family: "Times New Roman", "Liberation Serif", "Nimbus Roman", "DejaVu Serif", Times, serif; }
-    table th { background: #f3f4f6; }
+    table { width: 100%; border-collapse: collapse; margin: 14pt 0 18pt; font-family: "Times New Roman", "Liberation Serif", "Nimbus Roman", "DejaVu Serif", Times, serif; }
+    /* More breathing room: 9pt vertical padding, 12pt horizontal —
+       reads like a printed pay-table instead of a cramped grid. */
+    table th, table td { border: 1pt solid #1f2937; padding: 9pt 12pt; font-size: 11pt; text-align: left; vertical-align: middle; font-family: "Times New Roman", "Liberation Serif", "Nimbus Roman", "DejaVu Serif", Times, serif; }
+    table th { background: #f3f4f6; font-weight: bold; }
+    /* Pay-table auto-alignment — first column left (labels),
+       second column right (rupee amounts so the digits line up by
+       their right edge), third column center (basis labels like
+       50%, Fixed, Remaining). Applies whenever the body uses the
+       .pay-table class (set on all Revised Offer Letter tables).
+       Number cells get a tabular-nums OpenType feature so
+       0/1/…/9 all occupy the same horizontal cell — keeps the
+       column visually clean even when amounts differ in digit
+       count. */
+    table.pay-table td:nth-child(1), table.pay-table th:nth-child(1) { text-align: left; }
+    table.pay-table td:nth-child(2), table.pay-table th:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; }
+    table.pay-table td:nth-child(3), table.pay-table th:nth-child(3) { text-align: center; }
+    /* Total row reads as a footer — slightly tinted background +
+       bold weight so the eye lands on it. */
+    table.pay-table tr:last-child td { background: #f9fafb; font-weight: bold; }
     .page-break { display: block; height: 22pt; border-top: 1pt dashed #cbd5e1; margin: 18pt 0; padding-top: 8pt; }
   </style>
 </head>
