@@ -508,10 +508,11 @@ export async function wrapLetterPreviewHtml(
       width: 210mm;
       min-height: 297mm;
       margin: 0 auto;
-      /* More vertical breathing room on the page — 26mm top so
-         content doesn't hug the letterhead, 22mm bottom for the
-         footer area. Horizontal stays at 18mm. */
-      padding: 26mm 18mm 22mm 18mm;
+      /* Compact margins — 16mm top / 18mm bottom / 16mm sides.
+         Trimmed from 26 × 22 × 18 because long letters (Relieving
+         with its 7-line NDA paragraph) were spilling onto page 2.
+         Still plenty of whitespace for a printed letter. */
+      padding: 16mm 16mm 18mm 16mm;
       background: white;
       box-shadow: 0 0 0 1px rgba(15,23,42,0.06), 0 2px 16px rgba(15,23,42,0.06);
       box-sizing: border-box;
@@ -560,11 +561,14 @@ export async function wrapLetterPreviewHtml(
     ol, ul { padding-left: 22pt; margin: 6pt 0; }
     ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.55; word-spacing: 0.5px; }
     /* Keep the signature cluster (Regards / Name / Founder & CEO +
-       cursive image) and the Acknowledgement block together —
-       they look broken when split across pages. CSS3 break-inside
-       is the modern property; page-break-inside is the WebKit /
-       puppeteer-friendly alias. */
-    .no-break, .signature-block, p[data-role="signoff"], .acknowledgement { page-break-inside: avoid; break-inside: avoid; }
+       cursive image) together — it has the cursive PNG and
+       splitting it mid-block would look broken. We deliberately
+       DO NOT lock down .acknowledgement because it's plain text
+       with <br/> separators; if a tight letter would otherwise
+       push the whole acknowledgement to page 2 just to keep its
+       4 lines together, we'd rather let it flow naturally and
+       keep the document on one page. */
+    .no-break, .signature-block, p[data-role="signoff"] { page-break-inside: avoid; break-inside: avoid; }
     /* Force the same Times-family stack on tables — some user
        agents fall back to a sans-serif default for table cells if
        the family isn't restated. Liberation Serif ensures Linux
@@ -589,6 +593,18 @@ export async function wrapLetterPreviewHtml(
     /* Total row reads as a footer — slightly tinted background +
        bold weight so the eye lands on it. */
     table.pay-table tr:last-child td { background: #f9fafb; font-weight: bold; }
+    /* Pay-table must NEVER split across pages — splitting it
+       leaves "Basic Pay" on one page and the rest of the breakup
+       on another, which reads as broken. page-break-inside is the
+       puppeteer/Chromium alias; break-inside is the modern spec.
+       The preceding "COMPENSATION STRUCTURE" / "Annexure A"
+       heading uses page-break-after: avoid so the heading and
+       table travel together — if there isn't room for both at the
+       bottom of a page, Chrome pushes the whole heading + table
+       to the next page intact. */
+    table.pay-table { page-break-inside: avoid; break-inside: avoid; }
+    table.pay-table tr { page-break-inside: avoid; break-inside: avoid; }
+    h2.section-title, h3 { page-break-after: avoid; break-after: avoid; }
     .page-break { display: block; height: 22pt; border-top: 1pt dashed #cbd5e1; margin: 18pt 0; padding-top: 8pt; }
   </style>
 </head>
