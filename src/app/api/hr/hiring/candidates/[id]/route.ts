@@ -493,6 +493,48 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ ok: true });
     }
 
+    if (action === "updateSkills") {
+      // HR-side inline edit of the candidate's skills tags. Use
+      // case: resume parser couldn't extract skills (multi-column
+      // sidebar layout, sectioned headings the regex doesn't
+      // match, etc.) and HR is filling them in by hand.
+      // Body shape: { action:"updateSkills", skills:["Foo","Bar"] }
+      // — stored as comma-separated string in the existing
+      // JobApplication.skills text column (matches the chip-
+      // input format the apply form writes).
+      const raw = Array.isArray(body?.skills) ? body.skills : null;
+      if (!raw) {
+        return NextResponse.json({ error: "skills array required" }, { status: 400 });
+      }
+      const cleaned = raw
+        .map((s: any) => (typeof s === "string" ? s.trim().slice(0, 80) : ""))
+        .filter((s: string) => s.length > 0);
+      if (cleaned.length > 100) {
+        return NextResponse.json({ error: "Too many skills (max 100)" }, { status: 400 });
+      }
+      // Dedup case-insensitively but preserve the HR-entered casing.
+      const seen = new Set<string>();
+      const dedup: string[] = [];
+      for (const s of cleaned) {
+        const key = s.toLowerCase();
+        if (!seen.has(key)) { seen.add(key); dedup.push(s); }
+      }
+      const joined = dedup.join(", ");
+      await prisma.$executeRawUnsafe(
+        `UPDATE "JobApplication" SET "skills" = $1, "updatedAt" = NOW() WHERE "id" = $2`,
+        joined || null, id,
+      );
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "CandidateActivity" ("applicationId", "kind", "summary", "meta", "actorId")
+         VALUES ($1, 'profile_edit', $2, $3::jsonb, $4)`,
+        id,
+        `Skills updated — ${dedup.length} skill${dedup.length === 1 ? "" : "s"}`,
+        JSON.stringify({ field: "skills", count: dedup.length }),
+        actorId,
+      );
+      return NextResponse.json({ ok: true, count: dedup.length });
+    }
+
     if (action === "updateEducation") {
       // HR-side inline edit of the candidate's education history.
       // Use case: the resume auto-parser picks up junk (a bullet
