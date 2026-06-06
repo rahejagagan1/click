@@ -172,7 +172,6 @@ ${SIGNOFF_HTML}
       },
     ],
     bodyHtml: `
-<p class="note">NOTE: This is a temporary/ Conditional offer and cannot be used for Negotiations with other companies.</p>
 <p>{{DocumentFilterInfo.ShortDate}}</p>
 <p>Dear <strong>{{EmployeeBasicInfo.DisplayName}}</strong></p>
 <p>With reference to your application dated and subsequent interview with us, we are pleased to offer you employment for the position of <strong>{{EmployeeJobInfo.JobTitle}}</strong> with <strong>YT Money Productions Pvt. Ltd.</strong> (operating under the brand name NB Media) We trust that your knowledge, skills, and experience will be among our most valuable assets.</p>
@@ -190,7 +189,6 @@ ${SIGNOFF_HTML}
 ${SIGNOFF_HTML}
 
 <div class="page-break"></div>
-<p class="note">This is a temporary/ Conditional offer and cannot be used for Negotiations with other companies.</p>
 <h2 class="section-title">TERMS AND CONDITIONS:</h2>
 <p>Following are the terms and conditions in reference to your employment as <strong>{{EmployeeJobInfo.JobTitle}}</strong> at YT Money Productions Pvt. Ltd. (operating under the brand name NB Media.)</p>
 <ol class="terms">
@@ -405,7 +403,6 @@ ${SIGNOFF_HTML_YT_LABS}
       },
     ],
     bodyHtml: `
-<p class="note">NOTE: This is a temporary/ Conditional offer and cannot be used for Negotiations with other companies.</p>
 <p>{{DocumentFilterInfo.ShortDate}}</p>
 <p>Dear <strong>{{EmployeeBasicInfo.DisplayName}}</strong></p>
 <p>With reference to your application dated and subsequent interview with us, we are pleased to offer you employment for the position of <strong>{{EmployeeJobInfo.JobTitle}}</strong> with <strong>Billion Films Private Limited</strong> (operating under the brand name of YouTuber Labs) We trust that your knowledge, skills, and experience will be among our most valuable assets.</p>
@@ -423,7 +420,6 @@ ${SIGNOFF_HTML_YT_LABS}
 ${SIGNOFF_HTML_YT_LABS}
 
 <div class="page-break"></div>
-<p class="note">This is a temporary/ Conditional offer and cannot be used for Negotiations with other companies.</p>
 <h2 class="section-title">TERMS AND CONDITIONS:</h2>
 <p>Following are the terms and conditions in reference to your employment as <strong>{{EmployeeJobInfo.JobTitle}}</strong> at Billion Films Private Limited (operating under the brand name of YouTuber Labs.)</p>
 <ol class="terms">
