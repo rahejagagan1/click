@@ -199,23 +199,29 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const row = appRows[0];
     if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // ── Auto-backfill from the resume (lazy fallback) ──────────────
+    // ── Auto-backfill from the resume (FIRE-AND-FORGET) ────────────
     // The apply route fires an eager background extraction right
     // after submission, so most rows will already be populated by
     // the time HR opens the drawer. This block stays as a fallback
-    // for rows where:
-    //  • the eager job failed / was killed before completing
-    //  • the candidate was imported through another path that
-    //    bypasses /api/jobs/apply
-    //  • HR has manually nulled a field and wants it re-extracted
-    // Soft-fails inside the helper — never breaks the GET response.
+    // for rows where the eager job failed / the candidate was
+    // imported through a path that bypasses /api/jobs/apply / HR
+    // has manually nulled a field.
+    //
+    // CRITICAL: we DO NOT await runResumeBackfill any more. The
+    // backfill internally runs the resume parser (including OCR
+    // fallback for scanned PDFs) which can take 30-120 seconds on
+    // a difficult document — long enough that the API request
+    // times out and the candidate drawer hangs on a spinner
+    // forever. User reported "candidate #21 stuck loading" — this
+    // was the cause.
+    //
+    // Returning fresh data IS still possible: kick off the
+    // backfill, fire a SWR mutate from the client when the user
+    // refetches, and the next drawer open picks up the parsed
+    // values. Trade-off is acceptable — most candidates already
+    // have complete data; this only affects a handful of rows.
     if (row.resumeBlob && needsBackfill(row)) {
-      const patch = await runResumeBackfill(id);
-      // Reflect the patch in the row we're about to return so the
-      // drawer renders the new values on this very response.
-      for (const [k, v] of Object.entries(patch)) {
-        (row as Record<string, unknown>)[k] = v;
-      }
+      runResumeBackfill(id).catch(() => { /* logged inside helper */ });
     }
 
     const candidate = {
