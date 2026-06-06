@@ -451,6 +451,58 @@ export async function wrapLetterPreviewHtml(
 </html>`;
 }
 
+/**
+ * Stripped-down HTML wrapper specifically for LibreOffice HTML→PDF.
+ *
+ * LibreOffice's HTML importer struggles with modern CSS — `position:
+ * absolute`, flexbox, mm-based widths, background-image positioning,
+ * and `@page` rules all render unpredictably (we saw a 3-page blow-out
+ * where the watermark + logo each took a full page because LibreOffice
+ * read absolute-positioned images as block content). This wrapper
+ * sticks to what LibreOffice does render reliably:
+ *
+ *   • A 2-col `<table>` for the letterhead (text left, logo right),
+ *     with the logo's width set via the `width` attribute (not CSS).
+ *   • Sequential block-level content for body / signature / signoff.
+ *   • No watermark — LibreOffice can't anchor a backdrop image
+ *     without scaling it to the page. The preview pane still shows
+ *     the watermark via the rich wrapLetterPreviewHtml.
+ *   • Inline `style="font-size:..."` instead of class-based rules
+ *     so the importer doesn't drop styling.
+ */
+export async function wrapLetterForPdf(
+  bodyHtml: string,
+  title: string,
+  businessUnit: string | null = "NB Media",
+): Promise<string> {
+  const chrome = await getBrandChrome(businessUnit);
+  bodyHtml = await injectSignatureBeforeRegards(bodyHtml, businessUnit);
+  const logoCell = chrome.logoDataUrl
+    ? `<td style="vertical-align:top; text-align:right; padding:0;"><img src="${chrome.logoDataUrl}" alt="${escapeHtml(chrome.altText)}" width="86" /></td>`
+    : `<td></td>`;
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(title)}</title>
+</head>
+<body style="font-family: 'Times New Roman', Times, serif; color: #1f2937; font-size: 12pt; line-height: 1.5; margin: 0;">
+  <table style="width:100%; border-collapse:collapse; margin-bottom:18px;">
+    <tr>
+      <td style="vertical-align:top; padding:0; font-size:10.5pt; line-height:1.45;">
+        <div style="font-size:12pt; font-weight:bold; margin-bottom:4pt;">${escapeHtml(chrome.company)}</div>
+        ${chrome.addressHtml}
+      </td>
+      ${logoCell}
+    </tr>
+  </table>
+  <hr style="border:none; border-top:1px solid #e5e7eb; margin-bottom:14px;" />
+  <h1 style="font-size:16pt; font-weight:bold; text-align:center; margin:14pt 0 16pt 0;">${escapeHtml(title)}</h1>
+  ${bodyHtml}
+</body>
+</html>`;
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (m) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
