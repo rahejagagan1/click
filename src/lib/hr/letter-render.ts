@@ -272,8 +272,70 @@ function resolvePlaceholder(
     case "CustomAttributes":
       // HR-supplied per-render values (FnFAmount, ReferenceNo, …)
       return ctx.customFields?.[field] ?? "";
+    case "Salary":
+      // Auto-derived salary breakup. HR types the annual package
+      // (e.g. 600000) and ticks the EnablePf checkbox; this section
+      // expands {{Salary.Basic}}, {{Salary.HRA}}, … into the
+      // computed rupees per the NB Media / YT Labs standard:
+      //   Monthly CTC = Annual / 12
+      //   Basic       = 50% × monthly
+      //   HRA         = 20% × monthly
+      //   PF          = 1800 (fixed, only when EnablePf=true)
+      //   DA          = 10% × monthly
+      //   Conveyance  = 7.5% × monthly
+      //   Medical     = 1250 (15K / year)
+      //   Special     = remaining (so the column sums to monthly CTC)
+      return resolveSalary(field, ctx.customFields);
   }
   return null;
+}
+
+/** Compute the standard salary breakup placeholders.
+ *  Reads `AnnualPackage` + `EnablePf` from the HR-entered custom
+ *  fields. Returns "" for unknown fields so renderLetterHtml's
+ *  "missing" list still catches typos. */
+function resolveSalary(field: string, customFields: Record<string, string>): string {
+  const annual = Number(String(customFields?.AnnualPackage ?? "").replace(/[^\d.]/g, ""));
+  if (!Number.isFinite(annual) || annual <= 0) {
+    // Render placeholders as "—" so the table shows empty cells
+    // when HR hasn't entered the package yet.
+    return field === "Annual" || field === "Total" ? "—" : "—";
+  }
+  const enablePf = String(customFields?.EnablePf ?? "false") === "true";
+  const monthly  = annual / 12;
+  const basic    = Math.round(monthly * 0.50);
+  const hra      = Math.round(monthly * 0.20);
+  const da       = Math.round(monthly * 0.10);
+  const conv     = Math.round(monthly * 0.075);
+  const medical  = 1250;
+  const pf       = enablePf ? 1800 : 0;
+  // Special = whatever's left to make the column sum to monthly CTC.
+  // We compute against the rounded values so the totals tie.
+  const monthlyR = Math.round(monthly);
+  const fixedSum = basic + hra + da + conv + medical + pf;
+  const special  = Math.max(0, monthlyR - fixedSum);
+  const fmtRs = (n: number) => n.toLocaleString("en-IN");
+  switch (field) {
+    case "Annual":     return fmtRs(annual);
+    case "Monthly":    return fmtRs(monthlyR);
+    case "Basic":      return fmtRs(basic);
+    case "HRA":        return fmtRs(hra);
+    case "DA":         return fmtRs(da);
+    case "Conveyance": return fmtRs(conv);
+    case "Medical":    return fmtRs(medical);
+    case "PF":         return fmtRs(pf);
+    case "Special":    return fmtRs(special);
+    case "Total":      return fmtRs(monthlyR);
+    // Single placeholder that resolves to the entire PF row when
+    // enabled, or empty when disabled. One template body covers
+    // both PF / no-PF cases without HR touching the HTML.
+    case "PfRow":
+      return enablePf
+        ? `<tr><td>Provident Fund (PF)</td><td>${fmtRs(pf)}</td><td>Fixed</td></tr>`
+        : "";
+    case "EnablePfText": return enablePf ? "with PF" : "without PF";
+    default:           return "";
+  }
 }
 
 export type RenderResult = {
