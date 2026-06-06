@@ -477,7 +477,16 @@ export async function wrapLetterPreviewHtml(
        it — letterhead, title, paragraphs, lists, table cells.
        Brand-agnostic: same rule applies to NB Media and YT Labs
        letters since they share this wrapper. */
-    html, body { margin: 0; padding: 0; background: #f8fafc; font-family: "Times New Roman", Times, serif; color: #1f2937; letter-spacing: 0.5px; }
+    /* Font stack: Times New Roman (Windows/macOS), Liberation
+       Serif (Linux — metric-compatible drop-in for Times), then
+       generic serif. The VPS runs Linux and most distros don't
+       have Times New Roman by default; Liberation Serif ships with
+       the standard fontconfig package and matches Times's
+       character widths exactly, so the letter renders the same
+       layout regardless of which font is actually picked.
+       (Best practice: also apt install ttf-mscorefonts-installer
+       on the VPS so the real Times New Roman is available too.) */
+    html, body { margin: 0; padding: 0; background: #f8fafc; font-family: "Times New Roman", "Liberation Serif", "Nimbus Roman", "DejaVu Serif", Times, serif; color: #1f2937; letter-spacing: 0.5px; }
     .page {
       width: 210mm;
       min-height: 297mm;
@@ -522,20 +531,28 @@ export async function wrapLetterPreviewHtml(
        double-space consecutive paragraphs. */
     /* letter-spacing is inherited from body (0.5px global) — no
        per-rule override here so the entire document tracks
-       consistently across paragraphs, headings, and list items. */
-    p { font-size: 12pt; line-height: 1.5; margin: 4pt 0; text-align: justify; }
+       consistently across paragraphs, headings, and list items.
+       text-align: left avoids the awkward word-gap stretching
+       that text-align: justify creates on short lines (especially
+       visible when Linux font fallbacks are wider than Times New
+       Roman). word-spacing: 0.5px adds a subtle gap between words
+       so the body breathes the same way the letters do.
+       line-height: 1.6 gives more vertical room than the previous
+       1.5 — fixes the "congested" feel users hit on the VPS
+       where the wider serif fallback was crowding the baselines. */
+    p { font-size: 12pt; line-height: 1.6; margin: 5pt 0; text-align: left; word-spacing: 0.5px; }
     p.signoff, p[data-role="signoff"] { text-align: left; margin: 2pt 0; }
     p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; }
     h2 { font-size: 14pt; margin: 16pt 0 8pt; }
     h3 { font-size: 13pt; margin: 14pt 0 8pt; }
     ol, ul { padding-left: 22pt; margin: 8pt 0; }
-    ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.5; }
-    /* Force Times New Roman on tables too — some user agents fall
-       back to a sans-serif default when the cell content is plain
-       text (e.g. the pay-table breakup). Letter-spacing matches
-       the body for consistent typography. */
-    table { width: 100%; border-collapse: collapse; margin: 10pt 0 14pt; font-family: "Times New Roman", Times, serif; }
-    table th, table td { border: 1pt solid #1f2937; padding: 6pt 9pt; font-size: 11pt; text-align: left; font-family: "Times New Roman", Times, serif; }
+    ol li, ul li { margin-bottom: 5pt; font-size: 12pt; line-height: 1.6; word-spacing: 0.5px; }
+    /* Force the same Times-family stack on tables — some user
+       agents fall back to a sans-serif default for table cells if
+       the family isn't restated. Liberation Serif ensures Linux
+       VPS renders look the same as local. */
+    table { width: 100%; border-collapse: collapse; margin: 10pt 0 14pt; font-family: "Times New Roman", "Liberation Serif", "Nimbus Roman", "DejaVu Serif", Times, serif; }
+    table th, table td { border: 1pt solid #1f2937; padding: 6pt 9pt; font-size: 11pt; text-align: left; font-family: "Times New Roman", "Liberation Serif", "Nimbus Roman", "DejaVu Serif", Times, serif; }
     table th { background: #f3f4f6; }
     .page-break { display: block; height: 22pt; border-top: 1pt dashed #cbd5e1; margin: 18pt 0; padding-top: 8pt; }
   </style>
