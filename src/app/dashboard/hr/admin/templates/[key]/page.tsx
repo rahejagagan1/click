@@ -45,9 +45,15 @@ const LETTER_QUILL_FORMATS = [
 type CustomFieldDef = {
   key: string;
   label: string;
-  type: "text" | "number" | "date" | "textarea";
+  type: "text" | "number" | "date" | "textarea" | "checkbox";
   required?: boolean;
   placeholder?: string;
+  /** Inline helper text rendered below the input. */
+  help?: string;
+  /** For checkbox fields only. Strings that represent the
+   *  unchecked/checked state when serialised into customValues. */
+  uncheckedValue?: string;
+  checkedValue?: string;
 };
 
 type Template = {
@@ -267,31 +273,56 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
           {cats.length > 0 && (
             <section className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
               <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Custom fields</label>
-              {cats.map((f) => (
-                <div key={f.key}>
-                  <label className="text-[11.5px] text-slate-600 mb-1 inline-flex items-center gap-1">
-                    {f.label}
-                    {f.required && <span className="text-rose-500">*</span>}
-                  </label>
-                  {f.type === "textarea" ? (
-                    <textarea
-                      value={customValues[f.key] ?? ""}
-                      onChange={(e) => setCustomValues((v) => ({ ...v, [f.key]: e.target.value }))}
-                      rows={3}
-                      placeholder={f.placeholder}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF] resize-none"
-                    />
-                  ) : (
-                    <input
-                      type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
-                      value={customValues[f.key] ?? ""}
-                      onChange={(e) => setCustomValues((v) => ({ ...v, [f.key]: e.target.value }))}
-                      placeholder={f.placeholder}
-                      className="w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]"
-                    />
-                  )}
-                </div>
-              ))}
+              {cats.map((f) => {
+                if (f.type === "checkbox") {
+                  const onVal  = f.checkedValue   ?? "true";
+                  const offVal = f.uncheckedValue ?? "false";
+                  const checked = (customValues[f.key] ?? offVal) === onVal;
+                  return (
+                    <label key={f.key} className="flex items-start gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => setCustomValues((v) => ({ ...v, [f.key]: e.target.checked ? onVal : offVal }))}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#008CFF] focus:ring-[#008CFF]/40"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-[12.5px] font-medium text-slate-800">
+                          {f.label}
+                          {f.required && <span className="text-rose-500"> *</span>}
+                        </span>
+                        {f.help && <span className="block text-[11px] text-slate-500 mt-0.5">{f.help}</span>}
+                      </span>
+                    </label>
+                  );
+                }
+                return (
+                  <div key={f.key}>
+                    <label className="text-[11.5px] text-slate-600 mb-1 inline-flex items-center gap-1">
+                      {f.label}
+                      {f.required && <span className="text-rose-500">*</span>}
+                    </label>
+                    {f.type === "textarea" ? (
+                      <textarea
+                        value={customValues[f.key] ?? ""}
+                        onChange={(e) => setCustomValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                        rows={3}
+                        placeholder={f.placeholder}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF] resize-none"
+                      />
+                    ) : (
+                      <input
+                        type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
+                        value={customValues[f.key] ?? ""}
+                        onChange={(e) => setCustomValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                        placeholder={f.placeholder}
+                        className="w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]"
+                      />
+                    )}
+                    {f.help && <p className="text-[11px] text-slate-500 mt-1">{f.help}</p>}
+                  </div>
+                );
+              })}
             </section>
           )}
 
