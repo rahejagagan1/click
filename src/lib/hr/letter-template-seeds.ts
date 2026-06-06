@@ -135,7 +135,7 @@ ${SIGNOFF_HTML}
 <p>It is to certify that <strong>{{EmployeeBasicInfo.DisplayName}}</strong> was employed as <strong>{{EmployeeJobInfo.JobTitle}}</strong> in the <strong>{{EmployeeJobInfo.Department}}</strong> department of YT Money Productions Pvt. Ltd. (operating under the brand name NB Media) from <strong>{{EmployeeJobInfo.DateJoined}}</strong> to <strong>{{EmployeeJobInfo.LastWorkingDay}}</strong>.</p>
 <p>{{EmployeeBasicInfo.DisplayName}} fulfilled {{DocumentFilterInfo.HisHer}} roles and responsibilities diligently with dedication and commitment to company policy and rules and we wish {{DocumentFilterInfo.HimHer}} good luck for his/her future career and endeavors.</p>
 <p>Please be advised that all outstanding dues, including salary, benefits, and any other entitlements, have been settled as per company policies.</p>
-<p style="font-size:11pt">We would also like to remind you of the obligations of the confidentiality and non-disclosure agreement that you had signed during your employment with the Company. We earnestly hope that you will continue to bestow the same degree of commitment in protecting the Intellectual Property of the company as you have agreed to uphold as per the terms of the confidentiality and non-disclosure agreement. We request you to strive and ensure that the trade secrets, confidential and the intellectual property that were developed when you were in the employment of the company continue to be protected and are not compromised in anyway.</p>
+<p>We would also like to remind you of the obligations of the confidentiality and non-disclosure agreement that you had signed during your employment with the Company. We earnestly hope that you will continue to bestow the same degree of commitment in protecting the Intellectual Property of the company as you have agreed to uphold as per the terms of the confidentiality and non-disclosure agreement. We request you to strive and ensure that the trade secrets, confidential and the intellectual property that were developed when you were in the employment of the company continue to be protected and are not compromised in anyway.</p>
 <p>We wish you all the best in your future endeavors!</p>
 ${SIGNOFF_HTML}
 <p style="margin-top:36px">
@@ -230,7 +230,7 @@ ${SIGNOFF_HTML}
 </p>
 
 <div class="page-break"></div>
-<h2 class="section-title">Annexure "A"</h2>
+<h2 class="section-title" style="text-align:center">Annexure "A"</h2>
 <h3 style="text-align:center">COMPENSATION STRUCTURE</h3>
 <p>Your Annual fixed compensation of Rs. <strong>{{Salary.Annual}}</strong> ({{Salary.EnablePfText}}) will be divided per the following break up:</p>
 <p style="text-align:center"><strong>FIXED MONTHLY PAY:</strong></p>
@@ -257,7 +257,7 @@ ${SIGNOFF_HTML}
 </ul>
 
 <div class="page-break"></div>
-<h2 class="section-title">Annexure "B"</h2>
+<h2 class="section-title" style="text-align:center">Annexure "B"</h2>
 <ol>
   <li>Educational Passing certificates and mark sheets (10th, 12th/Diploma/Graduation/PG etc.)</li>
   <li>Copy of Curriculum Vitae</li>
@@ -368,7 +368,7 @@ ${SIGNOFF_HTML_YT_LABS}
 <p>It is to certify that <strong>{{EmployeeBasicInfo.DisplayName}}</strong> was employed as <strong>{{EmployeeJobInfo.JobTitle}}</strong> in the <strong>{{EmployeeJobInfo.Department}}</strong> department of Billion Films Private Limited (operating under the brand name of YouTuber Labs) from <strong>{{EmployeeJobInfo.DateJoined}}</strong> to <strong>{{EmployeeJobInfo.LastWorkingDay}}</strong>.</p>
 <p>{{EmployeeBasicInfo.DisplayName}} fulfilled {{DocumentFilterInfo.HisHer}} roles and responsibilities diligently with dedication and commitment to company policy and rules and we wish {{DocumentFilterInfo.HimHer}} good luck for his/her future career and endeavors.</p>
 <p>Please be advised that all outstanding dues, including salary, benefits, and any other entitlements, have been settled as per company policies.</p>
-<p style="font-size:11pt">We would also like to remind you of the obligations of the confidentiality and non-disclosure agreement that you had signed during your employment with the Company. We earnestly hope that you will continue to bestow the same degree of commitment in protecting the Intellectual Property of the company as you have agreed to uphold as per the terms of the confidentiality and non-disclosure agreement. We request you to strive and ensure that the trade secrets, confidential and the intellectual property that were developed when you were in the employment of the company continue to be protected and are not compromised in anyway.</p>
+<p>We would also like to remind you of the obligations of the confidentiality and non-disclosure agreement that you had signed during your employment with the Company. We earnestly hope that you will continue to bestow the same degree of commitment in protecting the Intellectual Property of the company as you have agreed to uphold as per the terms of the confidentiality and non-disclosure agreement. We request you to strive and ensure that the trade secrets, confidential and the intellectual property that were developed when you were in the employment of the company continue to be protected and are not compromised in anyway.</p>
 <p>We wish you all the best in your future endeavors!</p>
 ${SIGNOFF_HTML_YT_LABS}
 <p style="margin-top:36px">
@@ -453,7 +453,7 @@ ${SIGNOFF_HTML_YT_LABS}
 </p>
 
 <div class="page-break"></div>
-<h2 class="section-title">Annexure "A"</h2>
+<h2 class="section-title" style="text-align:center">Annexure "A"</h2>
 <h3 style="text-align:center">COMPENSATION STRUCTURE</h3>
 <p>Your Annual fixed compensation of Rs. <strong>{{Salary.Annual}}</strong> ({{Salary.EnablePfText}}) will be divided per the following break up:</p>
 <p style="text-align:center"><strong>FIXED MONTHLY PAY:</strong></p>
@@ -480,7 +480,7 @@ ${SIGNOFF_HTML_YT_LABS}
 </ul>
 
 <div class="page-break"></div>
-<h2 class="section-title">Annexure "B"</h2>
+<h2 class="section-title" style="text-align:center">Annexure "B"</h2>
 <ol>
   <li>Educational Passing certificates and mark sheets (10th, 12th/Diploma/Graduation/PG etc.)</li>
   <li>Copy of Curriculum Vitae</li>
