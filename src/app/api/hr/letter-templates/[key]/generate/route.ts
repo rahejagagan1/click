@@ -14,6 +14,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, isLeadershipOrHR, resolveUserId, serverError } from "@/lib/api-auth";
 import { renderLetterHtml, wrapLetterPreviewHtml, wrapLetterForPdf } from "@/lib/hr/letter-render";
 import { htmlToPdf } from "@/lib/hr/html-to-pdf";
+import { stampWatermark } from "@/lib/hr/pdf-watermark";
 
 export const dynamic = "force-dynamic";
 export const runtime  = "nodejs";
@@ -114,6 +115,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
     let pdfBytes: Buffer | null = null;
     try {
       pdfBytes = await htmlToPdf(pdfHtml);
+      // Stamp the brand watermark over every page. LibreOffice
+      // can't anchor a backdrop image from CSS — its HTML importer
+      // either drops absolute-positioned images or renders them at
+      // full page size. So we do it in pdf-lib after the fact:
+      // centered, ~50% width, 6% opacity. Faint enough to read as
+      // a backdrop, visible enough to brand the document.
+      pdfBytes = await stampWatermark(pdfBytes, tpl.businessUnit);
     } catch (e) {
       console.warn("[letter generate] HTML→PDF (LibreOffice) failed:", (e as any)?.message);
     }
