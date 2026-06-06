@@ -12,10 +12,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, isLeadershipOrHR, resolveUserId, serverError } from "@/lib/api-auth";
-import { renderLetterHtml, wrapLetterPreviewHtml, buildPlaceholderResolver } from "@/lib/hr/letter-render";
-import { renderJdPdfFromText } from "@/lib/jd-doc-from-text";
-import { docxExistsForKey, renderLetterDocxFromFile } from "@/lib/hr/letter-docx-render";
-import { docxToPdf } from "@/lib/docx-to-pdf";
+import { renderLetterHtml, wrapLetterPreviewHtml } from "@/lib/hr/letter-render";
+import { htmlToPdf } from "@/lib/hr/html-to-pdf";
 
 export const dynamic = "force-dynamic";
 export const runtime  = "nodejs";
@@ -87,40 +85,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
       return NextResponse.json({ html: fullHtml, missing, title: tpl.title });
     }
 
-    // PDF flow — two paths:
+    // PDF flow — render the SAME brand-aware preview HTML the
+    // editor's preview pane uses, then convert it to PDF via
+    // LibreOffice. This guarantees preview === PDF for both brands:
     //
-    //   1. PER-TEMPLATE DOCX (preferred): if a source DOCX exists
-    //      at public/templates/letter-<key>.docx (or the legacy
-    //      offer-letter-template.docx for revised_offer_letter),
-    //      we use HR's actual source-of-truth letter as the canvas
-    //      — letterhead, logo, watermark, Nikit's signature, and
-    //      the signoff block are all preserved as binary assets.
-    //      We only walk the document XML and substitute the
-    //      {{Section.Field}} placeholders.
-    //   2. JD-template fallback: when no per-template DOCX exists
-    //      yet, we hand off to the JD pipeline which uses the
-    //      generic jd-template.docx (letterhead + logo + watermark
-    //      but no signature image).
+    //   NB Media → YT Money Productions letterhead + nb-media logo
+    //              + Nikit Bassi signature
+    //   YT Labs  → BILLION FILMS letterhead + YT Labs hash logo
+    //              + Kunal Lall signature
     //
-    // The DOCX-first path keeps every letter pixel-identical to the
-    // PDFs HR shared — same fonts, layout, and signature image as
-    // the source DOCX files.
+    // The earlier per-template DOCX pipeline was retired because it
+    // used jd-template.docx as the canvas — which only carries the
+    // NB Media chrome. YT Labs letters previewed correctly but
+    // generated with NB Media branding. HTML→PDF via LibreOffice
+    // unifies the two outputs and removes the brand-divergence bug.
+    const fullHtml = await wrapLetterPreviewHtml(html, tpl.title, tpl.businessUnit);
     let pdfBytes: Buffer | null = null;
-    if (await docxExistsForKey(tpl.key)) {
-      try {
-        const resolver = await buildPlaceholderResolver({ employeeId, customFields });
-        const { docxBytes } = await renderLetterDocxFromFile(tpl.key, resolver.resolve);
-        pdfBytes = await docxToPdf(docxBytes);
-      } catch (e) {
-        console.warn("[letter generate] per-template DOCX path failed, falling back to JD pipeline:", (e as any)?.message);
-      }
-    }
-    if (!pdfBytes) {
-      try {
-        pdfBytes = await renderJdPdfFromText({ title: tpl.title, text: html });
-      } catch (e) {
-        console.warn("[letter generate] JD-pipeline fallback also failed:", (e as any)?.message);
-      }
+    try {
+      pdfBytes = await htmlToPdf(fullHtml);
+    } catch (e) {
+      console.warn("[letter generate] HTML→PDF (LibreOffice) failed:", (e as any)?.message);
     }
 
     if (!pdfBytes) {
@@ -135,8 +119,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
       // the parser-based sanitiser can't execute scripts on the
       // app origin. Add nosniff + frame DENY headers as
       // belt-and-braces against MIME-confusion / clickjacking.
-      const safeHtml = await wrapLetterPreviewHtml(html, tpl.title, tpl.businessUnit);
-      return new NextResponse(safeHtml, {
+      // Already-built brand-aware HTML — reuse instead of re-wrapping.
+      return new NextResponse(fullHtml, {
         headers: {
           "Content-Type":             "text/html; charset=utf-8",
           "Content-Security-Policy":  "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",

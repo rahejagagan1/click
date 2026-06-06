@@ -2204,6 +2204,15 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
     },
   ];
   const KNOWN_KEYS = new Set<string>(SECTION_CATALOG.flatMap((s) => s.cats.map((c) => c.key)));
+  // Generated-letter rows live under category='employee_letter' (the
+  // auto-save the /api/hr/letter-templates/[key]/generate route writes
+  // when HR clicks "Generate PDF"). Lifted into their own section so
+  // HR sees FnF / probation / relieving / offer letters grouped
+  // together instead of mixed into "Other files".
+  KNOWN_KEYS.add("employee_letter");
+  const generatedLetters = documents.filter(
+    (d: any) => (d.category || "").toLowerCase() === "employee_letter"
+  );
   // Latest doc per category — newest upload wins so a "Replace"
   // shows the freshly uploaded file.
   const docByCat = new Map<string, any>();
@@ -2395,6 +2404,47 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
             </div>
           </div>
         ))}
+
+        {/* Generated letters — auto-saved by the Templates page each
+            time HR clicks "Generate PDF". Same render shape as Other
+            files but in its own section so HR can find them fast. */}
+        {generatedLetters.length > 0 && (
+          <div>
+            <div className="mb-2.5 flex items-baseline justify-between gap-2">
+              <h4 className="text-[12px] uppercase tracking-wider font-semibold text-slate-500">Generated letters</h4>
+              <p className="text-[11px] text-slate-400">Auto-saved from the Templates page · {generatedLetters.length} total</p>
+            </div>
+            <div className="space-y-2">
+              {generatedLetters.map((doc: any) => (
+                <div
+                  key={doc.id}
+                  className="group flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50/30 px-4 py-3 hover:border-emerald-300 transition-colors"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-700">
+                    <FileText size={16} />
+                  </div>
+                  <a
+                    href={doc.fileUrl?.startsWith("http") ? doc.fileUrl : `/api/hr/documents/${doc.id}/file`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="min-w-0 flex-1 cursor-pointer"
+                  >
+                    <p className="truncate text-[13px] font-semibold text-slate-800">{doc.fileName || "Untitled"}</p>
+                    <p className="truncate text-[11px] text-slate-500">Generated · {fmtDate(doc.createdAt)}</p>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(doc)}
+                    title="Delete"
+                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-slate-400 hover:text-rose-500"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Other files — uploads outside the catalog (legacy + ad-hoc) */}
         {otherDocs.length > 0 && (
