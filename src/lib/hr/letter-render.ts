@@ -119,19 +119,22 @@ async function getSignatureDataUrl(businessUnit?: string | null): Promise<string
 async function injectSignatureBeforeRegards(bodyHtml: string, businessUnit?: string | null): Promise<string> {
   const sig = await getSignatureDataUrl(businessUnit);
   if (!sig) return bodyHtml;
-  // Signature sits BELOW the "Founder & CEO" line, left-aligned.
-  // Kunal's signature is rendered larger than Nikit's because his
-  // source-image strokes are thinner — at 18pt they read as
-  // tiny-and-stretched. Bumping to 28pt matches the visual weight
-  // HR's source PDFs use for YT Labs letters.
+  // Signature sits ABOVE the "Regards," line — same placement HR's
+  // source PDFs use (cursive flourish between the body and the
+  // typed signoff block). Kunal's signature is rendered larger
+  // than Nikit's because his source strokes are thinner.
   const altText  = businessUnit === "YT Labs" ? "Kunal Lall" : "Nikit Bassi";
   const sigHeight = businessUnit === "YT Labs" ? "28pt" : "18pt";
-  const sigBlock = `<p style="margin:6pt 0 4pt 0; padding:0; line-height:1; text-align:left"><img src="${sig}" alt="${altText}" style="height:${sigHeight}; width:auto; display:block"/></p>`;
-  // Anchor: the FIRST block element containing "Founder & CEO".
-  // The block may use a literal "&" or the HTML entity, so match
-  // both. Insert sigBlock RIGHT AFTER that block's closing tag.
-  const re = /(<(p|div|h[1-6])[^>]*>[\s\S]*?Founder\s*(?:&|&amp;)\s*CEO[\s\S]*?<\/\2>)/i;
-  if (re.test(bodyHtml)) return bodyHtml.replace(re, "$1" + sigBlock);
+  // Negative margin-bottom pulls the "Regards," paragraph in tight
+  // so the cursive looks attached to the signoff, not floating.
+  const sigBlock = `<p style="margin:14pt 0 -8pt 0; padding:0; line-height:1; text-align:left"><img src="${sig}" alt="${altText}" style="height:${sigHeight}; width:auto; display:block"/></p>`;
+  // Anchor: the FIRST block element whose content begins with
+  // "Regards,". Insert the signature block immediately BEFORE
+  // that paragraph's opening tag.
+  const re = /(<(?:p|div|h[1-6])[^>]*>)\s*Regards\s*,/i;
+  if (re.test(bodyHtml)) return bodyHtml.replace(re, sigBlock + "$1Regards,");
+  // Fallback when no "Regards," anchor exists — append at the
+  // end so HR can still spot the signature.
   return bodyHtml + sigBlock;
 }
 
