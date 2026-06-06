@@ -396,16 +396,32 @@ export async function renderLetterHtml(
   // `Manpreet <script>alert(1)</script>` can't break out of text.
   // The body itself is HTML (sanitised separately) so we don't
   // escape it again here.
+  //
+  // Exception: placeholders whose KEYS are listed in
+  // SAFE_HTML_PLACEHOLDERS resolve to first-party HTML fragments
+  // we generate ourselves (e.g. {{Salary.PfRow}} → "<tr>…</tr>"),
+  // so escaping them would print the literal tags as text in the
+  // output. We trust those values because they're produced by
+  // resolveSalary() with no user-controlled input flowing into
+  // tag positions — only digits + INR commas via fmtRs().
   const html = bodyHtml.replace(/\{\{\s*([A-Za-z][A-Za-z0-9_.]*)\s*\}\}/g, (_match, key: string) => {
     const v = resolvePlaceholder(key, renderCtx);
     if (v == null) {
       if (!missing.includes(key)) missing.push(key);
       return `[missing: ${escapeHtml(key)}]`;
     }
-    return escapeHtml(v);
+    return SAFE_HTML_PLACEHOLDERS.has(key) ? v : escapeHtml(v);
   });
   return { html, missing };
 }
+
+/** Placeholder keys whose resolved value is intentional HTML and
+ *  must NOT be HTML-escaped. Everything else goes through
+ *  escapeHtml() so user-controlled values (names, emails, custom
+ *  fields) can't break out of their text node and inject script. */
+const SAFE_HTML_PLACEHOLDERS = new Set<string>([
+  "Salary.PfRow",
+]);
 
 /**
  * Wrap a substituted body in a complete A4-sized preview HTML
@@ -501,8 +517,12 @@ export async function wrapLetterPreviewHtml(
     h3 { font-size: 13pt; margin: 14pt 0 8pt; letter-spacing: 0.5px; }
     ol, ul { padding-left: 22pt; margin: 8pt 0; }
     ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.5; letter-spacing: 0.5px; }
-    table { width: 100%; border-collapse: collapse; margin: 10pt 0 14pt; }
-    table th, table td { border: 1pt solid #1f2937; padding: 6pt 9pt; font-size: 11pt; text-align: left; }
+    /* Force Times New Roman on tables too — some user agents fall
+       back to a sans-serif default when the cell content is plain
+       text (e.g. the pay-table breakup). Letter-spacing matches
+       the body for consistent typography. */
+    table { width: 100%; border-collapse: collapse; margin: 10pt 0 14pt; font-family: "Times New Roman", Times, serif; }
+    table th, table td { border: 1pt solid #1f2937; padding: 6pt 9pt; font-size: 11pt; text-align: left; font-family: "Times New Roman", Times, serif; letter-spacing: 0.4px; }
     table th { background: #f3f4f6; }
     .page-break { display: block; height: 22pt; border-top: 1pt dashed #cbd5e1; margin: 18pt 0; padding-top: 8pt; }
   </style>
