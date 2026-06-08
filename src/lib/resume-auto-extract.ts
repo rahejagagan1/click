@@ -7,6 +7,15 @@
 
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+// Shared 3-stage fallback chain. Identical to what the public
+// /api/jobs/parse-resume endpoint runs; importing instead of
+// duplicating means a fix added in one place benefits both call
+// sites automatically.
+import {
+  scanEducationProsePassed,
+  clusterEducationByShape,
+  scanEducationSectionLoose,
+} from "./resume-education-fallbacks";
 
 export type ExtractedEducation = {
   course: string;
@@ -44,10 +53,29 @@ export async function extractText(buf: Buffer, fileName: string): Promise<string
         ).href;
       } catch { /* swallow — caller handles empty text */ }
     }
+    // Point pdfjs at its bundled standard font data so it can
+    // decode embedded fonts that don't fully ship their own glyph
+    // tables. Without this, the parser logs
+    //   "Ensure that the `standardFontDataUrl` API parameter is provided"
+    // on every PDF and extracts garbage for the affected
+    // characters (Nazia #19's resume hit this — extraction was
+    // partial / empty). pdfjs-dist ships the font data under
+    // standard_fonts/ in its package root.
+    let standardFontDataUrl: string | undefined;
+    try {
+      const req = createRequire(import.meta.url);
+      const fontPkg = req.resolve("pdfjs-dist/package.json");
+      // package.json sits at <root>/package.json; fonts are at
+      // <root>/standard_fonts/ — strip the filename and append.
+      const pkgDir = fontPkg.replace(/[\\/]package\.json$/, "");
+      standardFontDataUrl = pathToFileURL(`${pkgDir}/standard_fonts/`).href;
+      if (!standardFontDataUrl.endsWith("/")) standardFontDataUrl += "/";
+    } catch { /* fall through — extraction still works, just noisy */ }
     const doc = await pdfjs.getDocument({
       data: new Uint8Array(buf),
       isEvalSupported: false,
       useSystemFonts: false,
+      ...(standardFontDataUrl ? { standardFontDataUrl } : {}),
     }).promise;
     const annotUrls = new Set<string>();
     const pages: string[] = [];
@@ -567,11 +595,104 @@ export async function extractResumeData(buf: Buffer, fileName: string): Promise<
   }
 
   const { linkedinUrl, portfolioUrl } = extractUrls(text);
-  let educations = parseEducations(
-    extractSection(text, ["education","academic","qualifications","academics"]),
-  );
-  if (educations.length === 0) educations = scanEducationByUniversityYear(text);
-  const skills    = parseSkills(text);
-  const languages = parseLanguages(text);
+  // Full 5-stage education fallback chain. Order is from most
+  // specific to most permissive — first non-empty result wins.
+  // The last three live in the shared module so the apply form +
+  // HR drawer run identical code (drift-free).
+  const runChain = (src: string): ExtractedEducation[] => {
+    let acc = parseEducations(
+      extractSection(src, ["education","academic","qualifications","academics"]),
+    );
+    if (acc.length === 0) acc = scanEducationProsePassed(src);
+    if (acc.length === 0) acc = scanEducationByUniversityYear(src);
+    if (acc.length === 0) acc = clusterEducationByShape(src);
+    if (acc.length === 0) acc = scanEducationSectionLoose(src);
+    return acc;
+  };
+  let educations = runChain(text);
+
+  // SECOND-CHANCE OCR — if the original text extracted but the chain
+  // still returned 0 education entries, the PDF text was probably
+  // mangled (column-flattened tables, vector outlines on bold heads,
+  // multi-column shuffling). Re-render the pages as PNGs and OCR
+  // them — Tesseract sees the visual layout the same way humans
+  // would. We re-run the full chain against the OCR text + any
+  // entries it finds get used. Skipped if OCR already fired above
+  // (don't double-run).
+  if (educations.length === 0 && !triggerOcr && /\.pdf$/i.test(fileName)) {
+    try {
+      const { isOcrAvailable, ocrPdf } = await import("./ocr-pdf");
+      if (await isOcrAvailable()) {
+        const ocrText = await ocrPdf(buf);
+        if (ocrText && ocrText.trim().length > 20) {
+          const fromOcr = runChain(ocrText);
+          if (fromOcr.length > 0) {
+            educations = fromOcr;
+          }
+        }
+      }
+    } catch (e: any) {
+      console.error("[resume-auto-extract] second-chance OCR failed:", e?.message ?? e);
+    }
+  }
+  let skills    = parseSkills(text);
+  let languages = parseLanguages(text);
+
+  // ── LLM FALLBACK (Ollama / Llama 3.2 3B) ───────────────────────
+  // Heuristic + OCR can fail on multi-column / sidebar resumes
+  // where text-flow scrambles the section order. Fire the local
+  // LLM when ANY of these hold:
+  //   1. educations is empty
+  //   2. skills is empty
+  //   3. the heuristic produced education entries but they
+  //      LOOK GARBLED — missing course AND missing date, or
+  //      university that contains obvious junk (long phrase
+  //      like "audience eng" appended to a real name).
+  // The garbled detector handles cases like Manya #26 where
+  // the heuristic emitted 1 entry (so the simple `=== 0` check
+  // wouldn't fire), but that entry was clearly broken.
+  const isEduGarbled = (es: ExtractedEducation[]): boolean => {
+    if (es.length === 0) return true;
+    return es.every((e) => {
+      const hasCourse  = !!(e.course || e.branch);
+      const hasInst    = !!(e.university || e.location);
+      const cleanInst  = (e.university ?? "").replace(/\s+/g, " ").trim();
+      const wordCount  = cleanInst.split(/\s+/).filter(Boolean).length;
+      // Heuristic for "junk appended to a real name": 5+ words
+      // and contains lowercase noise (real university names are
+      // mostly title-case proper nouns and 1-4 words).
+      const looksJunky = wordCount >= 5 && /[a-z]{4,}\s+[a-z]{4,}/.test(cleanInst);
+      return !hasCourse || !hasInst || looksJunky;
+    });
+  };
+  const llmNeeded =
+    educations.length === 0 ||
+    skills.length === 0 ||
+    isEduGarbled(educations);
+  if (llmNeeded) {
+    try {
+      const { llmExtractResume } = await import("./resume-llm-extract");
+      const llm = await llmExtractResume(text);
+      // Replace educations when:
+      //   • heuristic empty AND llm has any, OR
+      //   • heuristic garbled AND llm has 1+ NON-garbled entries.
+      if (llm.educations.length > 0) {
+        if (educations.length === 0) {
+          educations = llm.educations;
+        } else if (isEduGarbled(educations) && !isEduGarbled(llm.educations)) {
+          educations = llm.educations;
+        }
+      }
+      if (skills.length === 0 && llm.skills.length > 0) {
+        skills = llm.skills;
+      }
+      if (languages.length === 0 && llm.languages.length > 0) {
+        languages = llm.languages;
+      }
+    } catch (e: any) {
+      console.warn("[resume-auto-extract] LLM fallback failed:", e?.message ?? e);
+    }
+  }
+
   return { linkedinUrl, portfolioUrl, educations, skills, languages };
 }

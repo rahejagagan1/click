@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, serverError } from "@/lib/api-auth";
+import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
 import { istTodayDateOnly } from "@/lib/ist-date";
 
@@ -23,7 +23,7 @@ function canEditOthers(session: any): boolean {
 // Returns the shape expected by /dashboard/hr/people/[id]/page.tsx:
 //   { id, name, email, role, orgLevel, profilePictureUrl, profile, documents, assets, directReports, manager, shift, leaveBalances }
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { errorResponse } = await requireAuth();
+  const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
 
   try {
@@ -81,6 +81,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       const erows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
         `SELECT "secondaryJobTitle", "legalEntity", "jobLocation",
                 "probationPolicy", "probationEndDate", "probationReminderSentAt",
+                "educationDetails",
                 "internshipEndDate",
                 "leavePlan", "holidayList", "weeklyOff",
                 "attendanceNumber", "timeTrackingPolicy", "penalizationPolicy",
@@ -124,12 +125,64 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       hasOpenSession = open.length > 0;
     }
 
+    // Exit row, if any. Drives the "On Notice Period" / "Exited"
+    // badge on the profile header. Visible only to HR team
+    // (orgLevel=hr_manager), developers, and the profile owner —
+    // mirrors canViewExitBadge in src/lib/access.ts. CEO and
+    // special_access / role=admin are intentionally excluded.
+    // Only one EmployeeExit row exists per user (userId is @unique).
+    const sUserBadge = session?.user as any;
+    const isSelfForBadge = (await resolveUserId(session)) === id;
+    const canSeeExitBadge =
+      isSelfForBadge ||
+      sUserBadge?.orgLevel === "hr_manager" ||
+      sUserBadge?.isDeveloper === true;
+    let activeExit: {
+      id: number;
+      status: string;
+      exitType: string;
+      resignationDate: string | null;
+      lastWorkingDay: string | null;
+      noticePeriodDays: number | null;
+    } | null = null;
+    if (canSeeExitBadge) {
+      try {
+        const exitRows = await prisma.$queryRawUnsafe<Array<any>>(
+          `SELECT id, status, "exitType",
+                  to_char("resignationDate", 'YYYY-MM-DD') AS "resignationDate",
+                  to_char("lastWorkingDay",  'YYYY-MM-DD') AS "lastWorkingDay",
+                  "noticePeriodDays"
+             FROM "EmployeeExit"
+            WHERE "userId" = $1
+            LIMIT 1`,
+          id,
+        );
+        if (exitRows[0]) activeExit = exitRows[0];
+      } catch (e) {
+        console.warn("[people GET] activeExit lookup failed:", e);
+      }
+    }
+
     // Reshape to what the detail page reads.
     const { employeeProfile, heldAssets, ownedDocuments, teamMembers, userShift, ...rest } = user;
+    // Documents are PII (PAN / Aadhaar / education / employee letters)
+    // — strict policy: only the profile owner, HR team
+    // (orgLevel=hr_manager), CEO, and developers. Excludes
+    // special_access and role=admin (which pass canEditOthers for
+    // most other things). Mirrors canViewEmployeeDocuments in
+    // src/lib/access.ts and the GET /api/hr/documents gate below.
+    const callerId = await resolveUserId(session);
+    const sUser = session?.user as any;
+    const isSelfRequest = callerId != null && callerId === id;
+    const isDocViewer =
+      sUser?.orgLevel === "ceo" ||
+      sUser?.isDeveloper === true ||
+      sUser?.orgLevel === "hr_manager";
+    const docsAllowed = isSelfRequest || isDocViewer;
     const payload = {
       ...rest,
       profile:       employeeProfile ? { ...employeeProfile, ...extended } : null,
-      documents:     ownedDocuments,
+      documents:     docsAllowed ? ownedDocuments : [],
       assets:        heldAssets.map((a) => ({ ...a.asset, assignedAt: a.assignedAt })),
       directReports: teamMembers,
       shift:         userShift?.shift ?? null,
@@ -138,6 +191,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       todayAttendance: todayAtt
         ? { ...todayAtt, hasOpenSession }
         : null,
+      activeExit,
     };
     return NextResponse.json(serializeBigInt(payload));
   } catch (e) {
@@ -181,7 +235,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       noticePeriodDays,
       // Extended onboarding fields — every wizard input is now editable.
       workCountry, nationality,
-      secondaryJobTitle, legalEntity, jobLocation, probationPolicy, probationEndDate, internshipEndDate,
+      secondaryJobTitle, legalEntity, jobLocation, probationPolicy, probationEndDate, educationDetails, internshipEndDate,
       leavePlan, holidayList, weeklyOff, attendanceNumber, timeTrackingPolicy, penalizationPolicy,
       // ── Keka-parity additions (extended profile) ──
       homePhone, physicallyHandicapped,
@@ -480,6 +534,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (internshipEndDate  !== undefined) {
         setParts.push(`"internshipEndDate" = $${i++}`);
         args.push(internshipEndDate ? new Date(internshipEndDate) : null);
+      }
+      // educationDetails — JSON array on EmployeeProfile mirroring
+      // the JobApplication.educationDetails shape. Accepts an array
+      // verbatim, or a JSON-encoded string from older clients. Empty
+      // array / null clears the field. Used by the compliance cron
+      // (at least one entry with degree + institution required).
+      if (educationDetails !== undefined) {
+        let val: any = educationDetails;
+        if (typeof val === "string") {
+          try { val = JSON.parse(val); } catch { val = null; }
+        }
+        if (!Array.isArray(val)) val = null;
+        setParts.push(`"educationDetails" = $${i++}::jsonb`);
+        args.push(val === null ? null : JSON.stringify(val));
       }
       if (leavePlan          !== undefined) { setParts.push(`"leavePlan" = $${i++}`);          args.push(leavePlan          || null); }
       if (holidayList        !== undefined) { setParts.push(`"holidayList" = $${i++}`);        args.push(holidayList        || null); }

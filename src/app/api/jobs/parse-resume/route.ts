@@ -12,6 +12,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+// Education extraction fallbacks live in a shared module so the
+// HR-side resume-auto-extract.ts and this public apply endpoint
+// exercise the SAME 5-stage chain. Keeps the two code paths in
+// sync — historically they drifted and HR would see empty
+// education on the candidate drawer even after the apply form
+// extracted it correctly. See src/lib/resume-education-fallbacks.ts.
+import {
+  scanEducationProsePassed as sharedProsePassed,
+  clusterEducationByShape  as sharedCluster,
+  scanEducationSectionLoose as sharedSectionLoose,
+} from "@/lib/resume-education-fallbacks";
 
 export const dynamic = "force-dynamic";
 export const runtime  = "nodejs";
@@ -537,7 +548,16 @@ function clusterEducationByShape(text: string): ExtractedEducation[] {
   const institutions: string[] = [];
   const degrees: string[] = [];
 
-  for (const raw of lines) {
+  // Track LINE POSITIONS for the gap-fill pass below. Without that
+  // tracking, a row whose course doesn't match DEGREE_RE (e.g. "Voice
+  // Dubbing" in a column-flattened table) gets silently dropped and
+  // every later degree pairs with the WRONG institution.
+  type WithPos = { text: string; line: number };
+  const degsPos: WithPos[] = [];
+  const instPos: WithPos[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    if (raw === undefined) continue;
     const line = raw.trim();
     // ── Years ── prefer ranges; fall back to single year-of-passing.
     if (!WORK_CONTEXT_RE.test(line)) {
@@ -552,33 +572,87 @@ function clusterEducationByShape(text: string): ExtractedEducation[] {
     }
     // ── Institutions ── any line with an institutional keyword. Skip
     // tagline-style sentences that just mention a school in passing.
-    if (INST_RE.test(line) && line.length <= 90) institutions.push(line);
+    if (INST_RE.test(line) && line.length <= 90) {
+      instPos.push({ text: line, line: i });
+    }
     // ── Degrees ── degree keyword on a short-ish line (filter out
     // narrative paragraphs that incidentally mention "Bachelor").
     const dm = line.match(DEGREE_RE);
-    if (dm && line.length <= 60) degrees.push(dm[0].trim());
+    if (dm && line.length <= 60) {
+      degsPos.push({ text: dm[0].trim(), line: i });
+    }
   }
+
+  // GAP-FILL: in column-flattened tables, course names that lack a
+  // degree token (e.g. "Voice Dubbing") get dropped from the degrees
+  // list. The institutions column still has the full count, so every
+  // entry below the gap mis-pairs. We scan the line range that holds
+  // the matched degrees and treat any short, non-institutional, non-
+  // year, non-section-header line in that range as an additional
+  // course candidate — adding it to degsPos at its actual position so
+  // the index-based zip below pairs everyone correctly. Lines outside
+  // the degree-cluster range are NOT considered (too easy to grab
+  // unrelated content from elsewhere in the resume).
+  if (degsPos.length > 0 && instPos.length > degsPos.length) {
+    const minLine = degsPos[0]!.line;
+    const maxLine = degsPos[degsPos.length - 1]!.line;
+    const taken = new Set(degsPos.map((d) => d.line));
+    const SECTION_NOISE = /^(profile|summary|objective|skills?|experience|hobbies|languages?|contact|education|qualifications?|references?|certifications?|projects?|achievements?|interests?)\b/i;
+    for (let i = minLine; i <= maxLine; i++) {
+      if (taken.has(i)) continue;
+      const raw = lines[i];
+      if (raw === undefined) continue;
+      const t = raw.trim();
+      if (!t || t.length > 60) continue;
+      if (INST_RE.test(t)) continue;
+      if (RANGE_RE.test(t) || SINGLE_YEAR_RE.test(t)) continue;
+      if (SECTION_NOISE.test(t)) continue;
+      // Course names start with a capital letter in the table layouts
+      // we're targeting. Lowercase prose in the middle of the section
+      // is more likely noise than a course title.
+      if (!/[A-Z]/.test(t)) continue;
+      degsPos.push({ text: t, line: i });
+    }
+    degsPos.sort((a, b) => a.line - b.line);
+  }
+
+  // Materialise back into the flat arrays the existing zip logic uses.
+  for (const d of degsPos) degrees.push(d.text);
+  for (const it of instPos) institutions.push(it.text);
 
   // Need at least two clusters to be confident the resume is education-
   // shaped (one match is too easy to false-positive on a stray "school"
   // mention in an unrelated paragraph).
-  const N = Math.min(years.length, institutions.length);
+  //
+  // YEARS ARE NO LONGER REQUIRED. Many Indian table-style resumes use a
+  // Remark column ("Passed", "1 Year", "Pursuing") instead of a year
+  // column, so insisting on year markers misses them entirely. We
+  // gracefully fall back to degree↔institution zipping when years are
+  // absent — the entries still carry the degree and institution; the
+  // year fields just stay empty.
+  const haveYears = years.length >= 2;
+  const N = haveYears
+    ? Math.min(years.length, Math.max(institutions.length, degrees.length))
+    : Math.min(institutions.length, degrees.length);
   if (N < 2) return [];
 
   const out: ExtractedEducation[] = [];
   for (let i = 0; i < N; i++) {
-    const yr = years[i];
     let startOfCourse = "", endOfCourse = "";
-    const isRange = /[-–—]/.test(yr);
-    if (isRange) {
-      const ys = yr.match(/(19|20)\d{2}/g) ?? [];
-      startOfCourse = ys[0] ?? "";
-      endOfCourse   = ys[1] ?? (/present|current/i.test(yr) ? "Present" : "");
-    } else {
-      endOfCourse = yr;
+    if (haveYears && years[i]) {
+      const yr = years[i]!;
+      const isRange = /[-–—]/.test(yr);
+      if (isRange) {
+        const ys = yr.match(/(19|20)\d{2}/g) ?? [];
+        startOfCourse = ys[0] ?? "";
+        endOfCourse   = ys[1] ?? (/present|current/i.test(yr) ? "Present" : "");
+      } else {
+        endOfCourse = yr;
+      }
     }
     const course = degrees[i] ?? "";
-    const university = institutions[i]
+    const rawInst = institutions[i];
+    const university = (rawInst ?? "")
       .replace(RANGE_RE, "")
       .replace(SINGLE_YEAR_RE, "")
       .replace(/[|·•]+/g, " ")
@@ -603,11 +677,59 @@ function clusterEducationByShape(text: string): ExtractedEducation[] {
 // in two-column resumes). Within the window, find runs of adjacent
 // lines where one is institutional and the other is a degree — emit
 // one entry per pair. No year required (left blank if absent).
+// Numbered prose-narrative format common on Indian resumes —
+// "1.Passed Post Graduation in X (Y) from Z, City in 2022." across
+// multiple lines after pdfjs word-wrap. Other scanners can't bridge
+// the wrap, so we whitespace-collapse the whole document then match
+// the very specific shape:
+//   N. Passed <DEGREE+SUBJECT> from <INSTITUTION> in <YEAR | YEAR-RANGE>.
+// Three required anchors (numbered prefix + "Passed" + "from" + "in" +
+// year + terminating ".") keep the false-positive rate low — random
+// English prose almost never hits all of them in order.
+function scanEducationProsePassed(text: string): ExtractedEducation[] {
+  // Collapse every run of whitespace (including newlines from pdfjs's
+  // word-wrap) into a single space so the regex can match across
+  // wrapped lines.
+  const joined = text.replace(/\s+/g, " ");
+  const RE = /\b\d+\.\s*Passed\s+([^.]+?)\s+from\s+([^.]+?)\s+in\s+((?:19|20)\d{2}(?:\s*[-–—]\s*\d{2,4})?)\s*\./gi;
+  const out: ExtractedEducation[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = RE.exec(joined)) !== null) {
+    // Course: degree + subject narrative. Strip the "with X.X%" tail
+    // that sometimes leaks into the degree string (e.g. "Intermediate
+    // with 63.5%").
+    let course = m[1].trim().replace(/\s+with\s+\d+(?:\.\d+)?\s*%.*$/i, "").trim();
+    if (course.length > 100) course = course.slice(0, 100);
+    let university = m[2].trim();
+    if (university.length > 120) university = university.slice(0, 120);
+    const yearStr = m[3].trim();
+    const ys = yearStr.match(/\d{4}/g) ?? [];
+    let startOfCourse = "", endOfCourse = "";
+    if (ys.length === 1) {
+      endOfCourse = ys[0] ?? "";
+    } else if (ys.length >= 2) {
+      const a = ys[0] ?? "";
+      const b = ys[1] ?? "";
+      startOfCourse = a;
+      // "2015-16" → end becomes "2016" (prefix the first two digits
+      // of the start year onto a 2-digit suffix).
+      endOfCourse = b.length === 2 ? a.slice(0, 2) + b : b;
+    }
+    if (course || university) {
+      out.push({ course, branch: "", startOfCourse, endOfCourse, university, location: "" });
+    }
+  }
+  return out.slice(0, 8);
+}
+
 function scanEducationSectionLoose(text: string): ExtractedEducation[] {
   const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
   // Header has to be ALONE on the line (or only with a few decorative
   // chars) so we don't catch the word inside narrative prose.
-  const HEADER_RE = /^(?:EDUCATION(?:\s*&\s*\w+)?|ACADEMIC(?:\s+(?:QUALIFICATIONS?|DETAILS|RECORD|BACKGROUND))?|EDUCATIONAL\s+(?:QUALIFICATIONS?|BACKGROUND|DETAILS))\s*[:.\s]*$/i;
+  // Widened: many Indian resumes title this section "Professional
+  // Qualification" / "Academic Credentials" / just "Qualifications".
+  // Without these aliases we silently dropped entire resumes.
+  const HEADER_RE = /^(?:EDUCATION(?:\s*&\s*\w+)?|ACADEMIC(?:\s+(?:QUALIFICATIONS?|CREDENTIALS?|DETAILS|RECORD|BACKGROUND))?|EDUCATIONAL\s+(?:QUALIFICATIONS?|BACKGROUND|DETAILS)|PROFESSIONAL\s+QUALIFICATIONS?|QUALIFICATIONS?)\s*[:.\s]*$/i;
   const headerIdx = lines.findIndex(l => HEADER_RE.test(l));
   if (headerIdx === -1) return [];
 
@@ -909,7 +1031,16 @@ export async function POST(req: NextRequest) {
     // candidate doesn't have to retype what's already on their CV.
     const educationSection = extractSection(text, ["education", "academic", "qualifications", "academics"]);
     let educations = parseEducations(educationSection);
-    // Fallback: many resumes render their bold section headings + the
+    // Fallback 1: prose narrative format common on Indian resumes —
+    // numbered "N.Passed X from Y in YEAR." sentences. pdfjs word-
+    // wraps each one across 2-3 lines so the line-based scanners miss
+    // them; we whitespace-collapse the whole document and match the
+    // pattern globally. Very specific shape (numbered + "Passed" +
+    // "from" + year-ending) so false positives are negligible.
+    if (educations.length === 0) {
+      educations = sharedProsePassed(text);
+    }
+    // Fallback 2: many resumes render their bold section headings + the
     // degree name as VECTOR OUTLINES instead of selectable text, so
     // pdfjs returns the text content with "EDUCATION" and "Bachelor
     // of …" completely missing. The university-name + year-range line
@@ -924,7 +1055,7 @@ export async function POST(req: NextRequest) {
     // entry land far apart. Extract the shape pieces globally and zip
     // them by index.
     if (educations.length === 0) {
-      educations = clusterEducationByShape(text);
+      educations = sharedCluster(text);
     }
     // Final fallback: resumes with NO years in education (just degree
     // + institution), or two-column layouts where pdfjs returns the
@@ -933,7 +1064,7 @@ export async function POST(req: NextRequest) {
     // EDUCATION-style header anywhere, then pairs adjacent institution
     // / degree lines within a window around it.
     if (educations.length === 0) {
-      educations = scanEducationSectionLoose(text);
+      educations = sharedSectionLoose(text);
     }
     const skills     = parseSkills(text);
 

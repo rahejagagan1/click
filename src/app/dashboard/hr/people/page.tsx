@@ -23,7 +23,7 @@ import {
   roleOptions,
 } from "@/lib/hr-taxonomy";
 import { getUserRoleLabel } from "@/lib/user-role-options";
-import { isHRAdmin } from "@/lib/access";
+import { isHRAdmin, canViewExitBadge } from "@/lib/access";
 
 const ORG_TABS = [
   { key: "employees", label: "EMPLOYEES" },
@@ -182,9 +182,40 @@ export default function PeoplePage() {
                       {emp.profilePictureUrl ? <img src={emp.profilePictureUrl} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" /> : emp.name?.charAt(0)}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <h3 className="text-[14px] font-semibold text-slate-800 dark:text-white truncate group-hover:text-[#008CFF] transition-colors">{emp.name}</h3>
-                        <span className="text-slate-600 text-sm cursor-pointer">⋯</span>
+                        {/* Exit-lifecycle badge — "On Notice"
+                            (amber) → "Exited" (slate) once the LWD
+                            passes or HR finalises. Gated to HR team
+                            + developer + self via canViewExitBadge. */}
+                        {(() => {
+                          const ex = emp.employeeExit;
+                          if (!ex || !ex.status) return null;
+                          const isSelfCard = user?.dbId != null && Number(user.dbId) === emp.id;
+                          if (!canViewExitBadge(user, isSelfCard)) return null;
+                          const finalised = ex.status === "exited" || ex.status === "offboarded";
+                          const lwdMs = ex.lastWorkingDay ? new Date(ex.lastWorkingDay).getTime() : 0;
+                          const lwdPassed = lwdMs > 0 && Date.now() > lwdMs + 86400000;
+                          const isExited = finalised || lwdPassed;
+                          return isExited ? (
+                            <span
+                              className="inline-flex items-center gap-0.5 rounded-full bg-slate-100 px-1.5 py-px text-[8.5px] font-bold uppercase tracking-wider text-slate-700 ring-1 ring-inset ring-slate-300"
+                              title={ex.lastWorkingDay ? `Exited on ${String(ex.lastWorkingDay).slice(0, 10)}` : "Exited"}
+                            >
+                              <span className="inline-block h-1 w-1 rounded-full bg-slate-500" />
+                              Exited
+                            </span>
+                          ) : (
+                            <span
+                              className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-px text-[8.5px] font-bold uppercase tracking-wider text-amber-700 ring-1 ring-inset ring-amber-200"
+                              title={ex.lastWorkingDay ? `Last working day: ${String(ex.lastWorkingDay).slice(0, 10)}` : "On notice"}
+                            >
+                              <span className="inline-block h-1 w-1 rounded-full bg-amber-500" />
+                              On Notice
+                            </span>
+                          );
+                        })()}
+                        <span className="text-slate-600 text-sm cursor-pointer ml-auto">⋯</span>
                       </div>
                       <p className="text-[12px] text-slate-500 dark:text-slate-400 truncate">{emp.employeeProfile?.designation || getUserRoleLabel(emp.role)}</p>
                     </div>

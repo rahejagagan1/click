@@ -7,7 +7,7 @@ import { useSession } from "next-auth/react";
 import SelectField from "@/components/ui/SelectField";
 import { ThumbsUp, MessageSquare, Send, BarChart2, Award, MoreHorizontal, X, ChevronDown, Pencil, Trash2, Link2, Check } from "lucide-react";
 import Link from "next/link";
-import { isHRAdmin } from "@/lib/access";
+import { isHRAdmin, isLeadershipOrHR } from "@/lib/access";
 import { PageShell, PageHeader, PageContainer } from "@/components/layout";
 
 function Avatar({ name, url, size = 36 }: { name: string; url?: string | null; size?: number }) {
@@ -25,6 +25,56 @@ function Avatar({ name, url, size = 36 }: { name: string; url?: string | null; s
   );
 }
 
+/** Parse post body for `@Name` patterns and turn ones that match a
+ *  real employee into clickable profile links. Returns the body as
+ *  an array of React nodes that the renderer can drop straight into
+ *  the <p> wrapper. Unknown @-handles stay as plain text so users
+ *  typing @Someone-who-isn't-there don't get a broken link.
+ *
+ *  Match rule: case-insensitive, ignores spaces. So "@PiyushSudha"
+ *  in the body matches employee "Piyush Sudha" in the DB. Composer
+ *  always inserts mentions space-stripped (no whitespace inside the
+ *  handle), so this is the canonical normalisation. */
+function renderWithMentions(
+  text: string,
+  employees: Array<{ id: number; name: string }>,
+): React.ReactNode[] {
+  if (!text) return [text];
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
+  // Pre-index employees by their normalised name once, so each
+  // match resolves in O(1).
+  const byHandle = new Map<string, number>();
+  for (const e of employees) byHandle.set(norm(e.name), e.id);
+
+  const out: React.ReactNode[] = [];
+  const re = /@([A-Za-z][A-Za-z0-9_]+)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const [full, handle] = match;
+    const start = match.index;
+    if (start > lastIndex) out.push(text.slice(lastIndex, start));
+    const empId = byHandle.get(norm(handle));
+    if (empId) {
+      out.push(
+        <Link
+          key={`m-${start}`}
+          href={`/dashboard/hr/people/${empId}`}
+          className="text-[#008CFF] hover:text-[#0077dd] hover:underline font-medium"
+        >
+          {full}
+        </Link>
+      );
+    } else {
+      // Unknown handle — render as-is.
+      out.push(full);
+    }
+    lastIndex = start + full.length;
+  }
+  if (lastIndex < text.length) out.push(text.slice(lastIndex));
+  return out;
+}
+
 function timeAgo(date: string) {
   const diff = Date.now() - new Date(date).getTime();
   const m = Math.floor(diff / 60000);
@@ -35,7 +85,7 @@ function timeAgo(date: string) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
+function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: any; employees: Array<{ id: number; name: string }> }) {
   const sessionUserId = sessionUser?.dbId;
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState("");
@@ -54,10 +104,16 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
   const reactionPickerRef  = useRef<HTMLDivElement | null>(null);
   const REACTION_EMOJIS = ["👍", "❤️", "🤣", "😮", "😢", "🙏", "👏", "🎉", "🎂", "🔥"];
 
-  // Dots-menu state. Copy link is shown to everyone; Edit only to the
-  // author; Delete to the author + HR admins (moderation).
+  // Dots-menu state. Copy link is shown to everyone; Edit / Delete
+  // to the author + leadership tier (CEO / HR team / developer). The
+  // leadership-tier carve-out lets HR moderate posts that go up
+  // without needing the original author. Excludes special_access +
+  // role=admin per the same policy used for documents (see
+  // canViewEmployeeDocuments in src/lib/access.ts).
   const isAuthor   = post.author.id === sessionUserId;
-  const canDelete  = isAuthor || isHRAdmin(sessionUser);
+  const canModerate = isLeadershipOrHR(sessionUser);
+  const canEdit    = isAuthor || canModerate;
+  const canDelete  = isAuthor || canModerate;
   const [menuOpen, setMenuOpen]   = useState(false);
   const [editing,  setEditing]    = useState(false);
   const [draft,    setDraft]      = useState(post.content);
@@ -300,7 +356,7 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
               style={{ position: "fixed", top: menuPos.top, right: menuPos.right, zIndex: 1000 }}
               className="min-w-[160px] rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0d1b2a] shadow-lg overflow-hidden"
             >
-              {isAuthor && (
+              {canEdit && (
                 <button
                   onClick={() => { setMenuOpen(false); setDraft(post.content); setEditing(true); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors"
@@ -356,7 +412,7 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
           </div>
         ) : (
           <>
-            <p className="mt-3 text-[14px] text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">{visibleBody}</p>
+            <p className="mt-3 text-[14px] text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">{renderWithMentions(visibleBody, employees)}</p>
             {tooLong && (
               <button
                 onClick={() => setExpanded((p) => !p)}
@@ -481,7 +537,7 @@ function PostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
               <Avatar name={c.author.name} url={c.author.profilePictureUrl} size={28} />
               <div className="flex-1 bg-white dark:bg-[#0d1b2a] border border-slate-100 dark:border-white/[0.06] rounded-xl px-3 py-2">
                 <p className="text-[12px] font-semibold text-slate-800 dark:text-white">{c.author.name}</p>
-                <p className="text-[12px] text-slate-600 dark:text-slate-300 mt-0.5">{c.content}</p>
+                <p className="text-[12px] text-slate-600 dark:text-slate-300 mt-0.5">{renderWithMentions(c.content, employees)}</p>
               </div>
             </div>
           ))}
@@ -542,15 +598,48 @@ export default function EngagePage() {
   const [content, setContent]   = useState("");
   const [praiseToId, setPraiseToId] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // Inline image upload. The image is converted to a data URL on the
+  // client and stored in EngagePost.mediaUrl. We cap at 2 MB raw to
+  // keep DB rows reasonable — the post card renders mediaUrl directly
+  // in an <img>. The composer is gated to admin-tier so the byte
+  // cost only ever lands on intentional admin posts, not on the
+  // general workforce. content text serves as the caption.
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const canCompose = isLeadershipOrHR(user);
+
+  const pickImage = (file: File | null) => {
+    setMediaError(null);
+    if (!file) { setMediaUrl(null); return; }
+    if (!file.type.startsWith("image/")) {
+      setMediaError("Only image files are allowed.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setMediaError("Image too large — limit is 2 MB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") setMediaUrl(result);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const submit = async () => {
-    if (!content.trim()) return;
+    if (!content.trim() && !mediaUrl) return;
     setSubmitting(true);
     await fetch("/api/hr/engage/posts", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, type: feedTab, praiseToId: praiseToId || undefined }),
+      body: JSON.stringify({
+        content,
+        type: feedTab,
+        praiseToId: praiseToId || undefined,
+        mediaUrl: mediaUrl || undefined,
+      }),
     });
-    setContent(""); setPraiseToId(""); setSubmitting(false);
+    setContent(""); setPraiseToId(""); setMediaUrl(null); setSubmitting(false);
     mutate("/api/hr/engage/posts");
   };
 
@@ -562,7 +651,11 @@ export default function EngagePage() {
       />
       <PageContainer maxWidth="md" className="py-5 space-y-4">
 
-        {/* Compose card */}
+        {/* Compose card — gated to admin tier (CEO / HR team /
+            developer). Regular employees still see the feed but
+            can't create new posts. Matches the moderation tier
+            used for Edit / Delete on individual posts. */}
+        {canCompose && (
         <div className="bg-white dark:bg-[#0d1b2a] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
           {/* Scope tabs */}
           <div className="flex items-center border-b border-slate-100 dark:border-white/[0.04] px-4">
@@ -617,7 +710,37 @@ export default function EngagePage() {
               />
             </div>
 
-            {content && (
+            {/* Image attachment — optional. Preview + clear button when
+                set; otherwise a small "+ Add image" button. The text
+                box above doubles as the caption. */}
+            {mediaUrl ? (
+              <div className="mt-3 relative inline-block">
+                <img src={mediaUrl} alt="Attached" className="max-h-64 rounded-lg border border-slate-200 dark:border-white/10" />
+                <button
+                  type="button"
+                  onClick={() => { setMediaUrl(null); setMediaError(null); }}
+                  className="absolute top-1.5 right-1.5 w-6 h-6 bg-black/60 hover:bg-black/80 text-white rounded-full flex items-center justify-center"
+                  aria-label="Remove image"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <label className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] text-slate-500 hover:text-[#008CFF] hover:bg-slate-50 dark:hover:bg-white/[0.04] cursor-pointer transition-colors">
+                <span aria-hidden>+</span> Add image
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => pickImage(e.target.files?.[0] ?? null)}
+                />
+              </label>
+            )}
+            {mediaError && (
+              <p className="mt-1 text-[11.5px] text-red-600">{mediaError}</p>
+            )}
+
+            {(content || mediaUrl) && (
               <div className="flex justify-end mt-2">
                 <button onClick={submit} disabled={submitting}
                   className="h-8 px-5 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded-lg text-[12px] font-semibold transition-colors disabled:opacity-50">
@@ -627,6 +750,7 @@ export default function EngagePage() {
             )}
           </div>
         </div>
+        )}
 
         {/* Feed */}
         {isLoading ? (
@@ -640,7 +764,7 @@ export default function EngagePage() {
           </div>
         ) : (
           posts.map((post: any) => (
-            <PostCard key={post.id} post={post} sessionUser={user} />
+            <PostCard key={post.id} post={post} sessionUser={user} employees={employees} />
           ))
         )}
       </PageContainer>

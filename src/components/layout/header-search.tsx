@@ -1,9 +1,23 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import useSWR from "swr";
+import { useSession } from "next-auth/react";
 import { fetcher } from "@/lib/swr";
+import { canViewExitBadge } from "@/lib/access";
+
+// Next.js 16 + Turbopack require any consumer of useSearchParams() to
+// sit under a <Suspense> boundary, otherwise pages that try to
+// statically prerender (including the auto-generated /_not-found and
+// payroll/summary) abort with the missing-suspense-with-csr-bailout
+// error. We isolate the searchParams read into a tiny inner component
+// and wrap it in Suspense so the rest of the tree prerenders cleanly.
+//
+// The fallback returns null — the search-continuity behavior is a UX
+// nice-to-have, not a hard requirement; rendering without it for the
+// SSR pass is fine.
 
 // Static jump list — common dashboard pages that should be reachable
 // from search-as-you-type. Filtered by substring match on `label` so
@@ -28,7 +42,21 @@ const PAGE_LINKS: { label: string; href: string; hint?: string }[] = [
 // Hits People (/api/hr/employees) and Cases (/api/cases) in parallel
 // once the user has typed ≥ 2 chars, plus a static Pages jump list.
 // Dropdown portals to body so overflow:hidden on the header can't clip it.
+//
+// Default export wraps the impl in <Suspense> — required because the
+// inner component uses useSearchParams(), and Next.js 16 + Turbopack
+// abort any static prerender that touches it without a suspense
+// boundary upstream. The fallback is null (no header search shown
+// during the brief SSR pass).
 export default function HeaderSearch() {
+  return (
+    <Suspense fallback={null}>
+      <HeaderSearchInner />
+    </Suspense>
+  );
+}
+
+function HeaderSearchInner() {
   const [query, setQuery]         = useState("");
   const [debounced, setDebounced] = useState("");
   const [open, setOpen]           = useState(false);
@@ -37,6 +65,23 @@ export default function HeaderSearch() {
   const inputRef  = useRef<HTMLInputElement>(null);
   // Bump tick on resize/scroll so the portalled panel re-reads anchor rect.
   const [, tick]  = useState(0);
+
+  // Search continuity: when the viewer is already on a person profile
+  // and switches to another person via search, carry their current
+  // ?tab= over so the new profile opens to the same sub-page (Edit
+  // Profile → Edit Profile, Assets → Assets, etc.). Outside the
+  // people-profile route this stays empty so other searches behave
+  // normally.
+  const pathname    = usePathname() ?? "";
+  const searchParams = useSearchParams();
+  const { data: session } = useSession();
+  const sessionUser = session?.user as any;
+  const sessionUserId = sessionUser?.dbId;
+  const tabQuery = useMemo(() => {
+    if (!pathname.startsWith("/dashboard/hr/people/")) return "";
+    const tab = searchParams?.get("tab");
+    return tab ? `?tab=${encodeURIComponent(tab)}` : "";
+  }, [pathname, searchParams]);
 
   // Debounce to 220ms so we don't hammer the APIs on every keystroke.
   useEffect(() => {
@@ -182,10 +227,25 @@ export default function HeaderSearch() {
                     const initials = (u.name || "?").split(" ").map((p: string) => p[0]).join("").slice(0, 2).toUpperCase();
                     const dept = u.employeeProfile?.department;
                     const desg = u.employeeProfile?.designation;
+                    // Exit-lifecycle badge — "On Notice" (amber)
+                    // while serving notice; "Exited" (slate) once
+                    // HR finalises or the LWD has passed. Gated to
+                    // HR team + developer + self only — see
+                    // canViewExitBadge in src/lib/access.ts.
+                    const exit = u.employeeExit;
+                    const isSelfRow = sessionUserId != null && Number(sessionUserId) === u.id;
+                    const canSeeBadge = canViewExitBadge(sessionUser, isSelfRow);
+                    const exFinalised = exit && (exit.status === "exited" || exit.status === "offboarded");
+                    const exLwdMs = exit?.lastWorkingDay ? new Date(exit.lastWorkingDay).getTime() : 0;
+                    const exLwdPassed = exLwdMs > 0 && Date.now() > exLwdMs + 86400000;
+                    const exitState: "on_notice" | "exited" | null =
+                      !exit || !canSeeBadge
+                        ? null
+                        : (exFinalised || exLwdPassed) ? "exited" : "on_notice";
                     return (
                       <Link
                         key={`p-${u.id}`}
-                        href={`/dashboard/hr/people/${u.id}`}
+                        href={`/dashboard/hr/people/${u.id}${tabQuery}`}
                         onClick={close}
                         className="flex items-center gap-2.5 px-3 py-2 border-b border-slate-100 dark:border-white/[0.04] last:border-b-0 hover:bg-[#008CFF]/[0.06] dark:hover:bg-[#008CFF]/[0.1] transition-colors"
                       >
@@ -195,7 +255,27 @@ export default function HeaderSearch() {
                           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#008CFF] text-[10px] font-bold text-white">{initials}</span>
                         )}
                         <div className="min-w-0 flex-1">
-                          <p className="text-[12.5px] font-medium text-slate-800 dark:text-white truncate leading-snug">{u.name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-[12.5px] font-medium text-slate-800 dark:text-white truncate leading-snug">{u.name}</p>
+                            {exitState === "on_notice" && (
+                              <span
+                                className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-px text-[8.5px] font-bold uppercase tracking-wider text-amber-700 ring-1 ring-inset ring-amber-200 shrink-0"
+                                title={exit?.lastWorkingDay ? `Last working day: ${String(exit.lastWorkingDay).slice(0, 10)}` : "On notice"}
+                              >
+                                <span className="inline-block h-1 w-1 rounded-full bg-amber-500" />
+                                On Notice
+                              </span>
+                            )}
+                            {exitState === "exited" && (
+                              <span
+                                className="inline-flex items-center gap-0.5 rounded-full bg-slate-100 px-1.5 py-px text-[8.5px] font-bold uppercase tracking-wider text-slate-700 ring-1 ring-inset ring-slate-300 shrink-0"
+                                title={exit?.lastWorkingDay ? `Exited on ${String(exit.lastWorkingDay).slice(0, 10)}` : "Exited"}
+                              >
+                                <span className="inline-block h-1 w-1 rounded-full bg-slate-500" />
+                                Exited
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[10.5px] text-slate-500 truncate">
                             {desg ? `${desg}${dept ? ` · ${dept}` : ""}` : u.email}
                           </p>
