@@ -293,6 +293,12 @@ function resolvePlaceholder(
     case "CustomAttributes":
       // HR-supplied per-render values (FnFAmount, ReferenceNo, …)
       return ctx.customFields?.[field] ?? "";
+    case "ExitSettlement":
+      // Provisional Full & Final Settlement statement — auto
+      // computes the earnings total, deductions total, net
+      // payable, and the English-words representation from the
+      // line items HR enters as custom fields.
+      return resolveExitSettlement(field, ctx.customFields);
     case "Salary":
       // Auto-derived salary breakup. HR types the annual package
       // (e.g. 600000) and ticks the EnablePf checkbox; this section
@@ -315,6 +321,70 @@ function resolvePlaceholder(
  *  Reads `AnnualPackage` + `EnablePf` from the HR-entered custom
  *  fields. Returns "" for unknown fields so renderLetterHtml's
  *  "missing" list still catches typos. */
+/** Convert a positive integer rupee amount to Indian English
+ *  words ("14217 → Fourteen Thousand Two Hundred Seventeen
+ *  Rupees only"). Handles the Indian numbering system (lakh,
+ *  crore) since the existing payroll system uses it. Returns
+ *  "Zero Rupees only" for 0, "—" for non-numbers. */
+function rupeesInWords(amount: number): string {
+  if (!Number.isFinite(amount) || amount < 0) return "—";
+  const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+    "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen",
+    "Seventeen", "Eighteen", "Nineteen"];
+  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  const twoDigit = (n: number): string => {
+    if (n < 20) return ones[n];
+    const t = Math.floor(n / 10), o = n % 10;
+    return o === 0 ? tens[t] : `${tens[t]} ${ones[o]}`;
+  };
+  const threeDigit = (n: number): string => {
+    const h = Math.floor(n / 100), r = n % 100;
+    if (h === 0) return twoDigit(r);
+    if (r === 0) return `${ones[h]} Hundred`;
+    return `${ones[h]} Hundred ${twoDigit(r)}`;
+  };
+  let n = Math.floor(amount);
+  if (n === 0) return "Zero Rupees only";
+  const parts: string[] = [];
+  const crore = Math.floor(n / 10_000_000); n = n % 10_000_000;
+  const lakh  = Math.floor(n / 100_000);    n = n % 100_000;
+  const thousand = Math.floor(n / 1000);    n = n % 1000;
+  const hundredRem = n;
+  if (crore    > 0) parts.push(`${twoDigit(crore)} Crore`);
+  if (lakh     > 0) parts.push(`${twoDigit(lakh)} Lakh`);
+  if (thousand > 0) parts.push(`${twoDigit(thousand)} Thousand`);
+  if (hundredRem > 0) parts.push(threeDigit(hundredRem));
+  return `${parts.join(" ")} Rupees only`;
+}
+
+/** Compute earnings total, deductions total, net payable, and
+ *  net-in-words from the line items HR enters. Each line item is
+ *  optional — empty/non-numeric strings count as 0. */
+function resolveExitSettlement(field: string, customFields: Record<string, string>): string {
+  const num = (key: string): number => {
+    const raw = String(customFields?.[key] ?? "").replace(/[^\d.\-]/g, "");
+    const v = Number(raw);
+    return Number.isFinite(v) ? v : 0;
+  };
+  const EARNINGS_KEYS = [
+    "Basic", "HRA", "MedicalAllowance", "ConveyanceAllowance",
+    "SpecialAllowance", "DearnessAllowance", "LeaveEncashmentAmount",
+  ];
+  const DEDUCTION_KEYS = ["ProfessionalTax"];
+  const totalEarnings   = EARNINGS_KEYS.reduce((s, k) => s + num(k), 0);
+  const totalDeductions = DEDUCTION_KEYS.reduce((s, k) => s + num(k), 0);
+  const net             = totalEarnings - totalDeductions;
+  const fmtRs2 = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtRs0 = (n: number) => Math.round(n).toLocaleString("en-IN");
+  switch (field) {
+    case "TotalEarnings":   return fmtRs2(totalEarnings);
+    case "TotalDeductions": return fmtRs2(totalDeductions);
+    case "NetPayable":      return fmtRs0(net);
+    case "NetInWords":      return rupeesInWords(net);
+    default:                return "";
+  }
+}
+
 function resolveSalary(field: string, customFields: Record<string, string>): string {
   const annual = Number(String(customFields?.AnnualPackage ?? "").replace(/[^\d.]/g, ""));
   if (!Number.isFinite(annual) || annual <= 0) {
