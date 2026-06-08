@@ -9,7 +9,13 @@ import AssetsPanel from "@/components/hr/AssetsPanel";
 export default function AssetsPage() {
   const { data: session, status } = useSession();
   const me = session?.user as any;
-  const meId = me?.id != null ? Number(me.id) : null;
+  // Session attaches the DB user id as `dbId` (see src/lib/auth.ts
+  // session callback). NOT `id` — NextAuth's default `id` field
+  // isn't populated for credentials sessions. Reading `me?.id`
+  // here would silently be undefined, the SWR call never fires,
+  // and the page falsely shows "No assets assigned" even when
+  // the user has 5 assets. Use `dbId` to match the API path.
+  const meId = me?.dbId != null ? Number(me.dbId) : (me?.id != null ? Number(me.id) : null);
   const isAssetAdmin = can(session?.user as never, "MANAGE_ASSETS");
 
   // Fetch the user's own profile so we can show their assigned
