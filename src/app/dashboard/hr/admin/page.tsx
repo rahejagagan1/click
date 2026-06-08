@@ -7,7 +7,7 @@ import { brandFromSlug, slugForBrand, type CompanyBrand } from "@/lib/hr-brand-s
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
-import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote, ClipboardCheck, FileSpreadsheet, FileText } from "lucide-react";
+import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote, ClipboardCheck, FileSpreadsheet, FileText, HeartPulse } from "lucide-react";
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import { DEPARTMENTS } from "@/lib/departments";
 import { DEPARTMENTS_YT_LABS } from "@/lib/departments-yt-labs";
@@ -17,6 +17,7 @@ import LeavesAdminPanel from "@/components/hr/LeavesAdminPanel";
 import LeavePoliciesPanel from "@/components/hr/LeavePoliciesPanel";
 import PayrollAdminPanel from "@/components/hr/PayrollAdminPanel";
 import RegularizationBalancePanel from "@/components/hr/RegularizationBalancePanel";
+import PulseSurveysPanel from "@/components/hr/PulseSurveysPanel";
 import SalaryStructuresList from "@/components/hr/SalaryStructuresList";
 import EmployeePicker, { type PickerUser } from "@/components/hr/EmployeePicker";
 import { RunPayrollPanel } from "@/app/dashboard/hr/payroll/run/page";
@@ -51,6 +52,7 @@ const ADMIN_TABS: Array<AdminTabDef & { permKey: string }> = [
   { key: "departments",          label: "Departments",          icon: Users,           permKey: "hr_admin_departments"    },
   { key: "payroll",              label: "Payroll",              icon: Banknote,        permKey: "hr_admin_payroll"        },
   { key: "salary-structures",    label: "Salary Structures",    icon: Banknote,        permKey: "hr_admin_payroll"        },
+  { key: "pulse-surveys",        label: "Pulse & Surveys",      icon: HeartPulse,      permKey: "hr_admin_pulse_surveys"  },
 ];
 
 const DAYS_LABEL = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -671,6 +673,14 @@ export default function HRAdminPage() {
 
           {/* ── Salary Structures — full org salary table (gagan-only) ── */}
           {tab === "salary-structures" && isSalaryDev && <SalaryStructuresList />}
+
+          {/* ── Pulse & Surveys — Keka-parity engagement bank.
+              Two sub-tabs:
+                • Weekly Pulse   — 4-week × 5-question rotation
+                • Monthly Survey — eNPS + Likert engagement drivers
+              HR adds / edits / deletes any question. Employee-facing
+              answer flow + aggregate dashboards come in a later PR. */}
+          {tab === "pulse-surveys" && <PulseSurveysPanel />}
 
           {/* ── Leave Types ── */}
           {tab === "leave-types" && (

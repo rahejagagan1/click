@@ -7,7 +7,7 @@
 //
 // Click a card → opens the CandidateDrawer for that candidate.
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useUrlState } from "@/lib/hooks/useUrlState";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
@@ -87,6 +87,20 @@ export default function KanbanBoard({ jobId }: { jobId: number }) {
     (n: number | null) => setSelectedIdUrl(n != null ? String(n) : null),
     [setSelectedIdUrl],
   );
+
+  // CandidateDrawer's "1 of N" pager dispatches this event when HR
+  // clicks the prev/next chevrons. Mirror listener from
+  // JobApplicantList + CandidatesTab so the pager works in Kanban
+  // view too.
+  useEffect(() => {
+    function onNav(e: Event) {
+      const id = (e as CustomEvent<number>).detail;
+      if (Number.isInteger(id)) setSelectedId(Number(id));
+    }
+    window.addEventListener("nb:candidateDrawer:navigate", onNav as any);
+    return () => window.removeEventListener("nb:candidateDrawer:navigate", onNav as any);
+  }, [setSelectedId]);
+
   const [moving, setMoving] = useState<Set<number>>(new Set());
 
   const onDrop = async (stageId: number, e: React.DragEvent) => {
