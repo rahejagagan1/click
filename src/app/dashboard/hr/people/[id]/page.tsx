@@ -20,6 +20,7 @@ import {
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
 import { isHRAdmin as canViewAsHRAdmin, canViewSalary } from "@/lib/access";
+import { can } from "@/lib/permissions/can";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
 import EmployeeFinancesPanel from "@/components/hr/EmployeeFinancesPanel";
@@ -223,7 +224,7 @@ export default function EmployeeDetailPage() {
   // engineering. Resolves a parallel commit on origin/main that only
   // included developer + hr_manager — `isHRAdmin` covers both and is
   // the same gate the PUT endpoint enforces.)
-  const showEditTab = isHRAdmin;
+  const showEditTab = isHRAdmin || can(me as never, "EDIT_EMPLOYEE_PROFILES");
   // Finances tab: salary tier only — payslips, salary, bonuses are
   // compensation data, not the broader HR-admin surface. See
   // canViewSalary in src/lib/access.ts.
@@ -2967,6 +2968,12 @@ function EmployeeTimePanel({
               const isWeekend = rec.status === "weekly_off";
               const isHoliday = rec.status === "holiday";
               const isPresent = rec.status === "present" || rec.status === "late" || rec.status === "half_day";
+              // LOP penalties from the auto-LOP job — surfaced so HR (and the
+              // employee) can see the day was docked. full = absence, half =
+              // unregularized missed clock-out.
+              const isFullLop    = rec.status === "lop";
+              const isHalfDayLop = rec.status === "half_day_lop";
+              const isLop        = isFullLop || isHalfDayLop;
 
               const reg   = regByDate.get(dateOnly);
               const wfh   = wfhByDate.get(dateOnly);
@@ -3058,7 +3065,8 @@ function EmployeeTimePanel({
                       {isHoliday      ? <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">Holiday</span> : null}
                       {isWfhApproved && !isLeaveRow ? <span className="inline-flex items-center rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-700">WFH</span> : null}
                       {/* New tags (matches Me-section) */}
-                      {missedClockOut && !hasPendingAny ? <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">Missed</span> : null}
+                      {isLop ? <span className="inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-red-700">{isHalfDayLop ? "½ Day LOP" : "LOP"}</span> : null}
+                      {missedClockOut && !hasPendingAny && !isLop ? <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">Missed</span> : null}
                       {isLateFirstIn && !!rec.clockIn && !hasPendingAny && !isLeaveRow ? <span className="inline-flex items-center rounded bg-orange-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-orange-700">Late</span> : null}
                       {isOnBreak ? <span className="inline-flex items-center rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-700">On break</span> : null}
                     </div>
@@ -3081,7 +3089,12 @@ function EmployeeTimePanel({
                     const showCentered = isWeekend || isLeaveRow || isHoliday
                       || (isLeavePending && !isPresent)
                       || (isWfhPending && !isPresent && !isWfhApproved)
-                      || isRegOnly;
+                      || isRegOnly
+                      // LOP rows have no usable punches → show the centered LOP
+                      // banner instead of an empty bar. (For a half-day LOP the
+                      // row does carry a clock-in, but the day is already docked,
+                      // so the banner is the clearer signal.)
+                      || (isLop && !isRegApproved);
                     if (!showCentered) return null;
                     const fmt = (d: string | Date | null | undefined) => d
                       ? new Date(d).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" })
@@ -3095,11 +3108,14 @@ function EmployeeTimePanel({
                       : isWfhPending    ? "WFH Pending Approval"
                       : isWeekend       ? "Full day Weekly-off"
                       : isHoliday       ? (rec.notes || "Public Holiday")
+                      : isHalfDayLop    ? "Half-day LOP — missed clock-out not regularized in time"
+                      : isFullLop       ? "Full-day LOP — absent, no attendance logged"
                       : isRegPending    ? `Regularization Pending${regWindow ? ` · ${regWindow}` : ""}`
                       : isRegApproved   ? `Regularized${regWindow ? ` · ${regWindow}` : ""}`
                       : "";
                     const tone =
-                      isLeavePending || isWfhPending || isRegPending ? "text-amber-700"
+                      isLop                                          ? "text-red-600"
+                      : isLeavePending || isWfhPending || isRegPending ? "text-amber-700"
                       : isLeaveRow                                    ? "text-violet-700"
                       : isRegApproved                                 ? "text-emerald-700"
                       : isHoliday                                     ? "text-amber-700"
@@ -3270,6 +3286,14 @@ function EmployeeTimePanel({
                         className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-50 text-amber-600 ring-1 ring-inset ring-amber-200 shadow-[0_1px_2px_rgba(245,158,11,0.18)]"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      </span>
+                    ) : isLop ? (
+                      <span
+                        title={isHalfDayLop ? "Half-day LOP — missed clock-out not regularized in time" : "Full-day LOP — absent, no attendance logged"}
+                        className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700 ring-1 ring-inset ring-red-200"
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                        {isHalfDayLop ? "½ LOP" : "LOP"}
                       </span>
                     ) : rec.status === "absent" ? (
                       // Absent day → render a "Regularize" affordance instead
