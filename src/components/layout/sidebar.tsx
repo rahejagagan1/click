@@ -72,14 +72,15 @@ export default function Sidebar() {
     // to the legacy role logic (admin / manager / hod / hr_manager etc.).
     const canSeeReports = canSeeReportsFn(user);
     const canSeeViolationLog = can(user, "VIEW_VIOLATIONS");
-    // Assets — gated by MANAGE_ASSETS. Regular employees who land
-    // on /dashboard/hr/assets currently see "You don't have access
-    // to the asset register" — the page hasn't yet implemented the
-    // "my assigned assets" scoped view we'd want for them. Hiding
-    // the sidebar entry stops them from clicking into a dead end.
-    // If/when the page learns to scope content for non-admins, flip
-    // this back to `true`.
-    const showAssetsTab = can(user, "MANAGE_ASSETS");
+    // Assets tile — visible to EVERYONE. The page now actually
+    // implements the scoping the original comment promised:
+    //   • MANAGE_ASSETS (IT Security / HR / CEO / devs)
+    //     → full register with admin actions.
+    //   • Everyone else → read-only "My Assets" view of just the
+    //     items currently assigned to them (sourced from
+    //     /api/hr/people/<self>'s `assets` field).
+    // No more "You don't have access" dead-end for employees.
+    const showAssetsTab = true;
     const showFeedbackSubmenu = canViewFeedbackInbox(user);
 
     // Tab-permission overrides — the caller's personal map from
