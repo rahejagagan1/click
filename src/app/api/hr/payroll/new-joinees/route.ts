@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -39,11 +40,21 @@ export async function GET(req: NextRequest) {
     const monthEnd   = new Date(Date.UTC(year, month + 1, 1));
     const calendarDays = daysInMonth(year, month);
 
+    // Brand-scope: scope to caller's businessUnit unless they're a
+    // developer or in the cross-brand allowlist. A YT Labs CEO
+    // (canViewSalary) shouldn't see NB Media joiner salary data.
+    const scope = getBrandScope(session!.user);
+    if (!scope.allBrands && !scope.brand) {
+      // Caller has no brand set + isn't allowlisted — fail closed.
+      return NextResponse.json({ items: [] });
+    }
+
     // EmployeeProfile.joiningDate is the source of truth for DOJ.
     const profiles = await prisma.employeeProfile.findMany({
       where: {
         joiningDate: { gte: monthStart, lt: monthEnd },
         user: { isActive: true },
+        ...(scope.allBrands ? {} : { businessUnit: scope.brand! }),
       },
       include: {
         user: {

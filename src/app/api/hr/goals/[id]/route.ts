@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
+import { isHRAdmin } from "@/lib/access";
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
@@ -16,7 +17,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     const goal = await prisma.goal.findUnique({ where: { id } });
     if (!goal) return NextResponse.json({ error: "Goal not found" }, { status: 404 });
 
-    const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
+    // Canonical isHRAdmin — was inline check missing special_access
+    // and role=admin tiers.
+    const isAdmin = isHRAdmin(user);
     if (goal.ownerId !== user.dbId && !isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -70,7 +73,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const goal = await prisma.goal.findUnique({ where: { id } });
     if (!goal) return NextResponse.json({ error: "Goal not found" }, { status: 404 });
 
-    const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
+    // Canonical isHRAdmin — was inline check missing special_access
+    // and role=admin tiers.
+    const isAdmin = isHRAdmin(user);
     if (goal.ownerId !== user.dbId && !isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

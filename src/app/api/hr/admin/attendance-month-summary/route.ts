@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
 import { istTodayDateOnly } from "@/lib/ist-date";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -60,8 +61,18 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Users + their attendance rows for the month ──
+    // Brand-scope: NB Media HR Manager sees only NB Media users
+    // unless they're allowlisted for cross-brand. Closes the leak
+    // where the admin attendance dashboard mixed brands.
+    const scope = getBrandScope(self);
+    if (!scope.allBrands && !scope.brand) {
+      return NextResponse.json({ users: [], workingDays, workingDaysElapsed, weekendDays, holidayDays, daysInMonth });
+    }
     const users = await prisma.user.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        ...(scope.allBrands ? {} : { employeeProfile: { businessUnit: scope.brand! } }),
+      },
       orderBy: { name: "asc" },
       select: {
         id: true, name: true, email: true, role: true, orgLevel: true,

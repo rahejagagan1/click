@@ -6,6 +6,7 @@ import { extname } from "node:path";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, canViewSalary, serverError } from "@/lib/api-auth";
 import { writeAuditLog } from "@/lib/audit-log";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 // Node runtime needed for Buffer / multipart file reads (Edge can't).
@@ -73,24 +74,31 @@ export async function GET(req: NextRequest) {
       }
       const start = new Date(Date.UTC(year, month, 1));
       const end   = new Date(Date.UTC(year, month + 1, 1));
-      const items = await prisma.$queryRawUnsafe<(BonusRow & { name: string; role: string })[]>(
-        `SELECT b.id, b."userId", b.amount, b.reason, b."effectiveDate",
-                b."bonusType", b."paymentStatus", b."createdAt", b."createdBy",
-                b."attachmentName",
-                u.name, u.role::text AS role
-           FROM "EmployeeBonus" b
-           JOIN "User" u ON u.id = b."userId"
-          WHERE b."effectiveDate" >= $1 AND b."effectiveDate" < $2
-          ORDER BY b."effectiveDate" ASC, b.id ASC`,
-        start, end,
-      );
+      const scope = getBrandScope(session!.user);
+      if (!scope.allBrands && !scope.brand) return NextResponse.json({ items: [] });
+      const brandClause = scope.allBrands ? "" : ` AND ep."businessUnit" = $3`;
+      const sql = `SELECT b.id, b."userId", b.amount, b.reason, b."effectiveDate",
+                          b."bonusType", b."paymentStatus", b."createdAt", b."createdBy",
+                          b."attachmentName",
+                          u.name, u.role::text AS role
+                     FROM "EmployeeBonus" b
+                     JOIN "User" u ON u.id = b."userId"
+                LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
+                    WHERE b."effectiveDate" >= $1 AND b."effectiveDate" < $2
+                      ${brandClause}
+                    ORDER BY b."effectiveDate" ASC, b.id ASC`;
+      const items = scope.allBrands
+        ? await prisma.$queryRawUnsafe<(BonusRow & { name: string; role: string })[]>(sql, start, end)
+        : await prisma.$queryRawUnsafe<(BonusRow & { name: string; role: string })[]>(sql, start, end, scope.brand);
       return NextResponse.json({ items });
     }
 
     let userId: number;
     if (requested) {
       const n = parseInt(requested);
-      if (!Number.isFinite(n)) {
+      // I10 fix: strict integer check — parseInt("0") = 0 passed
+      // the old isFinite gate and would create phantom userId=0 FK rows.
+      if (!Number.isInteger(n) || n <= 0) {
         return NextResponse.json({ error: "Bad userId" }, { status: 400 });
       }
       if (!admin && n !== myId) {
