@@ -372,15 +372,26 @@ async function upsertSubtaskFromClickup(subtask: any, caseId: number): Promise<v
     const subtaskAssignees: any[] = Array.isArray(authoritative.assignees) ? authoritative.assignees : [];
     if (subtaskAssignees.length > 0) {
         await prisma.subtaskAssignee.deleteMany({ where: { subtaskId: savedSubtask.id } });
+        // Resolve clickup assignees → db users, deduped by userId (two clickup
+        // accounts can map to one db user). createMany + skipDuplicates is
+        // race-proof, so two overlapping syncs no longer throw P2002 on the
+        // (subtaskId, userId) unique constraint — they just skip the dupe.
+        const byUserId = new Map<number, bigint>();
         for (const assignee of subtaskAssignees) {
             const resolvedId = await resolveUserId(assignee.id);
-            if (resolvedId) {
-                await prisma.subtaskAssignee.upsert({
-                    where: { subtaskId_userId: { subtaskId: savedSubtask.id, userId: resolvedId } },
-                    create: { subtaskId: savedSubtask.id, userId: resolvedId, clickupUserId: BigInt(assignee.id) },
-                    update: {},
-                });
+            if (resolvedId && !byUserId.has(resolvedId)) {
+                byUserId.set(resolvedId, BigInt(assignee.id));
             }
+        }
+        if (byUserId.size > 0) {
+            await prisma.subtaskAssignee.createMany({
+                data: [...byUserId].map(([userId, clickupUserId]) => ({
+                    subtaskId: savedSubtask.id,
+                    userId,
+                    clickupUserId,
+                })),
+                skipDuplicates: true,
+            });
         }
     }
 }
