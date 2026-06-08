@@ -281,7 +281,14 @@ export default function CustomSelect({
             </div>
           </div>
         )}
-        <div className="overflow-y-auto" style={{ maxHeight: popupMaxH }}>
+        {/* Options list — flex-1 so the search bar (above) and the
+            "+ Add custom value" footer (below) stay visible while
+            the middle list scrolls. Previously the footer lived
+            INSIDE this scroll area, so with 8+ options the button
+            got pushed below the fold and HR Managers thought the
+            feature was missing entirely. User report: "again same
+            issue why?". */}
+        <div className="overflow-y-auto flex-1 min-h-0">
           {allOptions.length === 0 && !adding && (
             <p className="px-3 py-2 text-[12px] text-slate-400">No options yet</p>
           )}
@@ -322,56 +329,61 @@ export default function CustomSelect({
               </div>
             );
           })}
-
-          {!readOnlyOptions && (
-            <div className="border-t border-slate-100">
-              {adding ? (
-                <div className="px-3 py-2 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <input
-                      autoFocus
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") { e.preventDefault(); onAdd(); }
-                        if (e.key === "Escape") { setAdding(false); setDraft(""); setErr(""); }
-                      }}
-                      placeholder="Type a new value…"
-                      maxLength={120}
-                      className="h-8 flex-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12.5px] text-slate-800 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15"
-                    />
-                    <button
-                      type="button"
-                      disabled={busy || !draft.trim()}
-                      onClick={onAdd}
-                      className="h-8 inline-flex items-center gap-1 rounded-md bg-[#3b82f6] px-2.5 text-[11.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 hover:bg-[#2563eb]"
-                    >
-                      {busy ? "…" : "Add"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setAdding(false); setDraft(""); setErr(""); }}
-                      className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                      aria-label="Cancel"
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
-                  {err && <p className="text-[11px] text-rose-600">{err}</p>}
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => { setAdding(true); setDraft(""); setErr(""); }}
-                  className="w-full inline-flex items-center gap-2 px-3 py-2 text-[12.5px] font-semibold text-[#3b82f6] hover:bg-[#3b82f6]/5"
-                >
-                  <Plus size={13} />
-                  Add custom value
-                </button>
-              )}
-            </div>
-          )}
         </div>
+
+        {/* "+ Add custom value" footer — pinned at the BOTTOM of
+            the popup, OUTSIDE the scroll area so it's always
+            visible regardless of how many options exist. `shrink-0`
+            stops it from being squeezed when the option list is
+            taller than the popup. */}
+        {!readOnlyOptions && (
+          <div className="border-t border-slate-100 shrink-0 bg-white rounded-b-lg">
+            {adding ? (
+              <div className="px-3 py-2 space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { e.preventDefault(); onAdd(); }
+                      if (e.key === "Escape") { setAdding(false); setDraft(""); setErr(""); }
+                    }}
+                    placeholder="Type a new value…"
+                    maxLength={120}
+                    className="h-8 flex-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12.5px] text-slate-800 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || !draft.trim()}
+                    onClick={onAdd}
+                    className="h-8 inline-flex items-center gap-1 rounded-md bg-[#3b82f6] px-2.5 text-[11.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 hover:bg-[#2563eb]"
+                  >
+                    {busy ? "…" : "Add"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setAdding(false); setDraft(""); setErr(""); }}
+                    className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    aria-label="Cancel"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+                {err && <p className="text-[11px] text-rose-600">{err}</p>}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setAdding(true); setDraft(""); setErr(""); }}
+                className="w-full inline-flex items-center gap-2 px-3 py-2 text-[12.5px] font-semibold text-[#3b82f6] hover:bg-[#3b82f6]/5 rounded-b-lg"
+              >
+                <Plus size={13} />
+                Add custom value
+              </button>
+            )}
+          </div>
+        )}
         </div>
         );
       })(), document.body)}
