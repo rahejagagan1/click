@@ -11,25 +11,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth } from "@/lib/api-auth";
-import { canViewAllBrands } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
-/** Returns "deny" if the caller can't access this exit. Same
- *  strict semantics as the list endpoint:
- *    • canViewAllBrands (developers, top-tier role=hr_manager) →
- *      always allowed
+/** Returns "deny" if the caller can't access this exit. Strict
+ *  brand separation:
+ *    • Developers (isDeveloper === true) → always allowed
+ *      (debug/triage only)
+ *    • Everyone else (CEO, every HR tier, top-tier HR Manager,
+ *      per-brand HR Manager, …) → must match the exit's brand
+ *      exactly. NO cross-brand bypass — HR explicitly asked for
+ *      hard separation on offboarding (NB Media HR sees only NB
+ *      Media exits, YT Labs HR sees only YT Labs exits).
  *    • Caller without a businessUnit set on their profile →
- *      denied (HR must set their brand first)
- *    • Exit's businessUnit must match caller's exactly. No
- *      legacy-NULL bypass — a row with NULL businessUnit is
- *      invisible to brand-scoped users (forces HR to fix the
- *      data, doesn't silently leak across brands).
+ *      denied (HR must set their brand first).
+ *    • Exit row without a brand set → invisible to brand-scoped
+ *      users (forces HR to fix the data; doesn't silently leak).
  *  Returns 404 on mismatch to avoid leaking which IDs exist in
  *  the other brand's pipeline. */
 async function brandGate(session: any, exitId: number): Promise<string | null | "deny"> {
   const user = session?.user as any;
-  if (canViewAllBrands(user)) return null;
+  // Only developers bypass — canViewAllBrands intentionally NOT
+  // used here so the env allowlist (Tanvi etc.) can't grant
+  // cross-brand offboarding access.
+  if (user?.isDeveloper === true) return null;
   const callerBu = user?.businessUnit ?? null;
   if (!callerBu) {
     console.warn(`[exits/${exitId}] caller #${user?.dbId} has no businessUnit set — denying.`);
@@ -44,7 +49,6 @@ async function brandGate(session: any, exitId: number): Promise<string | null | 
   );
   if (rows.length === 0) return "deny";
   const exitBu = rows[0].bu;
-  // Strict: NULL-brand exits are invisible to brand-scoped users.
   if (!exitBu) return "deny";
   return exitBu === callerBu ? exitBu : "deny";
 }
