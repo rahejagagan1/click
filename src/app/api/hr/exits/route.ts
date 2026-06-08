@@ -30,43 +30,56 @@ export async function GET() {
   if (errorResponse) return errorResponse;
   if (!canManage(session)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   try {
-    // Brand-scope. Each per-brand HR Manager (NB Media / YT Labs)
-    // should only see exits for employees in their own brand. The
-    // canViewAllBrands bypass covers two tiers that explicitly need
-    // cross-brand visibility: developers (debugging) and role=
-    // "hr_manager" (the top-tier org-wide HR Manager, e.g. Tanvi).
-    // Everyone else (including orgLevel=hr_manager and CEOs — who
-    // are themselves brand-scoped) gets filtered to their own
-    // businessUnit.
+    // ── Strict brand-scope ─────────────────────────────────────
+    // Each per-brand HR Manager (NB Media / YT Labs) sees ONLY
+    // exits for employees with the same businessUnit on their
+    // EmployeeProfile. No "legacy NULL bypass" — earlier attempt
+    // used COALESCE(..., '') IN ('', $1) so rows with NULL
+    // businessUnit would show up to everyone; that turned out to
+    // be the leak (Manpreet Singh / Arpit Sharma had NULL on
+    // their profile so YT Labs HR could still see them). If a
+    // row legitimately lacks a brand, only developers see it (so
+    // HR can fix the data).
     //
-    // Bug we're fixing: prior to this filter, /api/hr/exits returned
-    // every exit row regardless of caller's brand, so the YT Labs
-    // HR Manager could see NB Media's offboarded employees.
-    const callerBu = (session?.user as any)?.businessUnit ?? null;
-    const allBrands = canViewAllBrands(session?.user as any);
-    // Also include rows where the exiting employee has no
-    // businessUnit set (legacy data) so HR can still see + fix them
-    // — only the same-brand filter applies otherwise.
-    const brandFilter = allBrands || !callerBu
-      ? ""
-      : `WHERE COALESCE(ep."businessUnit", '') IN ('', $1)`;
+    // canViewAllBrands bypass:
+    //   • Developers → always
+    //   • role = "hr_manager" (top-tier org-wide) → always
+    //   Per-brand HR Managers (orgLevel=hr_manager + businessUnit
+    //   set) and CEOs are brand-scoped here.
+    //
+    // If the caller has no businessUnit on their own profile AND
+    // doesn't pass canViewAllBrands, return an empty list. Better
+    // to show "0 of 0" + force HR to set the brand on the user's
+    // profile than to silently leak the whole table.
+    const user = session!.user as any;
+    const callerBu = user?.businessUnit ?? null;
+    const allBrands = canViewAllBrands(user);
 
-    const sql = `SELECT e.id, e."userId", u.name AS "userName", u.email AS "userEmail",
-                        ep.designation, ep.department, ep."businessUnit",
-                        e."exitType", e."resignationDate", e."lastWorkingDay",
-                        e."noticePeriodDays", e.reason, e.notes, e.status,
-                        e."assetsReturned", e."documentsHandled",
-                        e."finalSettlementDone", e."exitInterviewDone",
-                        e."okToRehire", e."createdAt"
-                   FROM "EmployeeExit" e
-                   JOIN "User" u ON u.id = e."userId"
-              LEFT JOIN "EmployeeProfile" ep ON ep."userId" = e."userId"
-                   ${brandFilter}
-                  ORDER BY e."createdAt" DESC`;
+    const baseSql = `SELECT e.id, e."userId", u.name AS "userName", u.email AS "userEmail",
+                            ep.designation, ep.department, ep."businessUnit",
+                            e."exitType", e."resignationDate", e."lastWorkingDay",
+                            e."noticePeriodDays", e.reason, e.notes, e.status,
+                            e."assetsReturned", e."documentsHandled",
+                            e."finalSettlementDone", e."exitInterviewDone",
+                            e."okToRehire", e."createdAt"
+                       FROM "EmployeeExit" e
+                       JOIN "User" u ON u.id = e."userId"
+                  LEFT JOIN "EmployeeProfile" ep ON ep."userId" = e."userId"`;
 
-    const rows = brandFilter
-      ? await prisma.$queryRawUnsafe<any[]>(sql, callerBu)
-      : await prisma.$queryRawUnsafe<any[]>(sql);
+    let rows: any[];
+    if (allBrands) {
+      rows = await prisma.$queryRawUnsafe<any[]>(
+        `${baseSql} ORDER BY e."createdAt" DESC`,
+      );
+    } else if (!callerBu) {
+      console.warn(`[GET /api/hr/exits] caller #${user?.dbId} has no businessUnit set — returning empty list. Set their EmployeeProfile.businessUnit to enable brand-scoped access.`);
+      rows = [];
+    } else {
+      rows = await prisma.$queryRawUnsafe<any[]>(
+        `${baseSql} WHERE ep."businessUnit" = $1 ORDER BY e."createdAt" DESC`,
+        callerBu,
+      );
+    }
 
     return NextResponse.json(rows);
   } catch (e: any) {
