@@ -508,23 +508,44 @@ ${SIGNOFF_HTML_YT_LABS}
   // letterhead / logo / signature switch via the wrapper based
   // on businessUnit.
   ...(([
-    { brand: "NB Media", companyName: "YT Money Productions Pvt. Ltd." },
-    { brand: "YT Labs", companyName: "Billion Films Private Limited (operating under the brand name of YouTuber Labs)" },
-  ] as const).map(({ brand, companyName }): LetterTemplateSeed => ({
+    {
+      brand: "NB Media" as const,
+      companyName: "YT Money Productions Pvt. Ltd.",
+      subDeptHint: "e.g. NB_Production",
+      bankHint:    "e.g. HDFC Bank",
+      ifscHint:    "e.g. HDFC0001234",
+      acctHint:    "e.g. 50100123456789",
+      panHint:     "e.g. ABCDE1234F",
+    },
+    {
+      brand: "YT Labs" as const,
+      companyName: "Billion Films Private Limited (operating under the brand name of YouTuber Labs)",
+      subDeptHint: "e.g. YT_Creative Writing",
+      bankHint:    "e.g. Bank of Baroda",
+      ifscHint:    "e.g. BARB0GARIAX",
+      acctHint:    "e.g. 30620100007754",
+      panHint:     "e.g. FBPPD5707L",
+    },
+  ] as const).map(({ brand, companyName, subDeptHint, bankHint, ifscHint, acctHint, panHint }): LetterTemplateSeed => ({
     key: "exit_statement",
     title: "Exit Statement",
     category: "offboarding",
     businessUnit: brand,
     customFields: [
-      // ── Employee meta (mostly typed manually — payroll system
-      //    integration isn't there yet, so HR transcribes from
-      //    the bank/PAN records) ──────────────────────────────
-      { key: "SubDepartment",       label: "Sub-department",       type: "text",   required: false, placeholder: "e.g. YT_Creative Writing" },
+      // ── Employee meta. Bank Account / Bank / Bank IFSC /
+      // PAN Number are AUTO-FILLED from the picked employee's
+      // EmployeeProfile by the template editor when those fields
+      // are populated there (e.g. bankAccountNumber, bankIfsc,
+      // bankName, panNumber). The placeholders below only show
+      // when the profile field is empty — so they exist as a
+      // gentle hint for HR, brand-specific because the sample
+      // formats differ between teams.
+      { key: "SubDepartment",       label: "Sub-department",       type: "text",   required: false, placeholder: subDeptHint },
       { key: "PaymentMode",         label: "Payment Mode",         type: "text",   required: false, placeholder: "Bank Transfer" },
-      { key: "Bank",                label: "Bank",                 type: "text",   required: false, placeholder: "e.g. Bank of Baroda" },
-      { key: "BankIFSC",            label: "Bank IFSC",            type: "text",   required: false, placeholder: "e.g. BARB0GARIAX" },
-      { key: "BankAccount",         label: "Bank Account",         type: "text",   required: false, placeholder: "e.g. 30620100007754" },
-      { key: "PANNumber",           label: "PAN Number",           type: "text",   required: false, placeholder: "e.g. FBPPD5707L" },
+      { key: "Bank",                label: "Bank",                 type: "text",   required: false, placeholder: bankHint },
+      { key: "BankIFSC",            label: "Bank IFSC",            type: "text",   required: false, placeholder: ifscHint },
+      { key: "BankAccount",         label: "Bank Account",         type: "text",   required: false, placeholder: acctHint },
+      { key: "PANNumber",           label: "PAN Number",           type: "text",   required: false, placeholder: panHint },
       { key: "SettlementDate",      label: "Settlement Date",      type: "date",   required: true },
 
       // ── Settlement metrics ─────────────────────────────────
