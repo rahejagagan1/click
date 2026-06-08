@@ -75,7 +75,16 @@ export default function AssetsPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {assigned.map((a) => (
+            {assigned.map((a) => {
+              // CPU category gets the same spec-chip treatment as
+              // the admin AssetsPanel — split notes on newlines /
+              // commas / semicolons into individual chips like
+              // "i7-12700K", "32GB RAM", "RTX 4060Ti".
+              const isCpu = a.category === "CPU" || a.category === "Laptop" || a.category === "Desktop";
+              const specLines: string[] = isCpu && a.notes
+                ? String(a.notes).split(/[\n,;]+/).map((s: string) => s.trim()).filter(Boolean)
+                : [];
+              return (
               <div key={a.id} className="rounded-xl border border-slate-200 bg-white p-4 hover:border-[#008CFF]/40 transition-colors">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -94,6 +103,21 @@ export default function AssetsPage() {
                     </span>
                   )}
                 </div>
+
+                {/* Specs row — only shown for CPU / Laptop / Desktop
+                    categories where HR fills `notes` with the
+                    component breakdown. Empty notes → row collapses. */}
+                {specLines.length > 0 && (
+                  <div className="mt-3 -mb-1 flex flex-wrap gap-1.5">
+                    {specLines.map((s, i) => (
+                      <span
+                        key={i}
+                        className="text-[11px] px-2 py-0.5 rounded-md bg-blue-50 border border-blue-200/70 text-blue-800 font-mono"
+                      >{s}</span>
+                    ))}
+                  </div>
+                )}
+
                 <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-2 gap-2 text-[11.5px] text-slate-600">
                   {a.assetTag && (
                     <div className="inline-flex items-center gap-1 truncate">
@@ -115,7 +139,8 @@ export default function AssetsPage() {
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
