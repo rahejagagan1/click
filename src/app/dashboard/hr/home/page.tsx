@@ -8,7 +8,7 @@ import SelectField from "@/components/ui/SelectField";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { parseAttLoc } from "@/lib/attendance-location";
-import { isHRAdmin, canApplyRestrictedLeave } from "@/lib/access";
+import { isHRAdmin, canApplyRestrictedLeave, canViewAllBrands } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
 import { PageShell } from "@/components/layout";
@@ -2484,15 +2484,22 @@ export default function HRHomePage() {
     const t = setTimeout(() => setConfirmingClockOut(false), 6000);
     return () => clearTimeout(t);
   }, [confirmingClockOut, clockingOut]);
-  // Viewer brand for the leave/wfh lists below. Every viewer is
-  // brand-scoped — even CEOs (Kunal sees only YT Labs, Nikit sees
-  // only NB Media) and HR managers. Legacy users with no
-  // businessUnit set bucket as NB Media (parent-brand default).
-  // Developers / super-admins are NOT exempt here per HR's ask.
+  // Viewer brand for the leave/wfh lists below. Default behavior:
+  // brand-scoped — CEOs see only their own brand (Kunal → YT Labs,
+  // Nikit → NB Media), HR Members see only their brand, every
+  // employee sees only their brand. Legacy users with no businessUnit
+  // bucket as NB Media (parent-brand default).
+  //
+  // Two tiers get a full cross-brand view via canViewAllBrands():
+  //   • Developers
+  //   • role="hr_manager" (Tanvi etc.) — distinct from orgLevel-only HR
+  // For those viewers the filter becomes a no-op so the On Leave Today
+  // / Working Remotely / Clocked-In lists show everyone in the org.
   const viewerBrand: "NB Media" | "YT Labs" =
     user?.businessUnit === "YT Labs" ? "YT Labs" : "NB Media";
+  const seeAllBrands = canViewAllBrands(user as any);
   const matchesViewerBrand = (u: any): boolean =>
-    (u.businessUnit || "NB Media") === viewerBrand;
+    seeAllBrands || (u.businessUnit || "NB Media") === viewerBrand;
   // On Leave Today — anyone whose attendance record is `on_leave` today, OR
   // who has an applied leave (pending / partially_approved / approved) that
   // covers today. Approval isn't required to appear here — the moment a

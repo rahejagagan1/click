@@ -22,6 +22,19 @@ const nextConfig = {
         // it find its own files at runtime.
         "puppeteer",
         "puppeteer-core",
+        // tesseract.js spawns a worker thread that loads a separate
+        // script file via require() at runtime. Webpack/Turbopack
+        // rewrites the path to /ROOT/node_modules/tesseract.js/...
+        // which doesn't exist, causing
+        //   "Cannot find module '.../worker-script/node/index.js'"
+        // as an uncaughtException that crashes the request. Keeping
+        // tesseract.js external means it resolves its own worker
+        // script the way the package expects.
+        "tesseract.js",
+        // mupdf has the same shape — native bindings + an internal
+        // require() of a wasm/data file. Mark it external for the
+        // same reason.
+        "mupdf",
     ],
     // Hosts allowed to hit Next.js dev resources (e.g. /_next/webpack-hmr).
     // The dev server blocks cross-origin requests to dev-only routes by

@@ -1,16 +1,125 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
-import { Loader2, Pencil, X, ChevronDown } from "lucide-react";
+import { Loader2, Pencil, X, ChevronDown, FileText, ShieldCheck, GraduationCap, BriefcaseBusiness, History, FolderClosed, Sparkles, CheckCircle2 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import SelectField from "@/components/ui/SelectField";
+
+// Doc folder taxonomy + categories that land in each. Mirrors the
+// HR-side DocumentsPanel so the two views stay consistent. See
+// the matching DOC_FOLDERS / CAT_LABEL_OVERRIDES in
+// /dashboard/hr/people/[id]/page.tsx for the rationale.
+// Folder taxonomy for the SELF view. "employee_letter" — the
+// category the HR Letter Templates page auto-saves to when HR
+// clicks "Generate PDF" — lands in the "Other" folder so the
+// employee can find every letter HR has issued them in one place
+// (FnF, Probation Confirmation, Relieving, Revised Offer, etc.).
+// Owner-readable subtitle + icon are paired with each entry to
+// make the sidebar self-documenting.
+type SelfDocFolder = {
+  key:       string;
+  label:     string;
+  subtitle:  string;
+  Icon:      typeof FileText;
+  cats:      string[];
+};
+const SELF_DOC_FOLDERS: SelfDocFolder[] = [
+  { key: "identity",  label: "Identity Documents", subtitle: "PAN, Aadhaar, Passport, Driving License",   Icon: ShieldCheck, cats: ["pan_card", "aadhar", "passport", "driving_license"] },
+  { key: "education", label: "Education",          subtitle: "Degrees, marksheets, transcripts",          Icon: GraduationCap, cats: ["education_certificate"] },
+  { key: "letters",   label: "Employment Letters", subtitle: "Offer letter, contract",                    Icon: BriefcaseBusiness, cats: ["offer_letter"] },
+  { key: "previous",  label: "Previous Experience",subtitle: "Relieving / offer from prior employers",    Icon: History, cats: ["previous_relieving_letter", "previous_offer_letter"] },
+  { key: "other",     label: "Other Documents",    subtitle: "Generated HR letters & misc uploads",       Icon: FolderClosed, cats: ["other", "employee_letter"] },
+];
+
+const CAT_LABEL_OVERRIDES: Record<string, string> = {
+  pan_card:                  "PAN Card",
+  aadhar:                    "Aadhaar",
+  passport:                  "Passport",
+  driving_license:           "Driving License",
+  education_certificate:     "Degree/marksheet",
+  offer_letter:              "Offer Letter",
+  previous_relieving_letter: "Previous Relieving Letter",
+  previous_offer_letter:     "Previous Offer Letter",
+  // legacy keys kept so old uploads still render readably
+  id_proof:                  "ID Proof",
+  voter_id:                  "Voter ID",
+  tenth:                     "10th",
+  twelfth:                   "12th",
+  degree:                    "Degree",
+  experience_letter:         "Experience Letter",
+  contract:                  "Contract",
+  payslip:                   "Payslip",
+};
+const REQUIRED_CATS = new Set<string>([
+  "pan_card", "aadhar", "education_certificate", "offer_letter",
+]);
+const OPTIONAL_HINT: Record<string, string> = {
+  passport:                  "optional",
+  driving_license:           "optional",
+  previous_relieving_letter: "if available",
+  previous_offer_letter:     "if available",
+};
+const prettyCategory = (c: string): string =>
+  CAT_LABEL_OVERRIDES[c]
+    ?? c.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+const dropdownCategoryLabel = (c: string): string => {
+  const base = prettyCategory(c);
+  if (REQUIRED_CATS.has(c)) return `${base} *`;
+  if (OPTIONAL_HINT[c])      return `${base} (${OPTIONAL_HINT[c]})`;
+  return base;
+};
 
 const F = "w-full h-9 px-3 border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] bg-white dark:bg-[#0a1526] text-slate-800 dark:text-white focus:outline-none focus:border-[#008CFF]";
 
 const PROFILE_TABS = ["ABOUT", "PROFILE", "JOB", "DOCUMENTS", "ASSETS"] as const;
 type ProfileTab = typeof PROFILE_TABS[number];
+
+// Reusable doc row — emerald accent for HR-issued letters,
+// blue accent for the employee's own uploads.
+function DocCard({ doc, accent, onDelete }: {
+  doc: any;
+  accent: "emerald" | "blue";
+  onDelete: (doc: any) => void;
+}) {
+  const isEmerald = accent === "emerald";
+  return (
+    <div
+      className={`group flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors ${
+        isEmerald
+          ? "border-emerald-200 bg-emerald-50/30 hover:border-emerald-300"
+          : "border-slate-200 bg-white hover:border-[#008CFF]/40"
+      }`}
+    >
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+        isEmerald ? "bg-emerald-500/10 text-emerald-700" : "bg-[#008CFF]/10 text-[#008CFF]"
+      }`}>
+        <FileText size={16} />
+      </div>
+      <a
+        href={doc.fileUrl?.startsWith("http") ? doc.fileUrl : `/api/hr/documents/${doc.id}/file`}
+        target="_blank"
+        rel="noreferrer"
+        className="min-w-0 flex-1 cursor-pointer"
+      >
+        <p className="truncate text-[13px] font-semibold text-slate-800">{doc.fileName || "Untitled"}</p>
+        <p className="truncate text-[11px] text-slate-500">
+          {isEmerald ? "Generated" : (doc.category ? doc.category.replace(/_/g, " ") : "Document")}
+          {doc.createdAt ? ` · ${new Date(doc.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}` : ""}
+        </p>
+      </a>
+      <button
+        type="button"
+        onClick={() => onDelete(doc)}
+        title="Delete"
+        className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-slate-400 hover:text-rose-500"
+      >
+        <X size={16} />
+      </button>
+    </div>
+  );
+}
 
 function EditModal({ title, fields, values, onSave, onClose }: {
   title: string;
@@ -638,40 +747,7 @@ export default function ProfilePage() {
         )}
 
         {/* ═══ DOCUMENTS ═══ */}
-        {tab === "DOCUMENTS" && (
-          <div className="max-w-4xl">
-            <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100 dark:border-white/[0.05]">
-                <h3 className="text-[14px] font-semibold text-slate-800 dark:text-white">Employee Documents</h3>
-              </div>
-              <div className="grid grid-cols-[220px_1fr]">
-                {/* Folder sidebar */}
-                <div className="border-r border-slate-100 dark:border-white/[0.05] py-2">
-                  <p className="px-4 py-1.5 text-[10px] text-slate-400 uppercase tracking-wider font-semibold">EMPLOYEE DOCUMENT FOLDERS</p>
-                  {["Identity Docs", "Degrees & Certificates", "Previous Experience", "Employee Letters", "Other"].map((f, i) => (
-                    <button key={f} className={`w-full text-left px-4 py-2.5 text-[13px] flex items-center gap-2 transition-colors ${i === 0 ? "bg-[#008CFF]/10 text-[#008CFF]" : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5"}`}>
-                      <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
-                      {f}
-                    </button>
-                  ))}
-                </div>
-                {/* Document list */}
-                <div className="p-5">
-                  <div className="mb-3">
-                    <h4 className="text-[13px] font-semibold text-slate-800 dark:text-white">Identity Docs</h4>
-                    <p className="text-[11px] text-slate-400 mt-0.5">An identity document is any document which may be used to verify aspects of a person's personal identity</p>
-                    <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
-                      SECURE — Only selected people can view this information
-                    </p>
-                  </div>
-                  <p className="text-[13px] text-slate-400 text-center py-8">No documents uploaded yet</p>
-                  <button className="h-8 px-4 border border-[#008CFF] text-[#008CFF] rounded-lg text-[12px] font-medium hover:bg-[#008CFF]/5">+ Add details</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        {tab === "DOCUMENTS" && <SelfDocumentsPanel />}
 
         {/* ═══ ASSETS ═══ */}
         {tab === "ASSETS" && (
@@ -825,6 +901,331 @@ export default function ProfilePage() {
           </div>
         );
       })()}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Self-view Documents panel — fetches the logged-in user's own
+// documents from /api/hr/documents (the route defaults to caller-
+// scoped when no userId param is sent), lets them upload new files,
+// and lets them delete their own. Same API + auth model the HR-side
+// DocumentsPanel uses; only difference is this view never asks for
+// someone else's docs.
+// ─────────────────────────────────────────────────────────────────────
+function SelfDocumentsPanel() {
+  const { data: documents = [], isLoading } = useSWR<any[]>("/api/hr/documents", fetcher);
+  const [folder, setFolder] = useState<string>("identity");
+  const active = SELF_DOC_FOLDERS.find((f) => f.key === folder)!;
+  const filesInFolder = documents.filter((d: any) => active.cats.includes((d.category || "").toLowerCase()));
+
+  const [uploadOpen, setUploadOpen]   = useState(false);
+  const [uploadFile, setUploadFile]   = useState<File | null>(null);
+  const [uploadName, setUploadName]   = useState<string>("");
+  const [uploadCategory, setUploadCategory] = useState<string>("pan_card");
+  const [uploading, setUploading]     = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dragOver, setDragOver]       = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const defaultCategoryFor = (key: string): string =>
+    key === "identity"  ? "pan_card"
+  : key === "education" ? "education_certificate"
+  : key === "letters"   ? "offer_letter"
+  : key === "previous"  ? "previous_relieving_letter"
+  : "other";
+
+  const openUpload = () => {
+    setUploadFile(null);
+    setUploadName("");
+    setUploadCategory(defaultCategoryFor(folder));
+    setUploadError(null);
+    setUploadOpen(true);
+  };
+  const closeUpload = () => { if (!uploading) setUploadOpen(false); };
+
+  const pickFile = (f: File) => {
+    setUploadError(null);
+    if (f.size > 10 * 1024 * 1024) { setUploadError("File is larger than the 10 MB limit."); return; }
+    setUploadFile(f);
+    if (!uploadName.trim()) setUploadName(f.name);
+  };
+
+  const submitUpload = async () => {
+    if (!uploadFile) { setUploadError("Pick a file first."); return; }
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", uploadFile);
+      fd.append("category", uploadCategory);
+      if (uploadName.trim()) fd.append("fileName", uploadName.trim());
+      const res = await fetch("/api/hr/documents", { method: "POST", body: fd });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setUploadError(j?.error || `Upload failed (${res.status})`);
+        return;
+      }
+      await mutate("/api/hr/documents");
+      setUploadOpen(false);
+    } catch (e: any) {
+      setUploadError(e?.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async (doc: any) => {
+    if (!confirm(`Delete "${doc.fileName}"?`)) return;
+    const res = await fetch(`/api/hr/documents/${doc.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      return alert(j?.error || `Delete failed (${res.status})`);
+    }
+    await mutate("/api/hr/documents");
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) pickFile(file);
+  };
+
+  const categoryOptions = active.cats.map((c: string) => ({
+    value: c,
+    label: dropdownCategoryLabel(c),
+  }));
+
+  const folderCounts: Record<string, number> = {};
+  for (const f of SELF_DOC_FOLDERS) {
+    folderCounts[f.key] = documents.filter((d: any) => f.cats.includes((d.category || "").toLowerCase())).length;
+  }
+
+  // Split the "Other" folder's contents into two visually distinct
+  // groups: HR-issued letters (generated via the Templates page,
+  // category='employee_letter') and everything else.
+  const isGeneratedLetter = (d: any) => (d.category || "").toLowerCase() === "employee_letter";
+  const generatedLetters = folder === "other" ? filesInFolder.filter(isGeneratedLetter) : [];
+  const otherUploads     = folder === "other" ? filesInFolder.filter((d) => !isGeneratedLetter(d)) : filesInFolder;
+
+  const totalDocs = documents.length;
+  const requiredCount = SELF_DOC_FOLDERS[0].cats.length + 1; // PAN, Aadhaar, plus the Education cat
+  const hasPan      = documents.some((d) => (d.category || "").toLowerCase() === "pan_card");
+  const hasAadhaar  = documents.some((d) => (d.category || "").toLowerCase() === "aadhar");
+  const hasEdu      = documents.some((d) => (d.category || "").toLowerCase() === "education_certificate");
+  const requiredDone = [hasPan, hasAadhaar, hasEdu].filter(Boolean).length;
+
+  return (
+    <div className="max-w-5xl">
+      {/* Summary header — total docs + required progress + upload CTA */}
+      <div className="mb-4 rounded-xl border border-slate-200 dark:border-white/[0.06] bg-gradient-to-br from-white to-slate-50/40 dark:from-[#001529] dark:to-[#001529] px-5 py-4 flex items-center gap-5">
+        <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#008CFF]/10 text-[#008CFF]">
+          <FileText size={22} strokeWidth={1.75} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-[15px] font-semibold text-slate-900 dark:text-white">My documents</h3>
+          <p className="mt-0.5 text-[12px] text-slate-500">
+            {totalDocs} total · {requiredDone}/3 essential documents uploaded
+            {requiredDone < 3 && <span className="text-amber-600 font-medium"> · {3 - requiredDone} pending</span>}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={openUpload}
+          className="inline-flex items-center gap-1.5 h-9 px-3.5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12.5px] font-semibold transition-colors shadow-sm"
+        >+ Upload</button>
+      </div>
+
+      <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-[260px_1fr]">
+          {/* Folder sidebar — icon + label + count chip */}
+          <div className="border-b md:border-b-0 md:border-r border-slate-100 dark:border-white/[0.05] py-3 bg-slate-50/40 dark:bg-transparent">
+            <p className="px-5 py-1.5 text-[10px] text-slate-400 uppercase tracking-[0.12em] font-semibold">Folders</p>
+            <div className="px-2">
+              {SELF_DOC_FOLDERS.map((f) => {
+                const count = folderCounts[f.key] ?? 0;
+                const Icon = f.Icon;
+                const isActive = folder === f.key;
+                return (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => setFolder(f.key)}
+                    className={`w-full text-left px-3 py-2.5 my-0.5 text-[13px] rounded-lg flex items-center gap-3 transition-colors ${
+                      isActive
+                        ? "bg-[#008CFF]/10 text-[#008CFF]"
+                        : "text-slate-700 dark:text-slate-300 hover:bg-slate-100/70 dark:hover:bg-white/5"
+                    }`}
+                  >
+                    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+                      isActive ? "bg-[#008CFF]/15 text-[#008CFF]" : "bg-slate-200/60 text-slate-500"
+                    }`}>
+                      <Icon size={14} strokeWidth={1.75} />
+                    </span>
+                    <span className={`flex-1 ${isActive ? "font-semibold" : ""}`}>{f.label}</span>
+                    {count > 0 && (
+                      <span className={`text-[11px] font-semibold rounded-full px-1.5 ${
+                        isActive ? "bg-[#008CFF]/15 text-[#008CFF]" : "bg-slate-200/70 text-slate-500"
+                      }`}>{count}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Folder body */}
+          <div className="p-6 space-y-5">
+            <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100 dark:border-white/[0.04]">
+              <div className="min-w-0">
+                <h4 className="text-[15px] font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                  <active.Icon size={16} strokeWidth={1.75} className="text-[#008CFF]" />
+                  {active.label}
+                </h4>
+                <p className="text-[11.5px] text-slate-500 mt-1">{active.subtitle}</p>
+              </div>
+              {!isLoading && filesInFolder.length > 0 && (
+                <button
+                  type="button"
+                  onClick={openUpload}
+                  className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 text-[11.5px] font-semibold text-[#008CFF] hover:bg-[#008CFF]/[0.06] rounded-md transition-colors"
+                >+ Add to folder</button>
+              )}
+            </div>
+
+            {isLoading ? (
+              <div className="flex items-center justify-center h-32">
+                <Loader2 size={20} className="animate-spin text-slate-400" />
+              </div>
+            ) : filesInFolder.length === 0 ? (
+              <button
+                type="button"
+                onClick={openUpload}
+                className="w-full rounded-xl border-2 border-dashed border-slate-200 hover:border-[#008CFF]/40 hover:bg-[#008CFF]/[0.02] transition-colors py-12 text-center"
+              >
+                <active.Icon size={32} className="mx-auto text-slate-300 mb-2" strokeWidth={1.5} />
+                <p className="text-[13px] font-semibold text-slate-700 dark:text-slate-200">Upload to {active.label}</p>
+                <p className="mt-1 text-[11.5px] text-slate-500">Click here or drop a file. PDF / image / DOCX, up to 10 MB.</p>
+              </button>
+            ) : (
+              <div className="space-y-5">
+                {/* HR-issued letters block — emerald-toned to mark them as generated, not employee-uploaded. */}
+                {generatedLetters.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <Sparkles size={13} className="text-emerald-600" strokeWidth={2} />
+                      <p className="text-[11px] uppercase tracking-[0.12em] font-semibold text-emerald-700">Issued by HR ({generatedLetters.length})</p>
+                    </div>
+                    <div className="space-y-2">
+                      {generatedLetters.map((doc: any) => (
+                        <DocCard key={doc.id} doc={doc} accent="emerald" onDelete={handleDelete} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {otherUploads.length > 0 && (
+                  <div>
+                    {generatedLetters.length > 0 && (
+                      <div className="flex items-center gap-2 mb-2.5">
+                        <FileText size={13} className="text-slate-500" strokeWidth={2} />
+                        <p className="text-[11px] uppercase tracking-[0.12em] font-semibold text-slate-500">Your uploads ({otherUploads.length})</p>
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      {otherUploads.map((doc: any) => (
+                        <DocCard key={doc.id} doc={doc} accent="blue" onDelete={handleDelete} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Upload drawer */}
+      {uploadOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-40" onClick={closeUpload} />
+          <div className="fixed top-0 right-0 bottom-0 w-[420px] bg-[#f4f7f8] dark:bg-[#001529] border-l border-slate-200 dark:border-white/[0.08] shadow-2xl z-50 flex flex-col">
+            <div className="flex items-start justify-between px-6 py-4 border-b border-slate-200 dark:border-white/[0.06]">
+              <div>
+                <h2 className="text-[16px] font-semibold text-slate-800 dark:text-white">Upload document</h2>
+                <p className="mt-0.5 text-[11.5px] text-slate-500">Adds to <strong className="text-slate-700 dark:text-slate-200">{active.label}</strong>.</p>
+              </div>
+              <button onClick={closeUpload} aria-label="Close" disabled={uploading} className="text-slate-400 hover:text-slate-700 dark:hover:text-white -mt-1 disabled:opacity-50">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+              <div
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={onDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`rounded-xl border-2 border-dashed py-8 px-4 text-center cursor-pointer transition-colors ${
+                  dragOver
+                    ? "border-[#008CFF] bg-[#008CFF]/[0.04]"
+                    : "border-slate-200 hover:border-slate-300 bg-white"
+                }`}
+              >
+                <FileText size={28} className="mx-auto text-slate-300 mb-2" strokeWidth={1.5} />
+                {uploadFile ? (
+                  <>
+                    <p className="text-[13px] font-semibold text-slate-800">{uploadFile.name}</p>
+                    <p className="mt-0.5 text-[11.5px] text-slate-500">{(uploadFile.size / 1024).toFixed(1)} KB · click to replace</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[13px] font-semibold text-slate-700">Drop a file here or click to pick</p>
+                    <p className="mt-0.5 text-[11.5px] text-slate-500">PDF, image, or DOCX up to 10 MB</p>
+                  </>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) pickFile(f);
+                  }}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Category</label>
+                <SelectField
+                  value={uploadCategory}
+                  onChange={setUploadCategory}
+                  options={categoryOptions}
+                  className={F}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Display name <span className="text-slate-400 font-normal normal-case tracking-normal">(optional)</span></label>
+                <input
+                  value={uploadName}
+                  onChange={(e) => setUploadName(e.target.value)}
+                  placeholder={uploadFile?.name || "Defaults to the file name"}
+                  className={F}
+                />
+              </div>
+              {uploadError && (
+                <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[12.5px] text-rose-700">{uploadError}</div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-white/[0.06] flex justify-end gap-3">
+              <button onClick={closeUpload} disabled={uploading} className="h-9 px-5 text-[13px] text-slate-500 hover:text-slate-800 rounded-lg disabled:opacity-50">Cancel</button>
+              <button
+                onClick={submitUpload}
+                disabled={uploading || !uploadFile}
+                className="h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-60 disabled:cursor-wait"
+              >{uploading ? "Uploading…" : "Upload"}</button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

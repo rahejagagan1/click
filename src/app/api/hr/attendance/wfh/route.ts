@@ -5,6 +5,7 @@ import { notifyApprovers, notifyUsers, brandCeoIdForEmployee } from "@/lib/notif
 import { istTimeOnDate, istDateOnlyFrom, istMonthRange } from "@/lib/ist-date";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
+import { isWorkingDay } from "@/lib/hr/shift-working-days";
 import { sendEmail } from "@/lib/email/sender";
 import { pocAssignmentEmail } from "@/lib/email/templates";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
@@ -148,15 +149,34 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Build the list of IST calendar days to create. Skip Sat/Sun (no
-    // working WFH on a weekend) and any day the subject already has a
-    // pending/approved WFH for (idempotent — HR can re-run the same
-    // range without duplicating rows).
+    // Build the list of IST calendar days to create. Skip days that
+    // aren't a working day for the SUBJECT'S shift (so an Alternate-
+    // Saturday-Working employee CAN request WFH on their working
+    // Saturdays). Falls back to the simple Mon–Fri check when the
+    // subject has no shift assignment.
+    //
+    // Also dedupes against any day the subject already has a
+    // pending/approved WFH for so HR can re-run the same range
+    // without duplicating rows.
+    const subjShift = await prisma.userShift.findUnique({
+      where: { userId: subjectUserId },
+      include: { shift: { select: { workDays: true, saturdayPolicy: true, saturdayWeeks: true } } },
+    });
+    const shiftRule = subjShift?.shift ?? null;
+    const anchor = subjShift?.effectiveFrom ?? null;
     const targetDays: Date[] = [];
     for (let cur = new Date(fromIst.getTime()); cur.getTime() <= toIst.getTime(); cur.setUTCDate(cur.getUTCDate() + 1)) {
-      const dow = cur.getUTCDay();
-      if (dow === 0 || dow === 6) continue;
-      targetDays.push(new Date(cur));
+      const dateUtc = new Date(cur);
+      // When the subject has no shift, treat Mon–Fri as working
+      // (mirrors the legacy behaviour for unenrolled accounts).
+      let isWorking: boolean;
+      if (shiftRule) {
+        isWorking = isWorkingDay(dateUtc, shiftRule as any, anchor);
+      } else {
+        const dow = dateUtc.getUTCDay();
+        isWorking = dow !== 0 && dow !== 6;
+      }
+      if (isWorking) targetDays.push(dateUtc);
     }
     if (targetDays.length === 0) {
       return NextResponse.json({ error: "Selected dates are all weekends." }, { status: 400 });
