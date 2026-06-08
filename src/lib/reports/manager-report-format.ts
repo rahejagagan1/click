@@ -5,6 +5,19 @@
 
 export type ManagerReportFormat = "production" | "researcher" | "qa" | "hr";
 
+/** The 4 report templates as a first-class, ordered registry. Single source of
+ *  truth for UI lists (e.g. the designation editor's template checkboxes) and
+ *  for validating designation→template assignments. */
+export const REPORT_TEMPLATES: { id: ManagerReportFormat; label: string }[] = [
+  { id: "production", label: "Production" },
+  { id: "researcher", label: "Researcher" },
+  { id: "qa", label: "QA" },
+  { id: "hr", label: "HR" },
+];
+
+/** Valid template ids, for server-side validation of incoming assignments. */
+export const REPORT_TEMPLATE_IDS: ManagerReportFormat[] = REPORT_TEMPLATES.map((t) => t.id);
+
 export type ManagerReportIdentity = {
     role?: string | null;
     orgLevel?: string | null;

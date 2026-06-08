@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
-import { getManagerReportFormat, isManagerReportEligible } from "@/lib/reports/manager-report-format";
+import { getManagerReportFormat } from "@/lib/reports/manager-report-format";
+import { resolveManagerReportFormats, isManagerReportEligibleResolved } from "@/lib/reports/report-templates-resolver";
 import { resolveReportTeamWithSource } from "@/lib/reports/team-snapshot";
 
 export const dynamic = 'force-dynamic';
@@ -32,13 +33,45 @@ export async function GET(
         if (!isFullAccess) {
             const isSelf = requestingUser.dbId === managerId;
             if (!isSelf) {
-                // Check UserReportAccess grant
+                // Allowed if the user has a legacy per-user grant OR their
+                // designation has been granted this owner's reports.
                 const grant = await prisma.$queryRaw`
                     SELECT 1 FROM "UserReportAccess"
                     WHERE "userId" = ${requestingUser.dbId} AND "managerId" = ${managerId}
                     LIMIT 1
                 ` as any[];
-                if (!grant.length) {
+                let allowed = grant.length > 0;
+                if (!allowed) {
+                    try {
+                        const dGrant = await prisma.$queryRaw`
+                            SELECT 1 FROM "DesignationReportAccess" dra
+                            JOIN "User" u ON u."designationId" = dra."designationId"
+                            WHERE u."id" = ${requestingUser.dbId} AND dra."managerId" = ${managerId}
+                            LIMIT 1
+                        ` as any[];
+                        allowed = dGrant.length > 0;
+                    } catch { /* table absent pre-migration → no designation grant */ }
+                }
+                if (!allowed) {
+                    // …OR the viewer's designation fills/views a report template
+                    // that this owner actually has reports for (template-based view).
+                    try {
+                        const tGrant = await prisma.$queryRaw`
+                            SELECT 1
+                            FROM "DesignationReportTemplate" drt
+                            JOIN "User" u ON u."designationId" = drt."designationId"
+                            WHERE u."id" = ${requestingUser.dbId}
+                              AND drt."template" IN (
+                                SELECT DISTINCT "reportTemplate" FROM "WeeklyReport"  WHERE "managerId" = ${managerId} AND "reportTemplate" IS NOT NULL
+                                UNION
+                                SELECT DISTINCT "reportTemplate" FROM "MonthlyReport" WHERE "managerId" = ${managerId} AND "reportTemplate" IS NOT NULL
+                              )
+                            LIMIT 1
+                        ` as any[];
+                        allowed = tGrant.length > 0;
+                    } catch { /* table absent pre-migration → no template grant */ }
+                }
+                if (!allowed) {
                     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
                 }
             }
@@ -55,10 +88,16 @@ export async function GET(
             return NextResponse.json({ error: "Manager not found" }, { status: 404 });
         }
 
+        // Designation-driven: the templates this person fills come from their
+        // designation (multiple possible); fall back to the single legacy-derived
+        // format. `reportFormat` (singular) kept for back-compat with callers
+        // that still read one format.
+        const reportFormats = await resolveManagerReportFormats(managerId, row);
         const manager = {
             ...row,
-            reportFormat: getManagerReportFormat(row),
-            reportEligible: isManagerReportEligible(row),
+            reportFormat: reportFormats[0] ?? getManagerReportFormat(row),
+            reportFormats,
+            reportEligible: await isManagerReportEligibleResolved(managerId, row),
         };
 
         // Period-aware team lookup. When the caller passes ?month=&year=
