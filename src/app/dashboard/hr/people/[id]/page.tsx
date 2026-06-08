@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
@@ -16,10 +16,11 @@ import {
   Mail, Phone, MapPin, Briefcase, Calendar, Building2, IdCard, FileText, Laptop,
   Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
   MoreVertical, UserMinus, TreePine, Coffee,
+  CheckCircle2, AlertCircle, Circle, Upload as UploadIcon, Eye, Trash2, RefreshCw,
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
-import { isHRAdmin as canViewAsHRAdmin, canViewSalary } from "@/lib/access";
+import { isHRAdmin as canViewAsHRAdmin, canViewSalary, canViewEmployeeDocuments, canViewExitBadge } from "@/lib/access";
 import { can } from "@/lib/permissions/can";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
@@ -172,7 +173,57 @@ export default function EmployeeDetailPage() {
     url.searchParams.delete("extendProbation");
     window.history.replaceState({}, "", url.toString());
   }, [extendParam]);
-  const [activeTab, setActiveTab] = useState<Tab>("About");
+  // Tab state is URL-backed (?tab=edit / ?tab=assets / etc.) so:
+  //   1. Refresh keeps you on the tab you were on.
+  //   2. Search from the header carries the tab over to the new
+  //      person's profile (see header-search.tsx).
+  //   3. The tab can be deep-linked / bookmarked.
+  // Mapping uses lowercase URL tokens; Edit Profile maps to "edit"
+  // for brevity. Unknown / missing token falls back to About.
+  const TAB_FROM_SLUG: Record<string, Tab> = {
+    "about":       "About",
+    "profile":     "Profile",
+    "job":         "Job",
+    "attendance":  "Attendance",
+    "documents":   "Documents",
+    "assets":      "Assets",
+    "finances":    "Finances",
+    "edit":        "Edit Profile",
+  };
+  const SLUG_FROM_TAB: Record<Tab, string> = {
+    "About":        "about",
+    "Profile":      "profile",
+    "Job":          "job",
+    "Attendance":   "attendance",
+    "Documents":    "documents",
+    "Assets":       "assets",
+    "Finances":     "finances",
+    "Edit Profile": "edit",
+  };
+  const urlTab = (searchParamsObj?.get("tab") ?? "").toLowerCase();
+  const [activeTab, setActiveTab] = useState<Tab>(TAB_FROM_SLUG[urlTab] ?? "About");
+  // Sync activeTab ⇄ URL. Whenever the user clicks a tab we replace
+  // the URL silently (no extra back-button entry). Whenever the URL
+  // changes externally — e.g. the header search carried a tab over
+  // from another profile — we react and update activeTab to match.
+  useEffect(() => {
+    const expected = SLUG_FROM_TAB[activeTab];
+    const current = (searchParamsObj?.get("tab") ?? "").toLowerCase();
+    if (expected === "about" && !current) return; // default tab, leave URL clean
+    if (current === expected) return;
+    const url = new URL(window.location.href);
+    if (expected === "about") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", expected);
+    window.history.replaceState({}, "", url.toString());
+  }, [activeTab, searchParamsObj]);
+  // Bring activeTab in line when the URL changes from outside (e.g.
+  // header search navigated to a different person but kept ?tab=edit).
+  useEffect(() => {
+    const slug = (searchParamsObj?.get("tab") ?? "").toLowerCase();
+    const next = TAB_FROM_SLUG[slug] ?? "About";
+    if (next !== activeTab) setActiveTab(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParamsObj?.get("tab")]);
   // Sub-view inside the Attendance tab: the employee's clock-in/log panel,
   // or a read-only mirror of their personal Leave page (balances + history).
   const [attendanceView, setAttendanceView] = useState<"attendance" | "leave">("attendance");
@@ -186,7 +237,7 @@ export default function EmployeeDetailPage() {
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   // Which PROFILE-tab section is currently being edited. null = closed.
   // Each section opens its own focused modal with just that card's fields.
-  const [editSection, setEditSection] = useState<null | "primary" | "contact" | "family" | "address" | "identity" | "job" | "time" | "other" | "org" | "bios">(null);
+  const [editSection, setEditSection] = useState<null | "primary" | "contact" | "family" | "address" | "identity" | "job" | "time" | "other" | "org" | "bios" | "education">(null);
   useEffect(() => {
     if (!headerMenuOpen) return;
     const close = (e: MouseEvent) => {
@@ -236,10 +287,18 @@ export default function EmployeeDetailPage() {
   const isSelfView = me?.dbId != null && Number(me.dbId) === userId;
   const isMyManager = user?.manager?.id != null && me?.dbId != null && user.manager.id === Number(me.dbId);
   const showAttendanceTab = isSelfView || isMyManager || isHRAdmin;
+  // Documents tab — PAN / Aadhaar / education / employee letters are
+  // PII. Strict access per HR policy: only the profile owner, HR
+  // team (orgLevel=hr_manager — covers HR Manager + HR team), CEO,
+  // and developers. Excludes special_access and role=admin, even
+  // though they pass isHRAdmin elsewhere. See canViewEmployeeDocuments
+  // in src/lib/access.ts.
+  const showDocumentsTab = canViewEmployeeDocuments(me, isSelfView);
   const visibleTabs = TABS.filter((t) => {
     if (t === "Edit Profile" && !showEditTab)       return false;
     if (t === "Finances"     && !showFinancesTab)   return false;
     if (t === "Attendance"   && !showAttendanceTab) return false;
+    if (t === "Documents"    && !showDocumentsTab)  return false;
     return true;
   });
 
@@ -304,6 +363,38 @@ export default function EmployeeDetailPage() {
                       >
                         <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`} />
                         {label}
+                      </span>
+                    );
+                  })()}
+                  {/* Exit-lifecycle badge — "On Notice Period"
+                      (amber) while the employee is still serving
+                      notice; "Exited" (slate) once HR finalises the
+                      status OR the LWD has passed. See
+                      exitBadgeState helper inlined below. */}
+                  {(() => {
+                    const ex = user.activeExit as any;
+                    if (!ex) return null;
+                    if (!canViewExitBadge(me, isSelfView)) return null;
+                    const finalised = ex.status === "exited" || ex.status === "offboarded";
+                    const lwdMs = ex.lastWorkingDay ? new Date(`${ex.lastWorkingDay}T00:00:00Z`).getTime() : 0;
+                    // Past LWD (UTC date compare) ⇒ effectively exited.
+                    const lwdPassed = lwdMs > 0 && Date.now() > lwdMs + 86400000;
+                    const isExited = finalised || lwdPassed;
+                    return isExited ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-700 ring-1 ring-inset ring-slate-300"
+                        title={ex.lastWorkingDay ? `Exited on ${ex.lastWorkingDay}` : "Exited"}
+                      >
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-500" />
+                        Exited
+                      </span>
+                    ) : (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 ring-1 ring-inset ring-amber-200"
+                        title={ex.lastWorkingDay ? `Last working day: ${ex.lastWorkingDay}` : "On notice"}
+                      >
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+                        On Notice Period
                       </span>
                     );
                   })()}
@@ -757,6 +848,47 @@ export default function EmployeeDetailPage() {
                       </Grid3>
                     </DetailCard>
 
+                    {/* ── Education ── compliance-tracked; the cron
+                        needs at least one entry with degree +
+                        institution OR it'll warn the employee + later
+                        auto-violate. JSON column on EmployeeProfile,
+                        same shape the candidate apply form uses. */}
+                    {(() => {
+                      const raw: any = (p as any).educationDetails;
+                      let entries: any[] = [];
+                      if (Array.isArray(raw)) entries = raw;
+                      else if (typeof raw === "string") {
+                        try { const v = JSON.parse(raw); if (Array.isArray(v)) entries = v; } catch {}
+                      }
+                      return (
+                        <DetailCard title="Education" onEdit={canEdit ? () => setEditSection("education") : undefined}>
+                          {entries.length === 0 ? (
+                            <p className="text-[13px] text-slate-400 italic">No education entries on file. Required for compliance.</p>
+                          ) : (
+                            <div className="space-y-2.5">
+                              {entries.map((e: any, i: number) => {
+                                const degree      = String(e?.degree      ?? e?.course     ?? "").trim();
+                                const institution = String(e?.institution ?? e?.university ?? "").trim();
+                                const startY      = String(e?.startOfCourse ?? e?.startYear ?? "").trim();
+                                const endY        = String(e?.endOfCourse   ?? e?.endYear   ?? "").trim();
+                                return (
+                                  <div key={i} className="rounded-lg border border-slate-200 px-4 py-2.5">
+                                    <p className="text-[13px] font-semibold text-slate-800">{degree || "(degree missing)"}</p>
+                                    <p className="text-[12px] text-slate-500 mt-0.5">
+                                      {institution || "(institution missing)"}
+                                      {(startY || endY) && (
+                                        <span className="text-slate-400"> · {startY}{startY && endY ? "–" : ""}{endY}</span>
+                                      )}
+                                    </p>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </DetailCard>
+                      );
+                    })()}
+
                     {/* ── Other ── */}
                     <DetailCard title="Other" onEdit={canEdit ? () => setEditSection("other") : undefined}>
                       <Grid3>
@@ -893,7 +1025,13 @@ export default function EmployeeDetailPage() {
             ))}
 
             {activeTab === "Documents" && (
-              <DocumentsPanel profile={p} documents={user.documents || []} />
+              showDocumentsTab ? (
+                <DocumentsPanel profile={p} documents={user.documents || []} userId={userId} />
+              ) : (
+                <section className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-[13px] text-amber-800">
+                  Documents are private. Only the employee and HR admins can view this tab.
+                </section>
+              )
             )}
 
             {activeTab === "Assets" && (
@@ -1322,6 +1460,24 @@ export default function EmployeeDetailPage() {
             ]}
           />
         );
+        if (editSection === "education") return (
+          <EducationEditModal
+            userId={userId}
+            initial={(() => {
+              const raw: any = (p as any).educationDetails;
+              if (Array.isArray(raw)) return raw;
+              if (typeof raw === "string") {
+                try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; } catch { return []; }
+              }
+              return [];
+            })()}
+            onClose={() => close(false)}
+            onSaved={async () => {
+              await mutate(`/api/hr/people/${userId}`);
+              close(true);
+            }}
+          />
+        );
         return null;
       })()}
 
@@ -1351,6 +1507,174 @@ export default function EmployeeDetailPage() {
 // ─────────────────────────────────────────────────────────────────────
 //  Probation extension modal
 // ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
+//  Education editor modal — repeating-rows form for the new
+//  EmployeeProfile.educationDetails JSON column. Required field by
+//  the compliance cron (at least one entry with degree + institution
+//  filled). Field shape mirrors the candidate apply form so HR can
+//  later copy across without remapping.
+// ─────────────────────────────────────────────────────────────────────
+function EducationEditModal({
+  userId, initial, onClose, onSaved,
+}: {
+  userId: number;
+  initial: any[];
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}) {
+  type Row = { id: string; degree: string; institution: string; startYear: string; endYear: string; branch: string };
+  const fromExisting = (e: any): Row => ({
+    id: Math.random().toString(36).slice(2),
+    degree:      String(e?.degree      ?? e?.course        ?? "").trim(),
+    institution: String(e?.institution ?? e?.university    ?? "").trim(),
+    startYear:   String(e?.startOfCourse ?? e?.startYear   ?? "").trim(),
+    endYear:     String(e?.endOfCourse   ?? e?.endYear     ?? "").trim(),
+    branch:      String(e?.branch      ?? ""              ).trim(),
+  });
+  const blankRow = (): Row => ({
+    id: Math.random().toString(36).slice(2),
+    degree: "", institution: "", startYear: "", endYear: "", branch: "",
+  });
+  const [rows, setRows] = useState<Row[]>(
+    initial.length > 0 ? initial.map(fromExisting) : [blankRow()],
+  );
+  const setRow = (id: string, patch: Partial<Row>) =>
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const addRow = () => setRows((rs) => [...rs, blankRow()]);
+  const removeRow = (id: string) =>
+    setRows((rs) => (rs.length === 1 ? rs : rs.filter((r) => r.id !== id)));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    // Drop blank rows; keep partial rows so HR sees their data in the
+    // payload until they fill the missing piece.
+    const cleaned = rows
+      .filter((r) => r.degree.trim() || r.institution.trim() || r.startYear.trim() || r.endYear.trim() || r.branch.trim())
+      .map((r) => ({
+        degree:        r.degree.trim()      || "",
+        institution:   r.institution.trim() || "",
+        startOfCourse: r.startYear.trim()   || "",
+        endOfCourse:   r.endYear.trim()     || "",
+        branch:        r.branch.trim()      || "",
+      }));
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/hr/people/${userId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ educationDetails: cleaned }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j?.error || `Save failed (${res.status})`);
+        return;
+      }
+      await onSaved();
+    } catch (e: any) {
+      setError(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm px-4" onClick={onClose}>
+      <div className="w-full max-w-lg max-h-[85vh] rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-slate-100">
+          <h3 className="text-[15px] font-semibold text-slate-900">Education</h3>
+          <p className="mt-0.5 text-[12px] text-slate-500">
+            Required for compliance — at least one entry with degree + institution.
+          </p>
+        </div>
+        <div className="px-6 py-5 space-y-3 overflow-y-auto">
+          {rows.map((row, idx) => (
+            <div key={row.id} className="rounded-lg border border-slate-200 p-3.5 group">
+              <div className="flex items-center justify-between mb-2.5">
+                <span className="text-[11px] font-semibold text-slate-400">#{idx + 1}</span>
+                {rows.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeRow(row.id)}
+                    className="text-[11px] text-rose-500 hover:text-rose-600 font-medium opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  >Remove</button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Degree</label>
+                  <input
+                    value={row.degree}
+                    onChange={(e) => setRow(row.id, { degree: e.target.value })}
+                    placeholder="e.g. B.Tech"
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Institution</label>
+                  <input
+                    value={row.institution}
+                    onChange={(e) => setRow(row.id, { institution: e.target.value })}
+                    placeholder="e.g. IIT Delhi"
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:border-slate-300"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2.5">
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Branch</label>
+                  <input
+                    value={row.branch}
+                    onChange={(e) => setRow(row.id, { branch: e.target.value })}
+                    placeholder="Optional"
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Start</label>
+                  <input
+                    value={row.startYear}
+                    onChange={(e) => setRow(row.id, { startYear: e.target.value })}
+                    placeholder="2019"
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">End</label>
+                  <input
+                    value={row.endYear}
+                    onChange={(e) => setRow(row.id, { endYear: e.target.value })}
+                    placeholder="2023"
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:border-slate-300"
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={addRow}
+            className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[#008CFF] hover:text-[#0070cc] transition-colors"
+          >
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#008CFF]/10">+</span>
+            Add another education
+          </button>
+          {error && (
+            <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[12.5px] text-rose-700">{error}</div>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50">Cancel</button>
+          <button type="button" onClick={submit} disabled={saving} className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white bg-[#008CFF] hover:bg-[#0070cc] disabled:opacity-50">
+            {saving ? "Saving…" : "Save education"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProbationExtendModal({
   userId, employeeName, currentEnd, defaultMode, onClose, onSaved,
 }: {
@@ -1681,127 +2005,570 @@ function maskPan(v?: string | null): string | null {
   return `XXXXXX${t.slice(-4)}`;
 }
 
-// Folder labels match the categories used in /api/hr/profile uploads.
+// Folder layout per HR policy (2026-06-05):
+//   • Identity:   PAN + Aadhaar are required, Passport + DL are optional.
+//   • Education:  one latest degree / marksheet, required.
+//   • Letters:    NB Media offer letter, required.
+//   • Previous:   relieving letter + offer letter from prior employer,
+//                 BOTH "if available" (no hard requirement).
+//   • Other:      free-form catch-all.
+//
+// Storage keys are kept stable across renames so existing rows + the
+// doc-compliance cron (panFile / aadhaarFile / education_certificate)
+// keep matching. Only the LABEL changes when we want a friendlier
+// display name — see CAT_LABEL_OVERRIDES below.
 const DOC_FOLDERS: { key: string; label: string; cats: string[] }[] = [
-  { key: "identity",    label: "Identity Docs",          cats: ["id_proof", "aadhar", "pan_card"] },
-  { key: "letters",     label: "Employee Letters",       cats: ["offer_letter", "experience_letter", "contract"] },
-  { key: "previous",    label: "Previous Experience",    cats: ["experience_letter", "payslip"] },
+  { key: "identity",    label: "Identity Docs",          cats: ["pan_card", "aadhar", "passport", "driving_license"] },
+  { key: "education",   label: "Education",              cats: ["education_certificate"] },
+  { key: "letters",     label: "Employee Letters",       cats: ["offer_letter"] },
+  { key: "previous",    label: "Previous Experience",    cats: ["previous_relieving_letter", "previous_offer_letter"] },
   { key: "other",       label: "Other",                  cats: ["other"] },
 ];
 
-function DocumentsPanel({ profile, documents }: { profile: any; documents: any[] }) {
-  const [folder, setFolder] = useState<string>("identity");
-  const active = DOC_FOLDERS.find((f) => f.key === folder)!;
-  const filesInFolder = documents.filter((d) => active.cats.includes((d.category || "").toLowerCase()));
+// Display labels for category keys that don't render cleanly under
+// the default `snake_case → Title Case` rule. Anything missing from
+// here falls back to the auto-titlecase used inline below.
+//
+// Old keys (tenth / twelfth / degree / experience_letter / contract /
+// id_proof / voter_id / payslip) are kept here so historical uploads
+// still render readably even though they're no longer offered in the
+// upload picker.
+const CAT_LABEL_OVERRIDES: Record<string, string> = {
+  // current pickers
+  pan_card:                 "PAN Card",
+  aadhar:                   "Aadhaar",
+  passport:                 "Passport",
+  driving_license:          "Driving License",
+  education_certificate:    "Degree/marksheet",
+  offer_letter:             "Offer Letter",
+  previous_relieving_letter:"Previous Relieving Letter",
+  previous_offer_letter:    "Previous Offer Letter",
+  // legacy — keep so doc cards from before this rework still show clean labels
+  id_proof:                 "ID Proof",
+  voter_id:                 "Voter ID",
+  tenth:                    "10th",
+  twelfth:                  "12th",
+  degree:                   "Degree",
+  experience_letter:        "Experience Letter",
+  contract:                 "Contract",
+  payslip:                  "Payslip",
+};
+// Required = must be uploaded as part of onboarding compliance. The
+// upload picker tags these with a "*" so HR / the employee see which
+// docs the org actually needs. Optional / "if-available" cats get a
+// muted suffix instead.
+const REQUIRED_CATS = new Set<string>([
+  "pan_card", "aadhar", "education_certificate", "offer_letter",
+]);
+const OPTIONAL_HINT: Record<string, string> = {
+  passport:                  "optional",
+  driving_license:           "optional",
+  previous_relieving_letter: "if available",
+  previous_offer_letter:     "if available",
+};
+const prettyCategory = (c: string): string =>
+  CAT_LABEL_OVERRIDES[c]
+    ?? c.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+const dropdownCategoryLabel = (c: string): string => {
+  const base = prettyCategory(c);
+  if (REQUIRED_CATS.has(c)) return `${base} *`;
+  if (OPTIONAL_HINT[c])      return `${base} (${OPTIONAL_HINT[c]})`;
+  return base;
+};
+
+// Tailwind classes for the upload modal's text inputs — kept inline
+// to avoid coupling this file to AssetsPanel's local constant.
+const DOC_FIELD_CLS = "mt-1 w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]";
+
+function DocumentsPanel({ profile, documents, userId }: { profile: any; documents: any[]; userId: number }) {
+  // Folder concept retired in the new layout — kept the
+  // DOC_FOLDERS catalog only so the modal can build a category
+  // dropdown that includes every known category.
+
+  const [uploadOpen, setUploadOpen]   = useState(false);
+  const [uploadFile, setUploadFile]   = useState<File | null>(null);
+  const [uploadName, setUploadName]   = useState<string>("");
+  const [uploadCategory, setUploadCategory] = useState<string>("pan_card");
+  const [uploading, setUploading]     = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dragOver, setDragOver]       = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const openUpload = () => {
+    setUploadFile(null);
+    setUploadName("");
+    // Default to "other" since the inline per-card uploads cover the
+    // catalog cases — this modal is now for free-form uploads.
+    setUploadCategory("other");
+    setUploadError(null);
+    setUploadOpen(true);
+  };
+  const closeUpload = () => {
+    if (uploading) return;
+    setUploadOpen(false);
+  };
+
+  const pickFile = (f: File) => {
+    setUploadError(null);
+    if (f.size > 10 * 1024 * 1024) {
+      setUploadError("File is larger than the 10 MB limit.");
+      return;
+    }
+    setUploadFile(f);
+    if (!uploadName.trim()) setUploadName(f.name);
+  };
+
+  const submitUpload = async () => {
+    if (!uploadFile) { setUploadError("Pick a file first."); return; }
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", uploadFile);
+      fd.append("userId", String(userId));
+      fd.append("category", uploadCategory);
+      if (uploadName.trim()) fd.append("fileName", uploadName.trim());
+      const res = await fetch("/api/hr/documents", { method: "POST", body: fd });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setUploadError(j?.error || `Upload failed (${res.status})`);
+        return;
+      }
+      await mutate(`/api/hr/people/${userId}`);
+      setUploadOpen(false);
+    } catch (e: any) {
+      setUploadError(e?.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async (doc: any) => {
+    if (!confirm(`Delete "${doc.fileName}"?`)) return;
+    const res = await fetch(`/api/hr/documents/${doc.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      return alert(j?.error || `Delete failed (${res.status})`);
+    }
+    await mutate(`/api/hr/people/${userId}`);
+  };
+
+  // Category options for the modal — full cross-folder list now
+  // that we no longer have a folder context. Per-card inline uploads
+  // (above) handle the common required cases; the modal is for
+  // ad-hoc uploads, so showing every option is fine.
+  const categoryOptions = DOC_FOLDERS.flatMap((f) =>
+    f.cats.map((c) => ({ value: c, label: dropdownCategoryLabel(c) }))
+  );
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) pickFile(file);
+  };
+
+  // ── Section-grouped checklist layout ─────────────────────────
+  // Catalog drives the layout. Each required card always renders so
+  // HR can see at a glance which docs are missing. Optional + "if
+  // available" cards also always render — the per-card action
+  // adapts to whether a document is already on file.
+  type CatMeta = { key: string; label: string; required: boolean; hint?: string };
+  const SECTION_CATALOG: Array<{ key: string; label: string; subtitle?: string; cats: CatMeta[] }> = [
+    {
+      key: "required",
+      label: "Required documents",
+      subtitle: "Every employee must upload these.",
+      cats: [
+        { key: "pan_card",              label: "PAN Card",          required: true },
+        { key: "aadhar",                label: "Aadhaar",           required: true },
+        { key: "education_certificate", label: "Degree / Marksheet", required: true },
+        { key: "offer_letter",          label: "Offer Letter",       required: true },
+      ],
+    },
+    {
+      key: "optional",
+      label: "Optional identity proofs",
+      cats: [
+        { key: "passport",         label: "Passport",         required: false },
+        { key: "driving_license",  label: "Driving License",  required: false },
+      ],
+    },
+    {
+      key: "previous",
+      label: "Previous experience",
+      subtitle: "Upload only if available from prior employer.",
+      cats: [
+        { key: "previous_relieving_letter", label: "Relieving Letter",        required: false, hint: "If available" },
+        { key: "previous_offer_letter",     label: "Offer Letter (Previous)", required: false, hint: "If available" },
+      ],
+    },
+  ];
+  const KNOWN_KEYS = new Set<string>(SECTION_CATALOG.flatMap((s) => s.cats.map((c) => c.key)));
+  // Generated-letter rows live under category='employee_letter' (the
+  // auto-save the /api/hr/letter-templates/[key]/generate route writes
+  // when HR clicks "Generate PDF"). Lifted into their own section so
+  // HR sees FnF / probation / relieving / offer letters grouped
+  // together instead of mixed into "Other files".
+  KNOWN_KEYS.add("employee_letter");
+  const generatedLetters = documents.filter(
+    (d: any) => (d.category || "").toLowerCase() === "employee_letter"
+  );
+  // Latest doc per category — newest upload wins so a "Replace"
+  // shows the freshly uploaded file.
+  const docByCat = new Map<string, any>();
+  for (const d of documents.slice().sort((a: any, b: any) =>
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  )) {
+    const k = (d.category || "").toLowerCase();
+    if (!docByCat.has(k)) docByCat.set(k, d);
+  }
+  // Anything outside the catalog (legacy uploads, "other") goes
+  // into the bottom "Other files" group.
+  const otherDocs = documents.filter((d: any) => !KNOWN_KEYS.has((d.category || "").toLowerCase()));
+
+  // Required completion bar.
+  const requiredCats = SECTION_CATALOG[0].cats;
+  const requiredDone = requiredCats.filter((c) => docByCat.has(c.key)).length;
+  const requiredPct  = Math.round((requiredDone / requiredCats.length) * 100);
+
+  // Direct (no-modal) upload for a specific category — the row's
+  // file input fires this with the category baked in. Bypasses the
+  // category dropdown entirely so the user just picks a file.
+  const inlineUpload = async (categoryKey: string, file: File | null) => {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert("File is larger than the 10 MB limit.");
+      return;
+    }
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("userId", String(userId));
+    fd.append("category", categoryKey);
+    fd.append("fileName", file.name);
+    const res = await fetch("/api/hr/documents", { method: "POST", body: fd });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      alert(j?.error || `Upload failed (${res.status})`);
+      return;
+    }
+    await mutate(`/api/hr/people/${userId}`);
+  };
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)] overflow-hidden">
+      {/* Header + progress strip */}
       <div className="px-6 py-4 border-b border-slate-100">
-        <h3 className="text-[14px] font-semibold text-slate-800">Employee Documents</h3>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-[220px_1fr]">
-        {/* Folder sidebar */}
-        <div className="border-b md:border-b-0 md:border-r border-slate-100 py-2 bg-slate-50/40">
-          <p className="px-4 py-1.5 text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Folders</p>
-          {DOC_FOLDERS.map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              onClick={() => setFolder(f.key)}
-              className={`w-full text-left px-4 py-2.5 text-[13px] flex items-center gap-2 transition-colors ${
-                folder === f.key
-                  ? "bg-[#008CFF]/10 text-[#008CFF] font-semibold"
-                  : "text-slate-600 hover:bg-slate-100"
-              }`}
-            >
-              <FileText size={14} className="shrink-0" />
-              {f.label}
-            </button>
-          ))}
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-[14px] font-semibold text-slate-800">Employee Documents</h3>
+            <p className="mt-0.5 text-[11.5px] text-slate-500">
+              {requiredDone === requiredCats.length
+                ? "All required documents on file."
+                : `${requiredDone} of ${requiredCats.length} required documents uploaded.`}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={openUpload}
+            className="inline-flex items-center gap-1.5 h-8 px-3 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12.5px] font-semibold transition-colors"
+          >
+            <Plus size={14} /> Other upload
+          </button>
         </div>
-        {/* Folder body */}
-        <div className="p-6 space-y-5">
-          {folder === "identity" && (
-            <>
-              {/* Aadhaar Card panel — built from EmployeeProfile fields */}
-              {(profile.aadhaarNumber || profile.aadhaarEnrollment) && (
-                <IdDocCard
-                  flag="🇮🇳"
-                  title="Aadhaar Card"
-                  status={profile.aadhaarNumber ? "verified" : "pending"}
-                  rows={[
-                    ["Aadhaar Number",     maskAadhaar(profile.aadhaarNumber) || "—"],
-                    ["Enrollment Number",  profile.aadhaarEnrollment || "Not Available"],
-                    ["Date of Birth",      fmtDate(profile.dateOfBirth)],
-                    ["Name",               [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "—"],
-                    ["Address",            (profile.address || "—").slice(0, 28) + ((profile.address || "").length > 28 ? "…" : "")],
-                    ["Gender",             profile.gender ? profile.gender[0].toUpperCase() + profile.gender.slice(1) : "—"],
-                  ]}
-                />
-              )}
-              {/* PAN Card panel */}
-              {(profile.panNumber || profile.parentName) && (
-                <IdDocCard
-                  flag="🇮🇳"
-                  title="Pan Card"
-                  status={profile.panNumber ? "verified" : "pending"}
-                  rows={[
-                    ["Permanent Account Number", maskPan(profile.panNumber) || "—"],
-                    ["Name",                     [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "—"],
-                    ["Date of Birth",            fmtDate(profile.dateOfBirth)],
-                    ["Parent's Name",            profile.parentName || "—"],
-                  ]}
-                />
-              )}
-              {!profile.aadhaarNumber && !profile.panNumber && filesInFolder.length === 0 && (
-                <EmptyState icon={IdCard} label="No identity documents on file" />
-              )}
-            </>
-          )}
+        <div className="mt-3 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+          <div
+            className={`h-full transition-all ${requiredPct === 100 ? "bg-emerald-500" : "bg-[#008CFF]"}`}
+            style={{ width: `${requiredPct}%` }}
+          />
+        </div>
+      </div>
 
-          {/* File list — appears in every folder for files that match the folder's categories */}
-          {filesInFolder.length > 0 && (
-            <div>
-              <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">
-                Uploaded files
-              </p>
-              <div className="space-y-2">
-                {filesInFolder.map((doc: any) => (
+      {/* Identity profile cards — only render when data is present */}
+      {(profile.aadhaarNumber || profile.aadhaarEnrollment || profile.panNumber || profile.parentName) && (
+        <div className="px-6 pt-5 grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {(profile.aadhaarNumber || profile.aadhaarEnrollment) && (
+            <IdDocCard
+              flag="🇮🇳" title="Aadhaar Card"
+              status={profile.aadhaarNumber ? "verified" : "pending"}
+              rows={[
+                ["Aadhaar Number",     maskAadhaar(profile.aadhaarNumber) || "—"],
+                ["Enrollment Number",  profile.aadhaarEnrollment || "Not Available"],
+                ["Date of Birth",      fmtDate(profile.dateOfBirth)],
+                ["Name",               [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "—"],
+              ]}
+            />
+          )}
+          {(profile.panNumber || profile.parentName) && (
+            <IdDocCard
+              flag="🇮🇳" title="PAN Card"
+              status={profile.panNumber ? "verified" : "pending"}
+              rows={[
+                ["Permanent Account Number", maskPan(profile.panNumber) || "—"],
+                ["Name",                     [profile.firstName, profile.lastName].filter(Boolean).join(" ") || "—"],
+                ["Date of Birth",            fmtDate(profile.dateOfBirth)],
+                ["Parent's Name",            profile.parentName || "—"],
+              ]}
+            />
+          )}
+        </div>
+      )}
+
+      {/* Section-grouped checklist */}
+      <div className="p-6 space-y-6">
+        {SECTION_CATALOG.map((section) => (
+          <div key={section.key}>
+            <div className="mb-2.5 flex items-baseline justify-between gap-2">
+              <h4 className="text-[12px] uppercase tracking-wider font-semibold text-slate-500">{section.label}</h4>
+              {section.subtitle && (
+                <p className="text-[11px] text-slate-400">{section.subtitle}</p>
+              )}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {section.cats.map((cat) => {
+                const doc = docByCat.get(cat.key);
+                const hasDoc = !!doc;
+                const stateBorder = hasDoc
+                  ? "border-emerald-300 bg-emerald-50/40"
+                  : cat.required
+                    ? "border-amber-300 bg-amber-50/30"
+                    : "border-slate-200 bg-white";
+                return (
+                  <div key={cat.key} className={`rounded-xl border ${stateBorder} px-4 py-3 transition-colors`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          {hasDoc
+                            ? <CheckCircle2 size={14} className="text-emerald-600 shrink-0" />
+                            : cat.required
+                              ? <AlertCircle size={14} className="text-amber-500 shrink-0" />
+                              : <Circle size={14} className="text-slate-300 shrink-0" />}
+                          <p className="text-[13px] font-semibold text-slate-800 truncate">{cat.label}</p>
+                          {cat.required && (
+                            <span className="text-[9.5px] font-bold tracking-wider text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">REQUIRED</span>
+                          )}
+                          {cat.hint && (
+                            <span className="text-[10.5px] text-slate-400">· {cat.hint}</span>
+                          )}
+                        </div>
+                        {hasDoc ? (
+                          <div className="mt-1 flex items-center gap-2 text-[11.5px] text-slate-500">
+                            <FileText size={11} className="shrink-0" />
+                            <span className="truncate">{doc.fileName || "Untitled"}</span>
+                            <span className="text-slate-400">· {fmtDate(doc.createdAt)}</span>
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-[11.5px] text-slate-400">
+                            {cat.required ? "Not yet uploaded — required." : "Not uploaded."}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center justify-end gap-1.5">
+                      {hasDoc && (
+                        <>
+                          <a
+                            href={doc.fileUrl?.startsWith("http") ? doc.fileUrl : `/api/hr/documents/${doc.id}/file`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] text-slate-600 hover:text-[#008CFF] hover:bg-[#008CFF]/5"
+                          >
+                            <Eye size={13} /> View
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(doc)}
+                            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] text-slate-500 hover:text-rose-600 hover:bg-rose-50"
+                          >
+                            <Trash2 size={13} /> Delete
+                          </button>
+                        </>
+                      )}
+                      <label className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-semibold cursor-pointer bg-[#008CFF] hover:bg-[#0070cc] text-white">
+                        {hasDoc ? <><RefreshCw size={13} /> Replace</> : <><UploadIcon size={13} /> Upload</>}
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept=".pdf,image/*,.doc,.docx"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            // Reset value so the same file can be re-selected (Replace flow).
+                            e.target.value = "";
+                            inlineUpload(cat.key, f ?? null);
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        {/* Generated letters — auto-saved by the Templates page each
+            time HR clicks "Generate PDF". Same render shape as Other
+            files but in its own section so HR can find them fast. */}
+        {generatedLetters.length > 0 && (
+          <div>
+            <div className="mb-2.5 flex items-baseline justify-between gap-2">
+              <h4 className="text-[12px] uppercase tracking-wider font-semibold text-slate-500">Generated letters</h4>
+              <p className="text-[11px] text-slate-400">Auto-saved from the Templates page · {generatedLetters.length} total</p>
+            </div>
+            <div className="space-y-2">
+              {generatedLetters.map((doc: any) => (
+                <div
+                  key={doc.id}
+                  className="group flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50/30 px-4 py-3 hover:border-emerald-300 transition-colors"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-700">
+                    <FileText size={16} />
+                  </div>
                   <a
-                    key={doc.id}
-                    href={doc.fileUrl}
+                    href={doc.fileUrl?.startsWith("http") ? doc.fileUrl : `/api/hr/documents/${doc.id}/file`}
                     target="_blank"
                     rel="noreferrer"
-                    className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 hover:border-[#008CFF]/40 hover:bg-[#008CFF]/[0.02] transition-colors"
+                    className="min-w-0 flex-1 cursor-pointer"
                   >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#008CFF]/10 text-[#008CFF]">
-                      <FileText size={16} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-semibold text-slate-800">{doc.fileName || doc.name}</p>
-                      <p className="truncate text-[11px] text-slate-500">
-                        {(doc.category || "Document").replace(/_/g, " ")} · {fmtDate(doc.createdAt)}
-                      </p>
-                    </div>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                      doc.isVerified
-                        ? "bg-emerald-50 text-emerald-600"
-                        : "bg-amber-50 text-amber-600"
-                    }`}>
-                      {doc.isVerified ? "Verified" : "Pending"}
-                    </span>
+                    <p className="truncate text-[13px] font-semibold text-slate-800">{doc.fileName || "Untitled"}</p>
+                    <p className="truncate text-[11px] text-slate-500">Generated · {fmtDate(doc.createdAt)}</p>
                   </a>
-                ))}
-              </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(doc)}
+                    title="Delete"
+                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-slate-400 hover:text-rose-500"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Folder-empty fallback for non-identity folders */}
-          {folder !== "identity" && filesInFolder.length === 0 && (
-            <EmptyState icon={FileText} label={`No documents in ${active.label}`} />
-          )}
-        </div>
+        {/* Other files — uploads outside the catalog (legacy + ad-hoc) */}
+        {otherDocs.length > 0 && (
+          <div>
+            <div className="mb-2.5">
+              <h4 className="text-[12px] uppercase tracking-wider font-semibold text-slate-500">Other files</h4>
+            </div>
+            <div className="space-y-2">
+              {otherDocs.map((doc: any) => (
+                <div
+                  key={doc.id}
+                  className="group flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 hover:border-[#008CFF]/40 transition-colors"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#008CFF]/10 text-[#008CFF]">
+                    <FileText size={16} />
+                  </div>
+                  <a
+                    href={doc.fileUrl?.startsWith("http") ? doc.fileUrl : `/api/hr/documents/${doc.id}/file`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="min-w-0 flex-1 cursor-pointer"
+                  >
+                    <p className="truncate text-[13px] font-semibold text-slate-800">{doc.fileName || "Untitled"}</p>
+                    <p className="truncate text-[11px] text-slate-500">
+                      {prettyCategory(doc.category || "Document")} · {fmtDate(doc.createdAt)}
+                    </p>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(doc)}
+                    title="Delete"
+                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-slate-400 hover:text-rose-500"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Upload drawer */}
+      {uploadOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-40" onClick={closeUpload} />
+          <div className="fixed top-0 right-0 bottom-0 w-[420px] bg-[#f4f7f8] border-l border-slate-200 shadow-2xl z-50 flex flex-col animate-slide-in">
+            <div className="flex items-start justify-between px-6 py-4 border-b border-slate-200">
+              <div>
+                <h2 className="text-[16px] font-semibold text-slate-800">Upload document</h2>
+                <p className="mt-0.5 text-[11.5px] text-slate-500">Pick a file and a category.</p>
+              </div>
+              <button onClick={closeUpload} aria-label="Close" disabled={uploading} className="text-slate-400 hover:text-slate-700 -mt-1 disabled:opacity-50">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+              <div
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={onDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`rounded-xl border-2 border-dashed py-8 px-4 text-center cursor-pointer transition-colors ${
+                  dragOver
+                    ? "border-[#008CFF] bg-[#008CFF]/[0.04]"
+                    : "border-slate-200 hover:border-slate-300 bg-white"
+                }`}
+              >
+                <FileText size={28} className="mx-auto text-slate-300 mb-2" strokeWidth={1.5} />
+                {uploadFile ? (
+                  <>
+                    <p className="text-[13px] font-semibold text-slate-800">{uploadFile.name}</p>
+                    <p className="mt-0.5 text-[11.5px] text-slate-500">{(uploadFile.size / 1024).toFixed(1)} KB · click to replace</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[13px] font-semibold text-slate-700">Drop a file here or click to pick</p>
+                    <p className="mt-0.5 text-[11.5px] text-slate-500">PDF, image, or DOCX up to 10 MB</p>
+                  </>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) pickFile(f);
+                  }}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Category</label>
+                <SelectField
+                  value={uploadCategory}
+                  onChange={setUploadCategory}
+                  options={categoryOptions}
+                  className={DOC_FIELD_CLS}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Display name <span className="text-slate-400 font-normal normal-case tracking-normal">(optional)</span></label>
+                <input
+                  value={uploadName}
+                  onChange={(e) => setUploadName(e.target.value)}
+                  placeholder={uploadFile?.name || "Defaults to the file name"}
+                  className={DOC_FIELD_CLS}
+                />
+              </div>
+              {uploadError && (
+                <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[12.5px] text-rose-700">{uploadError}</div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-3">
+              <button onClick={closeUpload} disabled={uploading} className="h-9 px-5 text-[13px] text-slate-500 hover:text-slate-800 rounded-lg disabled:opacity-50">Cancel</button>
+              <button
+                onClick={submitUpload}
+                disabled={uploading || !uploadFile}
+                className="h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-60 disabled:cursor-wait"
+              >{uploading ? "Uploading…" : "Upload"}</button>
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }

@@ -971,7 +971,10 @@ export default function Sidebar() {
                                 Both brand entries route to the same page with
                                 a ?brand= param; the page reads it and seeds
                                 each panel's brand filter. "All brands" is
-                                gated to founders / super-admins only.
+                                gated to DEVELOPERS ONLY now — CEOs (and every
+                                other tier) only see their own brand entries.
+                                Per HR's ask: CEOs should stay brand-scoped
+                                everywhere, including this dashboard switcher.
                                 Active state is brand-aware: we can't reuse
                                 `fl()` here because pathname doesn't include
                                 the query string. */}
@@ -987,6 +990,12 @@ export default function Sidebar() {
                                             const active = currentBrand === slug;
                                             return (
                                                 <Link key={slug} href={`/dashboard/hr/admin?brand=${slug}`}
+                                                    // Auto-close the flyout the moment the user
+                                                    // commits to a brand — otherwise the menu
+                                                    // hangs around as the page navigates,
+                                                    // covering content. Same hover-trigger logic
+                                                    // re-opens it on the next hover.
+                                                    onClick={() => setHrAdminOpen(false)}
                                                     className={cn(
                                                         "flex items-center justify-between px-4 py-2 text-[13px] transition-all duration-150",
                                                         active
@@ -1004,7 +1013,9 @@ export default function Sidebar() {
                                             <>
                                                 {brandEntry("nb-media", "NB Media")}
                                                 {brandEntry("yt-labs",  "YT Labs")}
-                                                {isCeo && (
+                                                {/* Developer-only — CEOs are deliberately
+                                                    excluded so they stay brand-scoped. */}
+                                                {user?.isDeveloper === true && (
                                                     <>
                                                         <div className="my-1 mx-3 border-t border-[#d1dae5]" />
                                                         {brandEntry("all", "All brands")}

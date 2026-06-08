@@ -104,6 +104,30 @@ export async function GET(req: NextRequest) {
       } catch { /* column missing — leave map empty */ }
     }
 
+    // Rejection-email status — pull the latest CandidateActivity row
+    // tagged kind='email_sent' AND tied to the Candidate Rejection
+    // template (either templateKey='rejection' OR summary mentions
+    // "rejection"). Drives the "Email sent" badge next to rejected
+    // candidates in the list view. Soft-fails to empty if the
+    // CandidateActivity table is missing on a stale DB.
+    const rejectEmailById = new Map<number, string>();
+    if (rows.length > 0) {
+      try {
+        const sentRows = await prisma.$queryRawUnsafe<any[]>(
+          `SELECT "applicationId", MAX("createdAt") AS "sentAt"
+             FROM "CandidateActivity"
+            WHERE kind = 'email_sent'
+              AND "applicationId" = ANY($1::int[])
+              AND (meta->>'templateKey' = 'rejection' OR summary ILIKE '%rejection%')
+            GROUP BY "applicationId"`,
+          rows.map((r) => r.id),
+        );
+        for (const s of sentRows) {
+          rejectEmailById.set(Number(s.applicationId), s.sentAt);
+        }
+      } catch { /* table or column missing — leave map empty */ }
+    }
+
     // Same pattern for recruiterOwnerId — soft-fails if the column
     // isn't migrated yet, leaving every candidate ownerless.
     const ownerById = new Map<number, { id: number | null; name: string | null }>();
@@ -158,6 +182,10 @@ export async function GET(req: NextRequest) {
       tags: tagsById.get(Number(r.id)) ?? [],
       recruiterOwnerId: ownerById.get(Number(r.id))?.id ?? null,
       ownerName:        ownerById.get(Number(r.id))?.name ?? null,
+      // ISO timestamp of the last rejection email sent, or null.
+      // UI uses presence-not-value, but the timestamp lets HR see
+      // "sent yesterday" on hover if we want to add that later.
+      rejectionEmailSentAt: rejectEmailById.get(Number(r.id)) ?? null,
     }));
 
     return NextResponse.json({ candidates });

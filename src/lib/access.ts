@@ -43,6 +43,70 @@ export function isHRAdmin(user: ClientUser): boolean {
 }
 
 /**
+ * Leadership + HR tier — CEO, developers, and the HR team
+ * (orgLevel=hr_manager, which is set on every HR team member,
+ * not just the HR Manager role). Use for any feature that
+ * should be scoped to "ops leadership only": engage post
+ * moderation, employee-documents access, etc.
+ *
+ * Deliberately tighter than isHRAdmin — special_access and
+ * role=admin are NOT included. Those tiers pass most other gates
+ * but should not be on the same permission level as the HR team
+ * for sensitive things like editing other people's posts /
+ * viewing colleagues' PAN/Aadhaar.
+ */
+export function isLeadershipOrHR(user: ClientUser): boolean {
+  if (!user) return false;
+  return (
+    user.orgLevel === "ceo" ||
+    user.isDeveloper === true ||
+    user.orgLevel === "hr_manager"
+  );
+}
+
+/**
+ * Tighter gate for an EMPLOYEE'S DOCUMENTS tab — PAN / Aadhaar /
+ * education / employee letters are PII. Per explicit HR policy
+ * (2026-06-05): only the profile owner, anyone in the HR team
+ * (orgLevel=hr_manager — covers both HR Manager + HR team members
+ * like Vanshika), developers, and the CEO may view another
+ * employee's documents.
+ *
+ * Pass `isSelfView` true when the viewer IS the employee whose
+ * profile is being looked at — self-view always passes regardless
+ * of role.
+ */
+export function canViewEmployeeDocuments(
+  user: ClientUser,
+  isSelfView: boolean,
+): boolean {
+  if (isSelfView) return true;
+  return isLeadershipOrHR(user);
+}
+
+/**
+ * Tight gate for the "On Notice Period" / "Exited" badge on
+ * employee profiles + search results. Visible ONLY to:
+ *   • The employee themselves (self-view)
+ *   • The HR team (orgLevel=hr_manager — covers HR Manager + HR
+ *     team members like Vanshika)
+ *   • Developers (isDeveloper=true)
+ *
+ * Per HR policy (2026-06-05): the CEO and special_access /
+ * role=admin should NOT see this badge on other people's profiles
+ * — exit status is HR's confidential signal, not a company-wide
+ * one. The page itself stays accessible; just the chip hides.
+ */
+export function canViewExitBadge(
+  user: ClientUser,
+  isSelfView: boolean,
+): boolean {
+  if (isSelfView) return true;
+  if (!user) return false;
+  return user.orgLevel === "hr_manager" || user.isDeveloper === true;
+}
+
+/**
  * The one developer who is trusted with salary data. Other developers
  * (e.g. anyone else in DEVELOPER_EMAILS) pass `isDeveloper` for every
  * other dev-only surface but NOT for compensation. Must stay in sync
@@ -177,6 +241,26 @@ export const HR_MANAGER_ALLOWED_RAIL_LINKS = new Set<string>([
 export function isFullHRAdmin(user: ClientUser): boolean {
   if (hasResolvedPermissions(user)) return can(user, "MANAGE_TAB_PERMISSIONS");
   return isAdmin(user) || user?.role === "hr_manager";
+}
+
+/**
+ * Bypass brand-scoping on cross-brand surfaces (HR home "On Leave Today" /
+ * "Working Remotely" lists, etc.). Most users see only their own brand —
+ * CEOs are deliberately brand-scoped (Kunal → YT Labs, Nikit → NB Media)
+ * so this DELIBERATELY excludes them. The bypass is for two tiers HR
+ * explicitly asked to grant full cross-brand visibility:
+ *   • Developers — they need full visibility to debug / triage.
+ *   • role="hr_manager" — the actual HR Manager (e.g. Tanvi) sees the
+ *     whole org; orgLevel="hr_manager" alone (HR Members) still gets
+ *     brand-scoped because they only support their own brand.
+ *
+ * Add new gate sites by composing: `canViewAllBrands(user) || same-brand`.
+ */
+export function canViewAllBrands(user: ClientUser): boolean {
+  if (!user) return false;
+  if (user.isDeveloper === true) return true;
+  if (user.role === "hr_manager") return true;
+  return false;
 }
 
 /**
