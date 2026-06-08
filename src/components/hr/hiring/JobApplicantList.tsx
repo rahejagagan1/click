@@ -8,7 +8,7 @@
 // inline via the stage select — same backend action as the kanban
 // drag-and-drop. Sortable by name, stage, applied-on, and source.
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useUrlState } from "@/lib/hooks/useUrlState";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
@@ -103,6 +103,21 @@ export default function JobApplicantList({ jobId, jobTitle = "this job" }: { job
     (n: number | null) => setSelectedIdUrl(n != null ? String(n) : null),
     [setSelectedIdUrl],
   );
+
+  // CandidateDrawer's "1 of N" pager dispatches this event when HR
+  // clicks the prev/next chevrons. We listen here so the drawer can
+  // switch to the next sibling without remounting. The matching
+  // listener lives in CandidatesTab too (the global candidates
+  // page) — same event, same intent, two consumers.
+  useEffect(() => {
+    function onNav(e: Event) {
+      const id = (e as CustomEvent<number>).detail;
+      if (Number.isInteger(id)) setSelectedId(Number(id));
+    }
+    window.addEventListener("nb:candidateDrawer:navigate", onNav as any);
+    return () => window.removeEventListener("nb:candidateDrawer:navigate", onNav as any);
+  }, [setSelectedId]);
+
   const [moving, setMoving]         = useState<Set<number>>(new Set());
 
   // Tab filter — lets HR slice the candidate list by lifecycle
