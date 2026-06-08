@@ -14,13 +14,27 @@ import { requireAuth } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
-/** Per-row brand check is intentionally a no-op now that the
- *  offboarding UI has explicit brand tabs (NB Media | YT Labs).
- *  Any canManage user can click into any exit from either tab —
- *  they're allowed to inspect / edit either brand's pipeline.
- *  Kept as a function so callers don't have to be edited if we
- *  later need to re-introduce a brand check on a per-environment
- *  basis (e.g. for a different deployment). */
+/** SECURITY MODEL — read this before tightening.
+ *
+ *  Per-row brand restriction is INTENTIONALLY OFF on the
+ *  offboarding [id] endpoint, per HR's explicit design choice:
+ *  the UI exposes brand tabs (NB Media | YT Labs) and HR
+ *  Managers can click into any exit from either tab. So this
+ *  endpoint trusts the canManage(session) gate above as the
+ *  authorisation boundary, not the row's businessUnit.
+ *
+ *  Threat model:
+ *    • The endpoint is canManage-gated (HR Manager / orgLevel=
+ *      hr_manager / role=admin / CEO / developer). A regular
+ *      employee can never reach this function.
+ *    • Brand is a UI filter on the list view, not an access
+ *      boundary on individual rows. The list endpoint
+ *      (/api/hr/exits) accepts ?brand= for the same reason.
+ *
+ *  If you later want to re-tighten (e.g. brand=NB Media for the
+ *  per-brand HR Manager only), restore a real check here. The
+ *  function signature is preserved so call sites don't need to
+ *  be edited at that point. */
 async function brandGate(_session: any, _exitId: number): Promise<"allow"> {
   return "allow";
 }
