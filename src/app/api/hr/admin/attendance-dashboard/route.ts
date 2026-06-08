@@ -6,6 +6,7 @@ import { parseAttLoc } from "@/lib/attendance-location";
 import { serializeBigInt } from "@/lib/utils";
 import { getPoliciesByUser } from "@/lib/hr/notification-policy";
 import { evaluateOfficeGeofence } from "@/lib/office-geofence";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +24,15 @@ export async function GET() {
   try {
     const today = istTodayDateOnly();
 
+    const scope = getBrandScope(self);
+    if (!scope.allBrands && !scope.brand) {
+      return NextResponse.json({ users: [], date: today.toISOString().slice(0, 10) });
+    }
     const usersAll = await prisma.user.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        ...(scope.allBrands ? {} : { employeeProfile: { businessUnit: scope.brand! } }),
+      },
       orderBy: { name: "asc" },
       select: {
         id: true, name: true, email: true, role: true, orgLevel: true,
