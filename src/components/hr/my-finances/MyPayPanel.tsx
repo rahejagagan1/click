@@ -6,8 +6,10 @@
 // in from the people-detail Finances tab).
 
 import { useEffect, useMemo, useState } from "react";
+import { useSession } from "next-auth/react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
+import { canViewSalary } from "@/lib/access";
 import SelectField from "@/components/ui/SelectField";
 import {
   Download, FileText, X, TrendingUp, ChevronRight, ChevronDown, Lightbulb, Paperclip,
@@ -46,97 +48,205 @@ function formatDate(iso?: string | null): string {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
-function downloadPayslip(p: any, structure: any) {
-  const fmt = (n: any) => new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(parseFloat(n || 0));
-  const isIntern = structure?.salaryType === "intern";
+// Indian-English amount-in-words for the net pay line ("Fifty Four Thousand
+// Eight Hundred Rupees only"). Whole rupees only — payslip nets are integral.
+function amountInWords(amount: number): string {
+  const n = Math.round(amount);
+  if (!Number.isFinite(n) || n === 0) return "Zero Rupees only";
+  const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+    "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  const two = (x: number): string => x < 20 ? ones[x] : (tens[Math.floor(x / 10)] + (x % 10 ? " " + ones[x % 10] : ""));
+  const three = (x: number): string => {
+    const h = Math.floor(x / 100), r = x % 100;
+    return (h ? ones[h] + " Hundred" + (r ? " " : "") : "") + (r ? two(r) : "");
+  };
+  const crore = Math.floor(n / 10000000), restCr = n % 10000000;
+  const lakh = Math.floor(restCr / 100000), restLk = restCr % 100000;
+  const thousand = Math.floor(restLk / 1000), rest = restLk % 1000;
+  let w = "";
+  if (crore) w += two(crore) + " Crore ";
+  if (lakh) w += two(lakh) + " Lakh ";
+  if (thousand) w += two(thousand) + " Thousand ";
+  if (rest) w += three(rest);
+  return w.trim() + " Rupees only";
+}
 
-  let earningsRowsHtml = "";
-  if (isIntern || !structure) {
-    earningsRowsHtml = `<tr><td>Monthly Stipend</td><td class="amount">₹${fmt(p.grossEarnings)}</td></tr>`;
-  } else {
-    const basic   = parseFloat(structure.basic               || 0) / 12;
-    const hra     = parseFloat(structure.hra                 || 0) / 12;
-    const da      = parseFloat(structure.dearnessAllowance   || 0) / 12;
-    const conv    = parseFloat(structure.conveyanceAllowance || 0) / 12;
-    const medical = parseFloat(structure.medicalAllowance    || 0) / 12;
-    const fixed   = basic + hra + da + conv + medical;
-    const special = Math.max(0, parseFloat(p.grossEarnings || 0) - fixed);
-    const rows: [string, number][] = [];
-    if (basic)   rows.push(["Basic Salary",              basic]);
-    if (hra)     rows.push(["House Rent Allowance (HRA)", hra]);
-    if (da)      rows.push(["Dearness Allowance",        da]);
-    if (conv)    rows.push(["Conveyance Allowance",      conv]);
-    if (medical) rows.push(["Medical Allowance",         medical]);
-    if (special) rows.push(["Special Allowance",         special]);
-    earningsRowsHtml = rows
-      .map(([label, value]) => `<tr><td>${label}</td><td class="amount">₹${fmt(value)}</td></tr>`)
-      .join("\n       ");
-  }
+// Per-legal-entity company header (name + address lines). Keyed by
+// EmployeeProfile.legalEntity. TODO(YT Labs): replace the placeholder with the
+// real registered name + address once HR provides it.
+const COMPANY_HEADERS: Record<string, { name: string; address: string[] }> = {
+  "NB Media Productions": {
+    name: "YT MONEY PRODUCTIONS PRIVATE LIMITED",
+    address: ["1ST FLOOR, 209,", "NB MEDIA, MODEL TOWN MAIN ROAD,", "BATHINDA PUNJAB 151001"],
+  },
+  "YT Labs": {
+    name: "YT MONEY PRODUCTIONS PRIVATE LIMITED", // PLACEHOLDER — awaiting YT Labs' legal name + address
+    address: ["1ST FLOOR, 209,", "NB MEDIA, MODEL TOWN MAIN ROAD,", "BATHINDA PUNJAB 151001"],
+  },
+};
+function companyHeader(legalEntity?: string | null) {
+  return (legalEntity && COMPANY_HEADERS[legalEntity]) || COMPANY_HEADERS["NB Media Productions"];
+}
+
+// Base monthly salary (CTC ÷ 12) — the contractual figure for the "Monthly
+// Salary" header field. Distinct from grossEarnings, which includes bonuses.
+function monthlyBaseSalary(structure: any): number {
+  return Math.round(parseFloat(structure?.ctc || 0) / 12);
+}
+
+// Bonuses (EmployeeBonus rows) whose effectiveDate falls in the payslip's month.
+function bonusesForPayslip(p: any, all: BonusRow[]): BonusRow[] {
+  return (all || []).filter((b) => {
+    const d = new Date(b.effectiveDate);
+    return !Number.isNaN(d.getTime()) && d.getUTCFullYear() === p.year && d.getUTCMonth() === p.month;
+  });
+}
+function bonusLabel(b: BonusRow): string {
+  return (b.bonusType && b.bonusType.trim()) ? b.bonusType.trim() : "Bonus";
+}
+
+// Non-zero deduction rows. The fixed ₹200 `additionalTax` is shown as
+// "Professional Tax" to match the company payslip format. Shared by the
+// on-screen preview and the printable download so they stay identical.
+function deductionRows(p: any): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = [];
+  if (parseFloat(p.pfEmployee || 0) > 0)      rows.push({ label: "Provident Fund (Employee)", value: fmtInr(p.pfEmployee) });
+  if (parseFloat(p.tds || 0) > 0)             rows.push({ label: "TDS / Income Tax", value: fmtInr(p.tds) });
+  if (parseFloat(p.professionalTax || 0) > 0) rows.push({ label: "Professional Tax", value: fmtInr(p.professionalTax) });
+  if (parseFloat(p.additionalTax || 0) > 0)   rows.push({ label: "Professional Tax", value: fmtInr(p.additionalTax) });
+  return rows;
+}
+
+function downloadPayslip(
+  p: any,
+  structure: any,
+  profile?: any,
+  bonuses: BonusRow[] = [],
+  header?: { name: string; address: string[] },
+) {
+  const co = header || companyHeader(profile?.legalEntity);
+  const period = `${MONTHS_FULL[p.month].toUpperCase()} ${p.year}`;
+  const name = (profile?.firstName || profile?.lastName)
+    ? [profile.firstName, profile.middleName, profile.lastName].filter(Boolean).join(" ")
+    : (p.user?.name || "—");
+  const loc = profile?.jobLocation || profile?.city || "—";
+  const days = (parseFloat(p.workingDays || 0) - parseFloat(p.lopDays || 0));
+  const logoUrl = (typeof window !== "undefined" ? window.location.origin : "") + "/logo.png";
+
+  // Earnings rows — itemised, bonuses labelled by their bonusType.
+  const earnRows = renderEarnings(p, structure, bonuses)
+    .map((r) => `<div class="line"><span>${r.label}</span><span class="amt">${r.value}</span></div>`).join("");
+
+  // Non-zero deductions (shared with the on-screen preview). Stipend-only
+  // employees (no deductions) get NO Taxes & Deductions section at all —
+  // Earnings spans full width and the net line reads "( A )".
+  const ded = deductionRows(p);
+  const hasDed = ded.length > 0;
+  const dedRows = ded.map((d) => `<div class="line"><span>${d.label}</span><span class="amt">${d.value}</span></div>`).join("");
+  const earningsCol =
+    `<div class="col left">
+      <div class="colh">EARNINGS</div>
+      ${earnRows}
+      <div class="line tot"><span>Total Earnings (A)</span><span class="amt">${fmtInr(p.grossEarnings)}</span></div>
+    </div>`;
+  const deductionsCol =
+    `<div class="col">
+      <div class="colh">TAXES &amp; DEDUCTIONS</div>
+      ${dedRows}
+      <div class="line tot"><span>Total Taxes &amp; Deductions (B)</span><span class="amt">${fmtInr(p.totalDeductions)}</span></div>
+    </div>`;
+  // Always two columns — when there are no deductions the right column is simply
+  // left empty (Earnings keeps its half width, not stretched full-page).
+  const edHtml = `<div class="ed">${earningsCol}${hasDed ? deductionsCol : ""}</div>`;
+  const netLabel = hasDed ? "A - B" : "A";
+
+  const cell = (label: string, value: string) =>
+    `<div class="cell"><div class="lbl">${label}</div><div class="val">${value || "&mdash;"}</div></div>`;
 
   const html = `<!DOCTYPE html>
-<html><head><title>Payslip - ${MONTHS_FULL[p.month]} ${p.year}</title>
-<meta charset="UTF-8"/>
+<html><head><meta charset="UTF-8"/><title>Payslip - ${period} - ${name}</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:Arial,sans-serif;font-size:12px;color:#1e293b;background:#fff}
-  .header{background:#1e3a5f;color:#fff;padding:24px 32px;display:flex;align-items:center;justify-content:space-between}
-  .company{font-size:20px;font-weight:700}
-  .period{font-size:13px;opacity:0.8;margin-top:4px}
-  .title{font-size:16px;font-weight:600;letter-spacing:2px}
-  .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid #e2e8f0;margin:24px 32px}
-  .info-cell{padding:10px 16px;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0}
-  .info-cell:nth-child(2n){border-right:none}
-  .info-label{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:3px}
-  .info-value{font-size:13px;font-weight:600;color:#1e293b}
-  .table{width:calc(100% - 64px);margin:0 32px;border-collapse:collapse}
-  .table th{background:#f8fafc;padding:10px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;border:1px solid #e2e8f0}
-  .table td{padding:10px 14px;border:1px solid #e2e8f0;font-size:12px}
-  .table .amount{text-align:right;font-weight:600}
-  .table .total-row td{background:#f1f5f9;font-weight:700}
-  .net{background:#1e3a5f;color:#fff;margin:0 32px;padding:16px;border-radius:0 0 8px 8px;display:flex;justify-content:space-between;align-items:center}
-  .net-label{font-size:13px;font-weight:600;letter-spacing:1px}
-  .net-amount{font-size:22px;font-weight:700}
-  .section-title{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#64748b;font-weight:700;margin:20px 32px 8px}
-  .note{font-size:10px;color:#94a3b8;margin:16px 32px;text-align:center}
-  @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-</style></head><body>
-<div class="header">
-  <div><div class="company">NB Media Productions</div><div class="period">Payslip for ${MONTHS_FULL[p.month]} ${p.year}</div></div>
-  <div class="title">SALARY SLIP</div>
-</div>
+  body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#1f2937;background:#fff}
+  .sheet{max-width:820px;margin:0 auto;background:#fff;padding:40px 44px}
+  .top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
+  .ptitle{font-size:26px;font-weight:400;color:#111827}
+  .ptitle b{font-weight:800}
+  .company{font-size:12px;color:#6b7280;margin-top:10px;line-height:1.55}
+  .company .nm{color:#4b5563;font-weight:500}
+  .logo{height:46px}
+  .empname{font-size:15px;font-weight:700;color:#111827;margin:22px 0 10px}
+  hr{border:none;border-top:1.5px solid #111827;margin:0}
+  .thin{border-top:1px solid #e5e7eb}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
+  .cell{padding:12px 4px 12px 0;border-bottom:1px solid #e5e7eb}
+  .lbl{font-size:10.5px;color:#9ca3af;margin-bottom:4px}
+  .val{font-size:12.5px;color:#1f2937;font-weight:500}
+  .sec{font-size:13px;font-weight:700;color:#111827;margin:26px 0 8px}
+  .days{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid #e5e7eb;padding-bottom:14px;padding-top:12px}
+  .ed{display:grid;grid-template-columns:1fr 1fr;margin-top:18px}
+  .ed .col{padding:0 26px}
+  .ed .col.left{border-right:1px solid #e5e7eb;padding-left:0}
+  .colh{font-size:13px;font-weight:700;color:#111827;margin-bottom:10px}
+  .line{display:flex;justify-content:space-between;padding:6px 0;font-size:12.5px;color:#374151}
+  .line.tot{font-weight:700;color:#111827;border-top:1px solid #e5e7eb;margin-top:4px;padding-top:8px}
+  .muted{color:#9ca3af}
+  .net{background:#f3f4f6;margin-top:26px;padding:16px 20px;border-radius:4px}
+  .net .row{display:flex;justify-content:space-between;align-items:center;padding:5px 0}
+  .net .k{font-size:13px;color:#374151}
+  .net .v{font-size:14px;font-weight:700;color:#111827}
+  .note{font-size:11px;color:#4b5563;margin-top:18px}
+  .note b{color:#111827}
+  .foot{font-size:10.5px;color:#9ca3af;font-style:italic;margin-top:14px}
+  @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.sheet{padding:24px}}
+</style></head><body><div class="sheet">
+  <div class="top">
+    <div>
+      <div class="ptitle"><b>PAYSLIP</b> ${period}</div>
+      <div class="company"><span class="nm">${co.name}</span><br/>${co.address.join("<br/>")}</div>
+    </div>
+    <img class="logo" src="${logoUrl}" alt="logo" onerror="this.style.display='none'"/>
+  </div>
 
-<div class="info-grid">
-  <div class="info-cell"><div class="info-label">Employee Name</div><div class="info-value">${p.user?.name || "—"}</div></div>
-  <div class="info-cell"><div class="info-label">Email</div><div class="info-value">${p.user?.email || "—"}</div></div>
-  <div class="info-cell"><div class="info-label">Pay Period</div><div class="info-value">${MONTHS_FULL[p.month]} ${p.year}</div></div>
-  <div class="info-cell"><div class="info-label">Status</div><div class="info-value" style="text-transform:capitalize">${p.status}</div></div>
-</div>
+  <div class="empname">${name.toUpperCase()}</div>
+  <hr/>
+  <div class="grid">
+    ${cell("Employee Number", profile?.employeeId)}
+    ${cell("Date Joined", profile?.joiningDate ? new Date(profile.joiningDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "")}
+    ${cell("Department", profile?.department)}
+    ${cell("Designation", profile?.designation)}
+    ${cell("Date Of Birth", profile?.dateOfBirth ? new Date(profile.dateOfBirth).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "")}
+    ${cell("Location", loc)}
+    ${cell("Payment Mode", "Bank Transfer")}
+    ${cell("Bank", profile?.bankName)}
+    ${cell("Bank IFSC", profile?.bankIfsc)}
+    ${cell("Bank Account", profile?.bankAccountNumber)}
+    ${cell("Monthly Salary", fmtInrWhole(monthlyBaseSalary(structure)))}
+    ${cell("PAN Number", profile?.panNumber)}
+  </div>
 
-<div class="section-title">Earnings</div>
-<table class="table">
-  <tr><th>Component</th><th style="text-align:right">Amount (₹)</th></tr>
-  ${earningsRowsHtml}
-  <tr class="total-row"><td>Gross Earnings</td><td class="amount">₹${fmt(p.grossEarnings)}</td></tr>
-</table>
+  <div class="sec">SALARY DETAILS</div>
+  <hr class="thin"/>
+  <div class="days">
+    <div><div class="lbl">Actual Payable Days</div><div class="val">${p.presentDays ?? "—"}</div></div>
+    <div><div class="lbl">Total Working Days</div><div class="val">${p.workingDays ?? "—"}</div></div>
+    <div><div class="lbl">Loss Of Pay Days</div><div class="val">${p.lopDays ?? 0}</div></div>
+    <div><div class="lbl">Days Payable</div><div class="val">${days}</div></div>
+  </div>
 
-<div class="section-title">Deductions</div>
-<table class="table">
-  <tr><th>Component</th><th style="text-align:right">Amount (₹)</th></tr>
-  <tr><td>Provident Fund (Employee)</td><td class="amount">₹${fmt(p.pfEmployee)}</td></tr>
-  <tr><td>TDS / Income Tax</td><td class="amount">₹${fmt(p.tds)}</td></tr>
-  <tr><td>Professional Tax</td><td class="amount">₹${fmt(p.professionalTax)}</td></tr>
-  ${parseFloat(p.additionalTax || 0) > 0 ? `<tr><td>Additional Tax</td><td class="amount">₹${fmt(p.additionalTax)}</td></tr>` : ""}
-  <tr class="total-row"><td>Total Deductions</td><td class="amount">₹${fmt(p.totalDeductions)}</td></tr>
-</table>
+  ${edHtml}
 
-<div class="net">
-  <span class="net-label">NET PAY</span>
-  <span class="net-amount">₹${fmt(p.netPay)}</span>
-</div>
-<p class="note">This is a computer-generated payslip and does not require a physical signature.</p>
-</body></html>`;
+  <div class="net">
+    <div class="row"><span class="k">Net Salary Payable ( ${netLabel} )</span><span class="v">${fmtInr(p.netPay)}</span></div>
+    <div class="row"><span class="k">Net Salary in words</span><span class="v">${amountInWords(parseFloat(p.netPay || 0))}</span></div>
+  </div>
 
-  const win = window.open("", "_blank", "width=800,height=900");
+  <div class="note"><b>**Note :</b> All amounts displayed in this payslip are in <b>INR</b></div>
+  <div class="foot">* This is computer generated statement, does not require signature.</div>
+</div></body></html>`;
+
+  const win = window.open("", "_blank", "width=860,height=1000");
   if (!win) return;
   win.document.write(html);
   win.document.close();
@@ -146,6 +256,17 @@ function downloadPayslip(p: any, structure: any) {
 
 export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) {
   const [subTab, setSubTab] = useState<SubTab>(initialSub);
+
+  // Pay Slips is still in development — surface it only to developers + salary
+  // admins (CEO / HR Manager / salary-dev) for now; regular employees don't see
+  // the tab yet. (The API also withholds payslip data until the run is "paid".)
+  // TODO: remove this gate once the payslip is production-ready.
+  const { data: session, status } = useSession();
+  const viewer = session?.user as any;
+  const canSeePayslips = viewer?.isDeveloper === true || canViewSalary(viewer);
+  useEffect(() => {
+    if (status !== "loading" && subTab === "pay-slips" && !canSeePayslips) setSubTab("my-salary");
+  }, [status, canSeePayslips, subTab]);
   const [showBreakup, setShowBreakup] = useState(false);
   // Salary Revision drill-down. Collapsed by default — clicking the
   // chevron expands into the regular-salary detail + per-bonus list.
@@ -210,7 +331,7 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
 
   const subTabs: { key: SubTab; label: string }[] = [
     { key: "my-salary",  label: userId ? "Salary" : "My Salary" },
-    { key: "pay-slips",  label: "Pay Slips"  },
+    ...(canSeePayslips ? [{ key: "pay-slips" as SubTab, label: "Pay Slips" }] : []),
     { key: "income-tax", label: "Income Tax" },
   ];
 
@@ -359,7 +480,7 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
         )}
 
         {/* ══════════════════════  Pay Slips  ══════════════════════ */}
-        {subTab === "pay-slips" && (
+        {subTab === "pay-slips" && canSeePayslips && (
           <PaySlipsView payslips={myPayslips} structure={myStructure} userId={userId} />
         )}
 
@@ -477,6 +598,13 @@ function PaySlipsView({ payslips, structure, userId }: { payslips: any[]; struct
   const { data: summary } = useSWR<{ profile: any }>(summaryUrl, fetcher);
   const profile = summary?.profile ?? null;
 
+  // Bonuses (with their bonusType) — itemised onto the payslip earnings.
+  const bonusUrl = userId ? `/api/hr/payroll/bonus?userId=${userId}` : "/api/hr/payroll/bonus";
+  const { data: bonusData } = useSWR<{ items: BonusRow[] }>(bonusUrl, fetcher);
+  const allBonuses = bonusData?.items ?? [];
+
+  const header = companyHeader(profile?.legalEntity);
+
   const years = useMemo(() => {
     const set = new Set<number>();
     for (const p of payslips) set.add(p.year);
@@ -503,6 +631,10 @@ function PaySlipsView({ payslips, structure, userId }: { payslips: any[]; struct
   }, [monthsInYear, selectedId]);
 
   const active = monthsInYear.find((p: any) => p.id === selectedId) || null;
+  const activeBonuses = active ? bonusesForPayslip(active, allBonuses) : [];
+  // Stipend-only employees (no PF/TDS/PT/etc.) get no deductions section.
+  const activeDeductions = active ? deductionRows(active) : [];
+  const hasDeductions = activeDeductions.length > 0;
 
   const maskedAcct = (v?: string | null) => !v ? "—" : String(v);
   const maskedPan  = (v?: string | null) => v || "—";
@@ -528,7 +660,7 @@ function PaySlipsView({ payslips, structure, userId }: { payslips: any[]; struct
           </div>
           {active ? (
             <button
-              onClick={() => downloadPayslip(active, structure)}
+              onClick={() => downloadPayslip(active, structure, profile, activeBonuses, header)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sky-300 text-sky-600 hover:bg-sky-50 text-[13px] font-semibold"
             >
               {MONTHS_FULL[active.month]} {active.year} Pay Slip
@@ -592,10 +724,9 @@ function PaySlipsView({ payslips, structure, userId }: { payslips: any[]; struct
                       <h1 className="text-[22px] font-bold text-slate-800 tracking-wide">
                         PAYSLIP <span className="font-normal">{MONTHS_FULL[active.month].toUpperCase()} {active.year}</span>
                       </h1>
-                      <p className="mt-3 text-[13px] font-semibold text-slate-700">NB MEDIA PRODUCTIONS PRIVATE LIMITED</p>
+                      <p className="mt-3 text-[13px] font-semibold text-slate-700">{header.name}</p>
                       <p className="mt-2 text-[11.5px] leading-relaxed text-slate-500">
-                        1st Floor, 209, NB Media, Model Town Main Road,<br />
-                        Bathinda, Punjab, 151001.
+                        {header.address.map((l, i) => <span key={i}>{l}<br /></span>)}
                       </p>
                     </div>
                     <div className="flex h-14 w-14 items-center justify-center rounded-md bg-white ring-1 ring-slate-200 overflow-hidden">
@@ -615,13 +746,13 @@ function PaySlipsView({ payslips, structure, userId }: { payslips: any[]; struct
                     <PayslipField label="Designation"      value={profile?.designation || "—"} />
 
                     <PayslipField label="Date of Birth"    value={formatDate(profile?.dateOfBirth)} />
-                    <PayslipField label="Location"         value={profile?.city || "—"} />
+                    <PayslipField label="Location"         value={profile?.jobLocation || profile?.city || "—"} />
                     <PayslipField label="Payment Mode"     value="Bank Transfer" />
                     <PayslipField label="Bank"             value={profile?.bankName || "—"} />
 
                     <PayslipField label="Bank IFSC"        value={profile?.bankIfsc || "—"} />
                     <PayslipField label="Bank Account"     value={maskedAcct(profile?.bankAccountNumber)} />
-                    <PayslipField label="Monthly Salary"   value={fmtInrWhole(active.grossEarnings)} />
+                    <PayslipField label="Monthly Salary"   value={fmtInrWhole(monthlyBaseSalary(structure))} />
                     <PayslipField label="PAN Number"       value={maskedPan(profile?.panNumber)} />
                   </div>
 
@@ -633,57 +764,51 @@ function PaySlipsView({ payslips, structure, userId }: { payslips: any[]; struct
                     <PayslipField label="Days Payable"        value={String((parseFloat(active.workingDays ?? 0)) - (parseFloat(active.lopDays ?? 0)))} />
                   </div>
 
-                  <h3 className="mt-8 text-[13px] font-bold text-slate-800 border-b border-slate-200 pb-2">EARNINGS</h3>
-                  <table className="mt-3 w-full text-[13px]">
-                    <tbody>
-                      {renderEarnings(active, structure).map((row) => (
-                        <tr key={row.label} className="border-b border-slate-100">
-                          <td className="py-2 text-slate-700">{row.label}</td>
-                          <td className="py-2 text-right text-slate-800 font-medium">{row.value}</td>
-                        </tr>
+                  {/* Earnings | (Taxes & Deductions only when there are any — else the
+                      right column stays empty; Earnings keeps its half width). */}
+                  <div className="mt-7 grid grid-cols-2">
+                    <div className="pr-7 border-r border-slate-200">
+                      <p className="text-[13px] font-bold text-slate-800 mb-2.5">EARNINGS</p>
+                      {renderEarnings(active, structure, activeBonuses).map((row) => (
+                        <div key={row.label} className="flex justify-between py-1.5 text-[12.5px] text-slate-700">
+                          <span>{row.label}</span><span className="tabular-nums">{row.value}</span>
+                        </div>
                       ))}
-                      <tr className="border-b-2 border-slate-300">
-                        <td className="py-2 font-semibold text-slate-800">Total Earnings (A)</td>
-                        <td className="py-2 text-right font-semibold text-slate-800">{fmtInr(active.grossEarnings)}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-
-                  <h3 className="mt-6 text-[13px] font-bold text-slate-800 border-b border-slate-200 pb-2">DEDUCTIONS</h3>
-                  <table className="mt-3 w-full text-[13px]">
-                    <tbody>
-                      <tr className="border-b border-slate-100">
-                        <td className="py-2 text-slate-700">Provident Fund (Employee)</td>
-                        <td className="py-2 text-right text-slate-800 font-medium">{fmtInr(active.pfEmployee)}</td>
-                      </tr>
-                      <tr className="border-b border-slate-100">
-                        <td className="py-2 text-slate-700">TDS / Income Tax</td>
-                        <td className="py-2 text-right text-slate-800 font-medium">{fmtInr(active.tds)}</td>
-                      </tr>
-                      <tr className="border-b border-slate-100">
-                        <td className="py-2 text-slate-700">Professional Tax</td>
-                        <td className="py-2 text-right text-slate-800 font-medium">{fmtInr(active.professionalTax)}</td>
-                      </tr>
-                      {parseFloat(active.additionalTax || 0) > 0 && (
-                        <tr className="border-b border-slate-100">
-                          <td className="py-2 text-slate-700">Additional Tax</td>
-                          <td className="py-2 text-right text-slate-800 font-medium">{fmtInr(active.additionalTax)}</td>
-                        </tr>
-                      )}
-                      <tr className="border-b-2 border-slate-300">
-                        <td className="py-2 font-semibold text-slate-800">Total Deductions (B)</td>
-                        <td className="py-2 text-right font-semibold text-slate-800">{fmtInr(active.totalDeductions)}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-
-                  <div className="mt-5 flex items-center justify-between rounded bg-[#1e3a5f] px-5 py-3 text-white">
-                    <span className="text-[13px] font-semibold tracking-wide">NET PAY (A − B)</span>
-                    <span className="text-[18px] font-bold">{fmtInr(active.netPay)}</span>
+                      <div className="flex justify-between border-t border-slate-200 mt-1 pt-2 text-[12.5px] font-bold text-slate-900">
+                        <span>Total Earnings (A)</span><span className="tabular-nums">{fmtInr(active.grossEarnings)}</span>
+                      </div>
+                    </div>
+                    {hasDeductions && (
+                      <div className="pl-7">
+                        <p className="text-[13px] font-bold text-slate-800 mb-2.5">TAXES &amp; DEDUCTIONS</p>
+                        {activeDeductions.map((row, i) => (
+                          <div key={i} className="flex justify-between py-1.5 text-[12.5px] text-slate-700">
+                            <span>{row.label}</span><span className="tabular-nums">{row.value}</span>
+                          </div>
+                        ))}
+                        <div className="flex justify-between border-t border-slate-200 mt-1 pt-2 text-[12.5px] font-bold text-slate-900">
+                          <span>Total Taxes &amp; Deductions (B)</span><span className="tabular-nums">{fmtInr(active.totalDeductions)}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  <p className="mt-4 text-[10.5px] text-slate-400 text-center">
-                    This is a computer-generated payslip and does not require a physical signature.
+                  <div className="mt-7 rounded bg-slate-100 px-5 py-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[13px] text-slate-700">Net Salary Payable ( {hasDeductions ? "A − B" : "A"} )</span>
+                      <span className="text-[14px] font-bold text-slate-900 tabular-nums">{fmtInr(active.netPay)}</span>
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between">
+                      <span className="text-[13px] text-slate-700">Net Salary in words</span>
+                      <span className="text-[13px] font-semibold text-slate-900">{amountInWords(parseFloat(active.netPay || 0))}</span>
+                    </div>
+                  </div>
+
+                  <p className="mt-4 text-[11px] text-slate-600">
+                    <span className="font-semibold text-slate-800">**Note :</span> All amounts displayed in this payslip are in <span className="font-semibold text-slate-800">INR</span>
+                  </p>
+                  <p className="mt-2 text-[10.5px] text-slate-400 italic">
+                    * This is computer generated statement, does not require signature.
                   </p>
                 </div>
               </div>
@@ -768,38 +893,44 @@ function BonusDetailRow({ bonus }: { bonus: BonusRow }) {
   );
 }
 
-function renderEarnings(p: any, structure: any): { label: string; value: string }[] {
+function renderEarnings(p: any, structure: any, bonuses: BonusRow[] = []): { label: string; value: string }[] {
   const gross = parseFloat(p.grossEarnings || 0);
-  const bonus = parseFloat(p.bonus || 0);
-  const baseEarnings = Math.max(0, gross - bonus);
-  if (!structure) {
-    const rows = [{ label: "Monthly Stipend", value: fmtInr(baseEarnings) }];
-    if (bonus) rows.push({ label: "Bonus", value: fmtInr(bonus) });
-    return rows;
-  }
-  if (structure.salaryType === "intern") {
-    const rows = [{ label: "Monthly Stipend", value: fmtInr(baseEarnings) }];
-    if (bonus) rows.push({ label: "Bonus", value: fmtInr(bonus) });
-    return rows;
-  }
-  const basic   = parseFloat(structure.basic               || 0) / 12;
-  const hra     = parseFloat(structure.hra                 || 0) / 12;
-  const da      = parseFloat(structure.dearnessAllowance   || 0) / 12;
-  const conv    = parseFloat(structure.conveyanceAllowance || 0) / 12;
-  const medical = parseFloat(structure.medicalAllowance    || 0) / 12;
-  // Special soaks up whatever's left after the fixed components — keeps
-  // the row total equal to baseEarnings even when the DB row is missing
-  // a component (older saves had only basic/hra/special populated).
-  const fixed   = basic + hra + da + conv + medical;
-  const special = Math.max(0, baseEarnings - fixed);
+  // The bonus amount actually baked into gross (from payroll). Base salary is
+  // gross minus that, so Total Earnings always reconciles to gross.
+  const bonusInGross = parseFloat(p.bonus || 0);
+  const baseEarnings = Math.max(0, gross - bonusInGross);
   const rows: { label: string; value: string }[] = [];
-  if (basic)   rows.push({ label: "Basic Salary",         value: fmtInr(basic)   });
-  if (hra)     rows.push({ label: "House Rent Allowance", value: fmtInr(hra)     });
-  if (da)      rows.push({ label: "Dearness Allowance",   value: fmtInr(da)      });
-  if (conv)    rows.push({ label: "Conveyance Allowance", value: fmtInr(conv)    });
-  if (medical) rows.push({ label: "Medical Allowance",    value: fmtInr(medical) });
-  if (special) rows.push({ label: "Special Allowance",    value: fmtInr(special) });
-  if (rows.length === 0) rows.push({ label: "Monthly Stipend", value: fmtInr(baseEarnings) });
-  if (bonus)   rows.push({ label: "Bonus",                value: fmtInr(bonus) });
+
+  if (!structure || structure.salaryType === "intern") {
+    rows.push({ label: "Monthly Stipend", value: fmtInr(baseEarnings) });
+  } else {
+    const basic   = parseFloat(structure.basic               || 0) / 12;
+    const hra     = parseFloat(structure.hra                 || 0) / 12;
+    const da      = parseFloat(structure.dearnessAllowance   || 0) / 12;
+    const conv    = parseFloat(structure.conveyanceAllowance || 0) / 12;
+    const medical = parseFloat(structure.medicalAllowance    || 0) / 12;
+    // Special soaks up whatever's left after the fixed components — keeps the
+    // row total equal to baseEarnings even when older rows are missing a
+    // component.
+    const fixed   = basic + hra + da + conv + medical;
+    const special = Math.max(0, baseEarnings - fixed);
+    if (basic)   rows.push({ label: "Basic Salary",         value: fmtInr(basic)   });
+    if (hra)     rows.push({ label: "House Rent Allowance", value: fmtInr(hra)     });
+    if (da)      rows.push({ label: "Dearness Allowance",   value: fmtInr(da)      });
+    if (conv)    rows.push({ label: "Conveyance Allowance", value: fmtInr(conv)    });
+    if (medical) rows.push({ label: "Medical Allowance",    value: fmtInr(medical) });
+    if (special) rows.push({ label: "Special Allowance",    value: fmtInr(special) });
+    if (rows.length === 0) rows.push({ label: "Monthly Stipend", value: fmtInr(baseEarnings) });
+  }
+
+  // Itemise bonuses by their actual bonusType. Only when the month's bonus
+  // rows reconcile with the bonus baked into gross — otherwise fall back to a
+  // single "Bonus" line so Total Earnings (A) stays equal to gross.
+  const sumMonth = bonuses.reduce((s, b) => s + parseFloat(b.amount || "0"), 0);
+  if (bonuses.length && Math.abs(sumMonth - bonusInGross) < 0.5) {
+    for (const b of bonuses) rows.push({ label: bonusLabel(b), value: fmtInr(b.amount) });
+  } else if (bonusInGross > 0) {
+    rows.push({ label: "Bonus", value: fmtInr(bonusInGross) });
+  }
   return rows;
 }

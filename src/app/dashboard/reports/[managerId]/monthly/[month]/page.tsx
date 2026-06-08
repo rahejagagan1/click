@@ -753,7 +753,10 @@ export default function MonthlyReportPage() {
     );
 
     const manager = data?.manager;
-    const reportFmt = (manager?.reportFormat ?? "production") as ManagerReportFormat;
+    // URL template wins (designation-driven fill); fall back to the manager's
+    // single format for old links without ?template=.
+    const urlTemplate = searchParams.get("template");
+    const reportFmt = (urlTemplate ?? manager?.reportFormat ?? "production") as ManagerReportFormat;
     const isResearcherReport = !isLoading && reportFmt === "researcher";
     const isQaReport = !isLoading && reportFmt === "qa";
     const isHrReport = !isLoading && reportFmt === "hr";
@@ -1012,7 +1015,7 @@ export default function MonthlyReportPage() {
     // Fetch submission status on mount
     useEffect(() => {
         if (!managerId || isNaN(monthIndex)) return;
-        fetch(`/api/reports/${managerId}/monthly/${monthIndex}?year=${year}`)
+        fetch(`/api/reports/${managerId}/monthly/${monthIndex}?year=${year}${urlTemplate ? `&template=${urlTemplate}` : ""}`)
             .then(r => r.json())
             .then(d => {
                 // Production Volume actuals are auto-computed on GET — load them
@@ -1163,6 +1166,7 @@ export default function MonthlyReportPage() {
                 body: JSON.stringify({
                     year,
                     isDraft,
+                    template: reportFmt,
                     executiveSummary,
                     shortfallSummary,
                     totalVideoTarget,
@@ -1250,7 +1254,7 @@ export default function MonthlyReportPage() {
         setShowDeleteConfirm(false);
         try {
             const res = await fetch(
-                `/api/reports/${managerId}/monthly/${monthIndex}?year=${year}`,
+                `/api/reports/${managerId}/monthly/${monthIndex}?year=${year}${urlTemplate ? `&template=${urlTemplate}` : ""}`,
                 { method: "DELETE" }
             );
             const json = await res.json();

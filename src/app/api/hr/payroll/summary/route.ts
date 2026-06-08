@@ -37,7 +37,8 @@ export async function GET(req: NextRequest) {
     const [profile] = await prisma.$queryRawUnsafe<any[]>(
       `SELECT
          u."id", u."name", u."email",
-         p."employeeId",
+         p."employeeId", p."department", p."designation",
+         p."joiningDate", p."jobLocation", p."legalEntity",
          p."firstName", p."middleName", p."lastName",
          p."dateOfBirth", p."gender",
          p."address", p."city", p."state",

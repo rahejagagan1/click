@@ -5,7 +5,7 @@ import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 // POST /api/hr/payroll/generate — produce draft payslips for a payroll run.
 // Math model:
 //   workingDays  = calendar days in run.month (28 / 30 / 31)
-//   lopDays      = absent + 0.5 × half_day + unpaid-leave weekdays in month
+//   lopDays      = absent + lop + 0.5 × (half_day + half_day_lop) + unpaid-leave weekdays in month
 //   paidDays     = workingDays − lopDays
 //   lopFactor    = paidDays / workingDays
 //   gross        = (basic + hra + specialAllowance) / 12 × lopFactor
@@ -104,11 +104,17 @@ export async function POST(req: NextRequest) {
       // processing-hold employees skip payslip generation entirely.
       if (holdByUser.get(s.userId) === "processing") { skipped += 1; continue; }
 
-      // LOP from attendance — absent = 1, half_day = 0.5. on_leave is paid
-      // here; unpaid leaves are netted out separately below.
-      const [absentCount, halfDayCount] = await Promise.all([
+      // LOP from attendance:
+      //   absent       = 1.0   (no swipe at all)
+      //   lop          = 1.0   (auto-LOP: missing day past the 48h grace)
+      //   half_day     = 0.5   (worked only a half day)
+      //   half_day_lop = 0.5   (auto-LOP: missed clock-out not regularized in time)
+      // on_leave is paid here; unpaid leaves are netted out separately below.
+      const [absentCount, lopCount, halfDayCount, halfDayLopCount] = await Promise.all([
         prisma.attendance.count({ where: { userId: s.userId, date: { gte: firstDay, lte: lastDay }, status: "absent" } }),
+        prisma.attendance.count({ where: { userId: s.userId, date: { gte: firstDay, lte: lastDay }, status: "lop" } }),
         prisma.attendance.count({ where: { userId: s.userId, date: { gte: firstDay, lte: lastDay }, status: "half_day" } }),
+        prisma.attendance.count({ where: { userId: s.userId, date: { gte: firstDay, lte: lastDay }, status: "half_day_lop" } }),
       ]);
 
       const unpaidLeaves = await prisma.leaveApplication.findMany({
@@ -134,7 +140,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const lopDays    = absentCount + halfDayCount * 0.5 + unpaidLeaveDays;
+      const lopDays    = absentCount + lopCount + (halfDayCount + halfDayLopCount) * 0.5 + unpaidLeaveDays;
       const paidDays   = Math.max(0, daysInMonth - lopDays);
       const lopFactor  = paidDays / daysInMonth;
 

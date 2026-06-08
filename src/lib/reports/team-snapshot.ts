@@ -27,9 +27,12 @@ export type TeamMember = {
   profilePictureUrl: string | null;
 };
 
+// `template` is optional for back-compat: when present the snapshot read/write
+// targets the specific (manager, template, period) report row; when absent it
+// matches by period only (legacy single-row behaviour).
 export type ReportPeriod =
-  | { kind: "monthly"; month: number; year: number }
-  | { kind: "weekly"; week: number; month: number; year: number };
+  | { kind: "monthly"; month: number; year: number; template?: string }
+  | { kind: "weekly"; week: number; month: number; year: number; template?: string };
 
 /**
  * Fetch the team for a given manager + period, preferring the locked
@@ -106,19 +109,15 @@ export async function writeSnapshot(
   const json = JSON.stringify(roster);
 
   if (period.kind === "monthly") {
-    await prisma.$executeRawUnsafe(
-      `UPDATE "MonthlyReport"
-          SET "teamSnapshot" = $1::jsonb
-        WHERE "managerId" = $2 AND "month" = $3 AND "year" = $4`,
-      json, managerId, period.month, period.year,
-    );
+    const args: unknown[] = [json, managerId, period.month, period.year];
+    let where = `"managerId" = $2 AND "month" = $3 AND "year" = $4`;
+    if (period.template != null) { args.push(period.template); where += ` AND "reportTemplate" = $${args.length}`; }
+    await prisma.$executeRawUnsafe(`UPDATE "MonthlyReport" SET "teamSnapshot" = $1::jsonb WHERE ${where}`, ...args);
   } else {
-    await prisma.$executeRawUnsafe(
-      `UPDATE "WeeklyReport"
-          SET "teamSnapshot" = $1::jsonb
-        WHERE "managerId" = $2 AND "week" = $3 AND "month" = $4 AND "year" = $5`,
-      json, managerId, period.week, period.month, period.year,
-    );
+    const args: unknown[] = [json, managerId, period.week, period.month, period.year];
+    let where = `"managerId" = $2 AND "week" = $3 AND "month" = $4 AND "year" = $5`;
+    if (period.template != null) { args.push(period.template); where += ` AND "reportTemplate" = $${args.length}`; }
+    await prisma.$executeRawUnsafe(`UPDATE "WeeklyReport" SET "teamSnapshot" = $1::jsonb WHERE ${where}`, ...args);
   }
   return roster;
 }
@@ -130,20 +129,18 @@ async function readSnapshot(
   try {
     let rows: Array<{ teamSnapshot: unknown }>;
     if (period.kind === "monthly") {
+      const args: unknown[] = [managerId, period.month, period.year];
+      let where = `"managerId" = $1 AND "month" = $2 AND "year" = $3`;
+      if (period.template != null) { args.push(period.template); where += ` AND "reportTemplate" = $${args.length}`; }
       rows = await prisma.$queryRawUnsafe<Array<{ teamSnapshot: unknown }>>(
-        `SELECT "teamSnapshot"
-           FROM "MonthlyReport"
-          WHERE "managerId" = $1 AND "month" = $2 AND "year" = $3
-          LIMIT 1`,
-        managerId, period.month, period.year,
+        `SELECT "teamSnapshot" FROM "MonthlyReport" WHERE ${where} ORDER BY "id" DESC LIMIT 1`, ...args,
       );
     } else {
+      const args: unknown[] = [managerId, period.week, period.month, period.year];
+      let where = `"managerId" = $1 AND "week" = $2 AND "month" = $3 AND "year" = $4`;
+      if (period.template != null) { args.push(period.template); where += ` AND "reportTemplate" = $${args.length}`; }
       rows = await prisma.$queryRawUnsafe<Array<{ teamSnapshot: unknown }>>(
-        `SELECT "teamSnapshot"
-           FROM "WeeklyReport"
-          WHERE "managerId" = $1 AND "week" = $2 AND "month" = $3 AND "year" = $4
-          LIMIT 1`,
-        managerId, period.week, period.month, period.year,
+        `SELECT "teamSnapshot" FROM "WeeklyReport" WHERE ${where} ORDER BY "id" DESC LIMIT 1`, ...args,
       );
     }
     const raw = rows[0]?.teamSnapshot;
