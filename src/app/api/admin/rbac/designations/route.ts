@@ -8,12 +8,30 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { PERMISSION_CATALOG } from "@/lib/permissions/catalog";
-import { canManageDesignations, syncGrants, toDesignationKey } from "@/lib/permissions/designation-admin";
+import { canManageDesignations, syncGrants, syncReportGrants, syncReportTemplates, toDesignationKey } from "@/lib/permissions/designation-admin";
+import { getManagerReportFormat, isManagerReportEligible, REPORT_TEMPLATES } from "@/lib/reports/manager-report-format";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!canManageDesignations(session)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  // Self-heal: ensure every code-defined permission exists as a row, so a newly
+  // added catalog permission is immediately grantable on ANY database without a
+  // manual re-seed. Prevents the "ticked it but it didn't save" drift that
+  // happens when the code has a permission the DB hasn't been seeded with.
+  try {
+    for (const perm of PERMISSION_CATALOG) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "Permission" ("key","label","description","category","sensitive","createdAt","updatedAt")
+         VALUES ($1,$2,$3,$4,$5,NOW(),NOW())
+         ON CONFLICT ("key") DO UPDATE SET
+           "label"=EXCLUDED."label","description"=EXCLUDED."description",
+           "category"=EXCLUDED."category","sensitive"=EXCLUDED."sensitive","updatedAt"=NOW()`,
+        perm.key, perm.label, perm.description, perm.category, !!perm.sensitive
+      );
+    }
+  } catch { /* RBAC tables missing pre-migration → ignore */ }
 
   const designations = await prisma.$queryRawUnsafe<
     { id: number; key: string; label: string; scorecardFunction: string | null;
@@ -34,12 +52,57 @@ export async function GET() {
     byDesig.set(g.did, arr);
   }
 
+  // Report-owners: the people whose weekly/monthly reports exist, that a
+  // designation can be granted view access to. Same eligibility + role label
+  // the reports system uses, so the editor shows them grouped by report role.
+  const ownerRows = await prisma.$queryRawUnsafe<
+    { id: number; name: string; role: string | null; orgLevel: string | null; reportAccess: boolean | null }[]
+  >(
+    `SELECT u."id", u."name", u."role", u."orgLevel", u."reportAccess"
+     FROM "User" u WHERE u."isActive" = true ORDER BY u."name" ASC`
+  );
+  const reportOwners = ownerRows
+    .filter((u) => isManagerReportEligible(u))
+    .map((u) => ({ id: Number(u.id), name: u.name, role: getManagerReportFormat(u) }));
+
+  // Per-designation granted report-owner ids. Wrapped so a pre-migration DB
+  // (table absent) degrades to "no grants" instead of 500-ing.
+  const ownersByDesig = new Map<number, number[]>();
+  try {
+    const reportGrants = await prisma.$queryRawUnsafe<{ did: number; mid: number }[]>(
+      `SELECT "designationId" AS "did", "managerId" AS "mid" FROM "DesignationReportAccess"`
+    );
+    for (const g of reportGrants) {
+      const arr = ownersByDesig.get(Number(g.did)) ?? [];
+      arr.push(Number(g.mid));
+      ownersByDesig.set(Number(g.did), arr);
+    }
+  } catch { /* table not yet created — no grants */ }
+
+  // Per-designation report-template assignments (production|researcher|qa|hr).
+  // Wrapped so a pre-migration DB degrades to "none".
+  const templatesByDesig = new Map<number, string[]>();
+  try {
+    const tmplGrants = await prisma.$queryRawUnsafe<{ did: number; tmpl: string }[]>(
+      `SELECT "designationId" AS "did", "template" AS "tmpl" FROM "DesignationReportTemplate"`
+    );
+    for (const g of tmplGrants) {
+      const arr = templatesByDesig.get(Number(g.did)) ?? [];
+      arr.push(g.tmpl);
+      templatesByDesig.set(Number(g.did), arr);
+    }
+  } catch { /* table not yet created — no template grants */ }
+
   return NextResponse.json({
     catalog: PERMISSION_CATALOG,
+    reportOwners,
+    reportTemplateCatalog: REPORT_TEMPLATES,
     designations: designations.map((d) => ({
       ...d,
       userCount: Number(d.userCount),
       permissionKeys: byDesig.get(d.id) ?? [],
+      reportOwnerIds: ownersByDesig.get(d.id) ?? [],
+      reportTemplates: templatesByDesig.get(d.id) ?? [],
     })),
   });
 }
@@ -56,6 +119,8 @@ export async function POST(req: Request) {
   const key = (body.key ? toDesignationKey(String(body.key)) : toDesignationKey(label)) || "designation";
   const scorecardFunction = body.scorecardFunction ? String(body.scorecardFunction) : null;
   const permissionKeys: string[] = Array.isArray(body.permissionKeys) ? body.permissionKeys.map(String) : [];
+  const reportOwnerIds: number[] = Array.isArray(body.reportOwnerIds) ? body.reportOwnerIds.map(Number) : [];
+  const reportTemplates: string[] = Array.isArray(body.reportTemplates) ? body.reportTemplates.map(String) : [];
   const actorId = (session.user as { dbId?: number }).dbId ?? null;
 
   const created = await prisma.$queryRawUnsafe<{ id: number }[]>(
@@ -69,5 +134,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `A designation with key "${key}" already exists` }, { status: 409 });
   }
   await syncGrants(created[0].id, permissionKeys, actorId);
+  await syncReportGrants(created[0].id, reportOwnerIds, actorId);
+  await syncReportTemplates(created[0].id, reportTemplates, actorId);
   return NextResponse.json({ ok: true, id: created[0].id, key });
 }

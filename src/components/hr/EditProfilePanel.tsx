@@ -23,7 +23,7 @@ import CustomSelect from "@/components/ui/CustomSelect";
 import SelectField from "@/components/ui/SelectField";
 import { DateField } from "@/components/ui/date-field";
 import { DEPARTMENTS } from "@/lib/departments";
-import { legacyDesignationKey, legacyFromDesignationKey } from "@/lib/permissions/designation-seed";
+import { legacyFromDesignationKey } from "@/lib/permissions/designation-seed";
 import {
   brandFromBusinessUnit,
   jobTitleSource,
@@ -246,7 +246,6 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
     probationPolicy:    p.probationPolicy ?? "Regular Employees",
     role:               user.role ?? "member",
     orgLevel:           user.orgLevel ?? "member",
-    designationKey:     legacyDesignationKey(user.orgLevel, user.role),
     managerId:          user.manager?.id ? String(user.manager.id) : "",
     inlineManagerId:    user.inlineManager?.id ? String(user.inlineManager.id) : "",
     teamCapsule:        user.teamCapsule ?? "",
@@ -256,16 +255,22 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
   // RBAC designations for the single Designation picker (replaces Role + Org Level).
   const { data: desigData } = useSWR("/api/designations", fetcher);
   const designations = (desigData?.designations ?? []) as { id: number; key: string; label: string }[];
-  // Correct the picker to the user's TRUE stored designation once the list loads
-  // (the init default is derived from orgLevel/role, which is wrong for customs).
-  useEffect(() => {
+  // The designation the HR user explicitly picked this session (null until they
+  // change it). Until then, the field is DERIVED each render from the employee's
+  // stored designationId once the list loads — so it shows the correct value on
+  // first load, deterministically, with NO init/reset/SWR race (the old bug:
+  // Member → — → correct only after a couple of reloads). Once picked, their
+  // choice sticks (a derived value can't be clobbered by background refreshes).
+  const [designationPick, setDesignationPick] = useState<string | null>(null);
+  const storedDesignationKey = (() => {
     const did = (user as { designationId?: number | null }).designationId;
-    if (did != null && designations.length) {
+    if (did != null) {
       const k = designations.find((d) => d.id === did)?.key;
-      if (k) setJob((j) => ({ ...j, designationKey: k }));
+      if (k) return k;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [desigData]);
+    return "";
+  })();
+  const designationKey = designationPick ?? storedDesignationKey;
 
   // ── Section: Work Settings (step 3 of the onboarding wizard) ──────
   // `leavePolicyId` replaces the old free-text leavePlan. Saves to
@@ -373,11 +378,11 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
       probationPolicy:    p.probationPolicy ?? "Regular Employees",
       role:               user.role ?? "member",
       orgLevel:           user.orgLevel ?? "member",
-      designationKey:     legacyDesignationKey(user.orgLevel, user.role),
       managerId:          user.manager?.id ? String(user.manager.id) : "",
       inlineManagerId:    user.inlineManager?.id ? String(user.inlineManager.id) : "",
       teamCapsule:        user.teamCapsule ?? "",
     });
+    setDesignationPick(null);
     setWork({
       leavePolicyId:           user.leavePolicyId ?? "",
       shiftId:                 user.shift?.id ? String(user.shift.id) : "",
@@ -777,7 +782,9 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
           probationPolicy:    job.probationPolicy.trim() || null,
           role:               job.role,
           orgLevel:           job.orgLevel,
-          designationId:      designations.find((d) => d.key === job.designationKey)?.id ?? null,
+          ...(designationPick != null
+            ? { designationId: designations.find((d) => d.key === designationPick)?.id ?? null }
+            : {}),
           managerId:          job.managerId === "" ? null : Number(job.managerId),
           inlineManagerId:    job.inlineManagerId === "" ? null : Number(job.inlineManagerId),
           teamCapsule:        job.teamCapsule.trim() || null,
@@ -790,13 +797,16 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className={cls.label}>Designation</label>
-            <CustomSelect
-              listKey={jobTitleSource(brandFromBusinessUnit(job.businessUnit, job.legalEntity)).listKey}
-              defaults={jobTitleSource(brandFromBusinessUnit(job.businessUnit, job.legalEntity)).defaults}
-              value={job.designation}
-              onChange={(v) => setJob({ ...job, designation: v })}
-              placeholder="Select designation"
+            <SelectField
+              value={designationKey}
+              onChange={(v) => {
+                setDesignationPick(v);
+                const { orgLevel, role } = legacyFromDesignationKey(v);
+                setJob((j) => ({ ...j, orgLevel, role }));
+              }}
+              options={designations.map((d) => ({ value: d.key, label: d.label }))}
             />
+            <p className="mt-1 text-[11px] text-slate-400">Sets access tier + scorecard. Replaces the old Role + Org Level.</p>
           </div>
           <div>
             <label className={cls.label}>Secondary Job Title</label>
@@ -934,18 +944,6 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
               value={job.probationPolicy}
               onChange={(v) => setJob({ ...job, probationPolicy: v })}
             />
-          </div>
-          <div>
-            <label className={cls.label}>Designation</label>
-            <SelectField
-              value={job.designationKey}
-              onChange={(v) => {
-                const { orgLevel, role } = legacyFromDesignationKey(v);
-                setJob({ ...job, designationKey: v, orgLevel, role });
-              }}
-              options={designations.map((d) => ({ value: d.key, label: d.label }))}
-            />
-            <p className="mt-1 text-[11px] text-slate-400">Sets access tier + scorecard. Replaces the old Role + Org Level.</p>
           </div>
           <div>
             <label className={cls.label}>Reporting Manager</label>
