@@ -532,40 +532,50 @@ ${SIGNOFF_HTML_YT_LABS}
     category: "offboarding",
     businessUnit: brand,
     customFields: [
-      // ── Employee meta. Bank Account / Bank / Bank IFSC /
-      // PAN Number are AUTO-FILLED from the picked employee's
-      // EmployeeProfile by the template editor when those fields
-      // are populated there (e.g. bankAccountNumber, bankIfsc,
-      // bankName, panNumber). The placeholders below only show
-      // when the profile field is empty — so they exist as a
-      // gentle hint for HR, brand-specific because the sample
-      // formats differ between teams.
-      { key: "SubDepartment",       label: "Sub-department",       type: "text",   required: false, placeholder: subDeptHint },
-      { key: "PaymentMode",         label: "Payment Mode",         type: "text",   required: false, placeholder: "Bank Transfer" },
-      { key: "Bank",                label: "Bank",                 type: "text",   required: false, placeholder: bankHint },
-      { key: "BankIFSC",            label: "Bank IFSC",            type: "text",   required: false, placeholder: ifscHint },
-      { key: "BankAccount",         label: "Bank Account",         type: "text",   required: false, placeholder: acctHint },
-      { key: "PANNumber",           label: "PAN Number",           type: "text",   required: false, placeholder: panHint },
-      { key: "SettlementDate",      label: "Settlement Date",      type: "date",   required: true },
+      // ── Employee meta. Bank / Bank IFSC / Bank Account / PAN /
+      // SubDepartment / AnnualPackage / EnablePf are AUTO-FILLED
+      // from the picked employee's EmployeeProfile + SalaryStructure
+      // by the template editor. Placeholders only show when the
+      // profile field is empty.
+      { key: "SubDepartment",  label: "Sub-department",  type: "text",   required: false, placeholder: subDeptHint },
+      { key: "PaymentMode",    label: "Payment Mode",    type: "text",   required: false, placeholder: "Bank Transfer" },
+      { key: "Bank",           label: "Bank",            type: "text",   required: false, placeholder: bankHint },
+      { key: "BankIFSC",       label: "Bank IFSC",       type: "text",   required: false, placeholder: ifscHint },
+      { key: "BankAccount",    label: "Bank Account",    type: "text",   required: false, placeholder: acctHint },
+      { key: "PANNumber",      label: "PAN Number",      type: "text",   required: false, placeholder: panHint },
+      { key: "SettlementDate", label: "Settlement Date", type: "date",   required: true },
+
+      // ── Salary inputs (drives every earnings line via the
+      //    ExitSettlement resolver) ────────────────────────────
+      { key: "AnnualPackage",  label: "Annual Package (₹)", type: "number", required: true,
+        placeholder: "Auto-filled from salary structure",
+        help: "Auto-filled from the employee's SalaryStructure.ctc if set. Drives Basic / HRA / DA / Conveyance / Medical / Special line items via the standard 50/20/10/7.5 split, pro-rated by Working Days." },
+      { key: "EnablePf",       label: "Include Provident Fund (PF)", type: "checkbox", required: false,
+        checkedValue: "true", uncheckedValue: "false",
+        help: "Tick to deduct a fixed ₹1,800/month PF (pro-rated). Auto-checked from the employee's SalaryStructure.pfEligible. Interns never have PF — the toggle is hidden for them." },
 
       // ── Settlement metrics ─────────────────────────────────
-      { key: "WorkingDays",         label: "Working Days",         type: "number", required: true,  placeholder: "e.g. 15" },
+      { key: "WorkingDays",         label: "Working Days",         type: "number", required: true,  placeholder: "e.g. 15",
+        help: "Pro-rates every earnings line as (this / 30). Use the actual days the employee worked in their final month." },
       { key: "LossOfPayDays",       label: "Loss of Pay Days",     type: "number", required: false, placeholder: "0" },
-      { key: "LeaveEncashmentDays", label: "Leave Encashment Days",type: "number", required: false, placeholder: "0" },
+      { key: "LeaveEncashmentDays", label: "Leave Encashment Days",type: "number", required: false, placeholder: "0",
+        help: "Adds (Basic + DA per day) × this many days to earnings. Leave blank or 0 to skip." },
       { key: "LastSalaryProcessed", label: "Last Salary Processed",type: "text",   required: false, placeholder: "Apr-2026" },
       { key: "FnFProcessed",        label: "F&F Processed",        type: "text",   required: false, placeholder: "May-2026" },
 
-      // ── Earnings line items (₹) ────────────────────────────
-      { key: "Basic",                  label: "Basic (₹)",                  type: "number", required: false, placeholder: "5806.45" },
-      { key: "HRA",                    label: "HRA (₹)",                    type: "number", required: false, placeholder: "2322.58" },
-      { key: "MedicalAllowance",       label: "Medical Allowance (₹)",      type: "number", required: false, placeholder: "604.84" },
-      { key: "ConveyanceAllowance",    label: "Conveyance Allowance (₹)",   type: "number", required: false, placeholder: "870.97" },
-      { key: "SpecialAllowance",       label: "Special Allowance (₹)",      type: "number", required: false, placeholder: "846.77" },
-      { key: "DearnessAllowance",      label: "Dearness Allowance (₹)",     type: "number", required: false, placeholder: "1161.29" },
-      { key: "LeaveEncashmentAmount",  label: "Leave Encashment (₹)",       type: "number", required: false, placeholder: "2603.84" },
+      // ── Manual overrides (optional) ────────────────────────
+      // Each is OPTIONAL — leave blank and the resolver computes
+      // from AnnualPackage. Fill if payroll uses different value.
+      { key: "Basic",                 label: "Basic — override (₹)",                 type: "number", required: false, placeholder: "Leave blank to auto-compute" },
+      { key: "HRA",                   label: "HRA — override (₹)",                   type: "number", required: false, placeholder: "Leave blank to auto-compute" },
+      { key: "MedicalAllowance",      label: "Medical — override (₹)",               type: "number", required: false, placeholder: "Leave blank to auto-compute" },
+      { key: "ConveyanceAllowance",   label: "Conveyance — override (₹)",            type: "number", required: false, placeholder: "Leave blank to auto-compute" },
+      { key: "SpecialAllowance",      label: "Special — override (₹)",               type: "number", required: false, placeholder: "Leave blank to auto-compute" },
+      { key: "DearnessAllowance",     label: "Dearness — override (₹)",              type: "number", required: false, placeholder: "Leave blank to auto-compute" },
+      { key: "LeaveEncashmentAmount", label: "Leave Encashment — override (₹)",      type: "number", required: false, placeholder: "Leave blank to auto-compute" },
 
       // ── Deductions (₹) ─────────────────────────────────────
-      { key: "ProfessionalTax",        label: "Professional Tax (₹)",       type: "number", required: false, placeholder: "0.00" },
+      { key: "ProfessionalTax", label: "Professional Tax (₹)", type: "number", required: false, placeholder: "0.00" },
     ],
     bodyHtml: `
 <h2 class="section-title" style="text-align:left">PROVISIONAL FULL &amp; FINAL SETTLEMENT</h2>
@@ -617,13 +627,13 @@ ${SIGNOFF_HTML_YT_LABS}
         <p style="margin:0 0 6pt 0;"><strong>EARNINGS</strong></p>
         <table style="width:100%; border:none;">
           <tbody>
-            <tr><td style="border:none; padding:3pt 0;">Basic</td>                  <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.Basic}}</td></tr>
-            <tr><td style="border:none; padding:3pt 0;">HRA</td>                    <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.HRA}}</td></tr>
-            <tr><td style="border:none; padding:3pt 0;">Medical Allowance</td>      <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.MedicalAllowance}}</td></tr>
-            <tr><td style="border:none; padding:3pt 0;">Conveyance Allowance</td>   <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.ConveyanceAllowance}}</td></tr>
-            <tr><td style="border:none; padding:3pt 0;">Special Allowance</td>      <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.SpecialAllowance}}</td></tr>
-            <tr><td style="border:none; padding:3pt 0;">Dearness Allowance</td>     <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.DearnessAllowance}}</td></tr>
-            <tr><td style="border:none; padding:3pt 0;">Leave Encashment</td>       <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.LeaveEncashmentAmount}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">Basic</td>                  <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.Basic}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">HRA</td>                    <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.HRA}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">Medical Allowance</td>      <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.MedicalAllowance}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">Conveyance Allowance</td>   <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.ConveyanceAllowance}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">Special Allowance</td>      <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.SpecialAllowance}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">Dearness Allowance</td>     <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.DearnessAllowance}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">Leave Encashment</td>       <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.LeaveEncashmentAmount}}</td></tr>
             <tr style="border-top:1pt solid #1f2937;"><td style="border:none; padding:6pt 0;"><strong>Total Earnings (A)</strong></td><td style="border:none; text-align:right; padding:6pt 0;"><strong>{{ExitSettlement.TotalEarnings}}</strong></td></tr>
           </tbody>
         </table>
@@ -632,7 +642,8 @@ ${SIGNOFF_HTML_YT_LABS}
         <p style="margin:0 0 6pt 0;"><strong>TAXES &amp; DEDUCTIONS</strong></p>
         <table style="width:100%; border:none;">
           <tbody>
-            <tr><td style="border:none; padding:3pt 0;">Professional Tax</td>      <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.ProfessionalTax}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">Professional Tax</td>      <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.ProfessionalTax}}</td></tr>
+            {{ExitSettlement.PfRow}}
             <tr style="border-top:1pt solid #1f2937;"><td style="border:none; padding:6pt 0;"><strong>Total Taxes &amp; Deductions (B)</strong></td><td style="border:none; text-align:right; padding:6pt 0;"><strong>{{ExitSettlement.TotalDeductions}}</strong></td></tr>
           </tbody>
         </table>
