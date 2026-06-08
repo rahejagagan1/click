@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { isHRAdmin } from "@/lib/access";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -12,12 +14,21 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const view = searchParams.get("view") || "my";
-  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
+  // Switched to canonical isHRAdmin helper instead of an inline
+  // copy that omitted special_access / role=admin.
+  const isAdmin = isHRAdmin(user);
+  // Brand-scope the admin "all" view.
+  const scope = getBrandScope(user);
+  const adminBrandFilter = scope.allBrands
+    ? {}
+    : (scope.brand
+        ? { user: { employeeProfile: { businessUnit: scope.brand } } }
+        : { userId: -1 }); // fail-closed if admin has no brand set
 
   try {
     const where: any =
       view === "my"   ? { userId: user.dbId } :
-      isAdmin         ? {} :
+      isAdmin         ? adminBrandFilter :
       view === "team" ? { user: { managerId: myId } } :
                         { userId: user.dbId };
 

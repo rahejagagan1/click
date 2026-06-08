@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -35,11 +36,18 @@ export async function GET(req: NextRequest) {
 
     // Overlap rule: an application's [fromDate, toDate] overlaps the
     // month [monthStart, monthEnd) iff fromDate < monthEnd AND toDate >= monthStart.
+    // Brand-scope: filter by the caller's brand unless allowlisted.
+    const scope = getBrandScope(session!.user);
+    if (!scope.allBrands && !scope.brand) return NextResponse.json({ items: [] });
+
     const apps = await prisma.leaveApplication.findMany({
       where: {
         fromDate: { lt: monthEnd },
         toDate:   { gte: monthStart },
         status:   { in: ["pending", "partially_approved", "approved"] },
+        ...(scope.allBrands ? {} : {
+          user: { employeeProfile: { businessUnit: scope.brand! } },
+        }),
       },
       include: {
         user: { select: { id: true, name: true, role: true, profilePictureUrl: true } },

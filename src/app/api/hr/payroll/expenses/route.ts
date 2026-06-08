@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -27,20 +28,25 @@ export async function GET(req: NextRequest) {
     const monthStart = new Date(Date.UTC(year, month, 1));
     const monthEnd   = new Date(Date.UTC(year, month + 1, 0));
 
-    const items = await prisma.$queryRawUnsafe<{
+    const scope = getBrandScope(session!.user);
+    if (!scope.allBrands && !scope.brand) return NextResponse.json({ items: [] });
+    const brandClause = scope.allBrands ? "" : ` AND ep."businessUnit" = $3`;
+    type ExpenseRow = {
       id: number; userId: number; userName: string; employeeId: string | null;
       title: string; category: string; amount: string; expenseDate: Date; status: string;
-    }[]>(
-      `SELECT e.id, e."userId", u.name AS "userName", ep."employeeId",
-              e.title, e.category, e.amount::text AS amount, e."expenseDate", e.status
-         FROM "Expense" e
-         JOIN "User" u ON u.id = e."userId"
-    LEFT JOIN "EmployeeProfile" ep ON ep."userId" = e."userId"
-        WHERE e."expenseDate" >= $1 AND e."expenseDate" <= $2
-          AND e.status IN ('approved','pending')
-        ORDER BY e."expenseDate" DESC`,
-      monthStart, monthEnd,
-    );
+    };
+    const sql = `SELECT e.id, e."userId", u.name AS "userName", ep."employeeId",
+                        e.title, e.category, e.amount::text AS amount, e."expenseDate", e.status
+                   FROM "Expense" e
+                   JOIN "User" u ON u.id = e."userId"
+              LEFT JOIN "EmployeeProfile" ep ON ep."userId" = e."userId"
+                  WHERE e."expenseDate" >= $1 AND e."expenseDate" <= $2
+                    AND e.status IN ('approved','pending')
+                    ${brandClause}
+                  ORDER BY e."expenseDate" DESC`;
+    const items = scope.allBrands
+      ? await prisma.$queryRawUnsafe<ExpenseRow[]>(sql, monthStart, monthEnd)
+      : await prisma.$queryRawUnsafe<ExpenseRow[]>(sql, monthStart, monthEnd, scope.brand);
     return NextResponse.json({ items });
   } catch (e) { return serverError(e, "GET /api/hr/payroll/expenses"); }
 }
