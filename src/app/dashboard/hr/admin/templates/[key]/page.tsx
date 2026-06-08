@@ -107,36 +107,70 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
 
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [customValues, setCustomValues] = useState<Record<string, string>>({});
+  // Salary type of the picked employee — "intern" or "regular".
+  // Used by the Exit Statement template to hide the EnablePf
+  // checkbox for interns (interns don't have PF). Set in the
+  // auto-fill effect below.
+  const [employeeSalaryType, setEmployeeSalaryType] = useState<string | null>(null);
 
-  // Auto-fill bank / PAN custom fields from the picked employee's
-  // profile so HR doesn't retype data we already have. Triggers
-  // whenever the employee changes; only fills fields that are
-  // CURRENTLY EMPTY so HR's manual edits aren't clobbered.
-  // Mapping (custom-field key → profile column):
-  //   BankAccount  ← bankAccountNumber
-  //   BankIFSC     ← bankIfsc
-  //   Bank         ← bankName
-  //   PANNumber    ← panNumber
+  // Auto-fill custom fields from the picked employee's profile +
+  // salary structure so HR doesn't retype data we already have.
+  // Triggers whenever the employee changes; only fills fields
+  // that are CURRENTLY EMPTY so HR's manual edits aren't
+  // clobbered.
+  //
+  // Mappings:
+  //   BankAccount    ← profile.bankAccountNumber
+  //   BankIFSC       ← profile.bankIfsc
+  //   Bank           ← profile.bankName
+  //   PANNumber      ← profile.panNumber
+  //   SubDepartment  ← profile.department  (same as Department —
+  //                    we don't have a dedicated subDepartment
+  //                    column yet; HR can refine manually)
+  //   AnnualPackage  ← salaryStructure.ctc  (Exit Statement +
+  //                    Revised Offer Letter both consume this)
+  //   EnablePf       ← salaryStructure.pfEligible (auto-checked,
+  //                    forced off for interns)
   useEffect(() => {
     let cancelled = false;
-    if (!employee?.id) return;
+    if (!employee?.id) {
+      setEmployeeSalaryType(null);
+      return;
+    }
     (async () => {
       try {
         const res = await fetch(`/api/hr/people/${employee.id}`);
         if (!res.ok) return;
         const j = await res.json();
-        const p = j?.profile ?? j?.user?.employeeProfile ?? j;
-        if (cancelled || !p) return;
+        const u = j?.user ?? j;
+        const p = u?.employeeProfile ?? j?.profile ?? j;
+        const s = u?.salaryStructure ?? j?.salaryStructure ?? null;
+        if (cancelled) return;
+        const salaryType = s?.salaryType ?? null;
+        setEmployeeSalaryType(salaryType);
+        const isIntern = salaryType === "intern";
         const fillMap: Record<string, string | null | undefined> = {
-          BankAccount: p.bankAccountNumber,
-          BankIFSC:    p.bankIfsc,
-          Bank:        p.bankName,
-          PANNumber:   p.panNumber,
+          BankAccount:   p?.bankAccountNumber,
+          BankIFSC:      p?.bankIfsc,
+          Bank:          p?.bankName,
+          PANNumber:     p?.panNumber,
+          SubDepartment: p?.department,
+          AnnualPackage: s?.ctc != null ? String(s.ctc) : undefined,
+          // Interns NEVER get PF — force the checkbox off.
+          // Regular employees inherit from salaryStructure.pfEligible.
+          EnablePf:      isIntern ? "false" : (s?.pfEligible ? "true" : undefined),
         };
         setCustomValues((curr) => {
           const next = { ...curr };
           let changed = false;
           for (const [k, v] of Object.entries(fillMap)) {
+            // Intern → ALWAYS force EnablePf=false (override any
+            // existing checked state). Other fields stay
+            // "fill-if-empty" so manual edits survive.
+            if (k === "EnablePf" && isIntern) {
+              if (curr[k] !== "false") { next[k] = "false"; changed = true; }
+              continue;
+            }
             if (!curr[k] && v) { next[k] = String(v); changed = true; }
           }
           return changed ? next : curr;
@@ -312,6 +346,19 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
             <section className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
               <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Custom fields</label>
               {cats.map((f) => {
+                // Hide the EnablePf toggle for interns — interns
+                // don't have PF deductions, so the choice is
+                // meaningless for them. EnablePf is force-set to
+                // "false" in customValues by the auto-fill effect,
+                // so the resolver still computes correctly without
+                // the user seeing the checkbox.
+                if (f.key === "EnablePf" && employeeSalaryType === "intern") {
+                  return (
+                    <div key={f.key} className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-[11.5px] text-slate-500">
+                      Provident Fund disabled — <span className="font-medium text-slate-700">{employee?.name || "this employee"}</span> is on an intern payroll.
+                    </div>
+                  );
+                }
                 if (f.type === "checkbox") {
                   const onVal  = f.checkedValue   ?? "true";
                   const offVal = f.uncheckedValue ?? "false";
