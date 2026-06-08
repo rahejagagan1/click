@@ -72,18 +72,14 @@ export default function Sidebar() {
     // to the legacy role logic (admin / manager / hod / hr_manager etc.).
     const canSeeReports = canSeeReportsFn(user);
     const canSeeViolationLog = can(user, "VIEW_VIOLATIONS");
-    // Assets in the main sidebar — visible to EVERYONE. The page
-    // itself scopes what they see:
-    //   • MANAGE_ASSETS (IT Security tier / HR / CEO / devs)
-    //     → full register with admin actions.
-    //   • Everyone else → read-only "my assets" view of just the
-    //     items currently assigned to them (the API enforces this
-    //     server-side regardless of any client-side spoofing).
-    // We deliberately KEEP the tile visible for HR admins too —
-    // they previously navigated via HR Dashboard, but having Assets
-    // directly in the sidebar is a small UX win and the HR Dashboard
-    // entry stays there as well.
-    const showAssetsTab = true;
+    // Assets — gated by MANAGE_ASSETS. Regular employees who land
+    // on /dashboard/hr/assets currently see "You don't have access
+    // to the asset register" — the page hasn't yet implemented the
+    // "my assigned assets" scoped view we'd want for them. Hiding
+    // the sidebar entry stops them from clicking into a dead end.
+    // If/when the page learns to scope content for non-admins, flip
+    // this back to `true`.
+    const showAssetsTab = can(user, "MANAGE_ASSETS");
     const showFeedbackSubmenu = canViewFeedbackInbox(user);
 
     // Tab-permission overrides — the caller's personal map from
@@ -855,14 +851,15 @@ export default function Sidebar() {
                                 </>
                             )}
 
-                            {/* ASSETS — standalone, moved out of HR Dashboard; gated by MANAGE_ASSETS */}
-                            {can(user, "MANAGE_ASSETS") && (
-                                <Link href="/dashboard/hr/assets"
-                                    className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", (pathname === "/dashboard/hr/assets" || pathname.startsWith("/dashboard/hr/assets/")) ? A : E)}>
-                                    <Package size={15} strokeWidth={1.75} />
-                                    Assets
-                                </Link>
-                            )}
+                            {/* Assets link is rendered in the always-visible
+                                top section above (showAssetsTab = true). HR-
+                                admins who can MANAGE_ASSETS were getting a
+                                SECOND copy of the same icon here, leading
+                                to "why are there 2 Assets?" — duplicate
+                                removed. The shared /dashboard/hr/assets
+                                page already gates admin actions internally
+                                via canManageAssets, so removing the gated
+                                sidebar copy doesn't lose any functionality. */}
 
                             {/* Refer & Earn lives in the always-visible top
                                 section above — intentionally NOT duplicated
