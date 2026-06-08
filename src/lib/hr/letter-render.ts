@@ -141,9 +141,12 @@ async function injectSignatureBeforeRegards(bodyHtml: string, businessUnit?: str
   const sigImg = `<img src="${sig}" alt="${altText}" width="${sigW}" height="${sigH}" style="vertical-align:bottom"/><br/>`;
   const re = /(<(?:p|div|h[1-6])[^>]*>)(\s*Regards\s*,)/i;
   if (re.test(bodyHtml)) return bodyHtml.replace(re, `$1${sigImg}$2`);
-  // Fallback when no "Regards," anchor exists — append at the
-  // end so HR can still spot the signature.
-  return bodyHtml + `<p style="margin:8pt 0 0 0">${sigImg}</p>`;
+  // No "Regards," anchor in the body — this template doesn't
+  // want a signature (e.g. the Exit Statement payslip-style
+  // document, which is just a tabular pay statement and signing
+  // it off as a "letter" makes no sense). Return the body
+  // unmodified instead of appending a stray signature at the end.
+  return bodyHtml;
 }
 
 export type RenderContext = {
@@ -357,31 +360,122 @@ function rupeesInWords(amount: number): string {
   return `${parts.join(" ")} Rupees only`;
 }
 
-/** Compute earnings total, deductions total, net payable, and
- *  net-in-words from the line items HR enters. Each line item is
- *  optional — empty/non-numeric strings count as 0. */
+/** Compute earnings + deductions for the Exit Statement.
+ *
+ *  HR types ONE input: AnnualPackage (₹) — and optionally toggles
+ *  EnablePf (checkbox). Everything else is derived using the same
+ *  formula as the Revised Offer Letter, pro-rated by Working Days
+ *  (with a 30-day month denominator, standard payroll convention):
+ *
+ *    Monthly CTC      = annual / 12
+ *    Basic            = 50%  × monthly
+ *    HRA              = 20%  × monthly
+ *    DA               = 10%  × monthly
+ *    Conveyance       = 7.5% × monthly
+ *    Medical          = 1,250  (fixed)
+ *    PF               = 1,800  (fixed, only when EnablePf=true)
+ *    Special          = remaining (so monthly columns tie to CTC)
+ *    Then each ×= (WorkingDays / 30)  →  pro-rated for the partial
+ *                                        last month.
+ *    LeaveEncashment  = (Basic_pro + DA_pro) / WorkingDays × LeaveEncashmentDays
+ *                       — standard formula based on per-day basic+DA
+ *                       rate × encashment days. Falls back to 0 if
+ *                       no LE days entered.
+ *
+ *  HR can also enter any individual amount manually as a custom
+ *  field — manual values override the computed defaults. That's
+ *  the escape hatch for the rare cases where payroll diverges
+ *  from the formula. */
 function resolveExitSettlement(field: string, customFields: Record<string, string>): string {
   const num = (key: string): number => {
     const raw = String(customFields?.[key] ?? "").replace(/[^\d.\-]/g, "");
     const v = Number(raw);
     return Number.isFinite(v) ? v : 0;
   };
-  const EARNINGS_KEYS = [
-    "Basic", "HRA", "MedicalAllowance", "ConveyanceAllowance",
-    "SpecialAllowance", "DearnessAllowance", "LeaveEncashmentAmount",
-  ];
-  const DEDUCTION_KEYS = ["ProfessionalTax"];
-  const totalEarnings   = EARNINGS_KEYS.reduce((s, k) => s + num(k), 0);
-  const totalDeductions = DEDUCTION_KEYS.reduce((s, k) => s + num(k), 0);
-  const net             = totalEarnings - totalDeductions;
+  const numOrUndef = (key: string): number | undefined => {
+    const raw = String(customFields?.[key] ?? "").trim();
+    if (!raw) return undefined;
+    const v = Number(raw.replace(/[^\d.\-]/g, ""));
+    return Number.isFinite(v) ? v : undefined;
+  };
+  // ── Compute the pro-rated salary block ──────────────────────
+  const annual      = num("AnnualPackage");
+  const workingDays = num("WorkingDays");
+  const enablePf    = String(customFields?.EnablePf ?? "false") === "true";
+  const monthly     = annual > 0 ? annual / 12 : 0;
+  const proRata     = workingDays > 0 ? (workingDays / 30) : 1; // 1 = full month
+  // Full-month monetary values per the offer-letter formula.
+  const mBasic = monthly * 0.50;
+  const mHRA   = monthly * 0.20;
+  const mDA    = monthly * 0.10;
+  const mConv  = monthly * 0.075;
+  const mMed   = 1250;
+  const mPF    = enablePf ? 1800 : 0;
+  const mFixed = mBasic + mHRA + mDA + mConv + mMed + mPF;
+  const mSpecial = Math.max(0, Math.round(monthly) - Math.round(mFixed));
+  // Pro-rate each by working days / 30.
+  const calc = {
+    Basic:               mBasic   * proRata,
+    HRA:                 mHRA     * proRata,
+    DearnessAllowance:   mDA      * proRata,
+    ConveyanceAllowance: mConv    * proRata,
+    MedicalAllowance:    mMed     * proRata,
+    ProvidentFund:       mPF      * proRata,
+    SpecialAllowance:    mSpecial * proRata,
+  };
+  // Leave encashment: daily Basic+DA × LE days. Fall back to 0
+  // if no encashment days entered (no implicit encashment).
+  const leDays = num("LeaveEncashmentDays");
+  const dailyBasicDA = (mBasic + mDA) / 30;
+  const calcLE = leDays > 0 ? dailyBasicDA * leDays : 0;
+  // Manual overrides take precedence — HR can type any line and
+  // the typed value wins over the computed one.
+  const final = {
+    Basic:                  numOrUndef("Basic")                  ?? calc.Basic,
+    HRA:                    numOrUndef("HRA")                    ?? calc.HRA,
+    MedicalAllowance:       numOrUndef("MedicalAllowance")       ?? calc.MedicalAllowance,
+    ConveyanceAllowance:    numOrUndef("ConveyanceAllowance")    ?? calc.ConveyanceAllowance,
+    SpecialAllowance:       numOrUndef("SpecialAllowance")       ?? calc.SpecialAllowance,
+    DearnessAllowance:      numOrUndef("DearnessAllowance")      ?? calc.DearnessAllowance,
+    ProvidentFund:          numOrUndef("ProvidentFund")          ?? calc.ProvidentFund,
+    LeaveEncashmentAmount:  numOrUndef("LeaveEncashmentAmount")  ?? calcLE,
+  };
+  const totalEarnings = final.Basic + final.HRA + final.MedicalAllowance +
+                        final.ConveyanceAllowance + final.SpecialAllowance +
+                        final.DearnessAllowance + final.LeaveEncashmentAmount;
+  // Provident Fund counts as a deduction in payslip-style
+  // statements (employee contribution).
+  const profTax = num("ProfessionalTax");
+  const totalDeductions = profTax + final.ProvidentFund;
+  const net = totalEarnings - totalDeductions;
   const fmtRs2 = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtRs0 = (n: number) => Math.round(n).toLocaleString("en-IN");
   switch (field) {
-    case "TotalEarnings":   return fmtRs2(totalEarnings);
-    case "TotalDeductions": return fmtRs2(totalDeductions);
-    case "NetPayable":      return fmtRs0(net);
-    case "NetInWords":      return rupeesInWords(net);
-    default:                return "";
+    // Computed line items (resolve to "" instead of "0.00" when
+    // package not entered — keeps the form looking clean before
+    // HR fills the trigger fields).
+    case "Basic":               return annual > 0 ? fmtRs2(final.Basic) : "";
+    case "HRA":                 return annual > 0 ? fmtRs2(final.HRA) : "";
+    case "DearnessAllowance":   return annual > 0 ? fmtRs2(final.DearnessAllowance) : "";
+    case "ConveyanceAllowance": return annual > 0 ? fmtRs2(final.ConveyanceAllowance) : "";
+    case "MedicalAllowance":    return annual > 0 ? fmtRs2(final.MedicalAllowance) : "";
+    case "SpecialAllowance":    return annual > 0 ? fmtRs2(final.SpecialAllowance) : "";
+    case "ProvidentFund":       return annual > 0 ? fmtRs2(final.ProvidentFund) : "";
+    case "LeaveEncashmentAmount": return final.LeaveEncashmentAmount > 0 ? fmtRs2(final.LeaveEncashmentAmount) : "";
+    case "ProfessionalTax":     return profTax > 0 ? fmtRs2(profTax) : "0.00";
+    // PF row visibility — single placeholder that resolves to the
+    // <tr> only when EnablePf is true. Lets the same body template
+    // cover both PF / no-PF cases without duplicating HTML.
+    case "PfRow":
+      return enablePf
+        ? `<tr><td style="border:none; padding:3pt 0;">Provident Fund (PF)</td><td style="border:none; text-align:right; padding:3pt 0;">${fmtRs2(final.ProvidentFund)}</td></tr>`
+        : "";
+    // Totals
+    case "TotalEarnings":       return fmtRs2(totalEarnings);
+    case "TotalDeductions":     return fmtRs2(totalDeductions);
+    case "NetPayable":          return fmtRs0(net);
+    case "NetInWords":          return rupeesInWords(net);
+    default:                    return "";
   }
 }
 
@@ -512,6 +606,7 @@ export async function renderLetterHtml(
  *  fields) can't break out of their text node and inject script. */
 const SAFE_HTML_PLACEHOLDERS = new Set<string>([
   "Salary.PfRow",
+  "ExitSettlement.PfRow",
 ]);
 
 /**
