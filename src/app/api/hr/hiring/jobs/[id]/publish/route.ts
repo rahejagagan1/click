@@ -47,7 +47,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // overwrite a stable URL just because HR un-published then re-
     // published.
     const rows = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT id, title, status, "publicSlug", "publishedAt"
+      `SELECT id, title, status, "publicSlug", "publishedAt",
+              "publishChannels", "department", "brand"
          FROM "JobOpening" WHERE id = $1`,
       id,
     );
@@ -75,6 +76,38 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           WHERE id = $3`,
         slug, firstPublishedAt, id,
       );
+
+      // ── Referral fanout — fire-and-forget ─────────────────────
+      // ONLY runs when:
+      //   1. This is the FIRST publish (job.publishedAt was null
+      //      before; firstPublishedAt is sticky thereafter) — so
+      //      unpublish → re-publish doesn't spam every employee
+      //      again.
+      //   2. The "referral" channel is enabled for this job.
+      // Sends an email + in-app notification to every active
+      // employee. Wrapped in setImmediate so the HTTP response
+      // returns immediately; the fanout runs in the background.
+      const isFirstPublish = !job.publishedAt;
+      const wantsReferral  = Array.isArray(job.publishChannels) &&
+                             job.publishChannels.includes("referral");
+      if (isFirstPublish && wantsReferral) {
+        setImmediate(async () => {
+          try {
+            const { fanoutReferralAnnouncement } = await import("@/lib/hr/referral-announcement");
+            await fanoutReferralAnnouncement({
+              jobId:        id,
+              jobTitle:     job.title,
+              department:   job.department,
+              businessUnit: job.brand === "yt_labs" ? "YT Labs"
+                          : job.brand === "nb_media" ? "NB Media"
+                          : job.brand ?? null,
+              publicSlug:   slug,
+            });
+          } catch (e: any) {
+            console.error("[publish] referral fanout failed:", e?.message ?? e);
+          }
+        });
+      }
       return NextResponse.json({ ok: true, status: "published", publicSlug: slug });
     }
 
