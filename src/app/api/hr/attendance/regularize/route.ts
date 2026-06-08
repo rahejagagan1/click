@@ -10,6 +10,7 @@ import { isRegularizationWindowEnforced } from "@/app/api/hr/policy/regularizati
 import { isRegularizationUnlimited } from "@/app/api/hr/policy/regularization-unlimited/route";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
+import { refundLopLwp } from "@/lib/hr/lop-lwp";
 
 // Schema covers both self-apply and admin-grant flavours of regularize POST.
 const RegularizePost = z.object({
@@ -578,6 +579,9 @@ export async function PUT(req: NextRequest) {
       // list to a single regularized session so the parent's total and
       // sessions[] stay coherent. Done in a transaction with the upsert.
       await prisma.$transaction(async (tx) => {
+        // If this day was auto-LOP'd, refund the LWP "used" balance before we
+        // flip it to present — the approved regularization cancels the penalty.
+        await refundLopLwp(tx, reg.userId, dateOnly);
         const upserted = await tx.attendance.upsert({
           where: { userId_date: { userId: reg.userId, date: dateOnly } },
           create: {

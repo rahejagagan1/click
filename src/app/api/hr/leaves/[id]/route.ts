@@ -6,6 +6,7 @@ import { writeAuditLog } from "@/lib/audit-log";
 import { countWorkingDays } from "@/lib/hr/working-days";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
+import { refundLopLwp } from "@/lib/hr/lop-lwp";
 
 function fmtRange(from: Date, to: Date, days: number) {
   return `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} (${days} day${days === 1 ? "" : "s"})`;
@@ -243,6 +244,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           const dow = cur.getUTCDay();
           if (dow !== 0 && dow !== 6) {
             const dateOnly = new Date(cur);
+            // Approving leave for a day that was auto-LOP'd cancels the penalty
+            // → refund the LWP "used" balance before flipping it to on_leave.
+            await refundLopLwp(prisma, application.userId, dateOnly);
             await prisma.attendance.upsert({
               where:  { userId_date: { userId: application.userId, date: dateOnly } },
               create: { userId: application.userId, date: dateOnly, status: "on_leave" },
@@ -380,6 +384,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         const dow = cur.getUTCDay(); // 0 = Sun, 6 = Sat
         if (dow !== 0 && dow !== 6) {
           const dateOnly = new Date(cur);
+          // Approving leave for a day that was auto-LOP'd cancels the penalty
+          // → refund the LWP "used" balance before flipping it to on_leave.
+          await refundLopLwp(prisma, application.userId, dateOnly);
           await prisma.attendance.upsert({
             where: { userId_date: { userId: application.userId, date: dateOnly } },
             create: { userId: application.userId, date: dateOnly, status: "on_leave" },

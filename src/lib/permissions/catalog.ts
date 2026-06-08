@@ -37,6 +37,7 @@ export type Permission =
   // ── hr operations ──
   | "MANAGE_HR"
   | "VIEW_MY_TEAM"
+  | "EDIT_EMPLOYEE_PROFILES"
   | "APPROVE_TEAM_REQUESTS"
   | "APPROVE_ALL_REQUESTS"
   | "ACT_ON_BEHALF"
@@ -135,6 +136,10 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
     label: "My Team",
     description: "See the team overview + inbox for direct reports (managers/leads).",
     replaces: "hr_my_team tab (manager/hod/HR tiers)" },
+  { key: "EDIT_EMPLOYEE_PROFILES", category: "hr",
+    label: "Edit employee profiles",
+    description: "Open the Edit Profile tab on any employee and change their details (name, job, contact).",
+    replaces: "people/[id] Edit Profile tab (was HR-admin only)" },
   { key: "APPROVE_TEAM_REQUESTS", category: "hr",
     label: "Approve own team's requests (L1)",
     description: "First-level approval of direct reports' leave / WFH / regularization / OD / expenses.",
