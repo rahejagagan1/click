@@ -27,6 +27,18 @@ export async function PATCH(
         // the derived role/orgLevel (compat shim) so current access is unchanged.
         if (body.designationId !== undefined) {
             updateData.designationId = body.designationId === null ? null : parseInt(String(body.designationId), 10);
+            // Sync the displayed job-title designation to the RBAC designation
+            // label so the header / lists / org-tree / pickers show it everywhere.
+            if (updateData.designationId != null) {
+                try {
+                    await prisma.$executeRawUnsafe(
+                        `UPDATE "EmployeeProfile" SET "designation" = d."label"
+                         FROM "Designation" d
+                         WHERE "EmployeeProfile"."userId" = $1 AND d."id" = $2`,
+                        id, updateData.designationId,
+                    );
+                } catch { /* no profile / table missing → skip */ }
+            }
         }
         if (body.managerId !== undefined) {
             updateData.managerId = body.managerId === null ? null : parseInt(body.managerId);

@@ -28,8 +28,11 @@ function canManageAssets(user: any): boolean {
 }
 
 export async function GET(req: NextRequest) {
-  const { errorResponse } = await requireAuth();
+  const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+  if (!can(session!.user as any, "MANAGE_ASSETS")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   try {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");

@@ -40,6 +40,24 @@ export async function GET(req: NextRequest) {
             all ? devEmails :
             (!viewerIsDev && devEmails.length > 0 ? devEmails : []);
 
+        // Designation-driven report fillers: anyone whose designation has a
+        // report template assigned (DesignationReportTemplate) is a report owner
+        // too — even if their legacy role/orgLevel isn't manager-tier. This is
+        // how reports follow the DESIGNATION, not the role (RBAC migration). We
+        // resolve the user ids via raw SQL because the generated client may not
+        // know `designationId`/the template table yet (Windows DLL lock blocks
+        // regen); `id` is always known so the `{ id: { in } }` filter is safe.
+        let templateOwnerIds: number[] = [];
+        try {
+            const rows = await prisma.$queryRawUnsafe<{ id: number }[]>(
+                `SELECT DISTINCT u."id"
+                   FROM "User" u
+                   JOIN "DesignationReportTemplate" drt ON drt."designationId" = u."designationId"
+                  WHERE u."isActive" = true`
+            );
+            templateOwnerIds = rows.map((r) => Number(r.id));
+        } catch { /* table absent pre-migration → no designation-template owners */ }
+
         // Mirror of src/lib/access.ts:isPickableAsManager — kept here
         // as the server-side gate so a tampered client can't sneak in
         // a non-manager when `all` isn't set. Cast through `any` because
@@ -54,6 +72,7 @@ export async function GET(req: NextRequest) {
                     "researcher_manager",
                     "hr_manager",
                 ] } },
+                ...(templateOwnerIds.length ? [{ id: { in: templateOwnerIds } }] : []),
             ],
         };
 
