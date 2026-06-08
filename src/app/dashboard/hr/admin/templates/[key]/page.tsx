@@ -154,8 +154,13 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
           BankIFSC:      p?.bankIfsc,
           Bank:          p?.bankName,
           PANNumber:     p?.panNumber,
-          SubDepartment: p?.department,
           AnnualPackage: s?.ctc != null ? String(s.ctc) : undefined,
+          // Default payment mode — payroll is paid via bank transfer
+          // for every employee on the platform today. HR can still
+          // override manually if a one-off cash / cheque settlement
+          // is needed; this just removes the typing for the 100%
+          // common case.
+          PaymentMode:   "Bank Transfer",
           // Interns NEVER get PF — force the checkbox off.
           // Regular employees inherit from salaryStructure.pfEligible.
           EnablePf:      isIntern ? "false" : (s?.pfEligible ? "true" : undefined),
@@ -409,6 +414,22 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
                     ) : (
                       <input
                         type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
+                        // For number inputs: `min={0}` blocks the
+                        // user from typing/spinning negative values,
+                        // and the onWheel/onKeyDown handlers stop
+                        // the browser's built-in scroll-wheel /
+                        // arrow-key incrementing — common UX trap
+                        // where scrolling the page accidentally
+                        // changes a focused number field (0 → -1
+                        // → -2 → -3, etc.).
+                        {...(f.type === "number" ? {
+                          min:        0,
+                          step:       "any",
+                          onWheel:    (e: React.WheelEvent<HTMLInputElement>) => e.currentTarget.blur(),
+                          onKeyDown:  (e: React.KeyboardEvent<HTMLInputElement>) => {
+                            if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault();
+                          },
+                        } : {})}
                         value={customValues[f.key] ?? ""}
                         onChange={(e) => setCustomValues((v) => ({ ...v, [f.key]: e.target.value }))}
                         placeholder={f.placeholder}
