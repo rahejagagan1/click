@@ -11,8 +11,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth } from "@/lib/api-auth";
+import { canViewAllBrands } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
+
+/** Returns 404 if the caller is brand-scoped and this exit belongs
+ *  to a different brand. 404 (not 403) to avoid leaking which IDs
+ *  exist in the other brand's pipeline. Returns the exit's brand
+ *  string if access is allowed. */
+async function brandGate(session: any, exitId: number): Promise<string | null | "deny"> {
+  const allBrands = canViewAllBrands(session?.user as any);
+  if (allBrands) return null;
+  const callerBu = session?.user?.businessUnit ?? null;
+  // No caller brand set → fall back to allowing (legacy users
+  // without a businessUnit on their EmployeeProfile shouldn't be
+  // hard-locked out; they'll still be canManage-gated).
+  if (!callerBu) return null;
+  const rows = await prisma.$queryRawUnsafe<Array<{ bu: string | null }>>(
+    `SELECT ep."businessUnit" AS bu
+       FROM "EmployeeExit" e
+       LEFT JOIN "EmployeeProfile" ep ON ep."userId" = e."userId"
+      WHERE e.id = $1`,
+    exitId,
+  );
+  if (rows.length === 0) return "deny"; // doesn't exist → behave like 404
+  const exitBu = rows[0].bu;
+  // Allow rows where the exit has no businessUnit (legacy data).
+  if (!exitBu) return null;
+  return exitBu === callerBu ? exitBu : "deny";
+}
 
 function canManage(session: any): boolean {
   const u = session?.user;
@@ -41,6 +68,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const { id: idParam } = await params;
     const id = parseInt(idParam);
     if (!Number.isFinite(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+    // Brand-scope: per-brand HR Managers can only read exits for
+    // employees in their own brand. Returns 404 on cross-brand
+    // access (not 403) to avoid leaking the existence of IDs in
+    // the other brand's pipeline.
+    const gateResult = await brandGate(session, id);
+    if (gateResult === "deny") {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
 
     const exitRows = await prisma.$queryRawUnsafe<ExitDetail[]>(
       `SELECT e.id, e."userId", e.status, e."exitType",
@@ -128,6 +164,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const { id: idParam } = await params;
     const id = parseInt(idParam);
     if (!Number.isFinite(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+    // Brand-scope mutations the same way GET does. A cross-brand
+    // HR Manager shouldn't be able to flip another brand's exit
+    // status or tick clearance items.
+    const gateResult = await brandGate(session, id);
+    if (gateResult === "deny") {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
     const body = await req.json();
 
     const sets: string[] = [];
