@@ -24,31 +24,55 @@ function canManage(session: any): boolean {
 
 const EXIT_TYPES = new Set(["resignation", "termination", "contract_end", "retirement", "other"]);
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   if (!canManage(session)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   try {
-    // ── Strict brand separation (NO cross-brand view) ─────────
-    // HR explicitly asked for hard brand separation on offboarding:
-    //   • NB Media HR dashboard → ONLY NB Media offboarded employees
-    //   • YT Labs HR dashboard  → ONLY YT Labs offboarded employees
-    //   • No cross-brand view for ANY HR-tier user. Even the top-
-    //     tier HR Manager (Tanvi) is brand-scoped here.
+    // ── Tab-driven brand filter ────────────────────────────────
+    // The Offboarding UI has two brand tabs (NB Media | YT Labs).
+    // canManage users (HR Manager / CEO / admin / developer) can
+    // switch between tabs to view either brand's exits — visual
+    // separation in the UI, no hard server-side wall.
     //
-    // ONLY developers get a cross-brand view, and only for debug /
-    // triage. The shared canViewAllBrands() helper is deliberately
-    // NOT used here — its env allowlist would otherwise let Tanvi
-    // (or anyone we add later) read across brands, which violates
-    // the explicit "strict separation for all" requirement.
+    // Query param semantics:
+    //   ?brand=nb_media | "NB Media"  → only NB Media exits
+    //   ?brand=yt_labs  | "YT Labs"   → only YT Labs exits
+    //   ?brand=all                    → both brands (admin sweeps)
+    //   ?brand=  (omitted)            → caller's own brand by
+    //                                   default, so the first-load
+    //                                   tab matches their badge
     //
-    // If the caller has no businessUnit on their own profile, the
-    // endpoint returns an empty list (with a console.warn). Better
-    // to show "0 of 0" + force HR to fix the user's profile than
-    // to silently leak the whole table.
+    // The endpoint is already canManage-gated above, so any HR-tier
+    // user can request any brand. Brand acts as a UI filter, not
+    // an access control.
+    const url = new URL(request.url);
     const user = session!.user as any;
     const callerBu = user?.businessUnit ?? null;
-    const allBrands = user?.isDeveloper === true;
+
+    const brandParam = (url.searchParams.get("brand") ?? "").toLowerCase().trim();
+    const NORMALIZE: Record<string, "NB Media" | "YT Labs" | "all" | null> = {
+      "":          null,                  // → caller's own brand
+      "nb_media":  "NB Media",
+      "nb media":  "NB Media",
+      "nbmedia":   "NB Media",
+      "yt_labs":   "YT Labs",
+      "yt labs":   "YT Labs",
+      "ytlabs":    "YT Labs",
+      "all":       "all",
+    };
+    const requestedBrand = NORMALIZE[brandParam] ?? null;
+
+    // Decide what to filter on. Default (no ?brand=) → caller's
+    // own brand; "all" → no filter; explicit brand → that brand.
+    let brandToShow: string | null;
+    if (requestedBrand === "all") {
+      brandToShow = null; // no WHERE clause
+    } else if (requestedBrand) {
+      brandToShow = requestedBrand;
+    } else {
+      brandToShow = callerBu; // default tab
+    }
 
     const baseSql = `SELECT e.id, e."userId", u.name AS "userName", u.email AS "userEmail",
                             ep.designation, ep.department, ep."businessUnit",
@@ -61,20 +85,14 @@ export async function GET() {
                        JOIN "User" u ON u.id = e."userId"
                   LEFT JOIN "EmployeeProfile" ep ON ep."userId" = e."userId"`;
 
-    let rows: any[];
-    if (allBrands) {
-      rows = await prisma.$queryRawUnsafe<any[]>(
-        `${baseSql} ORDER BY e."createdAt" DESC`,
-      );
-    } else if (!callerBu) {
-      console.warn(`[GET /api/hr/exits] caller #${user?.dbId} has no businessUnit set — returning empty list. Set their EmployeeProfile.businessUnit to enable brand-scoped access.`);
-      rows = [];
-    } else {
-      rows = await prisma.$queryRawUnsafe<any[]>(
-        `${baseSql} WHERE ep."businessUnit" = $1 ORDER BY e."createdAt" DESC`,
-        callerBu,
-      );
-    }
+    const rows = brandToShow
+      ? await prisma.$queryRawUnsafe<any[]>(
+          `${baseSql} WHERE ep."businessUnit" = $1 ORDER BY e."createdAt" DESC`,
+          brandToShow,
+        )
+      : await prisma.$queryRawUnsafe<any[]>(
+          `${baseSql} ORDER BY e."createdAt" DESC`,
+        );
 
     return NextResponse.json(rows);
   } catch (e: any) {
