@@ -14,43 +14,15 @@ import { requireAuth } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
-/** Returns "deny" if the caller can't access this exit. Strict
- *  brand separation:
- *    • Developers (isDeveloper === true) → always allowed
- *      (debug/triage only)
- *    • Everyone else (CEO, every HR tier, top-tier HR Manager,
- *      per-brand HR Manager, …) → must match the exit's brand
- *      exactly. NO cross-brand bypass — HR explicitly asked for
- *      hard separation on offboarding (NB Media HR sees only NB
- *      Media exits, YT Labs HR sees only YT Labs exits).
- *    • Caller without a businessUnit set on their profile →
- *      denied (HR must set their brand first).
- *    • Exit row without a brand set → invisible to brand-scoped
- *      users (forces HR to fix the data; doesn't silently leak).
- *  Returns 404 on mismatch to avoid leaking which IDs exist in
- *  the other brand's pipeline. */
-async function brandGate(session: any, exitId: number): Promise<string | null | "deny"> {
-  const user = session?.user as any;
-  // Only developers bypass — canViewAllBrands intentionally NOT
-  // used here so the env allowlist (Tanvi etc.) can't grant
-  // cross-brand offboarding access.
-  if (user?.isDeveloper === true) return null;
-  const callerBu = user?.businessUnit ?? null;
-  if (!callerBu) {
-    console.warn(`[exits/${exitId}] caller #${user?.dbId} has no businessUnit set — denying.`);
-    return "deny";
-  }
-  const rows = await prisma.$queryRawUnsafe<Array<{ bu: string | null }>>(
-    `SELECT ep."businessUnit" AS bu
-       FROM "EmployeeExit" e
-       LEFT JOIN "EmployeeProfile" ep ON ep."userId" = e."userId"
-      WHERE e.id = $1`,
-    exitId,
-  );
-  if (rows.length === 0) return "deny";
-  const exitBu = rows[0].bu;
-  if (!exitBu) return "deny";
-  return exitBu === callerBu ? exitBu : "deny";
+/** Per-row brand check is intentionally a no-op now that the
+ *  offboarding UI has explicit brand tabs (NB Media | YT Labs).
+ *  Any canManage user can click into any exit from either tab —
+ *  they're allowed to inspect / edit either brand's pipeline.
+ *  Kept as a function so callers don't have to be edited if we
+ *  later need to re-introduce a brand check on a per-environment
+ *  basis (e.g. for a different deployment). */
+async function brandGate(_session: any, _exitId: number): Promise<"allow"> {
+  return "allow";
 }
 
 function canManage(session: any): boolean {
@@ -85,10 +57,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // employees in their own brand. Returns 404 on cross-brand
     // access (not 403) to avoid leaking the existence of IDs in
     // the other brand's pipeline.
-    const gateResult = await brandGate(session, id);
-    if (gateResult === "deny") {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
+    // brandGate is currently a no-op — keeping the call site for
+    // future re-introduction of per-row brand restrictions.
+    await brandGate(session, id);
 
     const exitRows = await prisma.$queryRawUnsafe<ExitDetail[]>(
       `SELECT e.id, e."userId", e.status, e."exitType",
@@ -180,10 +151,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // Brand-scope mutations the same way GET does. A cross-brand
     // HR Manager shouldn't be able to flip another brand's exit
     // status or tick clearance items.
-    const gateResult = await brandGate(session, id);
-    if (gateResult === "deny") {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
+    // brandGate is currently a no-op — keeping the call site for
+    // future re-introduction of per-row brand restrictions.
+    await brandGate(session, id);
 
     const body = await req.json();
 
