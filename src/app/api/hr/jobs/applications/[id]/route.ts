@@ -4,20 +4,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth } from "@/lib/api-auth";
+import { isHRAdmin } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
 const STATUS_VALUES = new Set(["new", "reviewed", "shortlisted", "interviewing", "rejected", "hired"]);
 
-function canManageHiring(session: any): boolean {
-  const u = session?.user;
-  return !!u && (u.orgLevel === "ceo" || u.orgLevel === "hr_manager" || u.role === "admin" || u.isDeveloper === true);
-}
-
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
-  if (!canManageHiring(session)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!isHRAdmin(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   try {
     const { id: idParam } = await params;
     const id = parseInt(idParam);

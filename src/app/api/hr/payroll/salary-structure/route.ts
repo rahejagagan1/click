@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 import { writeAuditLog } from "@/lib/audit-log";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest) {
   const requested = searchParams.get("userId");
   if (requested) {
     const n = parseInt(requested);
-    if (!Number.isFinite(n)) {
+    if (!Number.isInteger(n) || n <= 0) {
       return NextResponse.json({ error: "Bad userId" }, { status: 400 });
     }
     if (!admin && n !== user.dbId) {
@@ -31,6 +32,25 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // Brand-scope: even an admin who passes canViewSalary should
+    // only see same-brand salary structures unless they're a
+    // developer / in the cross-brand allowlist. Without this, a
+    // YT Labs CEO could fetch ?userId=<NB Media employee> and see
+    // their full salary structure.
+    if (admin && userId !== user.dbId) {
+      const scope = getBrandScope(user);
+      if (!scope.allBrands) {
+        const target = await prisma.employeeProfile.findUnique({
+          where: { userId },
+          select: { businessUnit: true },
+        });
+        const targetBu = target?.businessUnit ?? null;
+        if (targetBu && targetBu !== scope.brand) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
+      }
+    }
+
     const structure = await prisma.salaryStructure.findUnique({
       where: { userId },
       include: { user: { select: { id: true, name: true, email: true } } },
