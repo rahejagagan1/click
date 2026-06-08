@@ -6,8 +6,10 @@
 // in from the people-detail Finances tab).
 
 import { useEffect, useMemo, useState } from "react";
+import { useSession } from "next-auth/react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
+import { canViewSalary } from "@/lib/access";
 import SelectField from "@/components/ui/SelectField";
 import {
   Download, FileText, X, TrendingUp, ChevronRight, ChevronDown, Lightbulb, Paperclip,
@@ -254,6 +256,17 @@ function downloadPayslip(
 
 export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) {
   const [subTab, setSubTab] = useState<SubTab>(initialSub);
+
+  // Pay Slips is still in development — surface it only to developers + salary
+  // admins (CEO / HR Manager / salary-dev) for now; regular employees don't see
+  // the tab yet. (The API also withholds payslip data until the run is "paid".)
+  // TODO: remove this gate once the payslip is production-ready.
+  const { data: session, status } = useSession();
+  const viewer = session?.user as any;
+  const canSeePayslips = viewer?.isDeveloper === true || canViewSalary(viewer);
+  useEffect(() => {
+    if (status !== "loading" && subTab === "pay-slips" && !canSeePayslips) setSubTab("my-salary");
+  }, [status, canSeePayslips, subTab]);
   const [showBreakup, setShowBreakup] = useState(false);
   // Salary Revision drill-down. Collapsed by default — clicking the
   // chevron expands into the regular-salary detail + per-bonus list.
@@ -318,7 +331,7 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
 
   const subTabs: { key: SubTab; label: string }[] = [
     { key: "my-salary",  label: userId ? "Salary" : "My Salary" },
-    { key: "pay-slips",  label: "Pay Slips"  },
+    ...(canSeePayslips ? [{ key: "pay-slips" as SubTab, label: "Pay Slips" }] : []),
     { key: "income-tax", label: "Income Tax" },
   ];
 
@@ -467,7 +480,7 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
         )}
 
         {/* ══════════════════════  Pay Slips  ══════════════════════ */}
-        {subTab === "pay-slips" && (
+        {subTab === "pay-slips" && canSeePayslips && (
           <PaySlipsView payslips={myPayslips} structure={myStructure} userId={userId} />
         )}
 
