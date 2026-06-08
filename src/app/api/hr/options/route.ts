@@ -10,19 +10,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+// Canonical HR-admin gate — uses the new RBAC MANAGE_HR
+// permission when resolved, falls back to legacy orgLevel/role.
+// Previously this route had its OWN local isHRAdmin that
+// hard-coded orgLevel checks and missed the permission-based
+// path entirely — so HR Managers who only had MANAGE_HR granted
+// (no legacy orgLevel="hr_manager") got 403'd when they clicked
+// "+ Add custom value" in the CustomSelect dropdown. User report:
+// "for HR Manager Add custom value isn't available, fix it".
+import { isHRAdmin } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
-
-function isHRAdmin(u: any): boolean {
-  return (
-    u?.orgLevel === "ceo" ||
-    u?.isDeveloper === true ||
-    u?.orgLevel === "special_access" ||
-    u?.role === "admin" ||
-    u?.orgLevel === "hr_manager" ||
-    u?.role === "hr_manager"
-  );
-}
 
 type Row = { id: number; listKey: string; value: string; createdAt: Date };
 
