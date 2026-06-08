@@ -497,4 +497,164 @@ ${SIGNOFF_HTML_YT_LABS}
 <p><strong>Note:</strong> You are requested to bring all the above-specified documents in Original &amp; Xerox for joining. These documents are MANDATORY at the time of joining.</p>
 `.trim(),
   },
+
+  // ─────────────────────────────────────────────────────────────
+  // ── 6. Exit Statement (Provisional Full & Final Settlement) ─
+  // ─────────────────────────────────────────────────────────────
+  // Structured payroll-style statement (not a free-form letter).
+  // HR enters each line-item amount; totals + net payable + net-
+  // in-words are computed via the {{ExitSettlement.*}} resolver
+  // in letter-render.ts. Same template body for both brands;
+  // letterhead / logo / signature switch via the wrapper based
+  // on businessUnit.
+  ...(([
+    {
+      brand: "NB Media" as const,
+      companyName: "YT Money Productions Pvt. Ltd.",
+      subDeptHint: "e.g. NB_Production",
+      bankHint:    "e.g. HDFC Bank",
+      ifscHint:    "e.g. HDFC0001234",
+      acctHint:    "e.g. 50100123456789",
+      panHint:     "e.g. ABCDE1234F",
+    },
+    {
+      brand: "YT Labs" as const,
+      companyName: "Billion Films Private Limited (operating under the brand name of YouTuber Labs)",
+      subDeptHint: "e.g. YT_Creative Writing",
+      bankHint:    "e.g. Bank of Baroda",
+      ifscHint:    "e.g. BARB0GARIAX",
+      acctHint:    "e.g. 30620100007754",
+      panHint:     "e.g. FBPPD5707L",
+    },
+  ] as const).map(({ brand, companyName, subDeptHint, bankHint, ifscHint, acctHint, panHint }): LetterTemplateSeed => ({
+    key: "exit_statement",
+    title: "Exit Statement",
+    category: "offboarding",
+    businessUnit: brand,
+    customFields: [
+      // ── Employee meta. Bank Account / Bank / Bank IFSC /
+      // PAN Number are AUTO-FILLED from the picked employee's
+      // EmployeeProfile by the template editor when those fields
+      // are populated there (e.g. bankAccountNumber, bankIfsc,
+      // bankName, panNumber). The placeholders below only show
+      // when the profile field is empty — so they exist as a
+      // gentle hint for HR, brand-specific because the sample
+      // formats differ between teams.
+      { key: "SubDepartment",       label: "Sub-department",       type: "text",   required: false, placeholder: subDeptHint },
+      { key: "PaymentMode",         label: "Payment Mode",         type: "text",   required: false, placeholder: "Bank Transfer" },
+      { key: "Bank",                label: "Bank",                 type: "text",   required: false, placeholder: bankHint },
+      { key: "BankIFSC",            label: "Bank IFSC",            type: "text",   required: false, placeholder: ifscHint },
+      { key: "BankAccount",         label: "Bank Account",         type: "text",   required: false, placeholder: acctHint },
+      { key: "PANNumber",           label: "PAN Number",           type: "text",   required: false, placeholder: panHint },
+      { key: "SettlementDate",      label: "Settlement Date",      type: "date",   required: true },
+
+      // ── Settlement metrics ─────────────────────────────────
+      { key: "WorkingDays",         label: "Working Days",         type: "number", required: true,  placeholder: "e.g. 15" },
+      { key: "LossOfPayDays",       label: "Loss of Pay Days",     type: "number", required: false, placeholder: "0" },
+      { key: "LeaveEncashmentDays", label: "Leave Encashment Days",type: "number", required: false, placeholder: "0" },
+      { key: "LastSalaryProcessed", label: "Last Salary Processed",type: "text",   required: false, placeholder: "Apr-2026" },
+      { key: "FnFProcessed",        label: "F&F Processed",        type: "text",   required: false, placeholder: "May-2026" },
+
+      // ── Earnings line items (₹) ────────────────────────────
+      { key: "Basic",                  label: "Basic (₹)",                  type: "number", required: false, placeholder: "5806.45" },
+      { key: "HRA",                    label: "HRA (₹)",                    type: "number", required: false, placeholder: "2322.58" },
+      { key: "MedicalAllowance",       label: "Medical Allowance (₹)",      type: "number", required: false, placeholder: "604.84" },
+      { key: "ConveyanceAllowance",    label: "Conveyance Allowance (₹)",   type: "number", required: false, placeholder: "870.97" },
+      { key: "SpecialAllowance",       label: "Special Allowance (₹)",      type: "number", required: false, placeholder: "846.77" },
+      { key: "DearnessAllowance",      label: "Dearness Allowance (₹)",     type: "number", required: false, placeholder: "1161.29" },
+      { key: "LeaveEncashmentAmount",  label: "Leave Encashment (₹)",       type: "number", required: false, placeholder: "2603.84" },
+
+      // ── Deductions (₹) ─────────────────────────────────────
+      { key: "ProfessionalTax",        label: "Professional Tax (₹)",       type: "number", required: false, placeholder: "0.00" },
+    ],
+    bodyHtml: `
+<h2 class="section-title" style="text-align:left">PROVISIONAL FULL &amp; FINAL SETTLEMENT</h2>
+<p style="margin-top:14pt"><strong>${companyName.toUpperCase()}</strong></p>
+
+<h3 style="margin-top:18pt">{{EmployeeBasicInfo.DisplayName}}</h3>
+
+<table style="border:none; width:100%;">
+  <tbody>
+    <tr>
+      <td style="border:none; width:25%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Employee Number</span><br/><strong>{{EmployeeBasicHeaderInfo.EmployeeNumber}}</strong></td>
+      <td style="border:none; width:25%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Date Joined</span><br/><strong>{{EmployeeJobInfo.DateJoined}}</strong></td>
+      <td style="border:none; width:25%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Department</span><br/><strong>{{EmployeeJobInfo.Department}}</strong></td>
+      <td style="border:none; width:25%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Sub Department</span><br/><strong>{{CustomAttributes.SubDepartment}}</strong></td>
+    </tr>
+    <tr>
+      <td style="border:none; vertical-align:top; padding-top:10pt;"><span style="font-size:9pt; color:#64748b;">Designation</span><br/><strong>{{EmployeeJobInfo.JobTitle}}</strong></td>
+      <td style="border:none; vertical-align:top; padding-top:10pt;"><span style="font-size:9pt; color:#64748b;">Payment Mode</span><br/><strong>{{CustomAttributes.PaymentMode}}</strong></td>
+      <td style="border:none; vertical-align:top; padding-top:10pt;"><span style="font-size:9pt; color:#64748b;">Bank</span><br/><strong>{{CustomAttributes.Bank}}</strong></td>
+      <td style="border:none; vertical-align:top; padding-top:10pt;"><span style="font-size:9pt; color:#64748b;">Bank IFSC</span><br/><strong>{{CustomAttributes.BankIFSC}}</strong></td>
+    </tr>
+    <tr>
+      <td style="border:none; vertical-align:top; padding-top:10pt;"><span style="font-size:9pt; color:#64748b;">Bank Account</span><br/><strong>{{CustomAttributes.BankAccount}}</strong></td>
+      <td style="border:none; vertical-align:top; padding-top:10pt;"><span style="font-size:9pt; color:#64748b;">PAN Number</span><br/><strong>{{CustomAttributes.PANNumber}}</strong></td>
+      <td style="border:none; vertical-align:top; padding-top:10pt;"><span style="font-size:9pt; color:#64748b;">Date Of Leaving</span><br/><strong>{{EmployeeJobInfo.LastWorkingDay}}</strong></td>
+      <td style="border:none; vertical-align:top; padding-top:10pt;"><span style="font-size:9pt; color:#64748b;">Settlement Date</span><br/><strong>{{CustomAttributes.SettlementDate}}</strong></td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 style="margin-top:22pt">PROVISIONAL FULL &amp; FINAL SETTLEMENT DETAILS</h3>
+
+<table style="border:none; width:100%;">
+  <tbody>
+    <tr>
+      <td style="border:none; width:20%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Working Days</span><br/><strong>{{CustomAttributes.WorkingDays}}</strong></td>
+      <td style="border:none; width:20%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Loss of Pay Days</span><br/><strong>{{CustomAttributes.LossOfPayDays}}</strong></td>
+      <td style="border:none; width:20%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Leave Encashment Days</span><br/><strong>{{CustomAttributes.LeaveEncashmentDays}}</strong></td>
+      <td style="border:none; width:20%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Last Salary Processed</span><br/><strong>{{CustomAttributes.LastSalaryProcessed}}</strong></td>
+      <td style="border:none; width:20%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">F &amp; F Processed</span><br/><strong>{{CustomAttributes.FnFProcessed}}</strong></td>
+    </tr>
+  </tbody>
+</table>
+
+<table style="border:none; width:100%; margin-top:18pt;">
+  <tbody>
+    <tr>
+      <td style="border:none; width:50%; vertical-align:top; padding-right:14pt;">
+        <p style="margin:0 0 6pt 0;"><strong>EARNINGS</strong></p>
+        <table style="width:100%; border:none;">
+          <tbody>
+            <tr><td style="border:none; padding:3pt 0;">Basic</td>                  <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.Basic}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">HRA</td>                    <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.HRA}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">Medical Allowance</td>      <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.MedicalAllowance}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">Conveyance Allowance</td>   <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.ConveyanceAllowance}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">Special Allowance</td>      <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.SpecialAllowance}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">Dearness Allowance</td>     <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.DearnessAllowance}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">Leave Encashment</td>       <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.LeaveEncashmentAmount}}</td></tr>
+            <tr style="border-top:1pt solid #1f2937;"><td style="border:none; padding:6pt 0;"><strong>Total Earnings (A)</strong></td><td style="border:none; text-align:right; padding:6pt 0;"><strong>{{ExitSettlement.TotalEarnings}}</strong></td></tr>
+          </tbody>
+        </table>
+      </td>
+      <td style="border:none; width:50%; vertical-align:top; padding-left:14pt; border-left:1pt solid #e5e7eb;">
+        <p style="margin:0 0 6pt 0;"><strong>TAXES &amp; DEDUCTIONS</strong></p>
+        <table style="width:100%; border:none;">
+          <tbody>
+            <tr><td style="border:none; padding:3pt 0;">Professional Tax</td>      <td style="border:none; text-align:right; padding:3pt 0;">{{CustomAttributes.ProfessionalTax}}</td></tr>
+            <tr style="border-top:1pt solid #1f2937;"><td style="border:none; padding:6pt 0;"><strong>Total Taxes &amp; Deductions (B)</strong></td><td style="border:none; text-align:right; padding:6pt 0;"><strong>{{ExitSettlement.TotalDeductions}}</strong></td></tr>
+          </tbody>
+        </table>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<table style="width:100%; border:none; margin-top:22pt; background:#f8fafc;">
+  <tbody>
+    <tr>
+      <td style="border:none; padding:10pt 12pt;"><strong>Net Salary Payable ( A - B )</strong></td>
+      <td style="border:none; padding:10pt 12pt; text-align:right;"><strong>{{ExitSettlement.NetPayable}}</strong></td>
+    </tr>
+    <tr>
+      <td style="border:none; padding:4pt 12pt 10pt 12pt;">Net Salary in words</td>
+      <td style="border:none; padding:4pt 12pt 10pt 12pt; text-align:right;"><strong>{{ExitSettlement.NetInWords}}</strong></td>
+    </tr>
+  </tbody>
+</table>
+
+<p style="margin-top:16pt; font-size:10pt; color:#475569;"><strong>**Note :</strong> <em>All amounts displayed in this payslip are in INR</em></p>
+`.trim(),
+  }))),
 ];
