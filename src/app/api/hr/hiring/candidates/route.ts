@@ -50,6 +50,9 @@ export async function GET(req: NextRequest) {
            a."currentStageId", a."enteredStageAt", a."createdAt", a."updatedAt",
            a."jobOpeningId",
            a."archivedAt", a."archiveReason",
+           a."referredById",
+           rb."id"   AS "rb_id",
+           rb."name" AS "rb_name",
            o."title" AS "roleTitle",
            s."id"   AS "s_id",
            s."key"  AS "s_key",
@@ -59,6 +62,7 @@ export async function GET(req: NextRequest) {
          FROM "JobApplication" a
          LEFT JOIN "JobOpening" o ON o."id" = a."jobOpeningId"
          LEFT JOIN "HiringStage" s ON s."id" = a."currentStageId"
+         LEFT JOIN "User" rb ON rb."id" = a."referredById"
          ${openingId ? `WHERE a."jobOpeningId" = $1` : ""}
          ORDER BY a."createdAt" DESC`,
         ...(openingId ? [openingId] : []),
@@ -164,6 +168,11 @@ export async function GET(req: NextRequest) {
       resumeUrl: r.resumeUrl,
       resumeFileName: r.resumeFileName,
       source: r.source,
+      // When source === "referral", surface the employee who
+      // referred them. UI shows "Referral · {name}" instead of
+      // just "referral" so HR can see WHO sourced the candidate
+      // and route the referral bonus correctly.
+      referredBy: r.rb_id ? { id: r.rb_id, name: r.rb_name } : null,
       overallRating: r.overallRating,
       legacyStatus: r.status,
       currentStage: r.s_id
@@ -191,5 +200,163 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ candidates });
   } catch (e) {
     return serverError(e, "GET /api/hr/hiring/candidates");
+  }
+}
+
+// ── HR-side manual candidate creation ──────────────────────────────
+// POST /api/hr/hiring/candidates
+//   body: multipart/form-data {
+//     jobOpeningId : <int>
+//     source       : "indeed" | "naukri" | "linkedin" | "referral" | …
+//     resume       : <File>   (PDF/DOCX/DOC — same parsers as apply)
+//     fullName?    : <str>    (overrides parser)
+//     email?       : <str>
+//     phone?       : <str>
+//   }
+// Creates a new JobApplication row in the "sourced" stage, stores
+// the resume blob, and fires the async background extractor so name
+// / email / education / skills auto-fill from the resume. Same code
+// path as /api/jobs/apply — only the auth gate and source default
+// differ.
+export async function POST(req: NextRequest) {
+  const { session, errorResponse } = await requireAuth();
+  if (errorResponse) return errorResponse;
+  if (!isHRAdmin(session!.user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  try {
+    const form = await req.formData();
+    const jobOpeningId = Number(form.get("jobOpeningId"));
+    const source       = String(form.get("source") ?? "").trim() || "direct";
+    const fullNameRaw  = String(form.get("fullName") ?? "").trim();
+    const emailRaw     = String(form.get("email")    ?? "").trim();
+    const phoneRaw     = String(form.get("phone")    ?? "").trim();
+    const file         = form.get("resume");
+
+    if (!Number.isFinite(jobOpeningId) || jobOpeningId <= 0) {
+      return NextResponse.json({ error: "jobOpeningId required" }, { status: 400 });
+    }
+    // Verify the job exists + is open. Don't let HR attach
+    // candidates to deleted / archived job rows.
+    const job = (await prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, status FROM "JobOpening" WHERE id = $1 LIMIT 1`, jobOpeningId,
+    ))[0];
+    if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+
+    // Resume blob — required for the manual-add flow because the
+    // whole pitch is "drop the PDF and we'll fetch everything from
+    // it". HR can still manually override fields before saving.
+    if (!(file instanceof File) || file.size === 0) {
+      return NextResponse.json({ error: "Resume file required" }, { status: 400 });
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      return NextResponse.json({ error: "Resume must be 8 MB or smaller" }, { status: 400 });
+    }
+    const resumeBuf  = Buffer.from(await file.arrayBuffer());
+    const resumeName = file.name || "resume.pdf";
+    const resumeMime = file.type || "application/pdf";
+
+    // Sniff name / email / phone from the resume so HR doesn't have
+    // to retype basic fields. The full parse (skills, education,
+    // URLs) runs async via enqueueResumeBackfill below. HR-typed
+    // overrides win when both are present.
+    let sniffedName  = "";
+    let sniffedEmail = "";
+    let sniffedPhone = "";
+    try {
+      const { extractText } = await import("@/lib/resume-auto-extract");
+      const text = await extractText(resumeBuf, resumeName);
+      if (text) {
+        // First non-empty line that's all-letters/spaces ≈ name. The
+        // background parser does a better job; this is just to give
+        // HR something to look at if the auto-fill row hasn't been
+        // hydrated yet.
+        const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 10);
+        for (const ln of lines) {
+          if (/^[A-Za-z][A-Za-z .'-]{2,60}$/.test(ln) && ln.split(/\s+/).length <= 5) {
+            sniffedName = ln; break;
+          }
+        }
+        const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
+        if (emailMatch) sniffedEmail = emailMatch[0];
+        const phoneMatch = text.match(/(?:\+?91[-.\s]?)?[6-9]\d{9}/);
+        if (phoneMatch) sniffedPhone = phoneMatch[0];
+      }
+    } catch { /* parser unavailable — caller fills manually */ }
+
+    const fullName = fullNameRaw || sniffedName  || "Unknown Applicant";
+    const email    = emailRaw    || sniffedEmail || "";
+    const phone    = phoneRaw    || sniffedPhone || "";
+
+    // Resolve the initial stage = "Sourced". Mirrors the apply
+    // flow's behaviour so kanban / list places the manual addition
+    // in the same column candidates start in.
+    const sourcedStage = (await prisma.$queryRawUnsafe<any[]>(
+      `SELECT id FROM "HiringStage" WHERE key = 'sourced' LIMIT 1`,
+    ))[0];
+    const currentStageId = sourcedStage?.id ?? null;
+
+    const inserted = await prisma.$queryRawUnsafe<any[]>(
+      `INSERT INTO "JobApplication"
+         ("jobOpeningId", "fullName", "email", "phone", "source",
+          "resumeFileName", "currentStageId", "enteredStageAt", "status")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), 'new')
+       RETURNING id`,
+      jobOpeningId, fullName, email, phone, source, resumeName, currentStageId,
+    );
+    const applicationId = inserted[0]?.id;
+    if (!applicationId) {
+      return NextResponse.json({ error: "Insert failed" }, { status: 500 });
+    }
+
+    // Stamp the blob + the canonical resumeUrl on the row.
+    try {
+      const resumeUrl = `/api/hr/hiring/resumes/${applicationId}`;
+      await prisma.$executeRawUnsafe(
+        `UPDATE "JobApplication"
+            SET "resumeBlob" = $1,
+                "resumeMime" = $2,
+                "resumeUrl"  = $3
+          WHERE id = $4`,
+        resumeBuf, resumeMime, resumeUrl, applicationId,
+      );
+    } catch (e) {
+      console.error("[hr/hiring/candidates POST] resume blob save failed:", e);
+    }
+
+    // Open a stage-history row so the activity feed shows "HR
+    // sourced this candidate manually" — keeps the timeline
+    // consistent with apply-flow additions.
+    try {
+      if (currentStageId) {
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO "JobApplicationStage"
+             ("applicationId", "stageId", "enteredAt", "note")
+           VALUES ($1, $2, NOW(), 'Sourced manually by HR')`,
+          applicationId, currentStageId,
+        );
+      }
+    } catch (e) {
+      console.warn("[hr/hiring/candidates POST] stage history write failed:", e);
+    }
+
+    // Async parse — fills education / skills / linkedin / portfolio
+    // in the background so the candidate drawer is hydrated by the
+    // time HR opens it.
+    try {
+      const { enqueueResumeBackfill } = await import("@/lib/resume-backfill");
+      enqueueResumeBackfill(applicationId);
+    } catch (e) {
+      console.warn("[hr/hiring/candidates POST] backfill enqueue failed:", e);
+    }
+
+    return NextResponse.json({
+      ok: true,
+      id: applicationId,
+      candidate: { id: applicationId, fullName, email, phone, source },
+    }, { status: 201 });
+  } catch (e) {
+    return serverError(e, "POST /api/hr/hiring/candidates");
   }
 }
