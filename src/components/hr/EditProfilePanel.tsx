@@ -936,7 +936,7 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
             />
           </div>
           <div>
-            <label className={cls.label}>Designation</label>
+            <label className={cls.label}>Access Tier</label>
             <SelectField
               value={job.designationKey}
               onChange={(v) => {
@@ -945,7 +945,7 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
               }}
               options={designations.map((d) => ({ value: d.key, label: d.label }))}
             />
-            <p className="mt-1 text-[11px] text-slate-400">Sets access tier + scorecard. Replaces the old Role + Org Level.</p>
+            <p className="mt-1 text-[11px] text-slate-400">Controls what this user can see and edit (Member / HR / HR Manager / CEO / Developer). Separate from the job-title Designation above — pick "Member" for any non-leadership employee. Replaces the old Role + Org Level.</p>
           </div>
           <div>
             <label className={cls.label}>Reporting Manager</label>
