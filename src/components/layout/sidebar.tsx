@@ -12,7 +12,7 @@ import { canUseFeedback, isAdmin as isAdminFn, isHRAdmin as isHRAdminFn, canSeeR
 import { can } from "@/lib/permissions/can";
 
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
-import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench, Target, Package, Box } from "lucide-react";
+import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench, Target, Package, Box, UserPlus } from "lucide-react";
 
 // Consistent Keka-style icon: thin outline, fixed size / stroke.
 const icon = (Cmp: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>) => (
@@ -711,6 +711,29 @@ export default function Sidebar() {
                     );
                 })()}
 
+                {/* REFER — open to EVERY authenticated employee. No
+                    role gate; even fresh joiners can refer their
+                    network. Renders in the always-visible primary
+                    sidebar (this branch), and ALSO in the HR-tier
+                    secondary nav further below for symmetry. */}
+                {(() => {
+                    const isActive = pathname.startsWith("/dashboard/hr/referrals");
+                    return (
+                        <Link
+                            href="/dashboard/hr/referrals"
+                            className={cn(
+                                "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
+                                isActive
+                                    ? "bg-gradient-to-br from-[#e8f1fc] to-[#d9e7f8] text-[#0f4e93] shadow-[inset_0_0_0_1px_rgba(15,110,205,0.18),0_2px_8px_rgba(15,110,205,0.08)]"
+                                    : "text-[#6e8297] hover:bg-[#eef3f8] hover:text-[#213446]"
+                            )}
+                        >
+                            <UserPlus size={18} strokeWidth={1.5} className={isActive ? "text-[#0f6ecd]" : ""} />
+                            Refer
+                        </Link>
+                    );
+                })()}
+
                 {/* ── HR & People Section ── */}
                 {(() => {
                     const inboxCount = (inboxData?.total || 0) as number;
@@ -841,6 +864,10 @@ export default function Sidebar() {
                                 </Link>
                             )}
 
+                            {/* Refer & Earn lives in the always-visible top
+                                section above — intentionally NOT duplicated
+                                here. HR-admins see the primary copy. */}
+
                             {/* ── Portal flyouts — escape overflow-y:auto, open sideways ── */}
                             {hrMeOpen && typeof document !== "undefined" && createPortal(
                                 <div style={{ position: "fixed", left: 108, top: hrMeY, zIndex: 9999 }}
@@ -852,6 +879,11 @@ export default function Sidebar() {
                                     {fl("/dashboard/hr/goals",      "Goals"            )}
                                     {fl("/dashboard/hr/documents",  "Documents"        )}
                                     {fl("/dashboard/hr/tickets",    "Helpdesk"         )}
+                                    {/* Refer & Earn — visible to every employee.
+                                        Lists open jobs HR has tagged for referrals
+                                        and lets the employee refer someone from
+                                        their network with a resume upload. */}
+                                    {fl("/dashboard/hr/referrals",  "Refer & Earn"     )}
                                 </div>,
                                 document.body
                             )}
