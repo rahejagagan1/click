@@ -1510,6 +1510,12 @@ export default function AttendancePage() {
                     const isWeekend = !isWorkingDay(date, myShift, shiftAnchor);
                     const isHoliday = rec.status === "holiday";
                     const isLeave   = rec.status === "on_leave";
+                    // LOP penalties applied by the auto-LOP job — must be visible to
+                    // the employee + HR (full-day = absence, half-day = unregularized
+                    // missed clock-out). Rendered as a badge + row text + LOG icon below.
+                    const isFullLop    = rec.status === "lop";
+                    const isHalfDayLop = rec.status === "half_day_lop";
+                    const isLop        = isFullLop || isHalfDayLop;
                     const isPending = rec.status === "pending" && !rec.clockIn;
                     // Has a pending request for this date? Any type (regularize, WFH,
                     // On-Duty, or Leave that covers this date) flips the row to
@@ -1677,6 +1683,11 @@ export default function AttendancePage() {
                             {onLeave && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400 font-bold">LEAVE</span>
                             )}
+                            {isLop && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-bold uppercase tracking-wider">
+                                {isHalfDayLop ? "½ DAY LOP" : "LOP"}
+                              </span>
+                            )}
                             {/* MISSED — hidden as soon as the employee has
                                 either a PENDING or an APPROVED regularization
                                 for this day, OR the Attendance row itself
@@ -1730,6 +1741,12 @@ export default function AttendancePage() {
                                     : pendingKind === "On-Duty"
                                       ? "On-Duty Pending Approval"
                                       : `Pending ${pendingKind}`}
+                            </span>
+                          ) : isLop && !approvedRegRow ? (
+                            <span className="text-[12px] font-semibold text-red-600 dark:text-red-400">
+                              {isHalfDayLop
+                                ? "Half-day LOP — missed clock-out not regularized in time"
+                                : "Full-day LOP — absent, no attendance logged"}
                             </span>
                           ) : missedClockOut && !approvedRegRow ? (
                             <span className="text-[12px] font-medium text-amber-600 dark:text-amber-400">
@@ -1845,6 +1862,14 @@ export default function AttendancePage() {
                               // but HR has signed off and the day counts
                               // as a successful regularized day.
                               c = { label: `Regularized${regWindow(approvedRegRow) ? ` · ${regWindow(approvedRegRow)}` : ""}`, Icon: CheckCircle2, tone: "text-emerald-500" };
+                            } else if (isLop) {
+                              c = {
+                                label: isHalfDayLop
+                                  ? "Half-day LOP — missed clock-out not regularized in time"
+                                  : "Full-day LOP — absent, no attendance logged",
+                                Icon: XCircle,
+                                tone: "text-red-600",
+                              };
                             } else if (missedClockOut) {
                               c = { label: "Missed clock-out", Icon: AlertCircle, tone: "text-amber-500" };
                             } else if (rec.clockOut && !rec.clockIn && !isTodayRow && !rec.isRegularized) {

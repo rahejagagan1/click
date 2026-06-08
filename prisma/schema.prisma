@@ -96,6 +96,7 @@ model User {
   monthlyReports         MonthlyReport[] @relation("ManagerMonthlyReports")
   reportViewAccess       UserReportAccess[] @relation("ReportViewer")
   reportViewableBy       UserReportAccess[] @relation("ReportViewable")
+  designationReportViewable DesignationReportAccess[] @relation("DesignationReportViewable")
   violations             Violation[]        @relation("ViolationUser")
   violationsReported     Violation[]        @relation("ViolationReporter")
   violationsResponsible  Violation[]        @relation("ViolationResponsible")
@@ -216,8 +217,10 @@ model Designation {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  permissions DesignationPermission[]
-  users       User[]
+  permissions         DesignationPermission[]
+  reportAccessGrants  DesignationReportAccess[]
+  reportTemplateGrants DesignationReportTemplate[]
+  users               User[]
 }
 
 model DesignationPermission {
@@ -232,6 +235,41 @@ model DesignationPermission {
 
   @@id([designationId, permissionId])
   @@index([permissionId])
+}
+
+// Per-designation grant to VIEW a report-owner's (manager's) weekly/monthly
+// reports. The designation-level replacement for per-user UserReportAccess:
+// every member of the designation can view the granted owners' reports.
+// Enforcement unions these with any legacy UserReportAccess rows.
+model DesignationReportAccess {
+  designationId Int
+  managerId     Int          // report-owner User id
+  /// Audit trail: who granted this, and when.
+  grantedBy     Int?
+  createdAt     DateTime     @default(now())
+
+  designation   Designation  @relation(fields: [designationId], references: [id], onDelete: Cascade)
+  manager       User         @relation("DesignationReportViewable", fields: [managerId], references: [id], onDelete: Cascade)
+
+  @@id([designationId, managerId])
+  @@index([managerId])
+}
+
+// Which report templates a designation fills + can view (production|researcher|
+// qa|hr). Multiple per designation. Replaces the hardcoded name/role logic that
+// used to decide who fills which report — whoever holds the designation fills
+// (and views) its templates going forward.
+model DesignationReportTemplate {
+  designationId Int
+  template      String       // 'production' | 'researcher' | 'qa' | 'hr'
+  /// Audit trail: who granted this, and when.
+  grantedBy     Int?
+  createdAt     DateTime     @default(now())
+
+  designation   Designation  @relation(fields: [designationId], references: [id], onDelete: Cascade)
+
+  @@id([designationId, template])
+  @@index([template])
 }
 
 // ═══════════════════════════════════════════════════════
@@ -732,6 +770,10 @@ model WeeklyReport {
   viewsRows      Json?   @db.JsonB   // Section D: Views and Changes rows (Andrew)
   shortsRows     Json?   @db.JsonB   // Section E: Views and Changes (YT Shorts) rows (Andrew)
   dataJson     Json?   @db.JsonB   // Legacy fallback (kept for old records)
+  /// Which report template this row belongs to: production|researcher|qa|hr.
+  /// Backfilled from getManagerReportFormat for legacy rows; set explicitly on
+  /// new reports. Part of the row identity going forward (multi-template).
+  reportTemplate String?
   /// Frozen team roster at submit/lock time so historical reports
   /// keep showing who was on the team that week even if those users
   /// later move to a different manager. Shape:
@@ -746,6 +788,8 @@ model WeeklyReport {
   manager     User     @relation("ManagerWeeklyReports", fields: [managerId], references: [id])
 
   @@unique([managerId, week, month, year])
+  // Template-inclusive identity (Phase A: added alongside the legacy key above).
+  @@unique([managerId, reportTemplate, week, month, year])
   @@index([managerId])
   @@index([year, month, week]) // covers ORDER BY year desc, month desc, week desc
 }
@@ -755,6 +799,8 @@ model MonthlyReport {
   managerId   Int
   month       Int      // 0–11
   year        Int
+  /// production|researcher|qa|hr — see WeeklyReport.reportTemplate.
+  reportTemplate String?
   isLocked    Boolean  @default(false)
   submittedAt DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -843,6 +889,8 @@ model MonthlyReport {
   manager     User     @relation("ManagerMonthlyReports", fields: [managerId], references: [id])
 
   @@unique([managerId, month, year])
+  // Template-inclusive identity (Phase A: added alongside the legacy key above).
+  @@unique([managerId, reportTemplate, month, year])
   @@index([managerId])
   @@index([year, month]) // covers ORDER BY year desc, month desc
 }
@@ -1247,7 +1295,7 @@ model Attendance {
   clockIn         DateTime?
   clockOut        DateTime?
   totalMinutes    Int       @default(0)
-  status          String    @default("absent")  // present | absent | late | half_day | on_leave | weekend | holiday | lop | missed_clock_out
+  status          String    @default("absent")  // present | absent | late | half_day | on_leave | weekend | holiday | lop | half_day_lop | missed_clock_out
   overtimeMinutes Int       @default(0)
   ipAddress       String?
   location        String?

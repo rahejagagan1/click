@@ -6,7 +6,9 @@ import useSWR from "swr";
 import { fetcher, swrConfig } from "@/lib/swr";
 import { useState, useEffect } from "react";
 import { countWeeksInReportMonth } from "@/lib/reports/weekly-period";
-import { weeklyReportCardSubtitle, type ManagerReportFormat } from "@/lib/reports/manager-report-format";
+import { weeklyReportCardSubtitle, REPORT_TEMPLATES, type ManagerReportFormat } from "@/lib/reports/manager-report-format";
+
+const TEMPLATE_LABEL: Record<string, string> = Object.fromEntries(REPORT_TEMPLATES.map((t) => [t.id, t.label]));
 
 const MONTH_NAMES = [
     "January", "February", "March", "April", "May", "June",
@@ -33,36 +35,36 @@ export default function ManagerReportPage() {
     // Track submitted status: key = "monthly" | "week-1" | "week-2" etc.
     const [submittedMap, setSubmittedMap] = useState<Record<string, boolean>>({});
 
-    // Fetch submission status when a month is selected
+    // Fetch submission status when a month is selected — once per template the
+    // manager fills (keys carry the template so multi-template managers don't
+    // collide). Each template's report is a distinct (manager, template, period).
     useEffect(() => {
         if (selectedMonth === null || !managerId) return;
+        const m = data?.manager;
+        const fmts: string[] = (m?.reportFormats?.length ? m.reportFormats : [m?.reportFormat ?? "production"]);
         const year = currentYear;
-        const checks: Promise<void>[] = [];
 
-        // Check monthly report
-        checks.push(
-            fetch(`/api/reports/${managerId}/monthly/${selectedMonth}?year=${year}`)
+        for (const tmpl of fmts) {
+            fetch(`/api/reports/${managerId}/monthly/${selectedMonth}?year=${year}&template=${tmpl}`)
                 .then(r => r.json())
                 .then(d => {
-                    setSubmittedMap(prev => ({ ...prev, [`monthly-${selectedMonth}`]: !!(d.submitted && d.locked) }));
+                    setSubmittedMap(prev => ({ ...prev, [`monthly-${selectedMonth}-${tmpl}`]: !!(d.submitted && d.locked) }));
                 })
-                .catch(() => {})
-        );
+                .catch(() => {});
 
-        const weekCount = countWeeksInReportMonth(year, selectedMonth);
-        for (let w = 1; w <= weekCount; w++) {
-            const week = w;
-            checks.push(
-                fetch(`/api/reports/${managerId}/weekly/${week}?month=${selectedMonth}&year=${year}`)
+            const weekCount = countWeeksInReportMonth(year, selectedMonth);
+            for (let w = 1; w <= weekCount; w++) {
+                const week = w;
+                fetch(`/api/reports/${managerId}/weekly/${week}?month=${selectedMonth}&year=${year}&template=${tmpl}`)
                     .then(r => r.json())
                     .then(d => {
-                        setSubmittedMap(prev => ({ ...prev, [`week-${week}-${selectedMonth}`]: !!(d.submitted && d.locked) }));
+                        setSubmittedMap(prev => ({ ...prev, [`week-${week}-${selectedMonth}-${tmpl}`]: !!(d.submitted && d.locked) }));
                     })
-                    .catch(() => {})
-            );
+                    .catch(() => {});
+            }
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedMonth, managerId]);
+    }, [selectedMonth, managerId, data]);
 
     // Only show months from January up to the current month (inclusive)
     const availableMonths = MONTH_NAMES.slice(0, currentMonth + 1);
@@ -105,9 +107,9 @@ export default function ManagerReportPage() {
     const manager = data?.manager;
 
     const canViewReports = manager?.reportEligible === true;
-    const reportFormat = (manager?.reportFormat ?? "production") as ManagerReportFormat;
-    // HR: monthly only — hide weekly report cards
-    const hideWeeklyForHr = reportFormat === "hr";
+    // Templates this manager fills (designation-driven; falls back to the single
+    // legacy format). One card group is rendered per template.
+    const reportFormats = ((manager?.reportFormats?.length ? manager.reportFormats : [manager?.reportFormat ?? "production"]) as ManagerReportFormat[]);
 
     return (
         <div className="space-y-5 max-w-6xl pl-6 pr-4 pt-2">
@@ -208,30 +210,37 @@ export default function ManagerReportPage() {
                                                 (Monthly + 5 weeks) still fit on a single row at common
                                                 laptop widths (1366px) once the sidebar is open. Cards
                                                 grow to fill any extra space via the `1fr` max. */}
-                                            <div
-                                                className="grid gap-3"
-                                                style={{ gridTemplateColumns: "repeat(auto-fill, minmax(158px, 1fr))" }}
-                                            >
-                                                
+                                            {reportFormats.map((tmpl) => {
+                                              const hideWeeklyForHr = tmpl === "hr";
+                                              return (
+                                              <div key={tmpl} className="mb-4 last:mb-0">
+                                                {reportFormats.length > 1 && (
+                                                  <p className="text-[11px] font-bold uppercase tracking-wide text-violet-500 dark:text-violet-300 mb-2">{TEMPLATE_LABEL[tmpl] ?? tmpl} report</p>
+                                                )}
+                                                <div
+                                                  className="grid gap-3"
+                                                  style={{ gridTemplateColumns: "repeat(auto-fill, minmax(158px, 1fr))" }}
+                                                >
+
                                                 {/* 1. Monthly Report Card */}
                                                 {canViewReports ? (
-                                                    <Link href={`/dashboard/reports/${managerId}/monthly/${index}?year=${currentYear}`} className="relative flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-3 p-3.5 rounded-lg border border-violet-200 dark:border-violet-500/30 bg-white dark:bg-violet-500/10 hover:bg-violet-50 dark:hover:bg-violet-500/20 hover:border-violet-300 dark:hover:border-violet-500/50 transition-all duration-200 shadow-sm group">
-                                                        {submittedMap[`monthly-${index}`] && (
+                                                    <Link href={`/dashboard/reports/${managerId}/monthly/${index}?year=${currentYear}&template=${tmpl}`} className="relative flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-3 p-3.5 rounded-lg border border-violet-200 dark:border-violet-500/30 bg-white dark:bg-violet-500/10 hover:bg-violet-50 dark:hover:bg-violet-500/20 hover:border-violet-300 dark:hover:border-violet-500/50 transition-all duration-200 shadow-sm group">
+                                                        {submittedMap[`monthly-${index}-${tmpl}`] && (
                                                             <span className="absolute top-2 right-2 flex items-center justify-center w-5 h-5 rounded-full bg-green-500 shadow-sm">
                                                                 <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                                                                 </svg>
                                                             </span>
                                                         )}
-                                                        <div className={`w-10 h-10 shrink-0 rounded-md flex items-center justify-center transition-colors ${submittedMap[`monthly-${index}`] ? "bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400" : "bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400 group-hover:bg-violet-200 dark:group-hover:bg-violet-500/30 group-hover:text-violet-700 dark:group-hover:text-violet-300"}`}>
+                                                        <div className={`w-10 h-10 shrink-0 rounded-md flex items-center justify-center transition-colors ${submittedMap[`monthly-${index}-${tmpl}`] ? "bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400" : "bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400 group-hover:bg-violet-200 dark:group-hover:bg-violet-500/30 group-hover:text-violet-700 dark:group-hover:text-violet-300"}`}>
                                                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                             </svg>
                                                         </div>
                                                         <div className="min-w-0">
                                                             <p className="text-[13px] font-medium text-violet-900 dark:text-violet-100 group-hover:text-violet-700 dark:group-hover:text-white transition-colors truncate">Monthly Report</p>
-                                                            <p className={`text-[11px] mt-0.5 truncate ${submittedMap[`monthly-${index}`] ? "text-green-600 dark:text-green-400 font-medium" : "text-violet-600 dark:text-violet-300/70"}`}>
-                                                                {submittedMap[`monthly-${index}`] ? "Submitted" : "Full overview"}
+                                                            <p className={`text-[11px] mt-0.5 truncate ${submittedMap[`monthly-${index}-${tmpl}`] ? "text-green-600 dark:text-green-400 font-medium" : "text-violet-600 dark:text-violet-300/70"}`}>
+                                                                {submittedMap[`monthly-${index}-${tmpl}`] ? "Submitted" : "Full overview"}
                                                             </p>
                                                         </div>
                                                     </Link>
@@ -258,25 +267,25 @@ export default function ManagerReportPage() {
                                                     canViewReports ? (
                                                         <Link
                                                             key={week}
-                                                            href={`/dashboard/reports/${managerId}/weekly/${week}?month=${index}&year=${currentYear}`}
+                                                            href={`/dashboard/reports/${managerId}/weekly/${week}?month=${index}&year=${currentYear}&template=${tmpl}`}
                                                             className="relative flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-3 p-3.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#1a1a32] hover:bg-amber-50 dark:hover:bg-amber-500/5 hover:border-amber-200 dark:hover:border-amber-500/30 transition-all duration-200 shadow-sm group"
                                                         >
-                                                            {submittedMap[`week-${week}-${index}`] && (
+                                                            {submittedMap[`week-${week}-${index}-${tmpl}`] && (
                                                                 <span className="absolute top-2 right-2 flex items-center justify-center w-5 h-5 rounded-full bg-green-500 shadow-sm">
                                                                     <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                                                                     </svg>
                                                                 </span>
                                                             )}
-                                                            <div className={`w-10 h-10 shrink-0 rounded-md flex items-center justify-center transition-colors ${submittedMap[`week-${week}-${index}`] ? "bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400" : "bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400 group-hover:bg-amber-100 dark:group-hover:bg-amber-500/20 group-hover:text-amber-600 dark:group-hover:text-amber-400"}`}>
+                                                            <div className={`w-10 h-10 shrink-0 rounded-md flex items-center justify-center transition-colors ${submittedMap[`week-${week}-${index}-${tmpl}`] ? "bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400" : "bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400 group-hover:bg-amber-100 dark:group-hover:bg-amber-500/20 group-hover:text-amber-600 dark:group-hover:text-amber-400"}`}>
                                                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                                                                 </svg>
                                                             </div>
                                                             <div className="min-w-0">
                                                                 <p className="text-[13px] font-medium text-slate-800 dark:text-slate-200 group-hover:text-amber-800 dark:group-hover:text-amber-200 transition-colors truncate">Week {week} Report</p>
-                                                                <p className={`text-[11px] mt-0.5 truncate ${submittedMap[`week-${week}-${index}`] ? "text-green-600 dark:text-green-400 font-medium" : "text-slate-500 dark:text-slate-400"}`}>
-                                                                    {submittedMap[`week-${week}-${index}`] ? "Submitted" : weeklyReportCardSubtitle(reportFormat)}
+                                                                <p className={`text-[11px] mt-0.5 truncate ${submittedMap[`week-${week}-${index}-${tmpl}`] ? "text-green-600 dark:text-green-400 font-medium" : "text-slate-500 dark:text-slate-400"}`}>
+                                                                    {submittedMap[`week-${week}-${index}-${tmpl}`] ? "Submitted" : weeklyReportCardSubtitle(tmpl)}
 
                                                                 </p>
                                                             </div>
@@ -296,7 +305,10 @@ export default function ManagerReportPage() {
                                                     )
                                                 )}
 
-                                            </div>
+                                                </div>
+                                              </div>
+                                              );
+                                            })}
                                         </div>
                                     )}
                                 </div>
