@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, canViewSalary, serverError } from "@/lib/api-auth";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 import { writeAuditLog } from "@/lib/audit-log";
 
 export const dynamic = "force-dynamic";
@@ -48,21 +49,25 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "kind must be PT/ESI/TDS/LWF" }, { status: 400 });
     }
 
+    const scope = getBrandScope(session!.user);
+    if (!scope.allBrands && !scope.brand) return NextResponse.json({ items: [] });
+    const brandClause = scope.allBrands ? "" : ` AND ep."businessUnit" = $4`;
     // Pull EmployeeProfile.employeeId (the HRM number) so the table
     // can render "EMPLOYEE NUMBER" + "EMPLOYEE NAME" separately the
     // way Keka does.
-    const items = await prisma.$queryRawUnsafe<Row[]>(
-      `SELECT o.id, o."userId", o.month, o.year, o.kind,
-              o."employeeOverride", o."employerOverride", o.comment,
-              u.name,
-              ep."employeeId"
-         FROM "TaxOverride" o
-         JOIN "User" u ON u.id = o."userId"
-         LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
-        WHERE o.month = $1 AND o.year = $2 AND o.kind = $3
-        ORDER BY o.id ASC`,
-      month, year, kind,
-    );
+    const sql = `SELECT o.id, o."userId", o.month, o.year, o.kind,
+                        o."employeeOverride", o."employerOverride", o.comment,
+                        u.name,
+                        ep."employeeId"
+                   FROM "TaxOverride" o
+                   JOIN "User" u ON u.id = o."userId"
+              LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
+                  WHERE o.month = $1 AND o.year = $2 AND o.kind = $3
+                    ${brandClause}
+                  ORDER BY o.id ASC`;
+    const items = scope.allBrands
+      ? await prisma.$queryRawUnsafe<Row[]>(sql, month, year, kind)
+      : await prisma.$queryRawUnsafe<Row[]>(sql, month, year, kind, scope.brand);
     return NextResponse.json({ items });
   } catch (e) {
     return serverError(e, "GET /api/hr/payroll/tax-override");
