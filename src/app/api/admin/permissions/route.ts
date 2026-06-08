@@ -80,7 +80,11 @@ export async function PATCH(req: NextRequest) {
             return NextResponse.json({ id: userId, reportAccess });
         }
 
-        // Toggle specific manager access: { userId, managerId, grant }
+        // DEPRECATED: per-user "view manager X's reports" grants. Replaced by
+        // per-designation grants (DesignationReportAccess) managed from the
+        // Designations screen; the admin UI no longer calls this branch.
+        // Kept dormant for one release as a rollback valve — enforcement still
+        // unions any existing UserReportAccess rows. Remove in a later cleanup.
         if (typeof body.managerId === "number" && typeof body.grant === "boolean") {
             const { userId, managerId, grant } = body;
             if (typeof userId !== "number") {

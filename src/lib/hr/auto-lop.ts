@@ -20,6 +20,7 @@
 import prisma from "@/lib/prisma";
 import { istTodayDateOnly } from "@/lib/ist-date";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
+import { getPoliciesByUser } from "@/lib/hr/notification-policy";
 
 // 48h grace + the day itself = 3 calendar days between "missed day" and
 // "earliest cron run that may apply LOP".
@@ -28,6 +29,12 @@ const SCAN_BACK_DAYS = 7;
 
 // Bump only when intentionally enabling retroactive LOP for older missing days.
 const FEATURE_START_DATE_ISO = "2026-05-29";
+
+// Penalty for an UNREGULARIZED missed clock-out — a row that has a clockIn but
+// never got a clockOut, and the user never regularized it within the grace
+// window. Same 48h grace as a fully-missing day. HALF-day LOP for now; flip to
+// "lop" here for a full-day penalty if policy changes later.
+const MISSED_SWIPE_LOP_STATUS = "half_day_lop";
 
 export type AutoLOPSummary = {
   datesScanned: number;
@@ -104,6 +111,31 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
   );
   const shiftByUser = new Map(shiftRows.map((r) => [r.userId, r]));
 
+  // Exemption gate. Reads the SAME per-user policy that HR Dashboard →
+  // Permissions → Payroll & Attendance writes (EmployeeNotificationPolicy),
+  // plus the role defaults: defaultPolicyFor() returns attendanceEnabled =
+  // payrollEnabled = false for CEOs and developers. A user is skipped from
+  // auto-LOP when EITHER toggle is off — i.e. anyone HR has excluded from
+  // payroll OR attendance, alongside CEOs/owners/devs (who don't punch a
+  // clock). LOP only makes sense for people who are both tracked AND paid.
+  const policies = await getPoliciesByUser(users.map((u) => u.id));
+
+  // LWP (Leave Without Pay) type — LOP days are tracked against the user's
+  // open-ended LWP "used" balance (row created on demand, totalDays stays 0)
+  // so the Leave view reflects them. This is TRACKING ONLY: payroll still
+  // deducts via the attendance lop / half_day_lop status, and no
+  // LeaveApplication is created — so there is no double deduction.
+  const lwpType = await prisma.leaveType.findUnique({ where: { code: "LWP" }, select: { id: true } });
+  if (!lwpType) console.warn("[auto-lop] LWP leave type not found — LOP days will not be tracked against LWP balance.");
+  async function addLwpUsage(userId: number, year: number, amount: number): Promise<void> {
+    if (!lwpType) return;
+    await prisma.leaveBalance.upsert({
+      where:  { userId_leaveTypeId_year: { userId, leaveTypeId: lwpType.id, year } },
+      create: { userId, leaveTypeId: lwpType.id, year, totalDays: 0, usedDays: amount, pendingDays: 0 },
+      update: { usedDays: { increment: amount } },
+    });
+  }
+
   let datesScanned = 0;
   let lopApplied = 0;
 
@@ -115,6 +147,11 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
     // Pre-filter users to those for whom this date is in-scope.
     const eligibleUserIds: number[] = [];
     for (const u of users) {
+      // Exempt CEOs, developers, and any user HR has switched off for payroll
+      // OR attendance (HR Dashboard → Permissions → Payroll & Attendance).
+      const pol = policies.get(u.id);
+      if (pol && (pol.attendanceEnabled === false || pol.payrollEnabled === false)) continue;
+
       const join = u.employeeProfile?.joiningDate;
       if (!join) continue;
       if (dateOnlyUTC(join).getTime() > date.getTime()) continue;
@@ -142,7 +179,7 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
     const [attendances, leaves, regs, wfhs, ods, compOffs] = await Promise.all([
       prisma.attendance.findMany({
         where: { userId: { in: eligibleUserIds }, date },
-        select: { userId: true },
+        select: { id: true, userId: true, status: true, isRegularized: true },
       }),
       prisma.leaveApplication.findMany({
         where: {
@@ -190,15 +227,47 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
       }),
     ]);
 
+    // Unregularized missed clock-outs: a row exists (so it's NOT a full-day
+    // LOP / "absent" candidate), but the swipe was never completed and never
+    // regularized in time → half-day-LOP candidates, handled below.
+    const isUnregularizedMissedSwipe = (a: { status: string; isRegularized: boolean }) =>
+      a.status === "missed_clock_out" && !a.isRegularized;
+    const missedSwipeRows = attendances.filter(isUnregularizedMissedSwipe);
+    const missedSwipeUserIds = new Set(missedSwipeRows.map((a) => a.userId));
+
     const protectedIds = new Set<number>();
-    for (const r of attendances) protectedIds.add(r.userId);
+    // Any attendance row EXCEPT an unregularized missed clock-out protects the
+    // user (they were present / on leave / already settled). The missed-swipe
+    // rows are intentionally left out so they can receive a half-day LOP.
+    for (const r of attendances) if (!isUnregularizedMissedSwipe(r)) protectedIds.add(r.userId);
     for (const r of leaves)      protectedIds.add(r.userId);
     for (const r of regs)        protectedIds.add(r.userId);
     for (const r of wfhs)        protectedIds.add(r.userId);
     for (const r of ods)         protectedIds.add(r.userId);
     for (const r of compOffs)    protectedIds.add(r.userId);
 
-    const toLop = eligibleUserIds.filter((id) => !protectedIds.has(id));
+    // Half-day LOP: unregularized missed clock-outs not otherwise covered by a
+    // pending/approved leave / regularization / WFH / OD / comp-off. (A pending
+    // regularization means the user DID act in time → protectedIds excludes it.)
+    const toHalfDayLop = missedSwipeRows.filter((a) => !protectedIds.has(a.userId));
+    if (toHalfDayLop.length > 0) {
+      const upd = await prisma.attendance.updateMany({
+        where: { id: { in: toHalfDayLop.map((a) => a.id) } },
+        data: {
+          status: MISSED_SWIPE_LOP_STATUS,
+          notes: "Auto-marked half-day LOP: missed clock-out not regularized within the 48h grace window.",
+        },
+      });
+      lopApplied += upd.count;
+      // Track 0.5 LWP per half-day LOP. These rows are transitioning out of
+      // "missed_clock_out" this run, so each is counted exactly once.
+      for (const a of toHalfDayLop) await addLwpUsage(a.userId, date.getUTCFullYear(), 0.5);
+      console.log(`[auto-lop] ${isoKey(date)}: ${upd.count} missed clock-outs → ${MISSED_SWIPE_LOP_STATUS}`);
+    }
+
+    // Full-day LOP candidates: eligible users with NO row at all (excludes the
+    // missed-swipe users, who get the half-day penalty above instead).
+    const toLop = eligibleUserIds.filter((id) => !protectedIds.has(id) && !missedSwipeUserIds.has(id));
     if (toLop.length === 0) continue;
 
     const result = await prisma.attendance.createMany({
@@ -214,6 +283,9 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
     });
 
     lopApplied += result.count;
+    // Track 1.0 LWP per full-day LOP. toLop only contains users with no row
+    // for this date, so each newly-created LOP is counted exactly once.
+    for (const userId of toLop) await addLwpUsage(userId, date.getUTCFullYear(), 1);
     console.log(
       `[auto-lop] ${isoKey(date)}: ${result.count}/${toLop.length} marked LOP`,
     );

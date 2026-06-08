@@ -2,7 +2,7 @@ import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import prisma from "@/lib/prisma";
-import { getPermissionsByEmail } from "@/lib/permissions/resolve-permissions";
+import { getPermissionsByEmail, getScorecardFunctionByEmail, hasDesignationReportGrantsByEmail } from "@/lib/permissions/resolve-permissions";
 
 const useDevLogin = process.env.NEXT_PUBLIC_DEV_LOGIN === "true";
 const developerEmails = (process.env.DEVELOPER_EMAILS || "").split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
@@ -215,8 +215,21 @@ export const authOptions: NextAuthOptions = {
             // fetch without re-login. Empty pre-migration or for users without a
             // designation — can() then relies on the isDeveloper override only.
             if (session.user?.email) {
-                (session.user as any).permissions =
-                    await getPermissionsByEmail(session.user.email);
+                // Resolved together so the three designation lookups share one
+                // round-trip's worth of latency rather than three serial awaits.
+                // scorecardFunction (writer/editor/qa/researcher/manager) from the
+                // user's designation replaces role-based branching in the
+                // rating/report/KPI engine (additive for now). hasReportGrants lets
+                // canSeeReports open the reports hub for a designation that holds
+                // per-owner report grants without the blanket VIEW_REPORTS.
+                const [permissions, scorecardFunction, hasReportGrants] = await Promise.all([
+                    getPermissionsByEmail(session.user.email),
+                    getScorecardFunctionByEmail(session.user.email),
+                    hasDesignationReportGrantsByEmail(session.user.email),
+                ]);
+                (session.user as any).permissions = permissions;
+                (session.user as any).scorecardFunction = scorecardFunction;
+                (session.user as any).hasReportGrants = hasReportGrants;
             }
             return session;
         },

@@ -610,7 +610,11 @@ export default function WeeklyReportPage() {
     const periodLabel = `${monthName} (${manager?.name ?? "…"} C1)`;
 
 
-    const reportFmt = (manager?.reportFormat ?? "production") as ManagerReportFormat;
+    // URL template wins (designation-driven fill — a manager may fill several
+    // templates); fall back to the manager's single format for old links that
+    // have no ?template=.
+    const urlTemplate = searchParams.get("template");
+    const reportFmt = (urlTemplate ?? manager?.reportFormat ?? "production") as ManagerReportFormat;
     const isResearcherReport = !isLoading && reportFmt === "researcher";
     const isQaReport = !isLoading && reportFmt === "qa";
 
@@ -798,7 +802,7 @@ export default function WeeklyReportPage() {
     // Fetch submission status on mount
     useEffect(() => {
         if (!managerId || isNaN(week) || isNaN(monthIndex) || weekInvalid) return;
-        fetch(`/api/reports/${managerId}/weekly/${week}?month=${monthIndex}&year=${year}`)
+        fetch(`/api/reports/${managerId}/weekly/${week}?month=${monthIndex}&year=${year}${urlTemplate ? `&template=${urlTemplate}` : ""}`)
             .then(r => r.json())
             .then(d => {
                 if (d.submitted) {
@@ -1188,6 +1192,7 @@ export default function WeeklyReportPage() {
                     month: monthIndex,
                     year,
                     isDraft,
+                    template: reportFmt,
                     writerRows:      isQaReport ? andrewRows   : wRows,
                     editorRows:      isQaReport ? abhishekRows : cRows,
                     overviewRows:    isQaReport ? sectionBRows  : overviewRows,
@@ -1226,7 +1231,7 @@ export default function WeeklyReportPage() {
         setShowDeleteConfirm(false);
         try {
             const res = await fetch(
-                `/api/reports/${managerId}/weekly/${week}?month=${monthIndex}&year=${year}`,
+                `/api/reports/${managerId}/weekly/${week}?month=${monthIndex}&year=${year}${urlTemplate ? `&template=${urlTemplate}` : ""}`,
                 { method: "DELETE" }
             );
             const json = await res.json();
