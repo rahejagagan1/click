@@ -373,6 +373,18 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (orgLevel  !== undefined) userPatch.orgLevel = orgLevel;
     if (designationId !== undefined) {
       userPatch.designationId = designationId === null ? null : parseInt(String(designationId), 10);
+      // Keep the DISPLAYED job-title designation in sync with the RBAC
+      // designation's label, so the profile header, people list, org-tree,
+      // search and pickers all show the chosen designation everywhere.
+      if (userPatch.designationId != null) {
+        try {
+          const drow = await prisma.$queryRawUnsafe<Array<{ label: string }>>(
+            `SELECT "label" FROM "Designation" WHERE "id" = $1`,
+            userPatch.designationId,
+          );
+          if (drow[0]?.label) profileData.designation = drow[0].label;
+        } catch { /* designation table missing → leave job title as-is */ }
+      }
     }
     if (managerId !== undefined) {
       userPatch.managerId = managerId === null || managerId === "" ? null : parseInt(String(managerId), 10);

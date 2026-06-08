@@ -4,7 +4,8 @@ import { requireAuth , serverError } from "@/lib/api-auth";
 import { notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
 import { getQualifiedCasesForRole } from "@/lib/ratings/data-resolver";
-import { getManagerReportFormat } from "@/lib/reports/manager-report-format";
+import { getManagerReportFormat, REPORT_TEMPLATE_IDS } from "@/lib/reports/manager-report-format";
+import { findReportRow, upsertReportRow, deleteReportRow, MONTHLY_JSONB } from "@/lib/reports/report-store";
 import { getMonthlyReportWindow } from "@/lib/reports/monthly-window";
 import {
     normalizeTeamCapsuleInput,
@@ -83,16 +84,15 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         const managerId = parseInt(managerIdRaw);
         const month     = parseInt(monthRaw);
         const year      = parseInt(req.nextUrl.searchParams.get("year") ?? "");
+        const template  = req.nextUrl.searchParams.get("template");
 
         if (isNaN(managerId) || isNaN(month) || isNaN(year)) {
             return NextResponse.json({ error: "Invalid parameters" }, { status: 400 });
         }
 
-        const report = await prisma.monthlyReport.findUnique({
-            where: { managerId_month_year: { managerId, month, year } },
-        });
+        const report = await findReportRow("MonthlyReport", managerId, template, { month, year });
 
-        // Auto-compute Production Volume actuals for production managers. These
+        // Auto-compute Production Volume actuals for production reports. These
         // are returned regardless of whether a draft exists yet so the UI can
         // populate them on a blank form. If the saved report has override flags
         // set, we surface the saved values instead.
@@ -100,7 +100,9 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
             where: { id: managerId },
             select: { role: true, orgLevel: true, name: true },
         });
-        const isProduction = manager ? getManagerReportFormat(manager) === "production" : false;
+        // Whether THIS report is a production report: the URL template wins; fall
+        // back to the manager's legacy-derived format for old (no-template) URLs.
+        const isProduction = (template ?? (manager ? getManagerReportFormat(manager) : null)) === "production";
         const auto = isProduction
             ? await computeProductionActuals(managerId, month, year)
             : { totalVideo: 0, heroContent: 0 };
@@ -217,14 +219,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Params }) {
         const managerId = parseInt(managerIdRaw);
         const month     = parseInt(monthRaw);
         const year      = parseInt(req.nextUrl.searchParams.get("year") ?? "");
+        const template  = req.nextUrl.searchParams.get("template");
 
         if (isNaN(managerId) || isNaN(month) || isNaN(year)) {
             return NextResponse.json({ error: "Invalid parameters" }, { status: 400 });
         }
 
-        const report = await prisma.monthlyReport.findUnique({
-            where: { managerId_month_year: { managerId, month, year } },
-        });
+        const report = await findReportRow("MonthlyReport", managerId, template, { month, year });
 
         if (!report) {
             return NextResponse.json({ error: "Report not found" }, { status: 404 });
@@ -233,10 +234,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Params }) {
             return NextResponse.json({ error: "Cannot delete a submitted report. Ask an admin to unlock it first." }, { status: 403 });
         }
 
-        await prisma.monthlyReport.delete({
-            where: { managerId_month_year: { managerId, month, year } },
-        });
-
+        await deleteReportRow("MonthlyReport", managerId, report.reportTemplate ?? template, { month, year });
         return NextResponse.json({ success: true });
     } catch (error) {
         return serverError(error, "reports/monthly DELETE");
@@ -254,7 +252,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
         const managerId = parseInt(managerIdRaw);
         const month     = parseInt(monthRaw);
         const body      = await req.json();
-        const { year, isDraft, ...fields } = body;
+        const { year, isDraft, template, ...fields } = body;
 
         if (isNaN(managerId) || isNaN(month) || isNaN(year)) {
             return NextResponse.json({ error: "Invalid parameters" }, { status: 400 });
@@ -262,9 +260,18 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
 
         const shouldLock = !isDraft;
 
-        const existing = await prisma.monthlyReport.findUnique({
-            where: { managerId_month_year: { managerId, month, year } },
+        const manager = await prisma.user.findUnique({
+            where: { id: managerId },
+            select: { role: true, orgLevel: true, name: true },
         });
+        // Resolve the report template: explicit body.template when valid, else
+        // the manager's legacy-derived format (back-compat).
+        const reportTemplate = (typeof template === "string" && (REPORT_TEMPLATE_IDS as string[]).includes(template))
+            ? template
+            : (manager ? getManagerReportFormat(manager) : "production");
+        const isProduction = reportTemplate === "production";
+
+        const existing = await findReportRow("MonthlyReport", managerId, reportTemplate, { month, year });
         if (existing?.isLocked) {
             return NextResponse.json({ error: "Report is locked. Ask an admin to unlock it first." }, { status: 403 });
         }
@@ -277,12 +284,6 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
             sessionUser?.orgLevel === "ceo" ||
             sessionUser?.orgLevel === "special_access" ||
             sessionUser?.isDeveloper === true;
-
-        const manager = await prisma.user.findUnique({
-            where: { id: managerId },
-            select: { role: true, orgLevel: true, name: true },
-        });
-        const isProduction = manager ? getManagerReportFormat(manager) === "production" : false;
         const auto = isProduction
             ? await computeProductionActuals(managerId, month, year)
             : { totalVideo: 0, heroContent: 0 };
@@ -395,14 +396,17 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
             // HR Manager (Tanvi Dogra) — dedicated column
             hrMonthlyData: fields.hrMonthlyData ?? null,
             isLocked:            shouldLock,
-            submittedAt:         shouldLock ? new Date() : undefined,
         };
+        // Only stamp submittedAt on lock; drafts keep the existing value (or the
+        // DB default now() on first insert) — column omitted from the upsert.
+        if (shouldLock) (payload as Record<string, unknown>).submittedAt = new Date();
 
-        const report = await prisma.monthlyReport.upsert({
-            where:  { managerId_month_year: { managerId, month, year } },
-            create: { managerId, month, year, ...payload } as any,
-            update: payload as any,
-        });
+        const reportId = await upsertReportRow(
+            "MonthlyReport",
+            { managerId, reportTemplate, month, year },
+            payload as Record<string, unknown>,
+            MONTHLY_JSONB
+        );
 
         // Freeze the team roster onto the report when it transitions to
         // locked. Without this, the report's sidebar / per-member views
@@ -411,7 +415,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
         // src/lib/reports/team-snapshot.ts for the full rationale.
         if (shouldLock) {
             try {
-                await writeReportTeamSnapshot(managerId, { kind: "monthly", month, year });
+                await writeReportTeamSnapshot(managerId, { kind: "monthly", month, year, template: reportTemplate });
             } catch (e) {
                 console.warn("[monthly POST] snapshot write failed:", e);
             }
@@ -455,13 +459,13 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
                 const monthLabel = new Date(year, month, 1).toLocaleDateString("en-IN", {
                     month: "long", year: "numeric",
                 });
-                const link        = `/dashboard/reports/${managerId}/monthly/${month}?year=${year}`;
+                const link        = `/dashboard/reports/${managerId}/monthly/${month}?year=${year}&template=${reportTemplate}`;
                 const managerName = manager?.name || "A manager";
                 await notifyUsers({
                     actorId:  managerId,
                     userIds:  recipients.map((u) => u.id),
                     type:     "report",
-                    entityId: report.id,
+                    entityId: reportId,
                     title:    `${managerName} submitted monthly report — ${monthLabel}`,
                     body:     [
                         `kind: monthly`,
@@ -476,7 +480,7 @@ export async function POST(req: NextRequest, { params }: { params: Params }) {
             }
         }
 
-        return NextResponse.json({ success: true, reportId: report.id, locked: shouldLock, isDraft });
+        return NextResponse.json({ success: true, reportId, locked: shouldLock, isDraft });
     } catch (error) {
         return serverError(error, "route");
     }

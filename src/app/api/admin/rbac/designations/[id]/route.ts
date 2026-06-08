@@ -5,9 +5,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
-import { canManageDesignations, syncGrants } from "@/lib/permissions/designation-admin";
+import { canManageDesignations, syncGrants, syncReportGrants, syncReportTemplates } from "@/lib/permissions/designation-admin";
 
 export const dynamic = "force-dynamic";
+
+// GET /api/admin/rbac/designations/[id] → the users currently on this designation.
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!canManageDesignations(session)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const id = parseInt((await params).id);
+  if (!Number.isFinite(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+  const users = await prisma.$queryRawUnsafe<{ id: number; name: string; email: string; isActive: boolean }[]>(
+    `SELECT "id","name","email","isActive" FROM "User" WHERE "designationId" = $1 ORDER BY "isActive" DESC, "name"`,
+    id
+  );
+  return NextResponse.json({ users });
+}
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -41,6 +57,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if (Array.isArray(body.permissionKeys)) {
     await syncGrants(id, body.permissionKeys.map(String), actorId);
+  }
+
+  // Only touch report grants when the key is present, so a partial PATCH
+  // (e.g. just toggling isActive) doesn't wipe a designation's report access.
+  if (Array.isArray(body.reportOwnerIds)) {
+    await syncReportGrants(id, body.reportOwnerIds.map(Number), actorId);
+  }
+  if (Array.isArray(body.reportTemplates)) {
+    await syncReportTemplates(id, body.reportTemplates.map(String), actorId);
   }
 
   return NextResponse.json({ ok: true });

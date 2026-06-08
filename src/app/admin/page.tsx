@@ -132,15 +132,13 @@ export default function AdminPage() {
     const [ytApiMode, setYtApiMode] = useState<"data_api" | "analytics_api">("data_api");
     const [ytChannelCount, setYtChannelCount] = useState(0);
 
-    // Permissions tab
+    // Permissions tab — the "Report Access" write-eligibility toggle. Per-manager
+    // VIEW grants moved to the Designations screen (DesignationReportAccess).
     const [permUsers, setPermUsers] = useState<any[]>([]);
-    const [permManagers, setPermManagers] = useState<any[]>([]);
     const [permLoading, setPermLoading] = useState(false);
     const [permSearch, setPermSearch] = useState("");
     const [permRoleFilter, setPermRoleFilter] = useState<string>("all");
     const [togglingPerm, setTogglingPerm] = useState<number | null>(null);
-    const [expandedPermUserId, setExpandedPermUserId] = useState<number | null>(null);
-    const [togglingManagerAccess, setTogglingManagerAccess] = useState<string | null>(null); // "userId-managerId"
 
     // Crons tab (CEO / Developer) — one entry per registered job. Each
     // job has a server-side state and a per-row draft (so HR can edit
@@ -253,17 +251,6 @@ export default function AdminPage() {
             })
             .catch(() => setTeamCapsuleCatalog({ capsules: [], productionLists: [] }));
     }, []);
-
-    // Close dropdown when clicking outside
-    useEffect(() => {
-        if (!expandedPermUserId) return;
-        const handler = (e: MouseEvent) => {
-            const target = e.target as HTMLElement;
-            if (!target.closest("[data-perm-dropdown]")) setExpandedPermUserId(null);
-        };
-        document.addEventListener("mousedown", handler);
-        return () => document.removeEventListener("mousedown", handler);
-    }, [expandedPermUserId]);
 
     // Load spaces list (fast)
     useEffect(() => {
@@ -563,7 +550,6 @@ export default function AdminPage() {
                                     .then((r) => r.json())
                                     .then((data) => {
                                         if (Array.isArray(data.users)) setPermUsers(data.users);
-                                        if (Array.isArray(data.managers)) setPermManagers(data.managers);
                                     })
                                     .catch(() => {})
                                     .finally(() => setPermLoading(false));
@@ -1689,7 +1675,11 @@ export default function AdminPage() {
                         <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-5">
                             <div className="flex-1">
                                 <h2 className="text-sm font-semibold text-slate-800">Report Permissions</h2>
-                                <p className="text-xs text-slate-500 mt-0.5">Control who can access and fill weekly &amp; monthly reports.</p>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                    Toggle who can <strong>fill</strong> weekly &amp; monthly reports. Who can <strong>view</strong> each
+                                    owner&apos;s reports is now set per-designation in{" "}
+                                    <a href="/dashboard/hr/admin/designations" className="text-violet-600 font-semibold hover:underline">Designations → Report access</a>.
+                                </p>
                             </div>
                             <div className="flex gap-2 flex-wrap items-center">
                                 <input
@@ -1714,7 +1704,6 @@ export default function AdminPage() {
                                         setPermLoading(true);
                                         fetch("/api/admin/permissions").then(r => r.json()).then(data => {
                                             if (Array.isArray(data.users)) setPermUsers(data.users);
-                                            if (Array.isArray(data.managers)) setPermManagers(data.managers);
                                         }).catch(() => {}).finally(() => setPermLoading(false));
                                     }}
                                     className="px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-300 text-sm text-slate-600 hover:bg-violet-50 hover:border-violet-400 hover:text-violet-600 transition-colors"
@@ -1738,7 +1727,6 @@ export default function AdminPage() {
                                             <th className="text-left px-4 py-3 font-semibold">Org Level</th>
                                             <th className="text-left px-4 py-3 font-semibold">Manager</th>
                                             <th className="text-center px-4 py-3 font-semibold">Report Access</th>
-                                            <th className="text-center px-4 py-3 font-semibold">Specific Reports</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
@@ -1749,10 +1737,8 @@ export default function AdminPage() {
                                                 return matchesSearch && matchesRole;
                                             })
                                             .flatMap(u => {
-                                                const isExpanded = expandedPermUserId === u.id;
-                                                const allowedIds: number[] = u.allowedManagerIds ?? [];
                                                 const rows = [(
-                                                    <tr key={u.id} className={`transition-colors ${isExpanded ? "bg-violet-50" : "hover:bg-slate-50"}`}>
+                                                    <tr key={u.id} className="transition-colors hover:bg-slate-50">
                                                         <td className="px-4 py-3 font-medium text-slate-800">
                                                             <div className="flex items-center gap-2">
                                                                 <div className="w-7 h-7 rounded-full bg-violet-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
@@ -1795,10 +1781,6 @@ export default function AdminPage() {
                                                                         });
                                                                         if (res.ok) {
                                                                             setPermUsers(prev => prev.map(p => p.id === u.id ? { ...p, reportAccess: !p.reportAccess } : p));
-                                                                            // Refresh managers list since reportAccess changed
-                                                                            fetch("/api/admin/permissions").then(r => r.json()).then(d => {
-                                                                                if (Array.isArray(d.managers)) setPermManagers(d.managers);
-                                                                            }).catch(() => {});
                                                                         }
                                                                     } finally {
                                                                         setTogglingPerm(null);
@@ -1808,88 +1790,6 @@ export default function AdminPage() {
                                                             >
                                                                 <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${u.reportAccess ? "translate-x-4" : "translate-x-0.5"}`} />
                                                             </button>
-                                                        </td>
-                                                        <td className="px-4 py-3 text-center relative" data-perm-dropdown>
-                                                            {/* Dropdown trigger */}
-                                                            <button
-                                                                onClick={() => setExpandedPermUserId(isExpanded ? null : u.id)}
-                                                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors ${
-                                                                    allowedIds.length > 0
-                                                                        ? "bg-violet-50 border-violet-300 text-violet-700 hover:bg-violet-100"
-                                                                        : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
-                                                                }`}
-                                                            >
-                                                                {allowedIds.length > 0 ? (
-                                                                    <span className="w-4 h-4 rounded-full bg-violet-600 text-white flex items-center justify-center text-[10px] font-bold">{allowedIds.length}</span>
-                                                                ) : (
-                                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                                                                )}
-                                                                {allowedIds.length > 0 ? `${allowedIds.length} manager${allowedIds.length > 1 ? "s" : ""}` : "Add access"}
-                                                            </button>
-
-                                                            {/* Dropdown panel */}
-                                                            {isExpanded && (
-                                                                <div className="absolute right-0 top-full mt-1 z-50 w-64 rounded-xl border border-slate-200 bg-white shadow-xl overflow-hidden"
-                                                                    style={{ minWidth: 220 }}>
-                                                                    <div className="px-3 py-2 bg-violet-50 border-b border-violet-100">
-                                                                        <p className="text-[11px] font-semibold text-violet-700">Report access for <span className="font-bold">{u.name}</span></p>
-                                                                    </div>
-                                                                    {permManagers.length === 0 ? (
-                                                                        <p className="text-[11px] text-slate-400 italic px-3 py-3">No managers with report access yet.</p>
-                                                                    ) : (
-                                                                        <ul className="py-1 max-h-56 overflow-y-auto">
-                                                                            {permManagers.map(m => {
-                                                                                const granted = allowedIds.includes(m.id);
-                                                                                const key = `${u.id}-${m.id}`;
-                                                                                const toggling = togglingManagerAccess === key;
-                                                                                return (
-                                                                                    <li key={m.id}>
-                                                                                        <button
-                                                                                            disabled={toggling}
-                                                                                            onClick={async () => {
-                                                                                                setTogglingManagerAccess(key);
-                                                                                                try {
-                                                                                                    const res = await fetch("/api/admin/permissions", {
-                                                                                                        method: "PATCH",
-                                                                                                        headers: { "Content-Type": "application/json" },
-                                                                                                        body: JSON.stringify({ userId: u.id, managerId: m.id, grant: !granted }),
-                                                                                                    });
-                                                                                                    if (res.ok) {
-                                                                                                        setPermUsers(prev => prev.map(p => {
-                                                                                                            if (p.id !== u.id) return p;
-                                                                                                            const ids: number[] = p.allowedManagerIds ?? [];
-                                                                                                            return {
-                                                                                                                ...p,
-                                                                                                                allowedManagerIds: !granted
-                                                                                                                    ? [...ids, m.id]
-                                                                                                                    : ids.filter((id: number) => id !== m.id),
-                                                                                                            };
-                                                                                                        }));
-                                                                                                    }
-                                                                                                } finally {
-                                                                                                    setTogglingManagerAccess(null);
-                                                                                                }
-                                                                                            }}
-                                                                                            className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-[12px] transition-colors disabled:opacity-50 ${
-                                                                                                granted
-                                                                                                    ? "bg-violet-50 text-violet-700 font-medium"
-                                                                                                    : "text-slate-700 hover:bg-slate-50"
-                                                                                            }`}
-                                                                                >
-                                                                                    {granted ? (
-                                                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
-                                                                                    ) : (
-                                                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                                                                                    )}
-                                                                                    {m.name}
-                                                                                </button>
-                                                                                    </li>
-                                                                                );
-                                                                            })}
-                                                                        </ul>
-                                                                    )}
-                                                                </div>
-                                                            )}
                                                         </td>
                                                     </tr>
                                                 )];
@@ -1901,7 +1801,7 @@ export default function AdminPage() {
                                             return matchesSearch && matchesRole;
                                         }).length === 0 && !permLoading && (
                                             <tr>
-                                                <td colSpan={7} className="px-4 py-10 text-center text-slate-400 text-sm">No users found.</td>
+                                                <td colSpan={6} className="px-4 py-10 text-center text-slate-400 text-sm">No users found.</td>
                                             </tr>
                                         )}
                                     </tbody>
@@ -1914,8 +1814,7 @@ export default function AdminPage() {
                             <div className="mt-4 flex gap-6 text-xs text-slate-500">
                                 <span>Total users: <strong className="text-slate-700">{permUsers.length}</strong></span>
                                 <span>Report access granted: <strong className="text-violet-600">{permUsers.filter(u => u.reportAccess).length}</strong></span>
-                                <span>Specific report access: <strong className="text-violet-600">{permUsers.filter(u => (u.allowedManagerIds?.length ?? 0) > 0).length}</strong></span>
-                                <span>No access: <strong className="text-slate-600">{permUsers.filter(u => !u.reportAccess && !(u.allowedManagerIds?.length)).length}</strong></span>
+                                <span>No access: <strong className="text-slate-600">{permUsers.filter(u => !u.reportAccess).length}</strong></span>
                             </div>
                         )}
                     </div>
