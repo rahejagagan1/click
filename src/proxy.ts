@@ -27,6 +27,13 @@ const PUBLIC_PATHS = [
     // run. Safe to keep public because the route returns only a
     // single boolean marker and refuses requests without the token.
     "/api/__deploy-check",
+    // Cron entry points authenticate with Authorization: Bearer
+    // CRON_SECRET inside the route handler. We have to whitelist
+    // them here OR the middleware redirects the unauthenticated
+    // curl to /login before the token check can run (same problem
+    // /api/__deploy-check has). Path-prefix match — covers all
+    // /api/cron/<job> children.
+    "/api/cron",
 ];
 
 export async function proxy(request: NextRequest) {
