@@ -689,3 +689,26 @@ html:not(.dark) .glass {
   line-height: 1.7;
   color: #1e293b;
 }
+/* Auto-formatted JD structure — h2 = job title (centered),
+   h3 = section heading. Quill applies "ql-align-center" class to
+   centered blocks, so honour that too in case the extractor's
+   inline style gets stripped. */
+.jd-quill-wrap .ql-editor h2 {
+  font-size: 20px;
+  font-weight: 700;
+  text-align: center;
+  margin: 18px 0 14px;
+  color: #0f172a;
+}
+.jd-quill-wrap .ql-editor h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 16px 0 6px;
+  color: #0f172a;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 4px;
+}
+.jd-quill-wrap .ql-editor .ql-align-center { text-align: center; }
+.jd-quill-wrap .ql-editor ul,
+.jd-quill-wrap .ql-editor ol { padding-left: 24px; margin: 6px 0; }
+.jd-quill-wrap .ql-editor li { margin: 2px 0; }
