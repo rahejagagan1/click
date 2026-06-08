@@ -510,34 +510,29 @@ ${SIGNOFF_HTML_YT_LABS}
   ...(([
     {
       brand: "NB Media" as const,
-      companyName: "YT Money Productions Pvt. Ltd.",
-      subDeptHint: "e.g. NB_Production",
-      bankHint:    "e.g. HDFC Bank",
-      ifscHint:    "e.g. HDFC0001234",
-      acctHint:    "e.g. 50100123456789",
-      panHint:     "e.g. ABCDE1234F",
+      bankHint: "e.g. HDFC Bank",
+      ifscHint: "e.g. HDFC0001234",
+      acctHint: "e.g. 50100123456789",
+      panHint:  "e.g. ABCDE1234F",
     },
     {
       brand: "YT Labs" as const,
-      companyName: "Billion Films Private Limited (operating under the brand name of YouTuber Labs)",
-      subDeptHint: "e.g. YT_Creative Writing",
-      bankHint:    "e.g. Bank of Baroda",
-      ifscHint:    "e.g. BARB0GARIAX",
-      acctHint:    "e.g. 30620100007754",
-      panHint:     "e.g. FBPPD5707L",
+      bankHint: "e.g. Bank of Baroda",
+      ifscHint: "e.g. BARB0GARIAX",
+      acctHint: "e.g. 30620100007754",
+      panHint:  "e.g. FBPPD5707L",
     },
-  ] as const).map(({ brand, companyName, subDeptHint, bankHint, ifscHint, acctHint, panHint }): LetterTemplateSeed => ({
+  ] as const).map(({ brand, bankHint, ifscHint, acctHint, panHint }): LetterTemplateSeed => ({
     key: "exit_statement",
     title: "Exit Statement",
     category: "offboarding",
     businessUnit: brand,
     customFields: [
       // ── Employee meta. Bank / Bank IFSC / Bank Account / PAN /
-      // SubDepartment / AnnualPackage / EnablePf are AUTO-FILLED
-      // from the picked employee's EmployeeProfile + SalaryStructure
-      // by the template editor. Placeholders only show when the
-      // profile field is empty.
-      { key: "SubDepartment",  label: "Sub-department",  type: "text",   required: false, placeholder: subDeptHint },
+      // AnnualPackage / EnablePf are AUTO-FILLED from the picked
+      // employee's EmployeeProfile + SalaryStructure by the
+      // template editor. Placeholders only show when the profile
+      // field is empty.
       { key: "PaymentMode",    label: "Payment Mode",    type: "text",   required: false, placeholder: "Bank Transfer" },
       { key: "Bank",           label: "Bank",            type: "text",   required: false, placeholder: bankHint },
       { key: "BankIFSC",       label: "Bank IFSC",       type: "text",   required: false, placeholder: ifscHint },
@@ -578,18 +573,13 @@ ${SIGNOFF_HTML_YT_LABS}
       { key: "ProfessionalTax", label: "Professional Tax (₹)", type: "number", required: false, placeholder: "0.00" },
     ],
     bodyHtml: `
-<h2 class="section-title" style="text-align:left">PROVISIONAL FULL &amp; FINAL SETTLEMENT</h2>
-<p style="margin-top:14pt"><strong>${companyName.toUpperCase()}</strong></p>
-
-<h3 style="margin-top:18pt">{{EmployeeBasicInfo.DisplayName}}</h3>
-
-<table style="border:none; width:100%;">
+<table style="border:none; width:100%; margin-top:6pt;">
   <tbody>
     <tr>
+      <td style="border:none; width:25%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Employee Name</span><br/><strong>{{EmployeeBasicInfo.DisplayName}}</strong></td>
       <td style="border:none; width:25%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Employee Number</span><br/><strong>{{EmployeeBasicHeaderInfo.EmployeeNumber}}</strong></td>
       <td style="border:none; width:25%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Date Joined</span><br/><strong>{{EmployeeJobInfo.DateJoined}}</strong></td>
       <td style="border:none; width:25%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Department</span><br/><strong>{{EmployeeJobInfo.Department}}</strong></td>
-      <td style="border:none; width:25%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Sub Department</span><br/><strong>{{CustomAttributes.SubDepartment}}</strong></td>
     </tr>
     <tr>
       <td style="border:none; vertical-align:top; padding-top:10pt;"><span style="font-size:9pt; color:#64748b;">Designation</span><br/><strong>{{EmployeeJobInfo.JobTitle}}</strong></td>
