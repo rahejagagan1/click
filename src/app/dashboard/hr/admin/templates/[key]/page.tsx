@@ -107,6 +107,44 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
 
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [customValues, setCustomValues] = useState<Record<string, string>>({});
+
+  // Auto-fill bank / PAN custom fields from the picked employee's
+  // profile so HR doesn't retype data we already have. Triggers
+  // whenever the employee changes; only fills fields that are
+  // CURRENTLY EMPTY so HR's manual edits aren't clobbered.
+  // Mapping (custom-field key → profile column):
+  //   BankAccount  ← bankAccountNumber
+  //   BankIFSC     ← bankIfsc
+  //   Bank         ← bankName
+  //   PANNumber    ← panNumber
+  useEffect(() => {
+    let cancelled = false;
+    if (!employee?.id) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/hr/people/${employee.id}`);
+        if (!res.ok) return;
+        const j = await res.json();
+        const p = j?.profile ?? j?.user?.employeeProfile ?? j;
+        if (cancelled || !p) return;
+        const fillMap: Record<string, string | null | undefined> = {
+          BankAccount: p.bankAccountNumber,
+          BankIFSC:    p.bankIfsc,
+          Bank:        p.bankName,
+          PANNumber:   p.panNumber,
+        };
+        setCustomValues((curr) => {
+          const next = { ...curr };
+          let changed = false;
+          for (const [k, v] of Object.entries(fillMap)) {
+            if (!curr[k] && v) { next[k] = String(v); changed = true; }
+          }
+          return changed ? next : curr;
+        });
+      } catch { /* network blip — HR can still type manually */ }
+    })();
+    return () => { cancelled = true; };
+  }, [employee?.id]);
   const [preview, setPreview] = useState<{ html: string; missing: string[] } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [generating, setGenerating] = useState(false);
