@@ -15,18 +15,26 @@ import { canViewAllBrands } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
-/** Returns 404 if the caller is brand-scoped and this exit belongs
- *  to a different brand. 404 (not 403) to avoid leaking which IDs
- *  exist in the other brand's pipeline. Returns the exit's brand
- *  string if access is allowed. */
+/** Returns "deny" if the caller can't access this exit. Same
+ *  strict semantics as the list endpoint:
+ *    • canViewAllBrands (developers, top-tier role=hr_manager) →
+ *      always allowed
+ *    • Caller without a businessUnit set on their profile →
+ *      denied (HR must set their brand first)
+ *    • Exit's businessUnit must match caller's exactly. No
+ *      legacy-NULL bypass — a row with NULL businessUnit is
+ *      invisible to brand-scoped users (forces HR to fix the
+ *      data, doesn't silently leak across brands).
+ *  Returns 404 on mismatch to avoid leaking which IDs exist in
+ *  the other brand's pipeline. */
 async function brandGate(session: any, exitId: number): Promise<string | null | "deny"> {
-  const allBrands = canViewAllBrands(session?.user as any);
-  if (allBrands) return null;
-  const callerBu = session?.user?.businessUnit ?? null;
-  // No caller brand set → fall back to allowing (legacy users
-  // without a businessUnit on their EmployeeProfile shouldn't be
-  // hard-locked out; they'll still be canManage-gated).
-  if (!callerBu) return null;
+  const user = session?.user as any;
+  if (canViewAllBrands(user)) return null;
+  const callerBu = user?.businessUnit ?? null;
+  if (!callerBu) {
+    console.warn(`[exits/${exitId}] caller #${user?.dbId} has no businessUnit set — denying.`);
+    return "deny";
+  }
   const rows = await prisma.$queryRawUnsafe<Array<{ bu: string | null }>>(
     `SELECT ep."businessUnit" AS bu
        FROM "EmployeeExit" e
@@ -34,10 +42,10 @@ async function brandGate(session: any, exitId: number): Promise<string | null | 
       WHERE e.id = $1`,
     exitId,
   );
-  if (rows.length === 0) return "deny"; // doesn't exist → behave like 404
+  if (rows.length === 0) return "deny";
   const exitBu = rows[0].bu;
-  // Allow rows where the exit has no businessUnit (legacy data).
-  if (!exitBu) return null;
+  // Strict: NULL-brand exits are invisible to brand-scoped users.
+  if (!exitBu) return "deny";
   return exitBu === callerBu ? exitBu : "deny";
 }
 
