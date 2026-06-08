@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
 import { accrueLeavesForEveryone, ymKey } from "@/lib/leave-accrual";
 import { istTodayDateOnly } from "@/lib/ist-date";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -36,9 +37,17 @@ export async function GET(req: NextRequest) {
     // month's +1 Sick Leave for everyone before we read.
     try { await accrueLeavesForEveryone(); } catch (e) { /* swallow */ }
 
+    // Brand-scope: NB Media HR Manager sees only NB Media users.
+    const scope = getBrandScope(self);
+    if (!scope.allBrands && !scope.brand) {
+      return NextResponse.json({ year, leaveTypes: [], employees: [] });
+    }
     const [users, leaveTypes, balances] = await Promise.all([
       prisma.user.findMany({
-        where: { isActive: true },
+        where: {
+          isActive: true,
+          ...(scope.allBrands ? {} : { employeeProfile: { businessUnit: scope.brand! } }),
+        },
         select: {
           id: true, name: true, email: true, profilePictureUrl: true,
           // Multi-brand: lets the admin Leave Balances grid split rows

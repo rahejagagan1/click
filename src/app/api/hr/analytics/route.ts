@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
+import { isHRAdmin } from "@/lib/access";
 import { istTodayDateOnly } from "@/lib/ist-date";
 
+// HR-admin only — org-wide headcount + new-joiners + exits + per-
+// department breakdowns. Previously open to every authenticated
+// employee (any intern could see leadership-only org metrics).
 export async function GET() {
-  const { errorResponse } = await requireAuth();
+  const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+  if (!isHRAdmin(session!.user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   try {
     // Anchor month boundaries to the IST calendar so newJoiners / exits
     // don't shift around UTC midnight (which is 05:30 IST). Pulling year/
