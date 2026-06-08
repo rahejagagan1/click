@@ -112,7 +112,7 @@ export default function OffboardPage() {
       </div>
 
       {tab === "initiate" && <InitiateExitTab brand={brand} />}
-      {tab === "pipeline" && <ExitPipeline     />}
+      {tab === "pipeline" && <ExitPipeline initialBrand={brand} />}
     </div>
   );
 }
