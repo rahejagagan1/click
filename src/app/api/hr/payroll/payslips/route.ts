@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,18 @@ export async function GET(req: NextRequest) {
     : null;
 
   try {
+    // Brand-scope: even an admin who passes canViewSalary should
+    // see only same-brand payslips unless they're allowlisted for
+    // cross-brand. Closes the leak where YT Labs CEO could fetch
+    // a NB Media-only PayrollRun's payslips by runId.
+    const scope = getBrandScope(user);
+    if (isAdmin && !scope.allBrands && !scope.brand) {
+      return NextResponse.json([]);
+    }
+    const brandFilter = !isAdmin || scope.allBrands
+      ? {}
+      : { user: { employeeProfile: { businessUnit: scope.brand! } } };
+
     // Non-admin: only payslips whose parent PayrollRun has been marked
     // 'paid' are visible. Lock + finance-confirm is a manual two-step,
     // so the employee shouldn't see a payslip until the second step is
@@ -31,6 +44,7 @@ export async function GET(req: NextRequest) {
       where: {
         ...(runIdParam ? { payrollRunId: runIdParam } : { userId }),
         ...(isAdmin ? {} : { payrollRun: { status: "paid" } }),
+        ...brandFilter,
       },
       orderBy: [{ year: "desc" }, { month: "desc" }],
       include: {
