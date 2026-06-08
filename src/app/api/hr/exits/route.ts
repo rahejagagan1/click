@@ -14,7 +14,6 @@ import { sendEmail } from "@/lib/email/sender";
 import { employeeFarewellEmail, exitNotificationEmail } from "@/lib/email/templates";
 import { devEmailRecipientsClause } from "@/lib/email/toggles";
 import { brandCeoIdForEmployee } from "@/lib/notifications";
-import { canViewAllBrands } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -30,30 +29,26 @@ export async function GET() {
   if (errorResponse) return errorResponse;
   if (!canManage(session)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   try {
-    // ── Strict brand-scope ─────────────────────────────────────
-    // Each per-brand HR Manager (NB Media / YT Labs) sees ONLY
-    // exits for employees with the same businessUnit on their
-    // EmployeeProfile. No "legacy NULL bypass" — earlier attempt
-    // used COALESCE(..., '') IN ('', $1) so rows with NULL
-    // businessUnit would show up to everyone; that turned out to
-    // be the leak (Manpreet Singh / Arpit Sharma had NULL on
-    // their profile so YT Labs HR could still see them). If a
-    // row legitimately lacks a brand, only developers see it (so
-    // HR can fix the data).
+    // ── Strict brand separation (NO cross-brand view) ─────────
+    // HR explicitly asked for hard brand separation on offboarding:
+    //   • NB Media HR dashboard → ONLY NB Media offboarded employees
+    //   • YT Labs HR dashboard  → ONLY YT Labs offboarded employees
+    //   • No cross-brand view for ANY HR-tier user. Even the top-
+    //     tier HR Manager (Tanvi) is brand-scoped here.
     //
-    // canViewAllBrands bypass:
-    //   • Developers → always
-    //   • role = "hr_manager" (top-tier org-wide) → always
-    //   Per-brand HR Managers (orgLevel=hr_manager + businessUnit
-    //   set) and CEOs are brand-scoped here.
+    // ONLY developers get a cross-brand view, and only for debug /
+    // triage. The shared canViewAllBrands() helper is deliberately
+    // NOT used here — its env allowlist would otherwise let Tanvi
+    // (or anyone we add later) read across brands, which violates
+    // the explicit "strict separation for all" requirement.
     //
-    // If the caller has no businessUnit on their own profile AND
-    // doesn't pass canViewAllBrands, return an empty list. Better
-    // to show "0 of 0" + force HR to set the brand on the user's
-    // profile than to silently leak the whole table.
+    // If the caller has no businessUnit on their own profile, the
+    // endpoint returns an empty list (with a console.warn). Better
+    // to show "0 of 0" + force HR to fix the user's profile than
+    // to silently leak the whole table.
     const user = session!.user as any;
     const callerBu = user?.businessUnit ?? null;
-    const allBrands = canViewAllBrands(user);
+    const allBrands = user?.isDeveloper === true;
 
     const baseSql = `SELECT e.id, e."userId", u.name AS "userName", u.email AS "userEmail",
                             ep.designation, ep.department, ep."businessUnit",
