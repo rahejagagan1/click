@@ -12,7 +12,7 @@ import { canUseFeedback, isAdmin as isAdminFn, isHRAdmin as isHRAdminFn, canSeeR
 import { can } from "@/lib/permissions/can";
 
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
-import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench, Target, Box } from "lucide-react";
+import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench, Target, Package, Box } from "lucide-react";
 
 // Consistent Keka-style icon: thin outline, fixed size / stroke.
 const icon = (Cmp: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>) => (
@@ -110,33 +110,16 @@ export default function Sidebar() {
         // brand restriction before any other rule so a role bypass
         // (isCeo / isAdmin) can't accidentally re-grant access.
         if (isYtLabsCeo && !YT_CEO_NAV_ALLOWED.has(label)) return false;
-        // Brand-wide: Feedback is hidden for ALL YT Labs users (not
-        // just the CEO). NB Media users + role bypasses unaffected.
+        // Brand-wide: Feedback is hidden for ALL YT Labs users (not just the
+        // CEO). NB Media users + role bypasses unaffected. This brand gate is
+        // orthogonal to the permission migration below and always applies.
         if (label === "Feedback" && !canUseFeedback(user)) return false;
-        // Items that ARE in the Tab Permissions catalog let the per-user
-        // permission win — that's what makes the Permissions UI actually
-        // grant access. tabPermissionsForUser() already incorporates role
-        // defaults, so a Member with no explicit row still gets `false`
-        // for admin tabs; an admin granting `cases: true` to that Member
-        // now actually unlocks Cases.
-        const keyMap: Record<string, string> = {
-            // "Dashboard" intentionally omitted — it is developer-only and
-            // must NOT be unlockable via the per-user Tab Permissions UI.
-            // "Admin" intentionally omitted — admin/CEO/dev only.
-            "Cases": "cases", "Company": "company",
-            "Scores": "scores", "YouTube": "youtube", "Feedback": "feedback",
-            "Tools": "tools",
-        };
-        const k = keyMap[label];
-        if (k) {
-            // YouTube has a separate per-user channel-access check that's
-            // distinct from Tab Permissions — keep it stacked on top.
-            if ((item as any).youtubeDashboardAccess && !userCanAccessYoutubeDashboard(user)) return false;
-            return tabAllowed(k);
-        }
-
-        // Items NOT in the catalog (Tools, Admin) — role gates decide,
-        // since there's no per-user toggle to defer to.
+        // Menu items are otherwise gated purely by designation permissions
+        // now — the old per-user tabAllowed/keyMap catalog layer is replaced
+        // by the can()-backed helper flags below (ceoOnly / managersOnly /
+        // adminOnly / developerOnly). YouTube keeps its extra brand +
+        // VIEW_YOUTUBE_DASHBOARD gate. Items with NO flag (Tools) stay visible.
+        if ((item as any).youtubeDashboardAccess && !userCanAccessYoutubeDashboard(user)) return false;
         if ((item as any).ceoOnly && !isCeo) return false;
         if ((item as any).managersOnly && !canSeeReports) return false;
         if ((item as any).adminOnly && !isAdmin) return false;
@@ -560,7 +543,7 @@ export default function Sidebar() {
                 {/* Report — visible to CEO, developers, managers, HODs only.
                     YT Labs CEO is locked out per the brand-scoped sidebar
                     allowlist (no Report tile in their 10 allowed sections). */}
-                {canSeeReports && tabAllowed("reports") && !isYtLabsCeo && (!isAdmin ? (
+                {canSeeReports && !isYtLabsCeo && (!isAdmin ? (
                     <Link
                         href={`/dashboard/reports/${user?.dbId}`}
                         className={cn(
@@ -682,7 +665,7 @@ export default function Sidebar() {
 
                 {/* System Violation Log — HR, Special Access, CEO, Developer
                     AND tab-permission allows it. */}
-                {canSeeViolationLog && tabAllowed("violations") && (() => {
+                {canSeeViolationLog && (() => {
                     const isActive = pathname.startsWith("/dashboard/violations");
                     return (
                         <Link
@@ -812,7 +795,7 @@ export default function Sidebar() {
                             {/* ORGANISATION */}
                             <div className="mx-3 mt-4 mb-1.5 border-t border-[#e4ebf2]" />
                             <p className="hidden text-[9px] uppercase tracking-[0.14em] text-[#8a9caf] font-semibold mb-1.5 px-1 text-center">Organisation</p>
-                            {tabAllowed("hr_people") && [
+                            {isHRAdmin && [
                                 { href: "/dashboard/hr/people", label: "People", Icon: Users },
                             ].map(({ href, label, Icon }) => {
                                 const active = pathname === href || pathname.startsWith(href + "/");
@@ -831,7 +814,7 @@ export default function Sidebar() {
                                 Each entry routes to /dashboard/hr/admin
                                 with a ?brand= param the page reads and
                                 seeds each panel's brand filter from. */}
-                            {isHRAdmin && tabAllowed("hr_admin") && (
+                            {isHRAdmin && (
                                 <>
                                     <div className="mx-3 mt-4 mb-1.5 border-t border-[#e4ebf2]" />
                                     <div ref={hrAdminTrigger} {...adminHandlers}
@@ -847,6 +830,15 @@ export default function Sidebar() {
                                         HR Dashboard
                                     </div>
                                 </>
+                            )}
+
+                            {/* ASSETS — standalone, moved out of HR Dashboard; gated by MANAGE_ASSETS */}
+                            {can(user, "MANAGE_ASSETS") && (
+                                <Link href="/dashboard/hr/assets"
+                                    className={cn("flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]", (pathname === "/dashboard/hr/assets" || pathname.startsWith("/dashboard/hr/assets/")) ? A : E)}>
+                                    <Package size={15} strokeWidth={1.75} />
+                                    Assets
+                                </Link>
                             )}
 
                             {/* ── Portal flyouts — escape overflow-y:auto, open sideways ── */}

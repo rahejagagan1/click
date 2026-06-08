@@ -60,6 +60,52 @@ export function getPermissionsForUserId(userId: number): Promise<Permission[]> {
   return rawPerms(`u."id" = $1`, userId);
 }
 
+/** True if the user's designation has any report grant — either a per-owner
+ *  grant (DesignationReportAccess) OR a report-template assignment
+ *  (DesignationReportTemplate). Lets `canSeeReports` open the hub for a
+ *  designation that has report grants but no blanket VIEW_REPORTS. Boolean only
+ *  (no cookie bloat); the actual owner ids / templates are fetched per-page from
+ *  /api/user/report-access. */
+export async function hasDesignationReportGrantsByEmail(email: string): Promise<boolean> {
+  if (!(await rbacReady())) return false;
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ ok: boolean }[]>(
+      `SELECT (
+         EXISTS (
+           SELECT 1 FROM "User" u
+           JOIN "DesignationReportAccess" dra ON dra."designationId" = u."designationId"
+           WHERE u."email" = $1
+         )
+         OR EXISTS (
+           SELECT 1 FROM "User" u
+           JOIN "DesignationReportTemplate" drt ON drt."designationId" = u."designationId"
+           WHERE u."email" = $1
+         )
+       ) AS "ok"`,
+      email
+    );
+    return rows?.[0]?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Scorecard function for the user with this email (auth session callback). */
+export async function getScorecardFunctionByEmail(email: string): Promise<string | null> {
+  if (!(await rbacReady())) return null;
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ scorecardFunction: string | null }[]>(
+      `SELECT dg."scorecardFunction" AS "scorecardFunction"
+       FROM "User" u JOIN "Designation" dg ON dg."id" = u."designationId"
+       WHERE u."email" = $1`,
+      email
+    );
+    return rows[0]?.scorecardFunction ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** The user's scorecard function (writer/editor/qa/researcher/manager) from
  *  their designation, or null. Replaces `role`-based branching in the rating /
  *  report / KPI engine once those are migrated. */

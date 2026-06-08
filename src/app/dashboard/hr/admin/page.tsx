@@ -45,7 +45,6 @@ const ADMIN_TABS: Array<AdminTabDef & { permKey: string }> = [
   { key: "regularize-balance",   label: "Regularization Balance", icon: ClipboardCheck, permKey: "hr_admin_regularize_balance" },
   { key: "leaves",               label: "Leave Balances",       icon: Calendar,        permKey: "hr_admin_leaves"         },
   { key: "holidays",             label: "Holidays & Calendar",  icon: CalendarDays,    permKey: "hr_admin_holidays"       },
-  { key: "assets",               label: "Assets",               icon: Package,         permKey: "hr_admin_assets"         },
   { key: "leave-types",          label: "Leave Types",          icon: Calendar,        permKey: "hr_admin_leave_types"    },
   { key: "leave-policies",       label: "Leave Policies",       icon: Calendar,        permKey: "hr_admin_leave_policies" },
   { key: "shifts",               label: "Shift Templates",      icon: Clock,           permKey: "hr_admin_shifts"         },
@@ -666,7 +665,6 @@ export default function HRAdminPage() {
           {tab === "leaves" && <LeavesAdminPanel leaveTypes={leaveTypes} initialBrand={initialBrand} />}
 
           {/* ── Assets ── */}
-          {tab === "assets" && <AssetsPanel />}
 
           {/* ── Payroll — runs, generate, lock, mark paid, structures ── */}
           {tab === "payroll" && canSeeSalary && <RunPayrollPanel embedded />}

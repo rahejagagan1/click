@@ -22,8 +22,11 @@ export async function closeMissedClockOuts(): Promise<number> {
       clockIn:  { not: null },
       clockOut: null,
       // Don't overwrite already-settled statuses (leave, holiday, weekend,
-      // or a previous sweep's missed_clock_out mark).
-      status: { notIn: ["missed_clock_out", "on_leave", "weekend", "holiday"] },
+      // a previous sweep's missed_clock_out mark, or a LOP penalty the
+      // auto-LOP job already applied to an unregularized missed clock-out —
+      // otherwise the sweep would flip half_day_lop / lop back to
+      // missed_clock_out on the next run).
+      status: { notIn: ["missed_clock_out", "on_leave", "weekend", "holiday", "lop", "half_day_lop"] },
     },
     data: { status: "missed_clock_out" },
   });

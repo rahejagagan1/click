@@ -11,6 +11,9 @@ type ClientUser = {
   isDeveloper?: boolean | null;
   email?: string | null;
   businessUnit?: string | null;
+  // True when the user's designation has at least one per-owner report grant
+  // (DesignationReportAccess). Set on the session in the auth callback.
+  hasReportGrants?: boolean | null;
 } | null | undefined;
 
 /**
@@ -166,6 +169,9 @@ export function canApplyRestrictedLeave(user: ClientUser): boolean {
  * managers. Mirrors `canSeeReports` in the sidebar.
  */
 export function canSeeReports(user: ClientUser): boolean {
+  // A designation with per-owner report grants (but no blanket VIEW_REPORTS)
+  // still opens the hub — the hub then filters to just the granted owners.
+  if (user?.hasReportGrants === true) return true;
   if (hasResolvedPermissions(user)) return can(user, "VIEW_REPORTS");
   return (
     isAdmin(user) ||
