@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
     // an access control.
     const url = new URL(request.url);
     const user = session!.user as any;
+    const isDev = user?.isDeveloper === true;
     const callerBu = user?.businessUnit ?? null;
 
     const brandParam = (url.searchParams.get("brand") ?? "").toLowerCase().trim();
@@ -61,17 +62,41 @@ export async function GET(request: NextRequest) {
       "ytlabs":    "YT Labs",
       "all":       "all",
     };
-    const requestedBrand = NORMALIZE[brandParam] ?? null;
+    const requestedBrand = brandParam in NORMALIZE ? NORMALIZE[brandParam] : null;
 
-    // Decide what to filter on. Default (no ?brand=) → caller's
-    // own brand; "all" → no filter; explicit brand → that brand.
+    // Authority check on ?brand=all — admin sweep view that drops
+    // the WHERE clause entirely. Lock to developers only; an HR
+    // Manager who needs to view both brands clicks the [NB Media]
+    // and [YT Labs] tabs separately. (Per HR's brand-tab design,
+    // each tab stays visually clean.)
+    if (requestedBrand === "all" && !isDev) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    // Decide what to filter on:
+    //   • ?brand=all (devs only) → no WHERE clause
+    //   • ?brand=<explicit>      → that brand (HR can flip tabs;
+    //                              canManage already gates this)
+    //   • no ?brand= (default)   → caller's own brand
     let brandToShow: string | null;
     if (requestedBrand === "all") {
-      brandToShow = null; // no WHERE clause
+      brandToShow = null;
     } else if (requestedBrand) {
       brandToShow = requestedBrand;
+    } else if (callerBu) {
+      brandToShow = callerBu;
+    } else if (isDev) {
+      // Developer with no businessUnit + no ?brand= → see all (the
+      // typical debug login case).
+      brandToShow = null;
     } else {
-      brandToShow = callerBu; // default tab
+      // Non-developer caller with no businessUnit AND no explicit
+      // ?brand= → fail closed (return empty). Better than silently
+      // showing every brand to a user whose own brand isn't set up
+      // yet. HR fixes the user's EmployeeProfile.businessUnit, or
+      // the user clicks an explicit brand tab.
+      console.warn(`[GET /api/hr/exits] caller #${user?.dbId} has no businessUnit and didn't pass ?brand= — returning empty.`);
+      return NextResponse.json([]);
     }
 
     const baseSql = `SELECT e.id, e."userId", u.name AS "userName", u.email AS "userEmail",
