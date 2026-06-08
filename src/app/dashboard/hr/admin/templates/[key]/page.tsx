@@ -161,17 +161,28 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
           EnablePf:      isIntern ? "false" : (s?.pfEligible ? "true" : undefined),
         };
         setCustomValues((curr) => {
+          // On EMPLOYEE CHANGE we always OVERWRITE the profile-
+          // driven fields with the new employee's data. Previous
+          // "fill-if-empty" logic was wrong — if HR picked
+          // someone with IndusInd Bank, then switched to someone
+          // at HDFC, the IndusInd account number stayed on screen
+          // because the field "had a value" (the wrong person's).
+          //
+          // What HR types manually for THIS render (Settlement
+          // Date, Working Days, manual amount overrides, etc.)
+          // is NOT in the fillMap, so it stays untouched. Only
+          // the profile-driven fields refresh.
           const next = { ...curr };
           let changed = false;
           for (const [k, v] of Object.entries(fillMap)) {
-            // Intern → ALWAYS force EnablePf=false (override any
-            // existing checked state). Other fields stay
-            // "fill-if-empty" so manual edits survive.
+            // Intern → ALWAYS force EnablePf=false regardless of
+            // saved state.
             if (k === "EnablePf" && isIntern) {
               if (curr[k] !== "false") { next[k] = "false"; changed = true; }
               continue;
             }
-            if (!curr[k] && v) { next[k] = String(v); changed = true; }
+            const newVal = v == null || v === "" ? "" : String(v);
+            if (curr[k] !== newVal) { next[k] = newVal; changed = true; }
           }
           return changed ? next : curr;
         });
