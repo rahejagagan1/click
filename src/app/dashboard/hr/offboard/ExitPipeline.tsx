@@ -80,8 +80,23 @@ function normaliseStatus(raw: string): TabKey {
   return "in_progress";
 }
 
-export default function ExitPipeline() {
-  const { data: rows, isLoading } = useSWR<Exit[]>("/api/hr/exits", fetcher);
+type BrandProp = "NB Media" | "YT Labs" | "all";
+
+export default function ExitPipeline({ initialBrand = "all" }: { initialBrand?: BrandProp } = {}) {
+  // Brand tab — drives the ?brand= query param on /api/hr/exits.
+  // Initial value comes from the page's `?brand=` URL param (the
+  // HR Dashboard context — NB Media tab vs YT Labs tab). HR Managers
+  // can flip the in-component brand tabs to view either brand.
+  //
+  // If the dashboard URL passes `brand=all` (rare — direct visits
+  // without a brand context), seed the tab with NB Media as a sane
+  // default for the visible list. HR can still click "YT Labs" or
+  // pass `?brand=all` in the URL to override.
+  const initial: "NB Media" | "YT Labs" =
+    initialBrand === "YT Labs" ? "YT Labs" : "NB Media";
+  const [brand, setBrand] = useState<"NB Media" | "YT Labs">(initial);
+  const apiKey = `/api/hr/exits?brand=${encodeURIComponent(brand)}`;
+  const { data: rows, isLoading } = useSWR<Exit[]>(apiKey, fetcher);
   const [drawerExitId, setDrawerExitId] = useState<number | null>(null);
 
   // UI state — default lane is "Exits in Progress" (the only place
@@ -148,6 +163,31 @@ export default function ExitPipeline() {
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      {/* Brand tabs — switch between brands. Initial selection is
+          driven by the HR Dashboard URL's `?brand=` (NB Media vs
+          YT Labs). Each tab keeps the list visually clean —
+          never mixed-brand rows. */}
+      <div className="flex items-center gap-1 px-4 pt-3 pb-2 border-b border-slate-100 bg-white">
+        <span className="text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-400 mr-2">Brand</span>
+        {(["NB Media", "YT Labs"] as const).map((b) => {
+          const active = brand === b;
+          return (
+            <button
+              key={b}
+              type="button"
+              onClick={() => setBrand(b)}
+              className={`h-7 px-3 rounded-md text-[11.5px] font-semibold transition-colors ${
+                active
+                  ? "bg-[#008CFF] text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {b}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Status sub-tabs */}
       <nav className="flex border-b border-slate-200 bg-slate-50/50">
         {TABS.map(t => {
@@ -340,7 +380,9 @@ export default function ExitPipeline() {
           exitId={drawerExitId}
           onClose={() => setDrawerExitId(null)}
           onChanged={() => {
-            mutate("/api/hr/exits");
+            // Pattern-match so the brand-keyed variants
+            // (?brand=NB Media / ?brand=YT Labs) also refresh.
+            mutate((k: any) => typeof k === "string" && k.startsWith("/api/hr/exits"));
             mutate((k: any) => typeof k === "string" && (
               k.startsWith("/api/hr/employees") ||
               k.startsWith("/api/search") ||

@@ -24,36 +24,101 @@ function canManage(session: any): boolean {
 
 const EXIT_TYPES = new Set(["resignation", "termination", "contract_end", "retirement", "other"]);
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   if (!canManage(session)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   try {
-    const rows = await prisma.$queryRawUnsafe<
-      Array<{
-        id: number; userId: number; userName: string; userEmail: string;
-        designation: string | null; department: string | null;
-        exitType: string; resignationDate: Date; lastWorkingDay: Date;
-        noticePeriodDays: number; reason: string | null; notes: string | null;
-        status: string;
-        assetsReturned: boolean; documentsHandled: boolean;
-        finalSettlementDone: boolean; exitInterviewDone: boolean;
-        okToRehire: boolean;
-        createdAt: Date;
-      }>
-    >(
-      `SELECT e.id, e."userId", u.name AS "userName", u.email AS "userEmail",
-              ep.designation, ep.department,
-              e."exitType", e."resignationDate", e."lastWorkingDay",
-              e."noticePeriodDays", e.reason, e.notes, e.status,
-              e."assetsReturned", e."documentsHandled",
-              e."finalSettlementDone", e."exitInterviewDone",
-              e."okToRehire", e."createdAt"
-         FROM "EmployeeExit" e
-         JOIN "User" u ON u.id = e."userId"
-    LEFT JOIN "EmployeeProfile" ep ON ep."userId" = e."userId"
-        ORDER BY e."createdAt" DESC`,
-    );
+    // ── Tab-driven brand filter ────────────────────────────────
+    // The Offboarding UI has two brand tabs (NB Media | YT Labs).
+    // canManage users (HR Manager / CEO / admin / developer) can
+    // switch between tabs to view either brand's exits — visual
+    // separation in the UI, no hard server-side wall.
+    //
+    // Query param semantics:
+    //   ?brand=nb_media | "NB Media"  → only NB Media exits
+    //   ?brand=yt_labs  | "YT Labs"   → only YT Labs exits
+    //   ?brand=all                    → both brands (admin sweeps)
+    //   ?brand=  (omitted)            → caller's own brand by
+    //                                   default, so the first-load
+    //                                   tab matches their badge
+    //
+    // The endpoint is already canManage-gated above, so any HR-tier
+    // user can request any brand. Brand acts as a UI filter, not
+    // an access control.
+    const url = new URL(request.url);
+    const user = session!.user as any;
+    const isDev = user?.isDeveloper === true;
+    const callerBu = user?.businessUnit ?? null;
+
+    const brandParam = (url.searchParams.get("brand") ?? "").toLowerCase().trim();
+    const NORMALIZE: Record<string, "NB Media" | "YT Labs" | "all" | null> = {
+      "":          null,                  // → caller's own brand
+      "nb_media":  "NB Media",
+      "nb media":  "NB Media",
+      "nbmedia":   "NB Media",
+      "yt_labs":   "YT Labs",
+      "yt labs":   "YT Labs",
+      "ytlabs":    "YT Labs",
+      "all":       "all",
+    };
+    const requestedBrand = brandParam in NORMALIZE ? NORMALIZE[brandParam] : null;
+
+    // Authority check on ?brand=all — admin sweep view that drops
+    // the WHERE clause entirely. Lock to developers only; an HR
+    // Manager who needs to view both brands clicks the [NB Media]
+    // and [YT Labs] tabs separately. (Per HR's brand-tab design,
+    // each tab stays visually clean.)
+    if (requestedBrand === "all" && !isDev) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    // Decide what to filter on:
+    //   • ?brand=all (devs only) → no WHERE clause
+    //   • ?brand=<explicit>      → that brand (HR can flip tabs;
+    //                              canManage already gates this)
+    //   • no ?brand= (default)   → caller's own brand
+    let brandToShow: string | null;
+    if (requestedBrand === "all") {
+      brandToShow = null;
+    } else if (requestedBrand) {
+      brandToShow = requestedBrand;
+    } else if (callerBu) {
+      brandToShow = callerBu;
+    } else if (isDev) {
+      // Developer with no businessUnit + no ?brand= → see all (the
+      // typical debug login case).
+      brandToShow = null;
+    } else {
+      // Non-developer caller with no businessUnit AND no explicit
+      // ?brand= → fail closed (return empty). Better than silently
+      // showing every brand to a user whose own brand isn't set up
+      // yet. HR fixes the user's EmployeeProfile.businessUnit, or
+      // the user clicks an explicit brand tab.
+      console.warn(`[GET /api/hr/exits] caller #${user?.dbId} has no businessUnit and didn't pass ?brand= — returning empty.`);
+      return NextResponse.json([]);
+    }
+
+    const baseSql = `SELECT e.id, e."userId", u.name AS "userName", u.email AS "userEmail",
+                            ep.designation, ep.department, ep."businessUnit",
+                            e."exitType", e."resignationDate", e."lastWorkingDay",
+                            e."noticePeriodDays", e.reason, e.notes, e.status,
+                            e."assetsReturned", e."documentsHandled",
+                            e."finalSettlementDone", e."exitInterviewDone",
+                            e."okToRehire", e."createdAt"
+                       FROM "EmployeeExit" e
+                       JOIN "User" u ON u.id = e."userId"
+                  LEFT JOIN "EmployeeProfile" ep ON ep."userId" = e."userId"`;
+
+    const rows = brandToShow
+      ? await prisma.$queryRawUnsafe<any[]>(
+          `${baseSql} WHERE ep."businessUnit" = $1 ORDER BY e."createdAt" DESC`,
+          brandToShow,
+        )
+      : await prisma.$queryRawUnsafe<any[]>(
+          `${baseSql} ORDER BY e."createdAt" DESC`,
+        );
+
     return NextResponse.json(rows);
   } catch (e: any) {
     console.error("[GET /api/hr/exits] failed:", e);

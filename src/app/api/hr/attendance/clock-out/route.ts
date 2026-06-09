@@ -8,6 +8,7 @@ import { istTodayDateOnly } from "@/lib/ist-date";
 import { isMobileRequest } from "@/lib/is-mobile-device";
 import { hasDesktopBypassHeader } from "@/lib/desktop-bypass";
 import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
+import { isAfterSendTime, getWeekKey } from "@/lib/hr/pulse-week";
 
 // Same shape as the clock-in body. Optional here because legacy
 // callers (cron sweeper, integration tests, anyone POSTing an empty
@@ -31,6 +32,30 @@ export async function POST(req: NextRequest) {
       userId = dbUser?.id!;
     }
     if (!userId) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+    // ── Weekly Pulse gate ──────────────────────────────────────
+    // On Fridays from 10:30 IST onwards, every employee must submit
+    // this week's Pulse before clocking out. Skip for developers
+    // (they own the dashboard plumbing and shouldn't be locked out
+    // when testing) and for any future system / cron clock-out
+    // callers that pass a special header.
+    const isSystemCaller =
+      req.headers.get("x-system-clockout") === "1" || user?.isDeveloper === true;
+    if (!isSystemCaller && isAfterSendTime()) {
+      const weekKey = getWeekKey();
+      const submitted = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT 1 FROM "PulseResponse"
+          WHERE "userId" = $1 AND "weekKey" = $2 LIMIT 1`,
+        userId, weekKey,
+      );
+      if (submitted.length === 0) {
+        return NextResponse.json({
+          error: "Submit this week's Pulse before clocking out.",
+          reason: "pulse_required",
+          pulseUrl: "/dashboard/hr/pulse",
+        }, { status: 403 });
+      }
+    }
 
     // Mobile guard, mirrors clock-in: blocked by default, allowed when
     // ANY non-dismissed On-Duty record covers today. Pending counts —
