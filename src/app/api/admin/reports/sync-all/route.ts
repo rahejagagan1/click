@@ -55,7 +55,7 @@ export async function POST() {
             /* ── WEEKLY ── */
             try {
                 const existingWeekly = await prisma.weeklyReport.findUnique({
-                    where: { managerId_week_month_year: { managerId: mgr.id, week, month, year } },
+                    where: { managerId_reportTemplate_week_month_year: { managerId: mgr.id, reportTemplate: fmt, week, month, year } },
                 });
                 if (!existingWeekly?.isLocked) {
                     const period = getWeeklyReportPeriod(year, month, week);
@@ -128,8 +128,8 @@ export async function POST() {
                         });
 
                     await prisma.weeklyReport.upsert({
-                        where:  { managerId_week_month_year: { managerId: mgr.id, week, month, year } },
-                        create: { managerId: mgr.id, week, month, year, writerRows, editorRows, isLocked: false },
+                        where:  { managerId_reportTemplate_week_month_year: { managerId: mgr.id, reportTemplate: fmt, week, month, year } },
+                        create: { managerId: mgr.id, reportTemplate: fmt, week, month, year, writerRows, editorRows, isLocked: false },
                         update: { writerRows, editorRows },
                     });
                     weeklyStatus = `synced (${writerRows.length} writers, ${editorRows.length} editors)`;
@@ -144,7 +144,7 @@ export async function POST() {
             /* ── MONTHLY ── */
             try {
                 const existingMonthly = await prisma.monthlyReport.findUnique({
-                    where: { managerId_month_year: { managerId: mgr.id, month, year } },
+                    where: { managerId_reportTemplate_month_year: { managerId: mgr.id, reportTemplate: fmt, month, year } },
                 });
                 if (!existingMonthly?.isLocked) {
                     const monthStart = new Date(year, month, 1);
@@ -180,8 +180,8 @@ export async function POST() {
                             };
                         });
                         await prisma.monthlyReport.upsert({
-                            where:  { managerId_month_year: { managerId: mgr.id, month, year } },
-                            create: { managerId: mgr.id, month, year, nishantResearcherRows, isLocked: false },
+                            where:  { managerId_reportTemplate_month_year: { managerId: mgr.id, reportTemplate: fmt, month, year } },
+                            create: { managerId: mgr.id, reportTemplate: fmt, month, year, nishantResearcherRows, isLocked: false },
                             update: { nishantResearcherRows },
                         });
                         monthlyStatus = `synced researcher manager (${nishantResearcherRows.length} researchers)`;
@@ -214,8 +214,8 @@ export async function POST() {
                             .map(([person, count], i) => ({ id: `sb-auto-${i}`, person, thumbnailsDone: String(count), avgCtr: "", remark: "", autoFilled: true }));
 
                         await prisma.monthlyReport.upsert({
-                            where:  { managerId_month_year: { managerId: mgr.id, month, year } },
-                            create: { managerId: mgr.id, month, year, andrewCRows: andrewSBRows as any, andrewDRows: andrewSCRows as any, isLocked: false },
+                            where:  { managerId_reportTemplate_month_year: { managerId: mgr.id, reportTemplate: fmt, month, year } },
+                            create: { managerId: mgr.id, reportTemplate: fmt, month, year, andrewCRows: andrewSBRows as any, andrewDRows: andrewSCRows as any, isLocked: false },
                             update: { andrewCRows: andrewSBRows as any, andrewDRows: andrewSCRows as any },
                         });
                         monthlyStatus = `synced QA manager (${andrewSCRows.length} channels, ${andrewSBRows.length} thumbnail persons)`;

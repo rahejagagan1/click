@@ -3,7 +3,9 @@
 import { useMemo, useState } from "react";
 import useSWR, { mutate } from "swr";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { fetcher } from "@/lib/swr";
+import { brandFromSlug, inBrandScope } from "@/lib/hr-brand-scope";
 import { ChevronLeft, Search, X, Wallet, Clock, RefreshCcw, AlertCircle } from "lucide-react";
 
 // Per-employee Attendance + Payroll toggles. CEO + developers default
@@ -17,6 +19,7 @@ import { ChevronLeft, Search, X, Wallet, Clock, RefreshCcw, AlertCircle } from "
 
 type PolicyRow = {
   id: number; name: string; email: string; department: string | null;
+  businessUnit: string | null;
   role: string | null; orgLevel: string | null; isDeveloper: boolean;
   profilePictureUrl: string | null;
   attendanceEnabled: boolean; payrollEnabled: boolean;
@@ -28,13 +31,19 @@ const URL = "/api/hr/admin/notification-policy";
 export default function PayrollAttendancePermissionsPage() {
   const { data, isLoading, error } = useSWR<{ users: PolicyRow[] }>(URL, fetcher);
   const users = data?.users ?? [];
+  const searchParams = useSearchParams();
+  // Auto-scope to the brand of the HR sub-dashboard you came from (the rail
+  // link carries ?brand=). Super-admins on the "all" dashboard (or no param)
+  // see every brand. UI-only filter — the API still returns org-wide rows.
+  const brand = brandFromSlug(searchParams?.get("brand"));
+  const brandUsers = useMemo(() => users.filter((u) => inBrandScope(u.businessUnit, brand)), [users, brand]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "overridden" | "att_off" | "pay_off">("all");
   const [busyId, setBusyId] = useState<number | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
 
   const filtered = useMemo(() => {
-    let xs = users;
+    let xs = brandUsers;
     if (filter === "overridden") xs = xs.filter((u) => u.source === "override");
     else if (filter === "att_off") xs = xs.filter((u) => !u.attendanceEnabled);
     else if (filter === "pay_off") xs = xs.filter((u) => !u.payrollEnabled);
@@ -45,14 +54,14 @@ export default function PayrollAttendancePermissionsPage() {
       || (u.email || "").toLowerCase().includes(q)
       || (u.department || "").toLowerCase().includes(q),
     );
-  }, [users, query, filter]);
+  }, [brandUsers, query, filter]);
 
   const counts = useMemo(() => ({
-    total:        users.length,
-    attDisabled:  users.filter((u) => !u.attendanceEnabled).length,
-    payDisabled:  users.filter((u) => !u.payrollEnabled).length,
-    overridden:   users.filter((u) => u.source === "override").length,
-  }), [users]);
+    total:        brandUsers.length,
+    attDisabled:  brandUsers.filter((u) => !u.attendanceEnabled).length,
+    payDisabled:  brandUsers.filter((u) => !u.payrollEnabled).length,
+    overridden:   brandUsers.filter((u) => u.source === "override").length,
+  }), [brandUsers]);
 
   const flip = async (u: PolicyRow, key: "attendanceEnabled" | "payrollEnabled") => {
     setBusyId(u.id);
@@ -111,8 +120,18 @@ export default function PayrollAttendancePermissionsPage() {
           <ChevronLeft size={16} />
         </Link>
         <div className="min-w-0 flex-1">
-          <h1 className="text-[15px] font-bold text-slate-800">Payroll &amp; Attendance Permissions</h1>
-          <p className="text-[11.5px] text-slate-500">Per-employee toggles for the attendance + payroll modules. Overrides win over role defaults.</p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-[15px] font-bold text-slate-800">Payroll &amp; Attendance Permissions</h1>
+            {brand && brand !== "all" && (
+              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${brand === "YT Labs" ? "bg-rose-100 text-rose-700" : "bg-sky-100 text-sky-700"}`}>
+                {brand}
+              </span>
+            )}
+          </div>
+          <p className="text-[11.5px] text-slate-500">
+            Per-employee toggles for the attendance + payroll modules. Overrides win over role defaults.
+            {brand && brand !== "all" ? ` Showing ${brand} employees only.` : ""}
+          </p>
         </div>
       </div>
 
