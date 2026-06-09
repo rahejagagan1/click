@@ -37,7 +37,7 @@ type Q = {
   emojis: string[] | null;
   isActive: boolean;
   surveyType: "weekly" | "monthly";
-  brand: "NB Media" | "YT Labs" | null;
+  brand: "NB Media" | "YT Labs";
 };
 
 const WEEK_LABELS: Record<number, { title: string; subtitle: string }> = {
@@ -60,10 +60,9 @@ const LIKERT_LABELS = [
 export default function PulseSurveysPanel() {
   const [outer, setOuter] = useState<"questions" | "responses">("questions");
   const [view, setView] = useState<"weekly" | "monthly">("weekly");
-  // Brand sub-switcher. "" = shared questions (both brands see).
-  // "NB Media" / "YT Labs" = brand-specific variants. HR can manage
-  // each bank independently while shared questions stay common.
-  const [brand, setBrand] = useState<"" | "NB Media" | "YT Labs">("");
+  // Brand sub-switcher. Strict brand separation — each brand has
+  // its own independent question bank. No shared layer.
+  const [brand, setBrand] = useState<"NB Media" | "YT Labs">("NB Media");
 
   return (
     <div className="space-y-5">
@@ -123,29 +122,25 @@ export default function PulseSurveysPanel() {
             </button>
           </div>
 
-          {/* Brand picker — which question bank to manage. Each
-              employee receives "shared + their brand" at send time;
-              this lets HR edit each layer cleanly. */}
+          {/* Brand picker — each brand has its own independent
+              question bank. Strict separation: NB Media employees
+              receive only NB Media questions; same for YT Labs. */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-500 mr-1">Brand</span>
-            {([
-              { key: "",         label: "Shared (both)" },
-              { key: "NB Media", label: "NB Media only" },
-              { key: "YT Labs",  label: "YT Labs only" },
-            ] as const).map((b) => {
-              const active = brand === b.key;
+            {(["NB Media", "YT Labs"] as const).map((b) => {
+              const active = brand === b;
               return (
                 <button
-                  key={b.key || "shared"}
+                  key={b}
                   type="button"
-                  onClick={() => setBrand(b.key as any)}
+                  onClick={() => setBrand(b)}
                   className={`h-7 px-3 rounded-md text-[11.5px] font-semibold transition-colors ${
                     active
                       ? "bg-[#008CFF] text-white"
                       : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
-                  {b.label}
+                  {b}
                 </button>
               );
             })}
@@ -161,13 +156,11 @@ export default function PulseSurveysPanel() {
 // ─────────────────────────────────────────────────────────────────
 // Weekly view — 4 week-tabs, each shows that week's questions.
 // ─────────────────────────────────────────────────────────────────
-function WeeklyView({ brand }: { brand: "" | "NB Media" | "YT Labs" }) {
+function WeeklyView({ brand }: { brand: "NB Media" | "YT Labs" }) {
   const [week, setWeek] = useState<1 | 2 | 3 | 4>(1);
-  // Always include brand in the URL — empty = shared only,
-  // "NB Media"/"YT Labs" = that brand + shared.
-  const apiKey = brand
-    ? `/api/hr/pulse/questions?surveyType=weekly&week=${week}&brand=${encodeURIComponent(brand)}`
-    : `/api/hr/pulse/questions?surveyType=weekly&week=${week}`;
+  // Brand is always set under strict separation; include it in
+  // the URL so each brand tab cache-busts independently.
+  const apiKey = `/api/hr/pulse/questions?surveyType=weekly&week=${week}&brand=${encodeURIComponent(brand)}`;
   const { data, isLoading, mutate } = useSWR<{ questions: Q[] }>(apiKey, fetcher);
   const questions = data?.questions ?? [];
   const refresh = () => { mutate(); globalMutate(apiKey); };
@@ -212,7 +205,7 @@ function WeeklyView({ brand }: { brand: "" | "NB Media" | "YT Labs" }) {
         week={week}
         brand={brand}
         onAdded={refresh}
-        label={`Add ${brand || "shared"} question to Week ${week}`}
+        label={`Add question to ${brand} · Week ${week}`}
       />
     </div>
   );
@@ -221,10 +214,8 @@ function WeeklyView({ brand }: { brand: "" | "NB Media" | "YT Labs" }) {
 // ─────────────────────────────────────────────────────────────────
 // Monthly view — single list, no week buckets.
 // ─────────────────────────────────────────────────────────────────
-function MonthlyView({ brand }: { brand: "" | "NB Media" | "YT Labs" }) {
-  const apiKey = brand
-    ? `/api/hr/pulse/questions?surveyType=monthly&brand=${encodeURIComponent(brand)}`
-    : `/api/hr/pulse/questions?surveyType=monthly`;
+function MonthlyView({ brand }: { brand: "NB Media" | "YT Labs" }) {
+  const apiKey = `/api/hr/pulse/questions?surveyType=monthly&brand=${encodeURIComponent(brand)}`;
   const { data, isLoading, mutate } = useSWR<{ questions: Q[] }>(apiKey, fetcher);
   const questions = data?.questions ?? [];
   const refresh = () => { mutate(); globalMutate(apiKey); };
@@ -292,7 +283,7 @@ function MonthlyView({ brand }: { brand: "" | "NB Media" | "YT Labs" }) {
         week={null}
         brand={brand}
         onAdded={refresh}
-        label={`Add ${brand || "shared"} question to Monthly Survey`}
+        label={`Add question to ${brand} Monthly Survey`}
       />
     </div>
   );
@@ -393,14 +384,11 @@ function QuestionCard({ q, onChange }: { q: Q; onChange: () => void }) {
                   <p className="text-[14px] text-slate-900 font-medium leading-snug">{q.text}</p>
                   <p className="mt-1 text-[10.5px] uppercase tracking-[0.08em] font-semibold text-slate-400 inline-flex items-center gap-2 flex-wrap">
                     <TypeLabel type={q.type} />
-                    {/* Brand badge — coloured per brand. Shared
-                        questions (brand IS NULL) get a neutral chip. */}
-                    {q.brand === "NB Media" ? (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold normal-case tracking-normal bg-[#008CFF]/10 text-[#008CFF]">NB Media</span>
-                    ) : q.brand === "YT Labs" ? (
+                    {/* Brand badge — coloured per brand. */}
+                    {q.brand === "YT Labs" ? (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-bold normal-case tracking-normal bg-[#d4143d]/10 text-[#d4143d]">YT Labs</span>
                     ) : (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold normal-case tracking-normal bg-slate-100 text-slate-600">Shared</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold normal-case tracking-normal bg-[#008CFF]/10 text-[#008CFF]">NB Media</span>
                     )}
                     {!q.isActive && (
                       <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 normal-case tracking-normal text-[10px]">Inactive</span>
@@ -630,7 +618,7 @@ function AddQuestionButton({
 }: {
   surveyType: "weekly" | "monthly";
   week: number | null;
-  brand: "" | "NB Media" | "YT Labs";
+  brand: "NB Media" | "YT Labs";
   onAdded: () => void;
   label: string;
 }) {
@@ -646,9 +634,7 @@ function AddQuestionButton({
       const body: any = {
         surveyType, text: text.trim(), type,
         emojis: type === "emoji" ? DEFAULT_EMOJIS.neutral : undefined,
-        // Empty brand → null = shared. Otherwise tag the new
-        // question to the currently-active brand tab.
-        brand: brand || null,
+        brand, // strict separation — always the active brand tab
       };
       if (week != null) body.week = week;
 

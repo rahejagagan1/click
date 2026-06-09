@@ -28,40 +28,55 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
   const monthKey   = getMonthKey(now);
   const monthLabel = prettyMonth(monthKey);
 
-  const questions = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT id, "order", text, type
+  // Strict brand separation — split questions by brand. Each
+  // employee receives ONLY their brand's questions.
+  type Q = { id: number; order: number; text: string; type: string; brand: string };
+  const allQuestions = await prisma.$queryRawUnsafe<Q[]>(
+    `SELECT id, "order", text, type, brand
        FROM "PulseQuestion"
       WHERE "surveyType" = 'monthly' AND "isActive" = true
       ORDER BY "order" ASC`,
   );
+  const nbQs = allQuestions.filter((q) => q.brand === "NB Media");
+  const ytQs = allQuestions.filter((q) => q.brand === "YT Labs");
+  const questionsForBrand = (brand: string | null): Q[] =>
+    brand === "NB Media" ? nbQs :
+    brand === "YT Labs"  ? ytQs :
+    [];
 
-  // Active employees with real emails. Tolerant of envs without
-  // the isDeveloper column.
-  let employees: Array<{ id: number; name: string; email: string }>;
+  // Active employees with real emails + their businessUnit.
+  let employees: Array<{ id: number; name: string; email: string; businessUnit: string | null }>;
   try {
     employees = await prisma.$queryRawUnsafe(
-      `SELECT id, name, email FROM "User"
-        WHERE "isActive" = true AND email IS NOT NULL AND email <> ''
-          AND COALESCE("isDeveloper", false) = false
-        ORDER BY id ASC`,
+      `SELECT u.id, u.name, u.email, ep."businessUnit"
+         FROM "User" u
+         LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
+        WHERE u."isActive" = true AND u.email IS NOT NULL AND u.email <> ''
+          AND COALESCE(u."isDeveloper", false) = false
+        ORDER BY u.id ASC`,
     );
   } catch (e: any) {
     const code = e?.meta?.code || e?.code;
     if (code === "42703" || /isDeveloper/.test(String(e?.message ?? ""))) {
       employees = await prisma.$queryRawUnsafe(
-        `SELECT id, name, email FROM "User"
-          WHERE "isActive" = true AND email IS NOT NULL AND email <> ''
-          ORDER BY id ASC`,
+        `SELECT u.id, u.name, u.email, ep."businessUnit"
+           FROM "User" u
+           LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
+          WHERE u."isActive" = true AND u.email IS NOT NULL AND u.email <> ''
+          ORDER BY u.id ASC`,
       );
     } else { throw e; }
   }
 
-  if (employees.length === 0 || questions.length === 0) {
+  // Strict brand separation — skip users with no businessUnit.
+  employees = employees.filter((e) => e.businessUnit === "NB Media" || e.businessUnit === "YT Labs");
+
+  if (employees.length === 0 || allQuestions.length === 0) {
     return {
       monthKey, monthLabel,
       recipients: employees.length,
       emailsSent: 0, emailsFailed: 0, notifications: 0,
-      questions: questions.length,
+      questions: allQuestions.length,
     };
   }
 
@@ -96,8 +111,11 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
   }
 
   // ── Emails ─────────────────────────────────────────────────────
-  const html = buildEmailHtml({ monthLabel, questions, surveyUrl });
-  const text = html.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  // Two precomputed HTML variants — strict brand separation.
+  const variantBySlug = {
+    "NB Media": buildEmailHtml({ monthLabel, questions: questionsForBrand("NB Media"), surveyUrl }),
+    "YT Labs":  buildEmailHtml({ monthLabel, questions: questionsForBrand("YT Labs"),  surveyUrl }),
+  };
   let emailsSent = 0, emailsFailed = 0;
   const BATCH_SIZE = 25;
   const PAUSE_MS   = 250;
@@ -105,8 +123,11 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
     const wave = employees.slice(i, i + BATCH_SIZE);
     await Promise.all(wave.map(async (emp) => {
       try {
-        const personalised = html.replace(/\{\{FirstName\}\}/g, firstNameOf(emp.name));
-        const personalText = text.replace(/\{\{FirstName\}\}/g, firstNameOf(emp.name));
+        const variant = emp.businessUnit === "YT Labs"
+          ? variantBySlug["YT Labs"]
+          : variantBySlug["NB Media"];
+        const personalised = variant.replace(/\{\{FirstName\}\}/g, firstNameOf(emp.name));
+        const personalText = personalised.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
         await sendEmail({
           to: emp.email,
           content: { subject, html: personalised, text: personalText } as any,
@@ -126,7 +147,7 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
     monthKey, monthLabel,
     recipients: employees.length,
     emailsSent, emailsFailed, notifications,
-    questions: questions.length,
+    questions: allQuestions.length,
   };
 }
 
