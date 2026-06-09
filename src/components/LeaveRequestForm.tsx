@@ -344,6 +344,11 @@ export default function LeaveRequestForm({
         <div className="px-5 py-4 space-y-4 overflow-y-auto">
           {err && <p className="text-[12px] text-red-500 bg-red-500/10 px-3 py-2 rounded-lg">{err}</p>}
 
+          {/* WFH balance badge — shows the employee how many of their
+              monthly quota is used before they submit. Only renders
+              for WFH requests (other kinds don't have this quota). */}
+          {kind === "wfh" && <WfhBalanceBadge />}
+
           {/* Date range card — FROM and TO sit on the same row so the
               two date pickers line up, with the "1 day" badge anchored
               to the top-right of the card (not crammed beside FROM). */}
@@ -611,6 +616,58 @@ export default function LeaveRequestForm({
           >
             {saving ? "Submitting…" : (<><Check size={14} strokeWidth={2.5} /> Submit</>)}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** WFH monthly balance — shows "X of Y used this month" + remaining.
+ *  Reads from the caller's own balance endpoint. Hides entirely if
+ *  the limit is disabled (so HR doesn't have to explain a phantom
+ *  badge when enforcement is off). */
+function WfhBalanceBadge() {
+  const { data } = useSWR<{
+    credited: number; used: number; remaining: number;
+    monthKey: string; brand: string | null; limitEnabled: boolean;
+  }>("/api/hr/wfh/balance", fetcher, { revalidateOnFocus: false });
+
+  if (!data || !data.limitEnabled) return null;
+
+  const monthLabel = (() => {
+    const m = data.monthKey?.match(/^(\d{4})-M(\d{2})$/);
+    if (!m) return data.monthKey ?? "";
+    const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    return `${months[Number(m[2]) - 1] ?? ""} ${m[1]}`;
+  })();
+
+  const exhausted = data.remaining <= 0;
+  const tone = exhausted
+    ? "border-rose-200 bg-rose-50 text-rose-800"
+    : data.remaining === 1
+      ? "border-amber-200 bg-amber-50 text-amber-800"
+      : "border-emerald-200 bg-emerald-50 text-emerald-800";
+
+  return (
+    <div className={`rounded-lg border ${tone} px-3.5 py-2.5 text-[12px]`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-white/60 text-[14px] font-bold tabular-nums">
+            {data.used}
+          </span>
+          <div className="min-w-0">
+            <p className="font-semibold leading-tight">
+              {data.used} of {data.credited} WFH days used this month
+            </p>
+            <p className="text-[11px] opacity-80 mt-0.5">
+              {monthLabel}{data.brand ? ` · ${data.brand}` : ""}
+              {exhausted && " · Limit reached"}
+            </p>
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-[10px] uppercase tracking-wider font-bold opacity-70">Remaining</p>
+          <p className="text-[20px] font-bold tabular-nums leading-none">{data.remaining}</p>
         </div>
       </div>
     </div>
