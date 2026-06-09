@@ -535,16 +535,11 @@ function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: an
               showComments ? "text-[#008CFF]" : "text-slate-500 dark:text-slate-400"
             }`}>
             <MessageSquare className="w-4 h-4" />
-            <span>Comment</span>
-            {post.comments.length > 0 && (
-              <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10.5px] font-bold tabular-nums ${
-                showComments
-                  ? "bg-[#008CFF] text-white"
-                  : "bg-[#008CFF]/12 text-[#008CFF]"
-              }`}>
-                {post.comments.length}
-              </span>
-            )}
+            <span>
+              {post.comments.length === 0 && "Comment"}
+              {post.comments.length === 1 && "1 Comment"}
+              {post.comments.length > 1 && `${post.comments.length} Comments`}
+            </span>
           </button>
         </div>
         <div className="flex items-center gap-1.5 pr-2 text-[12px] text-slate-500 dark:text-slate-400">
