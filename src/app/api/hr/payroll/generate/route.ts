@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   if (!canViewSalary(user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
-    const { runId } = await req.json();
+    const { runId, brand } = await req.json();
     if (!runId) return NextResponse.json({ error: "runId required" }, { status: 400 });
 
     const run = await prisma.payrollRun.findUnique({ where: { id: runId } });
@@ -37,9 +37,21 @@ export async function POST(req: NextRequest) {
     await prisma.payrollRun.update({ where: { id: runId }, data: { status: "processing" } });
 
     const structures = await prisma.salaryStructure.findMany({
-      include: { user: { select: { id: true, isActive: true } } },
+      include: { user: { select: { id: true, isActive: true, employeeProfile: { select: { businessUnit: true } } } } },
     });
-    const activeStructures = structures.filter(s => s.user.isActive);
+    // Brand scope: when "NB Media" / "YT Labs" is passed (the Run Payroll brand
+    // dropdown), only that brand's employees are processed — so each brand's
+    // payroll runs independently. brandOf semantics: YT Labs is exact; NB Media
+    // is everything else (incl. null / legacy), so no employee is silently
+    // skipped. Payslips are upserted per-user, so generating one brand never
+    // wipes the other's payslips in the same run.
+    const activeStructures = structures.filter(s => {
+      if (!s.user.isActive) return false;
+      const bu = (s.user as any).employeeProfile?.businessUnit ?? null;
+      if (brand === "YT Labs")  return bu === "YT Labs";
+      if (brand === "NB Media") return bu !== "YT Labs";
+      return true;
+    });
 
     const firstDay = new Date(Date.UTC(run.year, run.month, 1));
     const lastDay  = new Date(Date.UTC(run.year, run.month + 1, 0));
