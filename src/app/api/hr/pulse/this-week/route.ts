@@ -37,12 +37,23 @@ export async function GET() {
     const weekKey = getWeekKey();
     const activeWeek = getActiveWeekNumber();
 
+    // Look up the caller's brand so we hand them their brand's
+    // questions + shared questions. If they have no brand set on
+    // their profile, they only see shared questions (the safe
+    // default for users like dev / sandbox accounts).
+    const profile = await prisma.employeeProfile.findUnique({
+      where: { userId },
+      select: { businessUnit: true },
+    });
+    const callerBrand = profile?.businessUnit ?? null;
+
     const questions = await prisma.$queryRawUnsafe<any[]>(
       `SELECT id, "order", text, type, emojis
          FROM "PulseQuestion"
         WHERE "surveyType" = 'weekly' AND week = $1 AND "isActive" = true
+          AND (brand IS NULL OR brand = $2)
         ORDER BY "order" ASC`,
-      activeWeek,
+      activeWeek, callerBrand,
     );
 
     // Existence check — any row for (userId, weekKey) means submitted.

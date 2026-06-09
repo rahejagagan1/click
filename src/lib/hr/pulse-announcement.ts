@@ -30,45 +30,60 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
   const weekKey    = getWeekKey(now);
   const activeWeek = getActiveWeekNumber(now);
 
-  // Active question set for this Friday.
-  const questions = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT id, "order", text, type
+  // Two question sets — shared (brand IS NULL) + each brand-specific.
+  // Each employee receives shared + their own brand's questions.
+  type Q = { id: number; order: number; text: string; type: string; brand: string | null };
+  const allQuestions = await prisma.$queryRawUnsafe<Q[]>(
+    `SELECT id, "order", text, type, brand
        FROM "PulseQuestion"
       WHERE "surveyType" = 'weekly' AND week = $1 AND "isActive" = true
       ORDER BY "order" ASC`,
     activeWeek,
   );
+  const sharedQs = allQuestions.filter((q) => q.brand == null);
+  const nbQs     = allQuestions.filter((q) => q.brand === "NB Media");
+  const ytQs     = allQuestions.filter((q) => q.brand === "YT Labs");
+  const questionsForBrand = (brand: string | null): Q[] => {
+    if (brand === "NB Media") return [...sharedQs, ...nbQs];
+    if (brand === "YT Labs")  return [...sharedQs, ...ytQs];
+    return sharedQs;
+  };
 
-  // Every active employee with a real email. Devs skipped on
-  // envs where the isDeveloper column is present — fallback to
-  // "all active employees" on legacy DBs without the column so
-  // the fanout still works.
-  let employees: Array<{ id: number; name: string; email: string }>;
+  // Every active employee with a real email + their businessUnit.
+  // Devs skipped on envs where the isDeveloper column is present —
+  // fallback to "all active employees" on legacy DBs without the
+  // column so the fanout still works.
+  let employees: Array<{ id: number; name: string; email: string; businessUnit: string | null }>;
   try {
     employees = await prisma.$queryRawUnsafe(
-      `SELECT id, name, email FROM "User"
-        WHERE "isActive" = true
-          AND email IS NOT NULL AND email <> ''
-          AND COALESCE("isDeveloper", false) = false
-        ORDER BY id ASC`,
+      `SELECT u.id, u.name, u.email, ep."businessUnit"
+         FROM "User" u
+         LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
+        WHERE u."isActive" = true
+          AND u.email IS NOT NULL AND u.email <> ''
+          AND COALESCE(u."isDeveloper", false) = false
+        ORDER BY u.id ASC`,
     );
   } catch (e: any) {
     const code = e?.meta?.code || e?.code;
     if (code === "42703" || /isDeveloper/.test(String(e?.message ?? ""))) {
       employees = await prisma.$queryRawUnsafe(
-        `SELECT id, name, email FROM "User"
-          WHERE "isActive" = true
-            AND email IS NOT NULL AND email <> ''
-          ORDER BY id ASC`,
+        `SELECT u.id, u.name, u.email, ep."businessUnit"
+           FROM "User" u
+           LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
+          WHERE u."isActive" = true
+            AND u.email IS NOT NULL AND u.email <> ''
+          ORDER BY u.id ASC`,
       );
     } else { throw e; }
   }
 
-  if (employees.length === 0 || questions.length === 0) {
+  // Bail only if NO employees AND NO questions of any kind.
+  if (employees.length === 0 || allQuestions.length === 0) {
     return {
       weekKey, activeWeek,
       recipients: employees.length, emailsSent: 0, emailsFailed: 0,
-      notifications: 0, questions: questions.length,
+      notifications: 0, questions: allQuestions.length,
     };
   }
 
@@ -104,8 +119,14 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
   }
 
   // ── Emails — batched 25/wave with 250 ms gap ──────────────────
-  const html  = buildEmailHtml({ activeWeek, theme, questions, pulseUrl });
-  const text  = htmlToText(html);
+  // Three precomputed HTML variants (shared-only / NB Media / YT Labs)
+  // so we don't re-render the template once per recipient. Each
+  // employee gets the variant matching their businessUnit.
+  const variantBySlug = {
+    "shared":   buildEmailHtml({ activeWeek, theme, questions: questionsForBrand(null),       pulseUrl }),
+    "NB Media": buildEmailHtml({ activeWeek, theme, questions: questionsForBrand("NB Media"), pulseUrl }),
+    "YT Labs":  buildEmailHtml({ activeWeek, theme, questions: questionsForBrand("YT Labs"),  pulseUrl }),
+  };
   let emailsSent = 0, emailsFailed = 0;
   const BATCH_SIZE = 25;
   const PAUSE_MS   = 250;
@@ -113,10 +134,14 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
     const wave = employees.slice(i, i + BATCH_SIZE);
     await Promise.all(wave.map(async (emp) => {
       try {
-        const personalised = html.replace(/\{\{FirstName\}\}/g, firstNameOf(emp.name));
+        const variant = emp.businessUnit === "NB Media" ? variantBySlug["NB Media"]
+                      : emp.businessUnit === "YT Labs"  ? variantBySlug["YT Labs"]
+                      : variantBySlug["shared"];
+        const personalised = variant.replace(/\{\{FirstName\}\}/g, firstNameOf(emp.name));
+        const text = htmlToText(personalised);
         await sendEmail({
           to: emp.email,
-          content: { subject, html: personalised, text: text.replace(/\{\{FirstName\}\}/g, firstNameOf(emp.name)) } as any,
+          content: { subject, html: personalised, text } as any,
         });
         emailsSent++;
       } catch (e: any) {
@@ -133,7 +158,7 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
     weekKey, activeWeek,
     recipients: employees.length,
     emailsSent, emailsFailed, notifications,
-    questions: questions.length,
+    questions: allQuestions.length,
   };
 }
 
