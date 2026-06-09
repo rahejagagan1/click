@@ -30,9 +30,9 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
   const weekKey    = getWeekKey(now);
   const activeWeek = getActiveWeekNumber(now);
 
-  // Two question sets — shared (brand IS NULL) + each brand-specific.
-  // Each employee receives shared + their own brand's questions.
-  type Q = { id: number; order: number; text: string; type: string; brand: string | null };
+  // Strict brand separation — each brand has its own independent
+  // question bank. No shared layer.
+  type Q = { id: number; order: number; text: string; type: string; brand: string };
   const allQuestions = await prisma.$queryRawUnsafe<Q[]>(
     `SELECT id, "order", text, type, brand
        FROM "PulseQuestion"
@@ -40,14 +40,12 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
       ORDER BY "order" ASC`,
     activeWeek,
   );
-  const sharedQs = allQuestions.filter((q) => q.brand == null);
-  const nbQs     = allQuestions.filter((q) => q.brand === "NB Media");
-  const ytQs     = allQuestions.filter((q) => q.brand === "YT Labs");
-  const questionsForBrand = (brand: string | null): Q[] => {
-    if (brand === "NB Media") return [...sharedQs, ...nbQs];
-    if (brand === "YT Labs")  return [...sharedQs, ...ytQs];
-    return sharedQs;
-  };
+  const nbQs = allQuestions.filter((q) => q.brand === "NB Media");
+  const ytQs = allQuestions.filter((q) => q.brand === "YT Labs");
+  const questionsForBrand = (brand: string | null): Q[] =>
+    brand === "NB Media" ? nbQs :
+    brand === "YT Labs"  ? ytQs :
+    [];  // no brand → no questions (dev/sandbox accounts skip)
 
   // Every active employee with a real email + their businessUnit.
   // Devs skipped on envs where the isDeveloper column is present —
@@ -78,7 +76,11 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
     } else { throw e; }
   }
 
-  // Bail only if NO employees AND NO questions of any kind.
+  // Strict brand separation — employees without a businessUnit
+  // on their profile can't be served a question set. Skip them
+  // entirely so they don't get an email with no content.
+  employees = employees.filter((e) => e.businessUnit === "NB Media" || e.businessUnit === "YT Labs");
+
   if (employees.length === 0 || allQuestions.length === 0) {
     return {
       weekKey, activeWeek,
@@ -119,11 +121,10 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
   }
 
   // ── Emails — batched 25/wave with 250 ms gap ──────────────────
-  // Three precomputed HTML variants (shared-only / NB Media / YT Labs)
-  // so we don't re-render the template once per recipient. Each
+  // Two precomputed HTML variants (NB Media / YT Labs) — strict
+  // brand separation means no "shared" middle ground. Each
   // employee gets the variant matching their businessUnit.
   const variantBySlug = {
-    "shared":   buildEmailHtml({ activeWeek, theme, questions: questionsForBrand(null),       pulseUrl }),
     "NB Media": buildEmailHtml({ activeWeek, theme, questions: questionsForBrand("NB Media"), pulseUrl }),
     "YT Labs":  buildEmailHtml({ activeWeek, theme, questions: questionsForBrand("YT Labs"),  pulseUrl }),
   };
@@ -134,9 +135,9 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
     const wave = employees.slice(i, i + BATCH_SIZE);
     await Promise.all(wave.map(async (emp) => {
       try {
-        const variant = emp.businessUnit === "NB Media" ? variantBySlug["NB Media"]
-                      : emp.businessUnit === "YT Labs"  ? variantBySlug["YT Labs"]
-                      : variantBySlug["shared"];
+        const variant = emp.businessUnit === "YT Labs"
+          ? variantBySlug["YT Labs"]
+          : variantBySlug["NB Media"];
         const personalised = variant.replace(/\{\{FirstName\}\}/g, firstNameOf(emp.name));
         const text = htmlToText(personalised);
         await sendEmail({
