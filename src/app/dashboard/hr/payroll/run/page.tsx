@@ -6,6 +6,8 @@ import { useSession } from "next-auth/react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { canViewSalary } from "@/lib/access";
+import { useSearchParams } from "next/navigation";
+import { brandFromSlug } from "@/lib/hr-brand-scope";
 import { DateField } from "@/components/ui/date-field";
 import {
   ChevronLeft, ChevronRight, Calendar,
@@ -127,7 +129,12 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
   // month strip. Payroll data filtering by entity is a follow-up; for
   // now this is a label state so HR sees they're contextually viewing
   // one brand vs the other.
-  const [payrollEntity, setPayrollEntity] = useState<"NB Media" | "YT Labs">("NB Media");
+  // Seed the brand from the dashboard's ?brand= (set by the HR Dashboard
+  // flyout) so opening payroll from the YT Labs dashboard lands on YT Labs.
+  const searchParams = useSearchParams();
+  const [payrollEntity, setPayrollEntity] = useState<"NB Media" | "YT Labs">(
+    brandFromSlug(searchParams?.get("brand") ?? null) === "YT Labs" ? "YT Labs" : "NB Media",
+  );
   const [entityOpen, setEntityOpen] = useState(false);
 
   const isAdmin = !!user && canViewSalary(user);
@@ -135,7 +142,7 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
   const { data: runsRaw } = useSWR<PayrollRun[]>(isAdmin ? "/api/hr/payroll/runs" : null, fetcher);
   const runs = Array.isArray(runsRaw) ? runsRaw : [];
 
-  const { data: empData } = useSWR<any>(isAdmin ? "/api/hr/employees?count=1" : null, fetcher);
+  const { data: empData } = useSWR<any>(isAdmin ? `/api/hr/employees?count=1&brand=${encodeURIComponent(payrollEntity)}` : null, fetcher);
   const totalEmployees = (Array.isArray(empData) ? empData.length : empData?.total) ?? 0;
 
   const cells = useMemo(() => buildStrip(today, runs), [today, runs]);
@@ -144,7 +151,7 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
                 ?? cells[0];
 
   // Phase 2 — totals (real aggregates from the payslip rows).
-  const totalsUrl = selected?.run ? `/api/hr/payroll/runs/${selected.run.id}/totals` : null;
+  const totalsUrl = selected?.run ? `/api/hr/payroll/runs/${selected.run.id}/totals?brand=${encodeURIComponent(payrollEntity)}` : null;
   const { data: totals } = useSWR<any>(isAdmin && totalsUrl ? totalsUrl : null, fetcher);
 
   // Phase 4 — activity feed for the right rail.
@@ -162,7 +169,7 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
     const y = selected.month0 === 0 ? selected.year - 1 : selected.year;
     return runs.find((r) => r.year === y && r.month === m) ?? null;
   }, [selected, runs]);
-  const prevTotalsUrl = prevRun ? `/api/hr/payroll/runs/${prevRun.id}/totals` : null;
+  const prevTotalsUrl = prevRun ? `/api/hr/payroll/runs/${prevRun.id}/totals?brand=${encodeURIComponent(payrollEntity)}` : null;
   const { data: prevTotals } = useSWR<any>(isAdmin && prevTotalsUrl ? prevTotalsUrl : null, fetcher);
   const prevMonthLabel = prevRun ? MONTHS_LONG[prevRun.month] : null;
 
@@ -262,13 +269,14 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
       const res = await fetch("/api/hr/payroll/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ runId: run.id }),
+        // brand scopes the run to one business unit's employees only.
+        body: JSON.stringify({ runId: run.id, brand: payrollEntity }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Generate failed");
       const data = await res.json();
-      setBanner({ kind: "ok", text: `Payslips generated for ${data.count ?? "all"} employees.` });
+      setBanner({ kind: "ok", text: `Payslips generated for ${data.count ?? "all"} ${payrollEntity} employees.` });
       await mutate("/api/hr/payroll/runs");
-      if (run.id) await mutate(`/api/hr/payroll/runs/${run.id}/totals`);
+      if (run.id) await mutate(`/api/hr/payroll/runs/${run.id}/totals?brand=${encodeURIComponent(payrollEntity)}`);
     } catch (e: any) {
       setBanner({ kind: "err", text: e?.message || "Generate failed" });
     } finally {

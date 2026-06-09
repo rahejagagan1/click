@@ -13,7 +13,7 @@ import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 // Plus a payslipCount so the UI can drive its "X/N employees" badge.
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   if (!canViewSalary(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -26,8 +26,18 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const run = await prisma.payrollRun.findUnique({ where: { id: runId } });
     if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
 
+    // Optional brand scope so the Run Payroll stats split per brand instead of
+    // always summing the whole org. Semantics match hr-brand-scope.brandOf:
+    //   YT Labs  → businessUnit = "YT Labs"
+    //   NB Media → everything else (incl. null / legacy / no profile)
+    const brand = new URL(req.url).searchParams.get("brand");
+    const brandWhere =
+      brand === "YT Labs"  ? { user: { employeeProfile: { businessUnit: "YT Labs" } } }
+    : brand === "NB Media" ? { user: { NOT: { employeeProfile: { businessUnit: "YT Labs" } } } }
+    : {};
+
     const agg = await prisma.payslip.aggregate({
-      where: { payrollRunId: runId },
+      where: { payrollRunId: runId, ...brandWhere },
       _sum: {
         grossEarnings:   true,
         totalDeductions: true,

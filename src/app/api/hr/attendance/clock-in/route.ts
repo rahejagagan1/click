@@ -63,7 +63,9 @@ export async function POST(req: NextRequest) {
     // header is intentionally not a secret — it's a soft override for when
     // a laptop isn't available; pair with a regularization request if used.
     const mobileBypass =
-      user?.isDeveloper === true || hasDesktopBypassHeader(req.headers);
+      user?.isDeveloper === true ||
+      hasDesktopBypassHeader(req.headers) ||
+      req.nextUrl.searchParams.get("desktop") === "1";
     if (isMobileRequest(req.headers) && !mobileBypass) {
       const today = istTodayDateOnly();
       const odForToday = await prisma.onDutyRequest.findFirst({

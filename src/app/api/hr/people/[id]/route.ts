@@ -68,14 +68,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       console.warn("[people GET] inlineManager lookup failed:", e);
     }
 
-    // designationId (RBAC) via raw SQL — the stale typed client may omit it.
+    // designationId + its RBAC designation label via raw SQL — the stale typed
+    // client may omit the column. designationLabel is what the header shows.
     let designationId: number | null = null;
+    let designationLabel: string | null = null;
     try {
-      const drows = await prisma.$queryRawUnsafe<Array<{ designationId: number | null }>>(
-        `SELECT "designationId" FROM "User" WHERE "id" = $1`, id,
+      const drows = await prisma.$queryRawUnsafe<Array<{ designationId: number | null; designationLabel: string | null }>>(
+        `SELECT u."designationId", d."label" AS "designationLabel"
+           FROM "User" u LEFT JOIN "Designation" d ON d."id" = u."designationId"
+          WHERE u."id" = $1`, id,
       );
       designationId = drows[0]?.designationId ?? null;
-    } catch { /* column missing → null */ }
+      designationLabel = drows[0]?.designationLabel ?? null;
+    } catch { /* column/table missing → null */ }
 
     // Extended onboarding fields — fetched via raw SQL so the GET
     // returns them even when `prisma generate` is stale on the VPS.
@@ -193,6 +198,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       shift:         userShift?.shift ?? null,
       inlineManager,
       designationId,
+      designationLabel,
       todayAttendance: todayAtt
         ? { ...todayAtt, hasOpenSession }
         : null,
