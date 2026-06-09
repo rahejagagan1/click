@@ -54,6 +54,7 @@ import {
   BarChart3 as BarChart3Icon,
   Rocket,
   MoreVertical,
+  SmilePlus,
 } from "lucide-react";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -1712,7 +1713,7 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
               {myReactionEmoji ? (
                 <span className="text-[16px] leading-none">{myReactionEmoji}</span>
               ) : (
-                <ThumbsUp className="h-4 w-4" />
+                <SmilePlus className="h-4 w-4" />
               )}
               React
             </button>
