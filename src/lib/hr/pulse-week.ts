@@ -104,3 +104,13 @@ export function prettyMonth(monthKey: string): string {
 export function getCycleKey(surveyType: "weekly" | "monthly", d: Date = new Date()): string {
   return surveyType === "monthly" ? getMonthKey(d) : getWeekKey(d);
 }
+
+/** True if the given date is the FIRST Monday of its month in IST.
+ *  Used by the monthly-survey auto-send cron — the cron fires every
+ *  Monday in the first week (`* * 1-7 * 1`), and this helper makes
+ *  sure we only actually fanout on day 1-7 AND day-of-week=Monday. */
+export function isFirstMondayOfMonth(d: Date = new Date()): boolean {
+  const ist = istShift(d);
+  if (ist.getUTCDay() !== 1) return false;          // Monday = 1
+  return ist.getUTCDate() <= 7;                     // first 7 days of month
+}

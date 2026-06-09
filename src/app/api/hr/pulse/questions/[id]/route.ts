@@ -59,21 +59,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (typeof body?.isActive === "boolean") {
       args.push(body.isActive); sets.push(`"isActive" = $${args.length}`);
     }
-    // Brand re-tagging. Pass "" or "both" or null to reset to shared
-    // (visible to both brands); pass "NB Media" / "YT Labs" for the
-    // brand-specific variants.
+    // Brand re-tagging. NOT NULL after the strict-brands migration —
+    // every question belongs to exactly one brand.
     if ("brand" in body) {
-      const raw = body.brand;
-      const v = raw == null ? null
-        : String(raw).trim().toLowerCase() === "nb_media"
-          || String(raw).trim().toLowerCase() === "nbmedia"
-          || String(raw).trim().toLowerCase() === "nb media"
-          ? "NB Media"
-        : String(raw).trim().toLowerCase() === "yt_labs"
-          || String(raw).trim().toLowerCase() === "ytlabs"
-          || String(raw).trim().toLowerCase() === "yt labs"
-          ? "YT Labs"
-        : null;
+      const raw = String(body.brand ?? "").trim().toLowerCase();
+      const v =
+        raw === "nb_media" || raw === "nbmedia" || raw === "nb media" ? "NB Media"
+      : raw === "yt_labs"  || raw === "ytlabs"  || raw === "yt labs"  ? "YT Labs"
+      : null;
+      if (!v) {
+        return NextResponse.json({ error: "brand must be 'NB Media' or 'YT Labs'" }, { status: 400 });
+      }
       args.push(v); sets.push(`brand = $${args.length}`);
     }
     if (sets.length === 0) {

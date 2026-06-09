@@ -52,34 +52,25 @@ export async function GET(req: NextRequest) {
     const week = Number(url.searchParams.get("week"));
     const hasWeek = surveyType === "weekly" && Number.isFinite(week) && week >= 1 && week <= 4;
 
-    // Brand filter — null/empty/"both" returns shared questions only,
-    // "NB Media" / "YT Labs" returns brand-specific + shared. Used by
-    // the HR panel's brand tabs.
+    // Strict brand separation — each brand has its own independent
+    // question bank. No shared/fallback layer. ?brand is REQUIRED;
+    // we default to NB Media if missing (the most common HR view).
     const brandParam = url.searchParams.get("brand");
-    const requestedBrand = normalizeBrand(brandParam);
-    // If client passes ?brand=both or omits → show ONLY shared
-    // questions (brand IS NULL). If they pass a specific brand →
-    // show that brand + shared so the manager sees the full
-    // "what this brand's employees will receive" set.
-    const showBrandAware = !!requestedBrand;
+    const requestedBrand = normalizeBrand(brandParam) ?? "NB Media";
 
-    const brandClause = showBrandAware
-      ? ` AND (brand IS NULL OR brand = $${hasWeek ? 3 : 2})`
-      : ` AND brand IS NULL`;
-    const params: any[] = [surveyType];
+    const params: any[] = [surveyType, requestedBrand];
     if (hasWeek) params.push(week);
-    if (showBrandAware) params.push(requestedBrand);
 
     const sql = hasWeek
       ? `SELECT id, week, "order", text, type, emojis, "isActive", "surveyType", brand,
                 "createdAt", "updatedAt"
            FROM "PulseQuestion"
-          WHERE "surveyType" = $1 AND week = $2 ${brandClause}
+          WHERE "surveyType" = $1 AND brand = $2 AND week = $3
           ORDER BY "order" ASC, id ASC`
       : `SELECT id, week, "order", text, type, emojis, "isActive", "surveyType", brand,
                 "createdAt", "updatedAt"
            FROM "PulseQuestion"
-          WHERE "surveyType" = $1 ${brandClause}
+          WHERE "surveyType" = $1 AND brand = $2
           ORDER BY COALESCE(week, 0) ASC, "order" ASC, id ASC`;
 
     const rows = await prisma.$queryRawUnsafe<any[]>(sql, ...params);
@@ -132,21 +123,19 @@ export async function POST(req: NextRequest) {
         : DEFAULT_EMOJIS;
     }
 
-    // Brand assignment — defaults to NULL (= both brands) if omitted.
-    const brand = normalizeBrand(body?.brand);
+    // Brand is REQUIRED — strict brand separation. Default to
+    // NB Media if the client forgot to send one so a malformed
+    // POST doesn't 400 the HR panel.
+    const brand = normalizeBrand(body?.brand) ?? "NB Media";
 
-    // Next `order` = max within the same (surveyType, week, brand) bucket.
+    // Next `order` within the same (surveyType, week, brand) bucket.
     const maxRow = (await prisma.$queryRawUnsafe<any[]>(
       week == null
         ? `SELECT COALESCE(MAX("order"), 0) AS m FROM "PulseQuestion"
-             WHERE "surveyType" = $1 AND week IS NULL
-               AND ${brand == null ? "brand IS NULL" : "brand = $2"}`
+             WHERE "surveyType" = $1 AND week IS NULL AND brand = $2`
         : `SELECT COALESCE(MAX("order"), 0) AS m FROM "PulseQuestion"
-             WHERE "surveyType" = $1 AND week = $2
-               AND ${brand == null ? "brand IS NULL" : "brand = $3"}`,
-      ...(week == null
-        ? (brand == null ? [surveyType] : [surveyType, brand])
-        : (brand == null ? [surveyType, week] : [surveyType, week, brand])),
+             WHERE "surveyType" = $1 AND week = $2 AND brand = $3`,
+      ...(week == null ? [surveyType, brand] : [surveyType, week, brand]),
     ))[0];
     const nextOrder = (maxRow?.m ?? 0) + 1;
 
