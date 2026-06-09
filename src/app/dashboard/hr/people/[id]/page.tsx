@@ -144,6 +144,94 @@ function Field({ label, value, capitalize = false }: { label: string; value?: st
   );
 }
 
+/** Per-employee attendance counting toggle. Flips the
+ *  EmployeeNotificationPolicy.attendanceEnabled field via the existing
+ *  PUT /api/hr/admin/notification-policy endpoint. Payroll continues to
+ *  count the cycle as normal (payrollEnabled stays TRUE) — so disabled
+ *  attendance = paid notice / paid leave use case.
+ *
+ *  Visible only to developers + orgLevel="hr_manager" users. The page
+ *  gates the JSX before mounting this so we don't need an extra check
+ *  here, but the endpoint also enforces isHRAdmin server-side. */
+function AttendanceCountingToggle({ userId, userName }: { userId: number; userName: string }) {
+  // Fetch the whole policy list (cheap — one row per active user) and
+  // pluck this employee's effective state.
+  const { data, isLoading, mutate: mutatePolicy } = useSWR<{ users: Array<{ id: number; attendanceEnabled: boolean; payrollEnabled: boolean; source: "override" | "default" }> }>(
+    "/api/hr/admin/notification-policy",
+    fetcher,
+    { revalidateOnFocus: false },
+  );
+  const me = data?.users.find((u) => u.id === userId);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const enabled = me?.attendanceEnabled ?? true;
+
+  const flip = async () => {
+    setSaving(true); setError(null);
+    try {
+      const res = await fetch("/api/hr/admin/notification-policy", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, attendanceEnabled: !enabled }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || `Failed to toggle (${res.status})`);
+      }
+      mutatePolicy();
+    } catch (e: any) {
+      setError(e?.message || "Toggle failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-3 text-[12px] text-slate-500">
+        Loading attendance toggle…
+      </div>
+    );
+  }
+
+  return (
+    <div className={`mb-5 rounded-xl border px-5 py-4 ${enabled ? "border-emerald-200 bg-emerald-50/40" : "border-amber-300 bg-amber-50"}`}>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`h-2 w-2 rounded-full ${enabled ? "bg-emerald-500" : "bg-amber-500"}`} />
+            <span className="text-[11px] uppercase tracking-[0.08em] font-bold text-slate-600">
+              Attendance counting · {enabled ? "ON" : "PAUSED"}
+            </span>
+            {me?.source === "override" && (
+              <span className="text-[10px] uppercase font-bold text-slate-500 px-1.5 py-0.5 bg-white border border-slate-300 rounded">Override</span>
+            )}
+          </div>
+          <p className="text-[13px] text-slate-700 font-medium">
+            {enabled
+              ? `Attendance is being tracked for ${userName}.`
+              : `Attendance is PAUSED for ${userName}. They won't be marked late / absent. Payroll continues normally — they're still paid for this cycle.`}
+          </p>
+          {error && <p className="mt-1.5 text-[12px] text-rose-700 font-medium">{error}</p>}
+        </div>
+        <button
+          type="button"
+          onClick={flip}
+          disabled={saving}
+          className={`shrink-0 h-9 px-4 rounded-md text-[12.5px] font-semibold transition-colors disabled:opacity-50 ${
+            enabled
+              ? "bg-amber-500 hover:bg-amber-600 text-white"
+              : "bg-emerald-600 hover:bg-emerald-700 text-white"
+          }`}
+        >
+          {saving ? "Saving…" : enabled ? "Pause attendance" : "Resume attendance"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function EmployeeDetailPage() {
   const { id } = useParams();
   const userId = Number(id);
@@ -997,6 +1085,18 @@ export default function EmployeeDetailPage() {
                       </button>
                     ))}
                   </div>
+                )}
+                {/* Attendance counting toggle — visible to developers
+                    and to orgLevel="hr_manager" users (the HR tier).
+                    Flipping OFF stops attendance from being counted /
+                    flagged late / marked absent for this employee from
+                    today onwards. Payroll continues to generate as
+                    normal (payrollEnabled stays TRUE) so the employee
+                    still gets paid for the full cycle — exactly what
+                    HR needs for paid-notice-period cases (e.g. Manpreet's
+                    15 days). */}
+                {(me?.isDeveloper === true || me?.orgLevel === "hr_manager") && (
+                  <AttendanceCountingToggle userId={userId} userName={user.name} />
                 )}
                 {isHRAdmin && attendanceView === "leave" ? (
                   <EmployeeLeavePanel userId={userId} userName={user.name} />
