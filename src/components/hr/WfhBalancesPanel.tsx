@@ -7,7 +7,7 @@
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
-import { Home, Search, ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
+import { Home, Search, ChevronLeft, ChevronRight, AlertCircle, Pencil, X, Check, Clock } from "lucide-react";
 
 type Row = {
   userId: number;
@@ -19,6 +19,8 @@ type Row = {
   used: number;
   remaining: number;
   hasRow: boolean;
+  updatedAt: string | null;
+  updatedByName: string | null;
 };
 type Payload = {
   monthKey: string;
@@ -58,7 +60,8 @@ export default function WfhBalancesPanel({ initialBrand }: { initialBrand?: "NB 
     return `/api/hr/wfh/balances?${params.toString()}`;
   }, [monthKey, brand, q]);
 
-  const { data, isLoading } = useSWR<Payload>(apiKey, fetcher, { revalidateOnFocus: false });
+  const { data, isLoading, mutate } = useSWR<Payload>(apiKey, fetcher, { revalidateOnFocus: false });
+  const [editing, setEditing] = useState<Row | null>(null);
 
   return (
     <div className="space-y-4">
@@ -158,20 +161,33 @@ export default function WfhBalancesPanel({ initialBrand }: { initialBrand?: "NB 
                 <th className="px-4 py-2.5 text-right">Credited</th>
                 <th className="px-4 py-2.5 text-right">Used</th>
                 <th className="px-4 py-2.5 text-right">Remaining</th>
+                <th className="px-4 py-2.5 text-right w-16">Edit</th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-[12.5px] text-slate-400">Loading…</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-[12.5px] text-slate-400">Loading…</td></tr>
               ) : !data || data.rows.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-[12.5px] text-slate-400">No employees match.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-[12.5px] text-slate-400">No employees match.</td></tr>
               ) : data.rows.map((r) => {
                 const exhausted = r.remaining <= 0;
                 const oneLeft   = r.remaining === 1;
                 return (
                   <tr key={r.userId} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/50">
                     <td className="px-4 py-2.5">
-                      <div className="text-[13px] font-semibold text-slate-800 leading-tight">{r.name}</div>
+                      <div className="text-[13px] font-semibold text-slate-800 leading-tight inline-flex items-center gap-1.5">
+                        {r.name}
+                        {/* Pencil dot — marks a row that's been
+                            manually edited (updatedByName populated). */}
+                        {r.updatedByName && (
+                          <span
+                            className="inline-flex items-center justify-center h-3 w-3 rounded-full bg-amber-100 text-amber-700 text-[7px]"
+                            title={`Edited by ${r.updatedByName}${r.updatedAt ? ` · ${new Date(r.updatedAt).toLocaleDateString("en-IN", { day:"numeric", month:"short" })}` : ""}`}
+                          >
+                            ✎
+                          </span>
+                        )}
+                      </div>
                       <div className="text-[11px] text-slate-500 mt-0.5">{r.email}</div>
                     </td>
                     <td className="px-4 py-2.5 text-[12px] text-slate-600">{r.department || "—"}</td>
@@ -202,6 +218,17 @@ export default function WfhBalancesPanel({ initialBrand }: { initialBrand?: "NB 
                         {r.remaining}
                       </span>
                     </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setEditing(r)}
+                        className="inline-flex items-center justify-center h-7 w-7 rounded-lg text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF] transition-colors"
+                        title="Edit balance"
+                        aria-label={`Edit balance for ${r.name}`}
+                      >
+                        <Pencil size={13} />
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -213,6 +240,167 @@ export default function WfhBalancesPanel({ initialBrand }: { initialBrand?: "NB 
             <span className="text-slate-400">*</span> No DB row yet — values shown are what the next cron firing will credit. Run a force-credit from VPS to materialise them now.
           </div>
         )}
+      </div>
+
+      {/* Edit modal — overrides credited / used for one (user,
+          month) pair. ON CONFLICT upsert on the server so editing
+          a synthetic row materialises it. */}
+      {editing && (
+        <EditBalanceModal
+          row={editing}
+          monthKey={monthKey}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); mutate(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditBalanceModal({
+  row, monthKey, onClose, onSaved,
+}: {
+  row: Row;
+  monthKey: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [credited, setCredited] = useState<string>(String(row.credited));
+  const [used,     setUsed]     = useState<string>(String(row.used));
+  const [busy, setBusy] = useState(false);
+  const [err,  setErr]  = useState<string>("");
+
+  const cNum = Number(credited);
+  const uNum = Number(used);
+  const valid = Number.isInteger(cNum) && cNum >= 0 && cNum <= 31
+             && Number.isInteger(uNum) && uNum >= 0 && uNum <= 31;
+  const remaining = Math.max(0, cNum - uNum);
+  const dirty = cNum !== row.credited || uNum !== row.used;
+
+  const save = async () => {
+    if (!valid || !dirty) return;
+    setBusy(true); setErr("");
+    try {
+      const res = await fetch(`/api/hr/wfh/balances/${row.userId}?monthKey=${encodeURIComponent(monthKey)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credited: cNum, used: uNum }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || `Save failed (${res.status})`);
+      }
+      onSaved();
+    } catch (e: any) {
+      setErr(e?.message || "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+      role="dialog" aria-modal="true"
+    >
+      <div
+        className="w-full max-w-[440px] bg-white rounded-2xl shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 px-5 pt-5 pb-3">
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-bold text-slate-900 leading-tight">Edit WFH balance</h2>
+            <p className="text-[12px] text-slate-500 mt-0.5">
+              {row.name} · <span className="text-slate-400">{prettyMonth(monthKey)}</span>
+              {row.businessUnit && (
+                <>
+                  {" · "}
+                  <span className={row.businessUnit === "YT Labs" ? "text-[#d4143d]" : "text-[#008CFF]"}>{row.businessUnit}</span>
+                </>
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 h-7 w-7 inline-flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Close"
+          >
+            <X size={14} />
+          </button>
+        </header>
+
+        <div className="px-5 pb-1 grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-500 mb-1">Credited</label>
+            <input
+              type="number" min={0} max={31}
+              value={credited}
+              onChange={(e) => setCredited(e.target.value)}
+              autoFocus
+              disabled={busy}
+              className="h-10 w-full px-3 border border-slate-200 rounded-md text-[15px] font-bold text-slate-900 tabular-nums focus:outline-none focus:border-[#008CFF] disabled:opacity-50"
+            />
+          </div>
+          <div>
+            <label className="block text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-500 mb-1">Used</label>
+            <input
+              type="number" min={0} max={31}
+              value={used}
+              onChange={(e) => setUsed(e.target.value)}
+              disabled={busy}
+              className="h-10 w-full px-3 border border-slate-200 rounded-md text-[15px] font-bold text-slate-900 tabular-nums focus:outline-none focus:border-[#008CFF] disabled:opacity-50"
+            />
+          </div>
+        </div>
+
+        {/* Live preview of remaining */}
+        <div className="px-5 mt-2">
+          <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-[12.5px] font-semibold ${
+            remaining === 0 ? "bg-rose-50 text-rose-800"
+              : remaining === 1 ? "bg-amber-50 text-amber-800"
+              : "bg-emerald-50 text-emerald-800"
+          }`}>
+            <span>Remaining after save</span>
+            <span className="text-[16px] font-bold tabular-nums">{remaining}</span>
+          </div>
+        </div>
+
+        {row.updatedByName && (
+          <div className="px-5 pt-3 flex items-center gap-1.5 text-[11px] text-slate-400">
+            <Clock size={11} />
+            <span>
+              Last edited by <span className="font-semibold text-slate-600">{row.updatedByName}</span>
+              {row.updatedAt ? ` · ${new Date(row.updatedAt).toLocaleString("en-IN", { day:"numeric", month:"short", hour:"numeric", minute:"2-digit", hour12: true })}` : ""}
+            </span>
+          </div>
+        )}
+
+        {err && (
+          <div className="mx-5 mt-3 rounded-md bg-rose-50 border border-rose-200 px-3 py-2 text-[11.5px] text-rose-700 inline-flex items-center gap-1.5">
+            <AlertCircle size={12} /> {err}
+          </div>
+        )}
+
+        <footer className="flex items-center justify-end gap-2 px-5 py-3 mt-3 border-t border-slate-100 bg-slate-50/60">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="h-9 px-3 rounded-md border border-slate-200 bg-white text-[12.5px] font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={busy || !valid || !dirty}
+            className="h-9 px-4 rounded-md bg-[#008CFF] text-[12.5px] font-semibold text-white hover:bg-[#0070d4] disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+          >
+            {busy ? "Saving…" : (<><Check size={13} /> Save changes</>)}
+          </button>
+        </footer>
       </div>
     </div>
   );
