@@ -32,6 +32,7 @@ export async function GET() {
       select: {
         id: true, name: true, email: true, profilePictureUrl: true,
         orgLevel: true, role: true,
+        employeeProfile: { select: { businessUnit: true } },
       },
       orderBy: [{ name: "asc" }],
     });
@@ -58,6 +59,7 @@ export async function GET() {
         profilePictureUrl: u.profilePictureUrl,
         orgLevel: u.orgLevel,
         role: u.role,
+        businessUnit: u.employeeProfile?.businessUnit ?? null,
         isNew: !userIdsWithPerms.has(u.id),
       }))
     );

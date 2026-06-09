@@ -40,7 +40,7 @@ export async function GET() {
       select: {
         id: true, name: true, email: true, role: true, orgLevel: true,
         profilePictureUrl: true,
-        employeeProfile: { select: { department: true } },
+        employeeProfile: { select: { department: true, businessUnit: true } },
       },
     });
     type Override = {
@@ -74,6 +74,7 @@ export async function GET() {
         return {
           id: u.id, name: u.name, email: u.email,
           department: u.employeeProfile?.department ?? null,
+          businessUnit: u.employeeProfile?.businessUnit ?? null,
           role: u.role, orgLevel: u.orgLevel, isDeveloper: isDev,
           profilePictureUrl: u.profilePictureUrl,
           attendanceEnabled: override.attendanceEnabled,
@@ -90,6 +91,7 @@ export async function GET() {
       return {
         id: u.id, name: u.name, email: u.email,
         department: u.employeeProfile?.department ?? null,
+        businessUnit: u.employeeProfile?.businessUnit ?? null,
         role: u.role, orgLevel: u.orgLevel, isDeveloper: isDev,
         profilePictureUrl: u.profilePictureUrl,
         attendanceEnabled: def.attendanceEnabled,
