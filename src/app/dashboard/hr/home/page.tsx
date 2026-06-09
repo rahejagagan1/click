@@ -1814,37 +1814,39 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
                 return (
                   <div
                     key={c.id}
-                    className={`group flex items-start gap-2.5 transition-opacity ${isDeleting ? "opacity-50" : ""}`}
+                    className={`group relative flex items-start gap-3 -mx-2 px-2 py-1.5 rounded-lg transition-all ${
+                      isDeleting ? "opacity-50" : "hover:bg-[#f7f9fc]"
+                    }`}
                   >
-                    {/* Avatar (small, no card around comment — Instagram-style) */}
-                    <Av name={c.author?.name || "User"} url={c.author?.profilePictureUrl} size={32} />
+                    {/* Avatar — slightly smaller for tighter rhythm */}
+                    <div className="shrink-0 pt-0.5">
+                      <Av name={c.author?.name || "User"} url={c.author?.profilePictureUrl} size={30} />
+                    </div>
 
                     <div className="flex-1 min-w-0">
-                      {/* Single line: name bolded then content inline. */}
                       <div className="flex items-start justify-between gap-2">
-                        <p className="text-[12.5px] text-[#3b4a5a] leading-snug break-words min-w-0">
-                          <span className="font-semibold mr-1.5">{c.author?.name || "Team member"}</span>
+                        <p className="text-[12.5px] text-[#3b4a5a] leading-relaxed break-words min-w-0">
+                          <span className="font-semibold text-[#1e2a38] mr-1.5">{c.author?.name || "Team member"}</span>
                           <span className="text-[#52647a] whitespace-pre-wrap">{c.content}</span>
                         </p>
 
-                        {/* 3-dot kebab menu — only for users who can
-                            delete this specific comment (owner OR
-                            dev OR orgLevel=hr_manager). Hover-revealed
-                            on desktop, always-visible on touch. */}
                         {showDelete && (
-                          <div className="relative shrink-0 -mt-0.5">
+                          <div className="relative shrink-0">
                             <button
                               type="button"
                               onClick={() => setOpenCommentMenu(isMenuOpen ? null : c.id)}
                               disabled={isDeleting}
                               aria-label="Comment options"
-                              className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity h-6 w-6 inline-flex items-center justify-center rounded-full text-[#8393a3] hover:bg-[#f0f3f7] hover:text-[#3b4a5a]"
+                              className={`h-6 w-6 inline-flex items-center justify-center rounded-full text-[#8393a3] transition-all ${
+                                isMenuOpen
+                                  ? "bg-[#eef2f6] text-[#3b4a5a] opacity-100"
+                                  : "opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-[#eef2f6] hover:text-[#3b4a5a]"
+                              }`}
                             >
                               <MoreVertical className="h-3.5 w-3.5" />
                             </button>
                             {isMenuOpen && (
                               <>
-                                {/* Click-outside catcher */}
                                 <button
                                   type="button"
                                   aria-hidden="true"
@@ -1853,14 +1855,14 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
                                   className="fixed inset-0 z-30 cursor-default"
                                   style={{ background: "transparent" }}
                                 />
-                                <div className="absolute right-0 top-7 z-40 min-w-[140px] rounded-lg border border-[#e2e8f0] bg-white shadow-lg overflow-hidden">
+                                <div className="absolute right-0 top-7 z-40 rounded-lg border border-[#e2e8f0] bg-white shadow-[0_8px_24px_-6px_rgba(15,23,42,0.18)] overflow-hidden py-1">
                                   <button
                                     type="button"
                                     onClick={() => deleteComment(c.id)}
-                                    className="w-full px-3 py-2 text-left text-[12px] font-medium text-rose-600 hover:bg-rose-50 inline-flex items-center gap-2"
+                                    className="w-full px-3 py-1.5 text-left text-[12px] font-medium text-rose-600 hover:bg-rose-50 inline-flex items-center gap-2 whitespace-nowrap"
                                   >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                    Delete comment
+                                    <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                                    <span>Delete comment</span>
                                   </button>
                                 </div>
                               </>
@@ -1869,9 +1871,8 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
                         )}
                       </div>
 
-                      {/* Tiny timestamp line below — Instagram dense row */}
-                      <div className="mt-0.5 text-[10.5px] font-medium text-[#97a4b3] inline-flex items-center gap-2">
-                        <span>{formatCommentTime(c.createdAt)}</span>
+                      <div className="mt-0.5 text-[10.5px] font-medium text-[#97a4b3]">
+                        {formatCommentTime(c.createdAt)}
                       </div>
                     </div>
                   </div>
@@ -1879,10 +1880,12 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
               })}
             </div>
           )}
-          <div className="flex items-start gap-2.5">
-            <Av name={sessionUser?.name || "You"} url={sessionUser?.profilePictureUrl} size={26} />
+          <div className={`flex items-center gap-3 ${Array.isArray(post.comments) && post.comments.length > 0 ? "pt-1" : ""}`}>
+            <div className="shrink-0">
+              <Av name={sessionUser?.name || "You"} url={sessionUser?.profilePictureUrl} size={30} />
+            </div>
             <div className="relative flex-1">
-              <div className="flex items-center gap-1.5 bg-white border border-[#dbe4ed] rounded-full px-3 py-1.5 focus-within:border-[#008CFF] transition-colors">
+              <div className="flex items-center gap-1 bg-[#f5f7fb] border border-transparent rounded-full pl-4 pr-1 py-1 focus-within:bg-white focus-within:border-[#008CFF] focus-within:shadow-[0_0_0_3px_rgba(0,140,255,0.08)] transition-all">
                 <input
                   ref={commentInputRef}
                   value={commentText}
@@ -1891,7 +1894,7 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
                     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); }
                   }}
                   placeholder="Write a comment…"
-                  className="flex-1 bg-transparent text-[12.5px] text-[#3b4a5a] placeholder-[#97a4b3] focus:outline-none"
+                  className="flex-1 bg-transparent text-[12.5px] text-[#1e2a38] placeholder-[#8393a3] focus:outline-none py-1.5"
                 />
                 <button
                   type="button"
