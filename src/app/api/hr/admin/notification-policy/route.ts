@@ -43,12 +43,24 @@ export async function GET() {
         employeeProfile: { select: { department: true } },
       },
     });
-    let policyByUser = new Map<number, { attendanceEnabled: boolean; payrollEnabled: boolean }>();
+    type Override = {
+      userId: number;
+      attendanceEnabled: boolean;
+      payrollEnabled: boolean;
+      updatedAt: Date | null;
+      updaterId: number | null;
+      updaterName: string | null;
+    };
+    let policyByUser = new Map<number, Override>();
     try {
-      const rows = await prisma.$queryRawUnsafe<Array<{ userId: number; attendanceEnabled: boolean; payrollEnabled: boolean }>>(
-        `SELECT "userId", "attendanceEnabled", "payrollEnabled" FROM "EmployeeNotificationPolicy"`,
+      const rows = await prisma.$queryRawUnsafe<Array<Override>>(
+        `SELECT p."userId", p."attendanceEnabled", p."payrollEnabled",
+                p."updatedAt", p."updatedById" AS "updaterId",
+                upd.name AS "updaterName"
+           FROM "EmployeeNotificationPolicy" p
+           LEFT JOIN "User" upd ON upd.id = p."updatedById"`,
       );
-      policyByUser = new Map(rows.map((r) => [r.userId, { attendanceEnabled: r.attendanceEnabled, payrollEnabled: r.payrollEnabled }]));
+      policyByUser = new Map(rows.map((r) => [r.userId, r]));
     } catch (e) {
       // Table missing → treat everyone as default; surface the error in
       // server logs but keep the page usable.
@@ -67,6 +79,11 @@ export async function GET() {
           attendanceEnabled: override.attendanceEnabled,
           payrollEnabled:    override.payrollEnabled,
           source: "override" as const,
+          // Audit trail — surfaced in the Attendance tab toggle so HR
+          // can see who paused / resumed counting + when.
+          updatedAt:   override.updatedAt,
+          updatedById: override.updaterId,
+          updatedByName: override.updaterName,
         };
       }
       const def = defaultPolicyFor({ orgLevel: u.orgLevel, email: u.email });
@@ -78,6 +95,7 @@ export async function GET() {
         attendanceEnabled: def.attendanceEnabled,
         payrollEnabled:    def.payrollEnabled,
         source: "default" as const,
+        updatedAt: null, updatedById: null, updatedByName: null,
       };
     });
     return NextResponse.json({ users: rows });
