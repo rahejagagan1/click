@@ -17,6 +17,7 @@ import {
   Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
   MoreVertical, UserMinus, TreePine, Coffee,
   CheckCircle2, AlertCircle, Circle, Upload as UploadIcon, Eye, Trash2, RefreshCw,
+  Clock,
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
@@ -154,9 +155,16 @@ function Field({ label, value, capitalize = false }: { label: string; value?: st
  *  gates the JSX before mounting this so we don't need an extra check
  *  here, but the endpoint also enforces isHRAdmin server-side. */
 function AttendanceCountingToggle({ userId, userName }: { userId: number; userName: string }) {
-  // Fetch the whole policy list (cheap — one row per active user) and
-  // pluck this employee's effective state.
-  const { data, isLoading, mutate: mutatePolicy } = useSWR<{ users: Array<{ id: number; attendanceEnabled: boolean; payrollEnabled: boolean; source: "override" | "default" }> }>(
+  type PolicyRow = {
+    id: number;
+    attendanceEnabled: boolean;
+    payrollEnabled: boolean;
+    source: "override" | "default";
+    updatedAt: string | null;
+    updatedById: number | null;
+    updatedByName: string | null;
+  };
+  const { data, isLoading, mutate: mutatePolicy } = useSWR<{ users: PolicyRow[] }>(
     "/api/hr/admin/notification-policy",
     fetcher,
     { revalidateOnFocus: false },
@@ -189,45 +197,89 @@ function AttendanceCountingToggle({ userId, userName }: { userId: number; userNa
 
   if (isLoading) {
     return (
-      <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-3 text-[12px] text-slate-500">
-        Loading attendance toggle…
+      <div className="mb-5 rounded-xl border border-slate-200 bg-white px-5 py-4 text-[12.5px] text-slate-500 inline-flex items-center gap-2">
+        <span className="h-4 w-4 border-2 border-slate-300 border-t-[#008CFF] rounded-full animate-spin" />
+        Loading attendance settings…
       </div>
     );
   }
 
+  // Pretty-print the audit timestamp in IST short form, e.g.
+  // "8 Jun 2026, 3:42 PM".
+  const stamp = me?.updatedAt ? new Date(me.updatedAt) : null;
+  const stampStr = stamp ? stamp.toLocaleString("en-IN", {
+    day: "numeric", month: "short", year: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: true,
+  }) : null;
+
   return (
-    <div className={`mb-5 rounded-xl border px-5 py-4 ${enabled ? "border-emerald-200 bg-emerald-50/40" : "border-amber-300 bg-amber-50"}`}>
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="min-w-0">
+    <div className="mb-5 rounded-xl border border-slate-200 bg-white overflow-hidden shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
+      <div className="px-5 py-4 flex items-start justify-between gap-5 flex-wrap">
+        {/* Left — label + description */}
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1">
-            <span className={`h-2 w-2 rounded-full ${enabled ? "bg-emerald-500" : "bg-amber-500"}`} />
-            <span className="text-[11px] uppercase tracking-[0.08em] font-bold text-slate-600">
-              Attendance counting · {enabled ? "ON" : "PAUSED"}
+            <h3 className="text-[14px] font-semibold text-slate-900">Attendance tracking</h3>
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+              enabled
+                ? "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                : "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200"
+            }`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${enabled ? "bg-emerald-500" : "bg-amber-500"}`} />
+              {enabled ? "Active" : "Paused"}
             </span>
-            {me?.source === "override" && (
-              <span className="text-[10px] uppercase font-bold text-slate-500 px-1.5 py-0.5 bg-white border border-slate-300 rounded">Override</span>
-            )}
           </div>
-          <p className="text-[13px] text-slate-700 font-medium">
+          <p className="text-[12.5px] text-slate-600 leading-snug max-w-2xl">
             {enabled
-              ? `Attendance is being tracked for ${userName}.`
-              : `Attendance is PAUSED for ${userName}. They won't be marked late / absent. Payroll continues normally — they're still paid for this cycle.`}
+              ? `Late marks, absent flags, and missed-clockout emails are recorded for ${userName}.`
+              : `Late marks, absent flags, and missed-clockout emails are paused for ${userName}. Payroll continues to count this cycle as full pay.`}
           </p>
-          {error && <p className="mt-1.5 text-[12px] text-rose-700 font-medium">{error}</p>}
+          {error && (
+            <p className="mt-2 text-[12px] text-rose-700 font-medium inline-flex items-center gap-1.5">
+              <AlertCircle size={13} /> {error}
+            </p>
+          )}
         </div>
-        <button
-          type="button"
-          onClick={flip}
-          disabled={saving}
-          className={`shrink-0 h-9 px-4 rounded-md text-[12.5px] font-semibold transition-colors disabled:opacity-50 ${
-            enabled
-              ? "bg-amber-500 hover:bg-amber-600 text-white"
-              : "bg-emerald-600 hover:bg-emerald-700 text-white"
-          }`}
-        >
-          {saving ? "Saving…" : enabled ? "Pause attendance" : "Resume attendance"}
-        </button>
+
+        {/* Right — proper toggle switch */}
+        <div className="shrink-0 flex flex-col items-end gap-1">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={enabled}
+            aria-label={enabled ? "Pause attendance tracking" : "Resume attendance tracking"}
+            onClick={flip}
+            disabled={saving}
+            className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-[#008CFF]/40 disabled:opacity-50 disabled:cursor-not-allowed ${
+              enabled ? "bg-emerald-500" : "bg-slate-300"
+            }`}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-1 ring-black/5 transition-transform duration-200 ${
+                enabled ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
+          <span className="text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">
+            {saving ? "Saving…" : enabled ? "ON" : "OFF"}
+          </span>
+        </div>
       </div>
+
+      {/* Audit-trail footer — only when there's an explicit override
+          row with updater metadata. Default policies have no
+          history so the footer hides. */}
+      {me?.source === "override" && stampStr && (
+        <div className="px-5 py-2.5 border-t border-slate-100 bg-slate-50/60 flex items-center gap-2 text-[11.5px] text-slate-500">
+          <Clock size={11} className="text-slate-400" />
+          <span>
+            Last changed by{" "}
+            <span className="font-semibold text-slate-700">
+              {me.updatedByName || "Unknown"}
+            </span>
+            {" "}· {stampStr} IST
+          </span>
+        </div>
+      )}
     </div>
   );
 }
