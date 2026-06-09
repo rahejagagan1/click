@@ -101,7 +101,7 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
     }
     await prisma.$executeRawUnsafe(
       `INSERT INTO "Notification"
-         ("userId", "type", "entityId", "title", "message", "createdAt")
+         ("userId", "type", "entityId", "title", "body", "createdAt")
        VALUES ${values}`,
       ...params,
     );
