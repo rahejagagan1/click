@@ -54,14 +54,15 @@ export default function Reveal({
   }, [threshold]);
 
   // Each direction maps to a starting transform — they all converge
-  // on translate(0,0) scale(1) when visible. Distances are tuned to
-  // feel like real entrances on scroll-snap sections.
+  // on translate(0,0) scale(1) when visible. Distances were bumped
+  // up (60px → 90px) and a slight starting scale was added so the
+  // section feels like it RISES into place, not just fades.
   const hidden: Record<Direction, string> = {
-    up:    "translate3d(0, 60px, 0)",
-    down:  "translate3d(0, -60px, 0)",
-    left:  "translate3d(-60px, 0, 0)",
-    right: "translate3d(60px, 0, 0)",
-    scale: "translate3d(0,0,0) scale(0.92)",
+    up:    "translate3d(0, 90px, 0) scale(0.97)",
+    down:  "translate3d(0, -90px, 0) scale(0.97)",
+    left:  "translate3d(-90px, 0, 0) scale(0.97)",
+    right: "translate3d(90px, 0, 0) scale(0.97)",
+    scale: "translate3d(0,0,0) scale(0.88)",
   };
 
   return (
@@ -69,7 +70,7 @@ export default function Reveal({
       ref={ref}
       className={className}
       style={{
-        transition: "opacity 700ms cubic-bezier(0.16,1,0.3,1), transform 800ms cubic-bezier(0.16,1,0.3,1)",
+        transition: "opacity 900ms cubic-bezier(0.16,1,0.3,1), transform 1000ms cubic-bezier(0.16,1,0.3,1)",
         transitionDelay: `${delay}ms`,
         opacity: visible ? 1 : 0,
         transform: visible ? "translate3d(0,0,0) scale(1)" : hidden[direction],
