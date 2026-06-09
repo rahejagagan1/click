@@ -28,6 +28,7 @@ type QStats = {
 type ResponsesPayload = {
   cycleKey: string;
   surveyType: "weekly" | "monthly";
+  brand: "NB Media" | "YT Labs";
   participation: { responded: number; totalActiveUsers: number; percent: number };
   questions: QStats[];
 };
@@ -36,8 +37,12 @@ const LIKERT_LABELS = ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Str
 
 export default function PulseResponsesView() {
   const [surveyType, setSurveyType] = useState<"weekly" | "monthly">("weekly");
+  // Strict brand separation — each brand's responses live in
+  // their own bucket. Defaults to NB Media (most common HR view).
+  const [brand, setBrand] = useState<"NB Media" | "YT Labs">("NB Media");
   const { data, isLoading } = useSWR<ResponsesPayload>(
-    `/api/hr/pulse/responses?surveyType=${surveyType}`, fetcher,
+    `/api/hr/pulse/responses?surveyType=${surveyType}&brand=${encodeURIComponent(brand)}`,
+    fetcher,
   );
 
   return (
@@ -71,13 +76,46 @@ export default function PulseResponsesView() {
         </button>
       </div>
 
-      {/* Cycle header + participation */}
+      {/* Brand sub-switcher — each brand's responses are isolated.
+          Matches the strict separation on the Questions tab. */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-500 mr-1">Brand</span>
+        {(["NB Media", "YT Labs"] as const).map((b) => {
+          const active = brand === b;
+          return (
+            <button
+              key={b}
+              type="button"
+              onClick={() => setBrand(b)}
+              className={`h-7 px-3 rounded-md text-[11.5px] font-semibold transition-colors ${
+                active
+                  ? "bg-[#008CFF] text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {b}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Cycle header + participation + brand badge */}
       {data && (
         <div className="rounded-xl border border-slate-200 bg-white px-5 py-4">
           <div className="flex items-end justify-between gap-3 flex-wrap">
             <div>
-              <p className="text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-400 mb-0.5">
-                {surveyType === "weekly" ? "Week" : "Month"}
+              <p className="text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-400 mb-0.5 inline-flex items-center gap-2">
+                <span>{surveyType === "weekly" ? "Week" : "Month"}</span>
+                {/* Brand badge — colour-coded to match the question
+                    cards on the other tab. Tells HR at a glance
+                    which brand's data they're looking at. */}
+                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold tracking-normal normal-case ${
+                  brand === "YT Labs"
+                    ? "bg-[#d4143d]/10 text-[#d4143d]"
+                    : "bg-[#008CFF]/10 text-[#008CFF]"
+                }`}>
+                  {brand}
+                </span>
               </p>
               <h3 className="text-[16px] font-semibold text-slate-900">{data.cycleKey}</h3>
             </div>
@@ -88,6 +126,9 @@ export default function PulseResponsesView() {
               <p className="text-[16px] font-bold text-slate-900 tabular-nums">
                 {data.participation.responded}/{data.participation.totalActiveUsers}
                 <span className="ml-2 text-[12px] font-semibold text-slate-500">({data.participation.percent}%)</span>
+              </p>
+              <p className="text-[10.5px] text-slate-400 mt-0.5">
+                {brand} employees only
               </p>
             </div>
           </div>
