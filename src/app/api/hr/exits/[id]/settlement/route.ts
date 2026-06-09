@@ -16,19 +16,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth } from "@/lib/api-auth";
+import { isHRAdmin } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
-function canManage(session: any): boolean {
-  const u = session?.user;
-  return !!u && (
-    u.orgLevel === "ceo" ||
-    u.orgLevel === "hr_manager" ||
-    u.orgLevel === "special_access" ||
-    u.role === "admin" ||
-    u.isDeveloper === true
-  );
-}
+// Use canonical isHRAdmin helper.
+const canManage = (session: any) => isHRAdmin(session?.user);
 
 const PAY_ACTIONS = new Set(["pay", "recover", "carryover", "hold"]);
 const PAYMENT_MODES = new Set(["pay", "hold", "recover"]);

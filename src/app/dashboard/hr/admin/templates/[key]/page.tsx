@@ -107,37 +107,87 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
 
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [customValues, setCustomValues] = useState<Record<string, string>>({});
+  // Salary type of the picked employee — "intern" or "regular".
+  // Used by the Exit Statement template to hide the EnablePf
+  // checkbox for interns (interns don't have PF). Set in the
+  // auto-fill effect below.
+  const [employeeSalaryType, setEmployeeSalaryType] = useState<string | null>(null);
 
-  // Auto-fill bank / PAN custom fields from the picked employee's
-  // profile so HR doesn't retype data we already have. Triggers
-  // whenever the employee changes; only fills fields that are
-  // CURRENTLY EMPTY so HR's manual edits aren't clobbered.
-  // Mapping (custom-field key → profile column):
-  //   BankAccount  ← bankAccountNumber
-  //   BankIFSC     ← bankIfsc
-  //   Bank         ← bankName
-  //   PANNumber    ← panNumber
+  // Auto-fill custom fields from the picked employee's profile +
+  // salary structure so HR doesn't retype data we already have.
+  // Triggers whenever the employee changes; only fills fields
+  // that are CURRENTLY EMPTY so HR's manual edits aren't
+  // clobbered.
+  //
+  // Mappings:
+  //   BankAccount    ← profile.bankAccountNumber
+  //   BankIFSC       ← profile.bankIfsc
+  //   Bank           ← profile.bankName
+  //   PANNumber      ← profile.panNumber
+  //   SubDepartment  ← profile.department  (same as Department —
+  //                    we don't have a dedicated subDepartment
+  //                    column yet; HR can refine manually)
+  //   AnnualPackage  ← salaryStructure.ctc  (Exit Statement +
+  //                    Revised Offer Letter both consume this)
+  //   EnablePf       ← salaryStructure.pfEligible (auto-checked,
+  //                    forced off for interns)
   useEffect(() => {
     let cancelled = false;
-    if (!employee?.id) return;
+    if (!employee?.id) {
+      setEmployeeSalaryType(null);
+      return;
+    }
     (async () => {
       try {
         const res = await fetch(`/api/hr/people/${employee.id}`);
         if (!res.ok) return;
         const j = await res.json();
-        const p = j?.profile ?? j?.user?.employeeProfile ?? j;
-        if (cancelled || !p) return;
+        const u = j?.user ?? j;
+        const p = u?.employeeProfile ?? j?.profile ?? j;
+        const s = u?.salaryStructure ?? j?.salaryStructure ?? null;
+        if (cancelled) return;
+        const salaryType = s?.salaryType ?? null;
+        setEmployeeSalaryType(salaryType);
+        const isIntern = salaryType === "intern";
         const fillMap: Record<string, string | null | undefined> = {
-          BankAccount: p.bankAccountNumber,
-          BankIFSC:    p.bankIfsc,
-          Bank:        p.bankName,
-          PANNumber:   p.panNumber,
+          BankAccount:   p?.bankAccountNumber,
+          BankIFSC:      p?.bankIfsc,
+          Bank:          p?.bankName,
+          PANNumber:     p?.panNumber,
+          AnnualPackage: s?.ctc != null ? String(s.ctc) : undefined,
+          // Default payment mode — payroll is paid via bank transfer
+          // for every employee on the platform today. HR can still
+          // override manually if a one-off cash / cheque settlement
+          // is needed; this just removes the typing for the 100%
+          // common case.
+          PaymentMode:   "Bank Transfer",
+          // Interns NEVER get PF — force the checkbox off.
+          // Regular employees inherit from salaryStructure.pfEligible.
+          EnablePf:      isIntern ? "false" : (s?.pfEligible ? "true" : undefined),
         };
         setCustomValues((curr) => {
+          // On EMPLOYEE CHANGE we always OVERWRITE the profile-
+          // driven fields with the new employee's data. Previous
+          // "fill-if-empty" logic was wrong — if HR picked
+          // someone with IndusInd Bank, then switched to someone
+          // at HDFC, the IndusInd account number stayed on screen
+          // because the field "had a value" (the wrong person's).
+          //
+          // What HR types manually for THIS render (Settlement
+          // Date, Working Days, manual amount overrides, etc.)
+          // is NOT in the fillMap, so it stays untouched. Only
+          // the profile-driven fields refresh.
           const next = { ...curr };
           let changed = false;
           for (const [k, v] of Object.entries(fillMap)) {
-            if (!curr[k] && v) { next[k] = String(v); changed = true; }
+            // Intern → ALWAYS force EnablePf=false regardless of
+            // saved state.
+            if (k === "EnablePf" && isIntern) {
+              if (curr[k] !== "false") { next[k] = "false"; changed = true; }
+              continue;
+            }
+            const newVal = v == null || v === "" ? "" : String(v);
+            if (curr[k] !== newVal) { next[k] = newVal; changed = true; }
           }
           return changed ? next : curr;
         });
@@ -312,6 +362,19 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
             <section className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
               <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Custom fields</label>
               {cats.map((f) => {
+                // Hide the EnablePf toggle for interns — interns
+                // don't have PF deductions, so the choice is
+                // meaningless for them. EnablePf is force-set to
+                // "false" in customValues by the auto-fill effect,
+                // so the resolver still computes correctly without
+                // the user seeing the checkbox.
+                if (f.key === "EnablePf" && employeeSalaryType === "intern") {
+                  return (
+                    <div key={f.key} className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-[11.5px] text-slate-500">
+                      Provident Fund disabled — <span className="font-medium text-slate-700">{employee?.name || "this employee"}</span> is on an intern payroll.
+                    </div>
+                  );
+                }
                 if (f.type === "checkbox") {
                   const onVal  = f.checkedValue   ?? "true";
                   const offVal = f.uncheckedValue ?? "false";
@@ -351,6 +414,22 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
                     ) : (
                       <input
                         type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
+                        // For number inputs: `min={0}` blocks the
+                        // user from typing/spinning negative values,
+                        // and the onWheel/onKeyDown handlers stop
+                        // the browser's built-in scroll-wheel /
+                        // arrow-key incrementing — common UX trap
+                        // where scrolling the page accidentally
+                        // changes a focused number field (0 → -1
+                        // → -2 → -3, etc.).
+                        {...(f.type === "number" ? {
+                          min:        0,
+                          step:       "any",
+                          onWheel:    (e: React.WheelEvent<HTMLInputElement>) => e.currentTarget.blur(),
+                          onKeyDown:  (e: React.KeyboardEvent<HTMLInputElement>) => {
+                            if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault();
+                          },
+                        } : {})}
                         value={customValues[f.key] ?? ""}
                         onChange={(e) => setCustomValues((v) => ({ ...v, [f.key]: e.target.value }))}
                         placeholder={f.placeholder}

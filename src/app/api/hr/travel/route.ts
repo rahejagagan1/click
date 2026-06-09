@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -14,9 +15,18 @@ export async function GET(req: NextRequest) {
   const view = searchParams.get("view") || "my";
 
   try {
+    // Brand-scope: admin "view=all" stays scoped to caller's brand
+    // unless allowlisted. Closes cross-brand travel-request leak.
+    const scope = getBrandScope(user);
+    const adminBrandFilter: any = scope.allBrands
+      ? {}
+      : (scope.brand
+          ? { user: { employeeProfile: { businessUnit: scope.brand } } }
+          : { userId: -1 });
+
     const where =
       view === "team" && !isAdmin ? { user: { managerId: myId! } } :
-      view === "all"  && isAdmin  ? {} :
+      view === "all"  && isAdmin  ? adminBrandFilter :
                                     { userId: myId! };
 
     const reqs = await prisma.travelRequest.findMany({

@@ -479,7 +479,7 @@ export default function JobsTab({
         </div>
         {pipelineView === "kanban"
           ? <KanbanBoard      jobId={activeJob.id} />
-          : <JobApplicantList jobId={activeJob.id} />}
+          : <JobApplicantList jobId={activeJob.id} jobTitle={activeJob.title} />}
         {shareJob && (
           <JobShareDialog
             job={{ id: shareJob.id, title: shareJob.title, slug: shareJob.publicSlug, brand: shareJob.brand }}
