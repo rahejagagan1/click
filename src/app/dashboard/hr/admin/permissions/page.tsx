@@ -1,13 +1,16 @@
 "use client";
 import { useState, useMemo, useEffect } from "react";
 import useSWR, { mutate } from "swr";
+import { useSearchParams } from "next/navigation";
 import { fetcher } from "@/lib/swr";
 import { Search, Check, Shield, Save } from "lucide-react";
 import { TAB_CATALOG, defaultTabPermissions, type TabKey } from "@/lib/permissions/tabs";
+import { brandFromSlug, inBrandScope } from "@/lib/hr-brand-scope";
 
 type UserRow = {
   id: number; name: string; email: string; profilePictureUrl?: string | null;
   orgLevel?: string | null; role?: string | null;
+  businessUnit?: string | null;
   isNew: boolean;
 };
 
@@ -24,16 +27,21 @@ type DetailResponse = {
 
 export default function PermissionsPage() {
   const { data: users = [] as UserRow[] } = useSWR<UserRow[]>("/api/hr/admin/tab-permissions", fetcher);
+  const searchParams = useSearchParams();
+  // Auto-scope to the brand of the HR sub-dashboard the rail link came from
+  // (?brand=). Super-admins on "all"/no param see every brand. UI-only filter.
+  const brand = brandFromSlug(searchParams?.get("brand"));
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const filtered = useMemo(() => {
+    const xs = users.filter((u) => inBrandScope(u.businessUnit, brand));
     const q = search.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter(
+    if (!q) return xs;
+    return xs.filter(
       (u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
     );
-  }, [users, search]);
+  }, [users, search, brand]);
 
   // Default-select the first "NEW" user, or the first user overall.
   useEffect(() => {
@@ -46,7 +54,14 @@ export default function PermissionsPage() {
   return (
     <div className="min-h-screen bg-[#f4f7f8]">
       <div className="bg-white border-b border-slate-200 px-6 py-4">
-        <h1 className="text-[15px] font-bold text-slate-800">Tab Permissions</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-[15px] font-bold text-slate-800">Tab Permissions</h1>
+          {brand && brand !== "all" && (
+            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${brand === "YT Labs" ? "bg-rose-100 text-rose-700" : "bg-sky-100 text-sky-700"}`}>
+              {brand}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="flex gap-0 h-[calc(100vh-82px)]">

@@ -11,6 +11,7 @@ import { parseAttLoc } from "@/lib/attendance-location";
 import { isHRAdmin, canApplyRestrictedLeave, canViewAllBrands } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
+import { isDesktopBypassActive } from "@/lib/desktop-bypass";
 import { PageShell } from "@/components/layout";
 import { DateField } from "@/components/ui/date-field";
 import {
@@ -2357,9 +2358,9 @@ export default function HRHomePage() {
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   useEffect(() => {
     const isDev = user?.isDeveloper === true;
-    const bypassParam = typeof window !== "undefined"
-      && new URLSearchParams(window.location.search).get("desktop") === "1";
-    setIsMobileDevice(detectMobileDevice() && !isDev && !bypassParam);
+    // isDesktopBypassActive() persists `?desktop=1` for the session, so the
+    // override survives navigation that drops the query string.
+    setIsMobileDevice(detectMobileDevice() && !isDev && !isDesktopBypassActive());
   }, [user]);
 
   useEffect(() => {

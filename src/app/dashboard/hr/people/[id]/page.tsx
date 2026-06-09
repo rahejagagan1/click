@@ -406,7 +406,7 @@ export default function EmployeeDetailPage() {
                 </div>
                 <p className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-medium text-slate-500">
                   <Briefcase className="h-3.5 w-3.5 text-slate-400" strokeWidth={2} />
-                  {p.designation || getUserRoleLabel(user.role) || "Employee"}
+                  {user.designationLabel || p.designation || getUserRoleLabel(user.role) || "Employee"}
                 </p>
                 {p.employeeId ? (
                   <p className="mt-1 ml-3 inline-flex items-center gap-1.5 font-mono text-[11.5px] text-slate-400">
