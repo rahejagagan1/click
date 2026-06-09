@@ -58,7 +58,7 @@ export async function fanoutReferralAnnouncement(j: ReferralAnnouncement): Promi
     }
     await prisma.$executeRawUnsafe(
       `INSERT INTO "Notification"
-         ("userId", "type", "entityId", "title", "message", "createdAt")
+         ("userId", "type", "entityId", "title", "body", "createdAt")
        VALUES ${values}`,
       ...params,
     );

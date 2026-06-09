@@ -111,7 +111,7 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
     }
     await prisma.$executeRawUnsafe(
       `INSERT INTO "Notification"
-         ("userId", "type", "entityId", "title", "message", "createdAt")
+         ("userId", "type", "entityId", "title", "body", "createdAt")
        VALUES ${values}`,
       ...params,
     );
