@@ -1751,16 +1751,14 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
             }`}
           >
             <MessageSquare className="h-4 w-4" />
-            <span>Comment</span>
-            {commentCount > 0 && (
-              <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10.5px] font-bold tabular-nums ${
-                showComments
-                  ? "bg-[#008CFF] text-white"
-                  : "bg-[#008CFF]/12 text-[#008CFF]"
-              }`}>
-                {commentCount}
-              </span>
-            )}
+            {/* LinkedIn / Facebook pattern: prepend the count with
+                pluralised label. Cleaner than a separate badge pill —
+                reads as a single coherent phrase. */}
+            <span>
+              {commentCount === 0 && "Comment"}
+              {commentCount === 1 && "1 Comment"}
+              {commentCount > 1 && `${commentCount} Comments`}
+            </span>
           </button>
         </div>
         <div className="flex items-center gap-1.5 pr-2 text-[12px] text-[#8393a3]">
