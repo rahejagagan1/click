@@ -591,25 +591,33 @@ function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: an
             return (
               <div
                 key={c.id}
-                className={`group flex items-start gap-2.5 transition-opacity ${isDeleting ? "opacity-50" : ""}`}
+                className={`group relative flex items-start gap-3 -mx-2 px-2 py-1.5 rounded-lg transition-all ${
+                  isDeleting ? "opacity-50" : "hover:bg-slate-50 dark:hover:bg-white/[0.02]"
+                }`}
               >
-                <Avatar name={c.author.name} url={c.author.profilePictureUrl} size={32} />
+                <div className="shrink-0 pt-0.5">
+                  <Avatar name={c.author.name} url={c.author.profilePictureUrl} size={30} />
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-[12.5px] leading-snug break-words min-w-0 text-slate-800 dark:text-slate-200">
-                      <span className="font-semibold mr-1.5">{c.author.name}</span>
+                    <p className="text-[12.5px] leading-relaxed break-words min-w-0 text-slate-800 dark:text-slate-200">
+                      <span className="font-semibold text-slate-900 dark:text-white mr-1.5">{c.author.name}</span>
                       <span className="text-slate-600 dark:text-slate-300 whitespace-pre-wrap">
                         {renderWithMentions(c.content, employees)}
                       </span>
                     </p>
                     {showDelete && (
-                      <div className="relative shrink-0 -mt-0.5">
+                      <div className="relative shrink-0">
                         <button
                           type="button"
                           onClick={() => setOpenCommentMenu(isMenuOpen ? null : c.id)}
                           disabled={isDeleting}
                           aria-label="Comment options"
-                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity h-6 w-6 inline-flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10 hover:text-slate-700"
+                          className={`h-6 w-6 inline-flex items-center justify-center rounded-full text-slate-400 transition-all ${
+                            isMenuOpen
+                              ? "bg-slate-200 dark:bg-white/10 text-slate-700 dark:text-slate-200 opacity-100"
+                              : "opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-slate-200 dark:hover:bg-white/10 hover:text-slate-700"
+                          }`}
                         >
                           <MoreHorizontal className="h-3.5 w-3.5" />
                         </button>
@@ -623,14 +631,14 @@ function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: an
                               className="fixed inset-0 z-30 cursor-default"
                               style={{ background: "transparent" }}
                             />
-                            <div className="absolute right-0 top-7 z-40 min-w-[150px] rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0d1b2a] shadow-lg overflow-hidden">
+                            <div className="absolute right-0 top-7 z-40 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0d1b2a] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.18)] overflow-hidden py-1">
                               <button
                                 type="button"
                                 onClick={() => deleteComment(c.id)}
-                                className="w-full px-3 py-2 text-left text-[12px] font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 inline-flex items-center gap-2"
+                                className="w-full px-3 py-1.5 text-left text-[12px] font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 inline-flex items-center gap-2 whitespace-nowrap"
                               >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                Delete comment
+                                <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                                <span>Delete comment</span>
                               </button>
                             </div>
                           </>
@@ -645,17 +653,24 @@ function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: an
               </div>
             );
           })}
-          <div className="flex items-center gap-2.5">
-            <Avatar name="You" size={28} />
-            <div className="flex-1 flex items-center gap-2 bg-white dark:bg-[#0d1b2a] border border-slate-200 dark:border-white/10 rounded-xl px-3 py-1.5">
+          <div className={`flex items-center gap-3 ${post.comments.length > 0 ? "pt-1" : ""}`}>
+            <div className="shrink-0">
+              <Avatar name="You" size={30} />
+            </div>
+            <div className="flex-1 flex items-center gap-1 bg-slate-100 dark:bg-white/[0.04] border border-transparent rounded-full pl-4 pr-1 py-1 focus-within:bg-white dark:focus-within:bg-[#0d1b2a] focus-within:border-[#008CFF] focus-within:shadow-[0_0_0_3px_rgba(0,140,255,0.08)] transition-all">
               <input
                 value={commentText}
                 onChange={e => setCommentText(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && submitComment()}
                 placeholder="Write a comment…"
-                className="flex-1 bg-transparent text-[12px] text-slate-700 dark:text-slate-300 placeholder-slate-400 focus:outline-none"
+                className="flex-1 bg-transparent text-[12.5px] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none py-1.5"
               />
-              <button onClick={submitComment} className="text-[#008CFF] hover:text-[#0077dd]">
+              <button
+                onClick={submitComment}
+                disabled={!commentText.trim()}
+                title="Send"
+                className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full text-[#008CFF] hover:bg-[#008CFF]/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
                 <Send className="w-3.5 h-3.5" />
               </button>
             </div>
