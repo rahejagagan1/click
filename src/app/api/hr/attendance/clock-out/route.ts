@@ -39,7 +39,9 @@ export async function POST(req: NextRequest) {
     // clock-in: developers and the `?desktop=1` override (forwarded as
     // the x-desktop-bypass header) skip the block entirely.
     const mobileBypass =
-      user?.isDeveloper === true || hasDesktopBypassHeader(req.headers);
+      user?.isDeveloper === true ||
+      hasDesktopBypassHeader(req.headers) ||
+      req.nextUrl.searchParams.get("desktop") === "1";
     if (isMobileRequest(req.headers) && !mobileBypass) {
       const today = istTodayDateOnly();
       const odForToday = await prisma.onDutyRequest.findFirst({

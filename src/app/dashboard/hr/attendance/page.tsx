@@ -15,6 +15,7 @@ import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { DateField } from "@/components/ui/date-field";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
+import { isDesktopBypassActive } from "@/lib/desktop-bypass";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
 
 // ── Form copy per kind ───────────────────────────────────────────────────────
@@ -599,9 +600,9 @@ export default function AttendancePage() {
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   useEffect(() => {
     const isDev = user?.isDeveloper === true;
-    const bypassParam = typeof window !== "undefined"
-      && new URLSearchParams(window.location.search).get("desktop") === "1";
-    setIsMobileDevice(detectMobileDevice() && !isDev && !bypassParam);
+    // isDesktopBypassActive() persists `?desktop=1` for the session, so the
+    // override survives navigation that drops the query string.
+    setIsMobileDevice(detectMobileDevice() && !isDev && !isDesktopBypassActive());
   }, [user]);
 
   // "Day Complete · 9h reached" toast — set after a successful clock-out

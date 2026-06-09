@@ -18,6 +18,10 @@ export async function GET(req: NextRequest) {
     // Multi-brand: callers can scope a list to "NB Media" or "YT Labs"
     // by passing ?businessUnit=… ; omitted = all brands.
     const businessUnit = searchParams.get("businessUnit") || "";
+    // Brand scope (NB Media / YT Labs) — brandOf semantics: YT Labs is an exact
+    // match; NB Media is everything else (incl. null / legacy / no profile), so
+    // no employee is ever dropped from both brands.
+    const brand = searchParams.get("brand") || "";
 
     // Developer invisibility: hide DEVELOPER_EMAILS rows from non-dev viewers.
     const viewer = session!.user as any;
@@ -47,6 +51,8 @@ export async function GET(req: NextRequest) {
           department ? { employeeProfile: { department: { contains: department, mode: "insensitive" } } } : {},
           employmentType ? { employeeProfile: { employmentType } } : {},
           businessUnit ? { employeeProfile: { businessUnit } } : {},
+          brand === "YT Labs"  ? { employeeProfile: { businessUnit: "YT Labs" } } : {},
+          brand === "NB Media" ? { NOT: { employeeProfile: { businessUnit: "YT Labs" } } } : {},
           isActive !== null && isActive !== undefined ? { isActive: isActive === "true" } : {},
           hideDevs ? { NOT: { email: { in: devEmails } } } : {},
         ],

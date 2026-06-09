@@ -7,8 +7,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import { isFullHRAdmin } from "@/lib/access";
 import { REPORT_TEMPLATES } from "@/lib/reports/manager-report-format";
+import { brandFromSlug, inBrandScope } from "@/lib/hr-brand-scope";
 
 type PermDef = { key: string; label: string; description: string; category: string; sensitive?: boolean };
 type ReportOwner = { id: number; name: string; role: string };
@@ -48,8 +50,14 @@ export default function DesignationsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
-  const [desigUsers, setDesigUsers] = useState<{ id: number; name: string; email: string; isActive: boolean }[]>([]);
+  const [desigUsers, setDesigUsers] = useState<{ id: number; name: string; email: string; isActive: boolean; businessUnit: string | null }[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
+  // Auto-scope the assigned-users list to the brand of the HR sub-dashboard
+  // (?brand=). Designations themselves are global; only the per-user list is
+  // brand-relevant, so super-admins on "all" see everyone.
+  const searchParams = useSearchParams();
+  const brand = brandFromSlug(searchParams?.get("brand"));
+  const shownDesigUsers = useMemo(() => desigUsers.filter((u) => inBrandScope(u.businessUnit, brand)), [desigUsers, brand]);
 
   async function load() {
     setLoading(true);
@@ -277,15 +285,21 @@ export default function DesignationsPage() {
             {selected && (
               <div className="mb-5">
                 <span className="text-sm font-semibold text-slate-700">
-                  Users on this designation <span className="text-slate-400">({selected.userCount})</span>
+                  Users on this designation{" "}
+                  <span className="text-slate-400">({brand && brand !== "all" ? shownDesigUsers.length : selected.userCount})</span>
+                  {brand && brand !== "all" && (
+                    <span className={`ml-2 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full align-middle ${brand === "YT Labs" ? "bg-rose-100 text-rose-700" : "bg-sky-100 text-sky-700"}`}>
+                      {brand}
+                    </span>
+                  )}
                 </span>
                 {usersLoading ? (
                   <p className="mt-1 text-xs text-slate-400">Loading…</p>
-                ) : desigUsers.length === 0 ? (
-                  <p className="mt-1 text-xs text-slate-400">No users assigned.</p>
+                ) : shownDesigUsers.length === 0 ? (
+                  <p className="mt-1 text-xs text-slate-400">{brand && brand !== "all" ? `No ${brand} users assigned.` : "No users assigned."}</p>
                 ) : (
                   <div className="mt-2 flex flex-wrap gap-1.5 max-h-44 overflow-y-auto">
-                    {desigUsers.map((u) => (
+                    {shownDesigUsers.map((u) => (
                       <span
                         key={u.id}
                         title={u.email}
