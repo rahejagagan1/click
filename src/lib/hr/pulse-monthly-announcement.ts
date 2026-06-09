@@ -68,8 +68,12 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
     } else { throw e; }
   }
 
-  // Strict brand separation — skip users with no businessUnit.
-  employees = employees.filter((e) => e.businessUnit === "NB Media" || e.businessUnit === "YT Labs");
+  // Strict brand separation — skip users with no businessUnit
+  // AND skip users whose brand has 0 active questions this cycle.
+  employees = employees.filter((e) =>
+    (e.businessUnit === "NB Media" && nbQs.length > 0) ||
+    (e.businessUnit === "YT Labs"  && ytQs.length > 0)
+  );
 
   if (employees.length === 0 || allQuestions.length === 0) {
     return {
@@ -78,6 +82,33 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
       emailsSent: 0, emailsFailed: 0, notifications: 0,
       questions: allQuestions.length,
     };
+  }
+
+  // ── Idempotency guard ──────────────────────────────────────
+  // The cron line `0 5 1-7 * 1` (Vixie OR semantics) fires ~10
+  // times in the first week of every month. isFirstMondayOfMonth
+  // in the route handler catches 9 of those. But cron retries or
+  // a force-fire after the scheduled one could still trigger
+  // a double fanout. Cheap defence: look for any pulse_monthly
+  // notification stamped in the last 48 hours — if any exists
+  // for this entityId=0 (monthly entityId), skip.
+  try {
+    const recent = await prisma.$queryRawUnsafe<Array<{ n: number }>>(
+      `SELECT count(*)::int AS n FROM "Notification"
+        WHERE type = 'pulse_monthly'
+          AND "createdAt" > now() - interval '48 hours'`,
+    );
+    if ((recent[0]?.n ?? 0) > 0) {
+      console.warn(`[monthly-pulse-fanout] skipping — found ${recent[0].n} pulse_monthly notifications in last 48h (idempotent skip)`);
+      return {
+        monthKey, monthLabel,
+        recipients: employees.length,
+        emailsSent: 0, emailsFailed: 0, notifications: 0,
+        questions: allQuestions.length,
+      };
+    }
+  } catch (e: any) {
+    console.warn("[monthly-pulse-fanout] idempotency check failed, proceeding anyway:", e?.message ?? e);
   }
 
   const surveyUrl = `${APP_URL}/dashboard/hr/pulse/monthly`;

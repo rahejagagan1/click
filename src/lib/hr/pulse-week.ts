@@ -106,9 +106,16 @@ export function getCycleKey(surveyType: "weekly" | "monthly", d: Date = new Date
 }
 
 /** True if the given date is the FIRST Monday of its month in IST.
- *  Used by the monthly-survey auto-send cron — the cron fires every
- *  Monday in the first week (`* * 1-7 * 1`), and this helper makes
- *  sure we only actually fanout on day 1-7 AND day-of-week=Monday. */
+ *
+ *  ⚠ LOAD-BEARING — do not delete.
+ *
+ *  Standard Vixie/Debian/RHEL cron OR's day-of-month with day-of-
+ *  week when both are restricted (the famous cron footgun, see
+ *  crontab(5) man page). The monthly-send crontab line
+ *  `0 5 1-7 * 1` therefore fires ~10 times per month at the daemon
+ *  level (every day 1-7 OR every Monday). This helper is what
+ *  collapses those 10 firings into a single actual fanout per
+ *  month by requiring BOTH dow=Monday AND dom ≤ 7. */
 export function isFirstMondayOfMonth(d: Date = new Date()): boolean {
   const ist = istShift(d);
   if (ist.getUTCDay() !== 1) return false;          // Monday = 1
