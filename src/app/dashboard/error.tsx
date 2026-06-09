@@ -2,6 +2,18 @@
 
 import { useEffect } from "react";
 
+// Detect stale-chunk errors that happen the first time a tab tries
+// to fetch a JS chunk that was renamed by a fresh deploy. Next.js
+// uses content-hashed chunk filenames (e.g. /_next/static/chunks/
+// 0re2wg98.n8dq.js). A new build replaces those with new hashes,
+// so the OLD page's references 404. Browser surfaces this as
+// "Failed to load chunk" / ChunkLoadError. A full page reload
+// fetches the new chunk manifest + the page works again.
+function isChunkLoadError(err: any): boolean {
+  const msg = String(err?.message ?? err ?? "");
+  return /ChunkLoadError|Loading chunk \d|Failed to load chunk|Loading CSS chunk/i.test(msg);
+}
+
 export default function Error({
     error,
     reset,
@@ -11,7 +23,35 @@ export default function Error({
 }) {
     useEffect(() => {
         console.error("Dashboard error:", error);
+        // Auto-recover from stale-chunk errors after a deploy.
+        // sessionStorage guards against an infinite reload loop —
+        // we only reload once per tab per error type.
+        if (isChunkLoadError(error) && typeof window !== "undefined") {
+            const KEY = "nb-chunk-reload";
+            if (!sessionStorage.getItem(KEY)) {
+                sessionStorage.setItem(KEY, "1");
+                window.location.reload();
+            }
+        }
     }, [error]);
+
+    // For stale-chunk errors we're already reloading — show a
+    // friendlier "refreshing…" state while the new JS lands.
+    if (isChunkLoadError(error)) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4">
+                <div className="w-10 h-10 border-4 border-slate-300 border-t-[#008CFF] rounded-full animate-spin" />
+                <div className="text-center">
+                    <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-1">
+                        Updating to the latest version…
+                    </h2>
+                    <p className="text-sm text-slate-500 max-w-md">
+                        A new build is live — reloading the page so you see the latest changes.
+                    </p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4">
