@@ -26,7 +26,20 @@ export const dynamic = "force-dynamic";
 // is the free-text comment box shared by both.
 const VALID_TYPES = new Set(["emoji", "rating", "likert", "enps", "text"]);
 const VALID_SURVEY_TYPES = new Set(["weekly", "monthly"]);
+const VALID_BRANDS = new Set(["NB Media", "YT Labs"]);
 const DEFAULT_EMOJIS = ["😡", "😟", "😐", "🙂", "😄"];
+
+// Normalise an incoming brand string. Accepts slugs + friendly
+// names + the literal "both" / "shared" / "" → null (= both brands).
+function normalizeBrand(raw: unknown): "NB Media" | "YT Labs" | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s || s === "both" || s === "shared") return null;
+  const lower = s.toLowerCase();
+  if (lower === "nb_media" || lower === "nbmedia" || lower === "nb media") return "NB Media";
+  if (lower === "yt_labs"  || lower === "ytlabs"  || lower === "yt labs")  return "YT Labs";
+  return null;
+}
 
 export async function GET(req: NextRequest) {
   const { errorResponse } = await requireAuth();
@@ -39,25 +52,38 @@ export async function GET(req: NextRequest) {
     const week = Number(url.searchParams.get("week"));
     const hasWeek = surveyType === "weekly" && Number.isFinite(week) && week >= 1 && week <= 4;
 
-    let rows: any[];
-    if (hasWeek) {
-      rows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT id, week, "order", text, type, emojis, "isActive", "surveyType", "createdAt", "updatedAt"
+    // Brand filter — null/empty/"both" returns shared questions only,
+    // "NB Media" / "YT Labs" returns brand-specific + shared. Used by
+    // the HR panel's brand tabs.
+    const brandParam = url.searchParams.get("brand");
+    const requestedBrand = normalizeBrand(brandParam);
+    // If client passes ?brand=both or omits → show ONLY shared
+    // questions (brand IS NULL). If they pass a specific brand →
+    // show that brand + shared so the manager sees the full
+    // "what this brand's employees will receive" set.
+    const showBrandAware = !!requestedBrand;
+
+    const brandClause = showBrandAware
+      ? ` AND (brand IS NULL OR brand = $${hasWeek ? 3 : 2})`
+      : ` AND brand IS NULL`;
+    const params: any[] = [surveyType];
+    if (hasWeek) params.push(week);
+    if (showBrandAware) params.push(requestedBrand);
+
+    const sql = hasWeek
+      ? `SELECT id, week, "order", text, type, emojis, "isActive", "surveyType", brand,
+                "createdAt", "updatedAt"
            FROM "PulseQuestion"
-          WHERE "surveyType" = $1 AND week = $2
-          ORDER BY "order" ASC, id ASC`,
-        surveyType, week,
-      );
-    } else {
-      rows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT id, week, "order", text, type, emojis, "isActive", "surveyType", "createdAt", "updatedAt"
+          WHERE "surveyType" = $1 AND week = $2 ${brandClause}
+          ORDER BY "order" ASC, id ASC`
+      : `SELECT id, week, "order", text, type, emojis, "isActive", "surveyType", brand,
+                "createdAt", "updatedAt"
            FROM "PulseQuestion"
-          WHERE "surveyType" = $1
-          ORDER BY COALESCE(week, 0) ASC, "order" ASC, id ASC`,
-        surveyType,
-      );
-    }
-    return NextResponse.json({ questions: rows });
+          WHERE "surveyType" = $1 ${brandClause}
+          ORDER BY COALESCE(week, 0) ASC, "order" ASC, id ASC`;
+
+    const rows = await prisma.$queryRawUnsafe<any[]>(sql, ...params);
+    return NextResponse.json({ questions: rows, brandFilter: requestedBrand });
   } catch (e) {
     return serverError(e, "GET /api/hr/pulse/questions");
   }
@@ -106,20 +132,29 @@ export async function POST(req: NextRequest) {
         : DEFAULT_EMOJIS;
     }
 
-    // Next `order` = max within the same (surveyType, week) bucket.
+    // Brand assignment — defaults to NULL (= both brands) if omitted.
+    const brand = normalizeBrand(body?.brand);
+
+    // Next `order` = max within the same (surveyType, week, brand) bucket.
     const maxRow = (await prisma.$queryRawUnsafe<any[]>(
       week == null
-        ? `SELECT COALESCE(MAX("order"), 0) AS m FROM "PulseQuestion" WHERE "surveyType" = $1 AND week IS NULL`
-        : `SELECT COALESCE(MAX("order"), 0) AS m FROM "PulseQuestion" WHERE "surveyType" = $1 AND week = $2`,
-      ...(week == null ? [surveyType] : [surveyType, week]),
+        ? `SELECT COALESCE(MAX("order"), 0) AS m FROM "PulseQuestion"
+             WHERE "surveyType" = $1 AND week IS NULL
+               AND ${brand == null ? "brand IS NULL" : "brand = $2"}`
+        : `SELECT COALESCE(MAX("order"), 0) AS m FROM "PulseQuestion"
+             WHERE "surveyType" = $1 AND week = $2
+               AND ${brand == null ? "brand IS NULL" : "brand = $3"}`,
+      ...(week == null
+        ? (brand == null ? [surveyType] : [surveyType, brand])
+        : (brand == null ? [surveyType, week] : [surveyType, week, brand])),
     ))[0];
     const nextOrder = (maxRow?.m ?? 0) + 1;
 
     const inserted = await prisma.$queryRawUnsafe<any[]>(
-      `INSERT INTO "PulseQuestion" (week, "order", text, type, emojis, "isActive", "surveyType")
-       VALUES ($1, $2, $3, $4, $5::jsonb, true, $6)
-       RETURNING id, week, "order", text, type, emojis, "isActive", "surveyType", "createdAt", "updatedAt"`,
-      week, nextOrder, text, type, emojis ? JSON.stringify(emojis) : null, surveyType,
+      `INSERT INTO "PulseQuestion" (week, "order", text, type, emojis, "isActive", "surveyType", brand)
+       VALUES ($1, $2, $3, $4, $5::jsonb, true, $6, $7)
+       RETURNING id, week, "order", text, type, emojis, "isActive", "surveyType", brand, "createdAt", "updatedAt"`,
+      week, nextOrder, text, type, emojis ? JSON.stringify(emojis) : null, surveyType, brand,
     );
     return NextResponse.json({ question: inserted[0] }, { status: 201 });
   } catch (e) {
