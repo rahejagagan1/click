@@ -10,10 +10,24 @@
 //   0 5 1-7 * 1  curl -sS -X POST -H "Authorization: Bearer …" \
 //                 http://localhost:3005/api/cron/pulse/send-monthly
 //
-// The crontab itself filters to first 7 days + Monday. The
-// endpoint also re-checks via isFirstMondayOfMonth() so a
-// misconfigured every-Monday cron doesn't fanout 4 times a
-// month.
+// ⚠ DO NOT REMOVE the isFirstMondayOfMonth() guard below.
+//
+// Vixie / Debian / RHEL / Alpine cron — every mainstream Linux
+// cron daemon — OR's day-of-month and day-of-week when BOTH are
+// restricted (the man page is explicit: "If both fields are
+// restricted (aren't *), the command will be run when either
+// field matches"). So `0 5 1-7 * 1` actually fires:
+//
+//   • Every day 1-7 of the month at 05:00 UTC  (~7 fires/month)
+//   • PLUS every Monday at 05:00 UTC            (~4 fires/month)
+//   ───────────────────────────────────────────────────────────
+//   → ~10-11 firings/month at the cron-daemon level
+//
+// The isFirstMondayOfMonth() check inside this route is what
+// reduces those 10 firings to a single actual fanout per month.
+// It is LOAD-BEARING, not a belt-and-suspenders. Removing it
+// would cause the monthly survey to fanout ~10× per month —
+// inboxes will be flooded.
 //
 // Pass `?force=1` to skip the date check — useful for HR to
 // resend off-schedule (e.g. when the first Monday is a holiday).
