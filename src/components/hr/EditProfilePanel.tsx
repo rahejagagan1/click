@@ -797,14 +797,16 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className={cls.label}>Designation</label>
-            <CustomSelect
-              listKey={jobTitleSource(brandFromBusinessUnit(job.businessUnit, job.legalEntity)).listKey}
-              defaults={jobTitleSource(brandFromBusinessUnit(job.businessUnit, job.legalEntity)).defaults}
-              value={job.designation}
-              onChange={(v) => setJob({ ...job, designation: v })}
-              placeholder="Select designation"
+            <SelectField
+              value={designationKey}
+              onChange={(v) => {
+                setDesignationPick(v);
+                const { orgLevel, role } = legacyFromDesignationKey(v);
+                setJob((j) => ({ ...j, orgLevel, role }));
+              }}
+              options={designations.map((d) => ({ value: d.key, label: d.label }))}
             />
-            <p className="mt-1 text-[11px] text-slate-400">Job title shown on the employee's card and on letters. Click "+ Add custom value" to add a new role HR doesn't have in the default list yet.</p>
+            <p className="mt-1 text-[11px] text-slate-400">Sets access tier + scorecard. Replaces the old Role + Org Level.</p>
           </div>
           <div>
             <label className={cls.label}>Secondary Job Title</label>
@@ -965,23 +967,6 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
             <label className={cls.label}>Team Capsule</label>
             <input className={cls.field} value={job.teamCapsule}
               onChange={(e) => setJob({ ...job, teamCapsule: e.target.value })} />
-          </div>
-          {/* Access Tier kept at the BOTTOM of the section so the
-              Designation / Department / Reporting Manager fields HR
-              touches every day stay at the top. Access Tier is the
-              permission layer — rarely edited after onboarding. */}
-          <div className="sm:col-span-2">
-            <label className={cls.label}>Access Tier</label>
-            <SelectField
-              value={designationKey}
-              onChange={(v) => {
-                setDesignationPick(v);
-                const { orgLevel, role } = legacyFromDesignationKey(v);
-                setJob((j) => ({ ...j, orgLevel, role }));
-              }}
-              options={designations.map((d) => ({ value: d.key, label: d.label }))}
-            />
-            <p className="mt-1 text-[11px] text-slate-400">Controls what this user can see and edit (Member / HR / HR Manager / CEO / Developer). Separate from the job-title Designation above — pick "Member" for any non-leadership employee. Replaces the old Role + Org Level.</p>
           </div>
         </div>
       </Section>
