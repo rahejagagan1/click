@@ -18,8 +18,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const id = parseInt((await params).id);
   if (!Number.isFinite(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
-  const users = await prisma.$queryRawUnsafe<{ id: number; name: string; email: string; isActive: boolean }[]>(
-    `SELECT "id","name","email","isActive" FROM "User" WHERE "designationId" = $1 ORDER BY "isActive" DESC, "name"`,
+  const users = await prisma.$queryRawUnsafe<{ id: number; name: string; email: string; isActive: boolean; businessUnit: string | null }[]>(
+    `SELECT u."id", u."name", u."email", u."isActive", ep."businessUnit"
+       FROM "User" u
+       LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u."id"
+      WHERE u."designationId" = $1
+      ORDER BY u."isActive" DESC, u."name"`,
     id
   );
   return NextResponse.json({ users });

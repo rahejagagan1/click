@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { mutate as globalMutate } from "swr";
 import { captureClockInGeo } from "@/lib/attendance-location";
-import { desktopBypassHeader } from "@/lib/desktop-bypass";
+import { desktopBypassHeader, withDesktopBypassParam } from "@/lib/desktop-bypass";
 
 // Shared clock-in / clock-out hook used by both the HR Attendance page
 // and the HR Home page. Hardens against the three failure modes that
@@ -87,7 +87,7 @@ class ClockApiError extends Error {
 }
 
 async function postOnce(url: string, body?: unknown): Promise<{ ok: boolean; status: number; data: any }> {
-  const res = await fetch(url, {
+  const res = await fetch(withDesktopBypassParam(url), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...desktopBypassHeader() },
     body: body ? JSON.stringify(body) : undefined,
