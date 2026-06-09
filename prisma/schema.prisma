@@ -209,6 +209,9 @@ model Designation {
   /// Optional rating track for the scorecard engine. Null = not rated by a
   /// production scorecard. One of: writer|editor|qa|researcher|manager.
   scorecardFunction String?
+  /// Brand the designation belongs to ("NB Media" | "YT Labs"). Each brand
+  /// shows only its own designations in the admin UI; clone copies across.
+  businessUnit      String?   @default("NB Media")
   isActive          Boolean   @default(true)
   sortOrder         Int       @default(0)
   /// System designations are seeded to mirror legacy access. HR can edit them
