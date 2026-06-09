@@ -84,40 +84,37 @@ export async function PATCH(
 
     const callerId = await resolveUserId(session);
 
-    // Upsert. For brand-new rows we need a credited value — use
-    // either the supplied one or fall back to the policy quota.
+    // Compute the FINAL credited + used values in JS, then do a
+    // straightforward upsert with EXCLUDED references. Avoids the
+    // dynamic-SET parameter-numbering trap.
     const policy = await getWfhPolicy();
     const defaultCredited = quotaForBrand(policy, subjectBrand);
-    const insertCredited = hasCredited ? credited : defaultCredited;
-    const insertUsed     = hasUsed     ? used     : 0;
 
-    // ON CONFLICT: only update the fields the client actually
-    // sent. Build the SET dynamically.
-    const updateSets: string[] = [];
-    const updateArgs: any[] = [];
-    if (hasCredited) {
-      updateArgs.push(credited);
-      updateSets.push(`"credited" = $${updateArgs.length}`);
-    }
-    if (hasUsed) {
-      updateArgs.push(used);
-      updateSets.push(`"used" = $${updateArgs.length}`);
-    }
-    updateArgs.push(callerId ?? null);
-    updateSets.push(`"updatedById" = $${updateArgs.length}`);
-    updateSets.push(`"updatedAt" = NOW()`);
+    const existingRows = await prisma.$queryRawUnsafe<Array<{ credited: number; used: number }>>(
+      `SELECT credited, used FROM "WfhBalance"
+        WHERE "userId" = $1 AND "monthKey" = $2 LIMIT 1`,
+      userId, monthKey,
+    );
+    const existing = existingRows[0];
 
-    // Insert params come first.
-    const params2 = [userId, monthKey, insertCredited, insertUsed, callerId ?? null, ...updateArgs];
+    const finalCredited = hasCredited
+      ? credited
+      : (existing?.credited ?? defaultCredited);
+    const finalUsed = hasUsed
+      ? used
+      : (existing?.used ?? 0);
 
     const rows = await prisma.$queryRawUnsafe<Array<any>>(
       `INSERT INTO "WfhBalance" ("userId", "monthKey", "credited", "used", "updatedById", "updatedAt")
        VALUES ($1, $2, $3, $4, $5, NOW())
        ON CONFLICT ("userId", "monthKey")
-       DO UPDATE SET ${updateSets.join(", ")}
+       DO UPDATE SET credited      = EXCLUDED.credited,
+                     used          = EXCLUDED.used,
+                     "updatedById" = EXCLUDED."updatedById",
+                     "updatedAt"   = NOW()
        RETURNING id, "userId", "monthKey", credited, used,
                  "updatedById", "updatedAt"`,
-      ...params2,
+      userId, monthKey, finalCredited, finalUsed, callerId ?? null,
     );
     const updated = rows[0];
 
