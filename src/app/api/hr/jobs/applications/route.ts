@@ -4,18 +4,18 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth } from "@/lib/api-auth";
+import { isHRAdmin } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
-function canViewHiring(session: any): boolean {
-  const u = session?.user;
-  return !!u && (u.orgLevel === "ceo" || u.orgLevel === "hr_manager" || u.role === "admin" || u.isDeveloper === true);
-}
-
+// Use the canonical isHRAdmin helper (includes special_access +
+// admin role) instead of an inline copy that drifted off the
+// original. Drift was the bug: special_access users got 403 here
+// but worked on every other HR surface.
 export async function GET() {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
-  if (!canViewHiring(session)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!isHRAdmin(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   try {
     const rows = await prisma.$queryRawUnsafe<
       Array<{

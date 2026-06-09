@@ -2249,12 +2249,76 @@ export default function HRHomePage() {
         .slice(0, 6)
     : [];
 
-  const handlePickImage = (file: File | null) => {
+  // Client-side image compressor — runs in the browser via <canvas>.
+  // Downscales any side > maxDim and re-encodes as JPEG at the
+  // tightest quality that keeps the base64 payload under the cap.
+  // Server cap is 3 MB encoded (validated in /api/hr/engage/posts);
+  // we target 2.5 MB so a base64 padding bump doesn't push us over.
+  //
+  // The function ALWAYS resolves with a data URL — if compression
+  // fails (very old browser, broken file), it falls back to the
+  // raw FileReader result and lets the server's 3 MB gate decide.
+  async function compressImage(file: File, opts?: { maxDim?: number; maxBytes?: number }): Promise<string> {
+    const maxDim   = opts?.maxDim   ?? 1920;
+    const maxBytes = opts?.maxBytes ?? 2.5 * 1024 * 1024;
+    const dataUrl  = await new Promise<string>((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload  = () => resolve(typeof fr.result === "string" ? fr.result : "");
+      fr.onerror = () => reject(fr.error);
+      fr.readAsDataURL(file);
+    });
+    if (!dataUrl) return "";
+
+    // If it's already under the cap AND ≤ maxDim, skip the canvas
+    // round-trip entirely (PNG with text/logo would re-encode worse
+    // as JPEG; small images don't need it).
+    if (dataUrl.length <= maxBytes && file.size <= maxBytes) return dataUrl;
+
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const i = new Image();
+        i.onload  = () => resolve(i);
+        i.onerror = () => reject(new Error("Image decode failed"));
+        i.src     = dataUrl;
+      });
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      let w = Math.round(img.width  * scale);
+      let h = Math.round(img.height * scale);
+      let quality = 0.85;
+      let out = "";
+      for (let i = 0; i < 6; i++) {
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) break;
+        ctx.drawImage(img, 0, 0, w, h);
+        out = canvas.toDataURL("image/jpeg", quality);
+        if (out.length <= maxBytes) break;
+        // Step down: drop quality first, then dimensions.
+        if (quality > 0.55) quality -= 0.10;
+        else { w = Math.round(w * 0.85); h = Math.round(h * 0.85); }
+      }
+      return out || dataUrl;
+    } catch {
+      return dataUrl;
+    }
+  }
+
+  const handlePickImage = async (file: File | null) => {
     if (!file) return;
-    if (file.size > 10 * 1024 * 1024) { alert("Image too large (max 10 MB)"); return; }
-    const reader = new FileReader();
-    reader.onload = () => setPostMedia(typeof reader.result === "string" ? reader.result : null);
-    reader.readAsDataURL(file);
+    if (file.size > 25 * 1024 * 1024) { alert("Image too large (max 25 MB)."); return; }
+    try {
+      const compressed = await compressImage(file);
+      if (!compressed) { alert("Couldn't read that image. Try a different file."); return; }
+      setPostMedia(compressed);
+      const origKb = Math.round(file.size / 1024);
+      const newKb  = Math.round(compressed.length / 1024);
+      if (newKb < origKb * 0.85) {
+        console.log(`[post] compressed image from ${origKb}KB → ${newKb}KB`);
+      }
+    } catch (e: any) {
+      alert(e?.message || "Failed to process image.");
+    }
   };
 
   const resetComposer = () => {
@@ -2278,17 +2342,26 @@ export default function HRHomePage() {
     setPraiseFiles([]);
   };
 
-  const addPraiseFile = (file: File | null) => {
+  const addPraiseFile = async (file: File | null) => {
     if (!file) return;
     if (praiseFiles.length >= 5) { alert("Max 5 attachments."); return; }
-    if (file.size > 10 * 1024 * 1024) { alert(`"${file.name}" is over 10 MB.`); return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setPraiseFiles(prev => [...prev, { name: file.name, data: reader.result as string }]);
-      }
-    };
-    reader.readAsDataURL(file);
+    if (file.size > 25 * 1024 * 1024) { alert(`"${file.name}" is over 25 MB.`); return; }
+    try {
+      // Compress images; non-image files pass through as-is (PDF,
+      // doc, etc.) — same upper bound, just no canvas re-encode.
+      const data = file.type.startsWith("image/")
+        ? await compressImage(file)
+        : await new Promise<string>((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload  = () => resolve(typeof fr.result === "string" ? fr.result : "");
+            fr.onerror = () => reject(fr.error);
+            fr.readAsDataURL(file);
+          });
+      if (!data) { alert(`Couldn't read "${file.name}".`); return; }
+      setPraiseFiles(prev => [...prev, { name: file.name, data }]);
+    } catch (e: any) {
+      alert(e?.message || `Failed to read "${file.name}".`);
+    }
   };
 
   const praiseMatches = praiseSearchOpen
@@ -2569,20 +2642,41 @@ export default function HRHomePage() {
       media = postMedia;
     }
     setSubmittingPost(true);
-    await fetch("/api/hr/engage/posts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        content,
-        type: feedTab,
-        scope: postScope === "org" ? "org" : teamScope,
-        mediaUrl: media,
-        praiseToId: praiseTo,
-      }),
-    });
-    resetComposer();
-    setSubmittingPost(false);
-    mutate(postsUrl);
+    // Wrap in try/catch + check res.ok so the composer doesn't
+    // silently clear on a failure. Previously: fetch threw or
+    // returned 4xx, code immediately reset + mutated → user
+    // thought it posted but nothing landed (the silent-fail bug
+    // HR Manager + HR were hitting). Now we surface the server
+    // error AND keep their draft so they can fix + retry.
+    try {
+      const res = await fetch("/api/hr/engage/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content,
+          type: feedTab,
+          scope: postScope === "org" ? "org" : teamScope,
+          mediaUrl: media,
+          praiseToId: praiseTo,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        const fallback =
+          res.status === 403 ? "You don't have permission to post." :
+          res.status === 413 ? "Image is too large (max 3 MB)." :
+          res.status === 400 ? "Content or image is required." :
+                               `Post failed (${res.status}).`;
+        alert(j?.error || fallback);
+        return;                              // keep composer state on failure
+      }
+      resetComposer();
+      mutate(postsUrl);
+    } catch (e: any) {
+      alert(e?.message || "Network error — post not sent. Check your connection and try again.");
+    } finally {
+      setSubmittingPost(false);
+    }
   };
 
   return (

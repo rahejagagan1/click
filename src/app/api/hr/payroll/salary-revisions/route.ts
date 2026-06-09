@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -46,26 +47,31 @@ export async function GET(req: NextRequest) {
     // entityType='SalaryStructure'. We pull only update/create rows whose
     // `after.ctc` differs from `before.ctc` (so unchanged-CTC patches
     // don't pollute the list).
-    const rows = await prisma.$queryRawUnsafe<Row[]>(
-      `SELECT al.id,
-              (al.after->>'userId')::int                AS "userId",
-              u.name                                    AS "userName",
-              ep."employeeId",
-              (al.before->>'ctc')                       AS "oldCtc",
-              (al.after->>'ctc')                        AS "newCtc",
-              NULLIF(al.after->>'effectiveFrom','')::timestamp AS "effectiveDate",
-              al."createdAt"                            AS "changedAt",
-              actor.name                                AS "actorName"
-         FROM "AuditLog" al
-         LEFT JOIN "User" u ON u.id = (al.after->>'userId')::int
-         LEFT JOIN "EmployeeProfile" ep ON ep."userId" = (al.after->>'userId')::int
-         LEFT JOIN "User" actor ON actor.id = al."actorId"
-        WHERE al."entityType" = 'SalaryStructure'
-          AND al."createdAt" >= $1 AND al."createdAt" < $2
-          AND (al.before IS NULL OR (al.before->>'ctc') IS DISTINCT FROM (al.after->>'ctc'))
-        ORDER BY al."createdAt" DESC`,
-      monthStart, monthEnd,
-    );
+    const scope = getBrandScope(session!.user);
+    if (!scope.allBrands && !scope.brand) return NextResponse.json({ items: [] });
+
+    const brandClause = scope.allBrands ? "" : ` AND ep."businessUnit" = $3`;
+    const sql = `SELECT al.id,
+                        (al.after->>'userId')::int                AS "userId",
+                        u.name                                    AS "userName",
+                        ep."employeeId",
+                        (al.before->>'ctc')                       AS "oldCtc",
+                        (al.after->>'ctc')                        AS "newCtc",
+                        NULLIF(al.after->>'effectiveFrom','')::timestamp AS "effectiveDate",
+                        al."createdAt"                            AS "changedAt",
+                        actor.name                                AS "actorName"
+                   FROM "AuditLog" al
+                   LEFT JOIN "User" u ON u.id = (al.after->>'userId')::int
+                   LEFT JOIN "EmployeeProfile" ep ON ep."userId" = (al.after->>'userId')::int
+                   LEFT JOIN "User" actor ON actor.id = al."actorId"
+                  WHERE al."entityType" = 'SalaryStructure'
+                    AND al."createdAt" >= $1 AND al."createdAt" < $2
+                    AND (al.before IS NULL OR (al.before->>'ctc') IS DISTINCT FROM (al.after->>'ctc'))
+                    ${brandClause}
+                  ORDER BY al."createdAt" DESC`;
+    const rows = scope.allBrands
+      ? await prisma.$queryRawUnsafe<Row[]>(sql, monthStart, monthEnd)
+      : await prisma.$queryRawUnsafe<Row[]>(sql, monthStart, monthEnd, scope.brand);
     return NextResponse.json({ items: rows });
   } catch (e) { return serverError(e, "GET /api/hr/payroll/salary-revisions"); }
 }

@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -50,20 +51,26 @@ export async function GET(req: NextRequest) {
     const monthStart = new Date(Date.UTC(year, month, 1));
     const monthEnd   = new Date(Date.UTC(year, month + 1, 0));
 
-    const rows = await prisma.$queryRawUnsafe<Row[]>(
-      `SELECT e.id, e."userId", u.name AS "userName",
-              ep."employeeId", ep.designation, ep.department,
-              e."exitType", e."resignationDate", e."lastWorkingDay",
-              e."noticePeriodDays", e.status,
-              e."assetsReturned", e."documentsHandled",
-              e."finalSettlementDone", e."exitInterviewDone",
-              ss.ctc::text AS ctc
-         FROM "EmployeeExit" e
-         JOIN "User" u ON u.id = e."userId"
-    LEFT JOIN "EmployeeProfile" ep ON ep."userId" = e."userId"
-    LEFT JOIN "SalaryStructure" ss ON ss."userId" = e."userId"
-        ORDER BY e."lastWorkingDay" DESC`,
-    );
+    const scope = getBrandScope(session!.user);
+    if (!scope.allBrands && !scope.brand) return NextResponse.json({ thisMonth: [], alreadyExited: [] });
+
+    const brandClause = scope.allBrands ? "" : `WHERE ep."businessUnit" = $1`;
+    const sql = `SELECT e.id, e."userId", u.name AS "userName",
+                        ep."employeeId", ep.designation, ep.department,
+                        e."exitType", e."resignationDate", e."lastWorkingDay",
+                        e."noticePeriodDays", e.status,
+                        e."assetsReturned", e."documentsHandled",
+                        e."finalSettlementDone", e."exitInterviewDone",
+                        ss.ctc::text AS ctc
+                   FROM "EmployeeExit" e
+                   JOIN "User" u ON u.id = e."userId"
+              LEFT JOIN "EmployeeProfile" ep ON ep."userId" = e."userId"
+              LEFT JOIN "SalaryStructure" ss ON ss."userId" = e."userId"
+                  ${brandClause}
+                  ORDER BY e."lastWorkingDay" DESC`;
+    const rows = scope.allBrands
+      ? await prisma.$queryRawUnsafe<Row[]>(sql)
+      : await prisma.$queryRawUnsafe<Row[]>(sql, scope.brand);
 
     const thisMonth: Row[] = [];
     const alreadyExited: Row[] = [];

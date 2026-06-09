@@ -112,7 +112,7 @@ export default function OffboardPage() {
       </div>
 
       {tab === "initiate" && <InitiateExitTab brand={brand} />}
-      {tab === "pipeline" && <ExitPipeline     />}
+      {tab === "pipeline" && <ExitPipeline initialBrand={brand} />}
     </div>
   );
 }
@@ -171,7 +171,9 @@ function InitiateExitTab({ brand }: { brand: BrandScope }) {
         onSubmitted={(name) => {
           setPicked(null);
           setSuccess(`Exit recorded for ${name}. Goodbye email sent and stakeholders notified.`);
-          mutate("/api/hr/exits");
+          // Pattern-match so the brand-keyed variants (?brand=...)
+          // also refresh after a new exit is recorded.
+          mutate((k: any) => typeof k === "string" && k.startsWith("/api/hr/exits"));
           // Invalidate every cached key that might still show this person
           // as active — employee listings, the global search bar, and any
           // mention-pickers — so they disappear immediately without a hard
