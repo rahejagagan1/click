@@ -9,6 +9,7 @@ import {
 import OrgTree from "@/components/admin/org-tree";
 import RegularizationPolicyCard from "@/components/admin/RegularizationPolicyCard";
 import UnlimitedRegularizationPolicyCard from "@/components/admin/UnlimitedRegularizationPolicyCard";
+import WfhPolicyCard from "@/components/admin/WfhPolicyCard";
 import EmailsAutomationPanel from "@/components/admin/EmailsAutomationPanel";
 import UserAvatar from "@/components/ui/user-avatar";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
@@ -571,7 +572,7 @@ export default function AdminPage() {
                                       ? "Emails Automation"
                                       : tab === "permissions"
                                         ? "Permissions"
-                                        : "Regularization Policy"}
+                                        : "Attendance Policies"}
                     </button>
                 ))}
             </div>
@@ -1825,13 +1826,14 @@ export default function AdminPage() {
             {activeTab === "regularization-policy" && (
                 <div className="max-w-3xl space-y-4">
                     <div>
-                        <h2 className="text-base font-semibold text-white">Regularization Policy</h2>
+                        <h2 className="text-base font-semibold text-white">Attendance Policies</h2>
                         <p className="text-xs text-slate-400 mt-1">
-                            Control the org-wide attendance regularization policy: the 2-day self-apply window and the unlimited override.
+                            Control the org-wide attendance toggles: the regularization 2-day self-apply window, the unlimited override, and the WFH monthly quota per brand.
                         </p>
                     </div>
                     <RegularizationPolicyCard />
                     <UnlimitedRegularizationPolicyCard />
+                    <WfhPolicyCard />
                 </div>
             )}
         </div>
