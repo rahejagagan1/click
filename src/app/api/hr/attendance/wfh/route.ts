@@ -129,23 +129,36 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Monthly WFH cap ────────────────────────────────────────────────
-    // Each employee can WFH at most twice per IST calendar month (the cap
-    // doesn't carry over). Pending and approved requests both count
-    // against the limit so users can't queue up more than 2 in flight.
+    // Per-brand quota driven by the WfhPolicy singleton (NB Media = 2,
+    // YT Labs = 3 by default; HR can edit + flip the limit off entirely
+    // from the admin Leave Policies panel). Pending + approved + the
+    // partially_approved interim state ALL count against the cap so
+    // users can't queue more than `quota` in flight at once.
     if (!isHRGrant) {
-      const { start: monthStart, end: monthEnd } = istMonthRange(fromIst);
-      const usedThisMonth = await prisma.wFHRequest.count({
-        where: {
-          userId: subjectUserId,
-          status: { in: ["pending", "approved"] },
-          date:   { gte: monthStart, lte: monthEnd },
-        },
-      });
-      if (usedThisMonth >= 2) {
-        const monthLabel = monthStart.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
-        return NextResponse.json({
-          error: `WFH limit reached: 2 of 2 already used for ${monthLabel}.`,
-        }, { status: 400 });
+      const { getWfhPolicy, quotaForBrand } = await import("@/lib/hr/wfh-balance");
+      const policy = await getWfhPolicy();
+      if (policy.limitEnabled) {
+        const subjProfile = await prisma.employeeProfile.findUnique({
+          where: { userId: subjectUserId },
+          select: { businessUnit: true },
+        });
+        const subjectBrand = subjProfile?.businessUnit ?? null;
+        const quota = quotaForBrand(policy, subjectBrand);
+
+        const { start: monthStart, end: monthEnd } = istMonthRange(fromIst);
+        const usedThisMonth = await prisma.wFHRequest.count({
+          where: {
+            userId: subjectUserId,
+            status: { in: ["pending", "partially_approved", "approved"] },
+            date:   { gte: monthStart, lte: monthEnd },
+          },
+        });
+        if (usedThisMonth >= quota) {
+          const monthLabel = monthStart.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
+          return NextResponse.json({
+            error: `WFH limit reached: ${quota} of ${quota} already used for ${monthLabel}.`,
+          }, { status: 400 });
+        }
       }
     }
 
