@@ -78,8 +78,13 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
 
   // Strict brand separation — employees without a businessUnit
   // on their profile can't be served a question set. Skip them
-  // entirely so they don't get an email with no content.
-  employees = employees.filter((e) => e.businessUnit === "NB Media" || e.businessUnit === "YT Labs");
+  // entirely so they don't get an email with no content. ALSO
+  // skip employees whose brand has 0 active questions this cycle —
+  // sending an empty <ol></ol> would look broken.
+  employees = employees.filter((e) =>
+    (e.businessUnit === "NB Media" && nbQs.length > 0) ||
+    (e.businessUnit === "YT Labs"  && ytQs.length > 0)
+  );
 
   if (employees.length === 0 || allQuestions.length === 0) {
     return {
@@ -87,6 +92,34 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
       recipients: employees.length, emailsSent: 0, emailsFailed: 0,
       notifications: 0, questions: allQuestions.length,
     };
+  }
+
+  // ── Idempotency guard ──────────────────────────────────────
+  // If a previous fanout for this weekKey already ran (e.g. a
+  // cron retry on transient network failure, or HR force-firing
+  // after the scheduled cron), don't double-send. Detect by
+  // looking for any pulse_weekly Notification row stamped with
+  // the active week's entityId in the last 36 hours — that
+  // covers same-day retries without false-positiving on a fresh
+  // weekly cycle next Friday.
+  try {
+    const recent = await prisma.$queryRawUnsafe<Array<{ n: number }>>(
+      `SELECT count(*)::int AS n FROM "Notification"
+        WHERE type = 'pulse_weekly'
+          AND "entityId" = $1
+          AND "createdAt" > now() - interval '36 hours'`,
+      activeWeek,
+    );
+    if ((recent[0]?.n ?? 0) > 0) {
+      console.warn(`[pulse-fanout] skipping — found ${recent[0].n} pulse_weekly notifications for week ${activeWeek} in last 36h (idempotent skip)`);
+      return {
+        weekKey, activeWeek,
+        recipients: employees.length, emailsSent: 0, emailsFailed: 0,
+        notifications: 0, questions: allQuestions.length,
+      };
+    }
+  } catch (e: any) {
+    console.warn("[pulse-fanout] idempotency check failed, proceeding anyway:", e?.message ?? e);
   }
 
   const pulseUrl    = `${APP_URL}/dashboard/hr/pulse`;
