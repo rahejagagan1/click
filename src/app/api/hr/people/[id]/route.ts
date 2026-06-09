@@ -35,6 +35,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       where: { id },
       include: {
         employeeProfile: true,
+        // SalaryStructure pulled in so HR-facing flows (Exit
+        // Statement template auto-fill, payroll exports, etc.)
+        // get CTC + PF eligibility + salary type (intern vs
+        // regular) without a second roundtrip.
+        salaryStructure: { select: { ctc: true, pfEligible: true, salaryType: true } },
         manager: { select: { id: true, name: true, profilePictureUrl: true, role: true } },
         teamMembers: { select: { id: true, name: true, profilePictureUrl: true, role: true } },
         userShift: { include: { shift: true } },

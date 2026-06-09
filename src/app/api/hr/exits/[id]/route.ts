@@ -11,13 +11,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth } from "@/lib/api-auth";
+import { isHRAdmin } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
-function canManage(session: any): boolean {
-  const u = session?.user;
-  return !!u && (u.orgLevel === "ceo" || u.orgLevel === "hr_manager" || u.role === "admin" || u.isDeveloper === true);
+/** SECURITY MODEL — read this before tightening.
+ *
+ *  Per-row brand restriction is INTENTIONALLY OFF on the
+ *  offboarding [id] endpoint, per HR's explicit design choice:
+ *  the UI exposes brand tabs (NB Media | YT Labs) and HR
+ *  Managers can click into any exit from either tab. So this
+ *  endpoint trusts the canManage(session) gate above as the
+ *  authorisation boundary, not the row's businessUnit.
+ *
+ *  Threat model:
+ *    • The endpoint is canManage-gated (HR Manager / orgLevel=
+ *      hr_manager / role=admin / CEO / developer). A regular
+ *      employee can never reach this function.
+ *    • Brand is a UI filter on the list view, not an access
+ *      boundary on individual rows. The list endpoint
+ *      (/api/hr/exits) accepts ?brand= for the same reason.
+ *
+ *  If you later want to re-tighten (e.g. brand=NB Media for the
+ *  per-brand HR Manager only), restore a real check here. The
+ *  function signature is preserved so call sites don't need to
+ *  be edited at that point. */
+async function brandGate(_session: any, _exitId: number): Promise<"allow"> {
+  return "allow";
 }
+
+// Use canonical isHRAdmin helper. Inline copy omitted
+// special_access — drift restored by routing through the helper.
+const canManage = (session: any) => isHRAdmin(session?.user);
 
 const STATUS_VALUES = new Set(["under_review", "in_progress", "exited"]);
 
@@ -41,6 +66,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const { id: idParam } = await params;
     const id = parseInt(idParam);
     if (!Number.isFinite(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+    // Brand-scope: per-brand HR Managers can only read exits for
+    // employees in their own brand. Returns 404 on cross-brand
+    // access (not 403) to avoid leaking the existence of IDs in
+    // the other brand's pipeline.
+    // brandGate is currently a no-op — keeping the call site for
+    // future re-introduction of per-row brand restrictions.
+    await brandGate(session, id);
 
     const exitRows = await prisma.$queryRawUnsafe<ExitDetail[]>(
       `SELECT e.id, e."userId", e.status, e."exitType",
@@ -128,6 +161,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const { id: idParam } = await params;
     const id = parseInt(idParam);
     if (!Number.isFinite(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+    // Brand-scope mutations the same way GET does. A cross-brand
+    // HR Manager shouldn't be able to flip another brand's exit
+    // status or tick clearance items.
+    // brandGate is currently a no-op — keeping the call site for
+    // future re-introduction of per-row brand restrictions.
+    await brandGate(session, id);
+
     const body = await req.json();
 
     const sets: string[] = [];

@@ -8,7 +8,7 @@
 // inline via the stage select — same backend action as the kanban
 // drag-and-drop. Sortable by name, stage, applied-on, and source.
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useUrlState } from "@/lib/hooks/useUrlState";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
@@ -16,6 +16,7 @@ import {
   Mail, Phone, Briefcase, Star, Clock, ChevronUp, ChevronDown, FileText, Users, Archive,
 } from "lucide-react";
 import CandidateDrawer from "./CandidateDrawer";
+import AddApplicantModal from "./AddApplicantModal";
 
 type Stage = { id: number; key: string; label: string; sortOrder: number; kind: string; color: string };
 type Candidate = {
@@ -28,6 +29,9 @@ type Candidate = {
   resumeUrl: string | null;
   resumeFileName?: string | null;
   source: string | null;
+  // Set when source === "referral" — { id, name } of the
+  // employee who referred this candidate.
+  referredBy?: { id: number; name: string } | null;
   overallRating: number | null;
   currentStage: Stage | null;
   enteredStageAt: string | null;
@@ -76,7 +80,7 @@ const STAGE_TONE: Record<string, { chip: string; dot: string; ring: string }> = 
   rose:    { chip: "bg-rose-50    text-rose-700",    dot: "bg-rose-500",    ring: "ring-rose-200"    },
 };
 
-export default function JobApplicantList({ jobId }: { jobId: number }) {
+export default function JobApplicantList({ jobId, jobTitle = "this job" }: { jobId: number; jobTitle?: string }) {
   const { data: stagesData } = useSWR<{ stages: Stage[] }>("/api/hr/hiring/stages", fetcher);
   const { data: candidatesData, isLoading } = useSWR<{ candidates: Candidate[] }>(
     `/api/hr/hiring/candidates?openingId=${jobId}`,
@@ -87,6 +91,9 @@ export default function JobApplicantList({ jobId }: { jobId: number }) {
 
   const [sortKey, setSortKey] = useState<SortKey>("applied");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  // Add-applicant drawer toggle — opened from the tab strip
+  // "+ Add applicant" button.
+  const [addOpen, setAddOpen] = useState(false);
   // selectedId is URL-derived (`?candidate=<id>`) so a hard reload
   // reopens the same candidate's drawer. Stored as string in the
   // URL; we coerce to number at the React boundary.
@@ -96,11 +103,51 @@ export default function JobApplicantList({ jobId }: { jobId: number }) {
     (n: number | null) => setSelectedIdUrl(n != null ? String(n) : null),
     [setSelectedIdUrl],
   );
+
+  // CandidateDrawer's "1 of N" pager dispatches this event when HR
+  // clicks the prev/next chevrons. We listen here so the drawer can
+  // switch to the next sibling without remounting. The matching
+  // listener lives in CandidatesTab too (the global candidates
+  // page) — same event, same intent, two consumers.
+  useEffect(() => {
+    function onNav(e: Event) {
+      const id = (e as CustomEvent<number>).detail;
+      if (Number.isInteger(id)) setSelectedId(Number(id));
+    }
+    window.addEventListener("nb:candidateDrawer:navigate", onNav as any);
+    return () => window.removeEventListener("nb:candidateDrawer:navigate", onNav as any);
+  }, [setSelectedId]);
+
   const [moving, setMoving]         = useState<Set<number>>(new Set());
+
+  // Tab filter — lets HR slice the candidate list by lifecycle
+  // bucket without scrolling/searching. Buckets:
+  //   • "all"          — everyone (default)
+  //   • "new"          — currentStage.key === "sourced" AND not archived
+  //                       (i.e. just applied, hasn't been screened yet)
+  //   • "in_progress"  — past sourcing AND not archived AND not hired
+  //                       (screening / interview / offer / etc.)
+  //   • "archived"     — explicit archive OR stage.kind === "rejected"
+  type TabKey = "all" | "new" | "in_progress" | "archived";
+  const [tab, setTab] = useState<TabKey>("all");
+  const bucketOf = (c: Candidate): Exclude<TabKey, "all"> => {
+    if (isArchived(c)) return "archived";
+    if (c.currentStage?.key === "sourced") return "new";
+    return "in_progress";
+  };
+  const counts = useMemo(() => {
+    const b = { all: candidates.length, new: 0, in_progress: 0, archived: 0 };
+    for (const c of candidates) b[bucketOf(c)]++;
+    return b;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidates]);
 
   const sorted = useMemo(() => {
     const dir = sortDir === "asc" ? 1 : -1;
-    return [...candidates].sort((a, b) => {
+    const filtered = tab === "all"
+      ? candidates
+      : candidates.filter((c) => bucketOf(c) === tab);
+    return [...filtered].sort((a, b) => {
       switch (sortKey) {
         case "name":   return a.fullName.localeCompare(b.fullName) * dir;
         case "stage":  return ((a.currentStage?.sortOrder ?? 0) - (b.currentStage?.sortOrder ?? 0)) * dir;
@@ -109,7 +156,8 @@ export default function JobApplicantList({ jobId }: { jobId: number }) {
         default:       return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
       }
     });
-  }, [candidates, sortKey, sortDir]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidates, sortKey, sortDir, tab]);
 
   const moveStage = async (candidateId: number, stageId: number) => {
     const curr = candidates.find((c) => c.id === candidateId);
@@ -170,31 +218,58 @@ export default function JobApplicantList({ jobId }: { jobId: number }) {
     );
   }
 
-  // Counts for the header strip — gives HR a glanceable "X active,
-  // Y archived" without scanning every row.
-  const archivedCount = candidates.filter(isArchived).length;
-  const activeCount   = candidates.length - archivedCount;
+  // Glanceable counts now live inside the tab strip below — each
+  // tab shows its own bucket count chip. No separate header
+  // counter needed.
 
   return (
     <>
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-        {/* Header strip — counts + an inline hint pointing at the
-            stage chip so HR knows it's interactive. Removes the
-            "is that a dropdown?" guesswork. */}
-        <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/60 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2 text-[11.5px]">
-            <span className="font-semibold text-slate-700">{activeCount} active</span>
-            {archivedCount > 0 && (
-              <>
-                <span className="text-slate-300">·</span>
-                <span className="text-slate-500">{archivedCount} archived</span>
-              </>
-            )}
+        {/* Tab strip — bucket the list by lifecycle so HR doesn't
+            scroll past archived/sourced candidates to find the ones
+            actively moving. Counts mirror the buckets exactly. */}
+        <div className="px-4 pt-3 pb-0 border-b border-slate-200 bg-slate-50/40 flex items-end justify-between gap-3 flex-wrap">
+          <div className="flex items-end gap-0 -mb-px" role="tablist">
+            {(([
+              { key: "all",          label: "All",          n: counts.all },
+              { key: "new",          label: "New",          n: counts.new },
+              { key: "in_progress",  label: "In Progress",  n: counts.in_progress },
+              { key: "archived",     label: "Archived",     n: counts.archived },
+            ] as const)).map((t) => {
+              const active = tab === t.key;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setTab(t.key)}
+                  className={`px-3.5 py-2 text-[12px] font-semibold inline-flex items-center gap-1.5 border-b-2 transition-colors ${
+                    active
+                      ? "border-[#008CFF] text-[#008CFF]"
+                      : "border-transparent text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  {t.label}
+                  <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10.5px] font-bold ${
+                    active ? "bg-[#008CFF]/15 text-[#008CFF]" : "bg-slate-200/70 text-slate-500"
+                  }`}>{t.n}</span>
+                </button>
+              );
+            })}
           </div>
-          <p className="text-[11px] text-slate-500 inline-flex items-center gap-1.5">
-            <ChevronDown size={11} className="text-slate-400" />
-            Click the stage chip on any row to move a candidate
-          </p>
+          <div className="flex items-center gap-3 mb-2">
+            <button
+              type="button"
+              onClick={() => setAddOpen(true)}
+              className="h-7 px-3 rounded-md bg-[#008CFF] hover:bg-[#0070cc] text-white text-[11.5px] font-semibold inline-flex items-center gap-1"
+              title="Manually source a candidate into this job"
+            >+ Add applicant</button>
+            <p className="text-[11px] text-slate-500 inline-flex items-center gap-1.5">
+              <ChevronDown size={11} className="text-slate-400" />
+              Click the stage chip on any row to move a candidate
+            </p>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-[12.5px]">
@@ -209,6 +284,13 @@ export default function JobApplicantList({ jobId }: { jobId: number }) {
               </tr>
             </thead>
             <tbody>
+              {sorted.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-[12.5px] text-slate-400">
+                    No candidates in this bucket yet.
+                  </td>
+                </tr>
+              )}
               {sorted.map((c) => {
                 const archived = isArchived(c);
                 return (
@@ -314,9 +396,22 @@ export default function JobApplicantList({ jobId }: { jobId: number }) {
                       <Clock size={11} className="text-slate-400" /> {daysSince(c.createdAt)}
                     </span>
                   </td>
-                  {/* Source */}
+                  {/* Source — if it's a referral, show WHO referred them.
+                      Emerald accent so referrals visually stand out from
+                      generic Indeed/Naukri/LinkedIn sources. */}
                   <td className="px-4 py-3 align-middle">
-                    {c.source ? (
+                    {c.source === "referral" ? (
+                      <div className="flex flex-col gap-0.5">
+                        <span className="inline-flex w-fit items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10.5px] font-semibold ring-1 ring-inset ring-emerald-200">
+                          ⭐ Referral
+                        </span>
+                        {c.referredBy?.name && (
+                          <span className="text-[10.5px] text-slate-500 font-medium pl-0.5">
+                            by {c.referredBy.name}
+                          </span>
+                        )}
+                      </div>
+                    ) : c.source ? (
                       <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[10.5px] font-medium">
                         {c.source}
                       </span>
@@ -357,6 +452,20 @@ export default function JobApplicantList({ jobId }: { jobId: number }) {
           candidateId={selectedId}
           onClose={() => setSelectedId(null)}
           onChange={() => globalMutate(`/api/hr/hiring/candidates?openingId=${jobId}`)}
+        />
+      )}
+
+      {addOpen && (
+        <AddApplicantModal
+          jobId={jobId}
+          jobTitle={jobTitle}
+          onClose={() => setAddOpen(false)}
+          onCreated={(id) => {
+            // Auto-open the new candidate's drawer so HR can
+            // immediately verify the parser's auto-fill and edit
+            // education/skills if needed.
+            if (id) setSelectedId(id);
+          }}
         />
       )}
     </>
