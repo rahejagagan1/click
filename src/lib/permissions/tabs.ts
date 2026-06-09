@@ -42,6 +42,7 @@ export type TabKey =
   | "hr_admin_attendance"
   | "hr_admin_approvals"
   | "hr_admin_regularize_balance"
+  | "hr_admin_wfh_balances"
   | "hr_admin_leaves"
   | "hr_admin_holidays"
   | "hr_admin_assets"
@@ -112,6 +113,7 @@ export const TAB_CATALOG: TabDef[] = [
   // and there are no ROLE_TAB_OVERRIDES so the Tab Permissions UI can't
   // accidentally grant it.
   { key: "hr_admin_regularize_balance", label: "Regularization Balance", description: "Developer-only: per-employee monthly regularization quota usage", pathPrefixes: ["/dashboard/hr/admin?tab=regularize-balance"], defaultForNewUser: false, group: "HR Dashboard sections" },
+  { key: "hr_admin_wfh_balances",  label: "WFH Balances",         description: "Per-employee WFH monthly quota + remaining",  pathPrefixes: ["/dashboard/hr/admin?tab=wfh-balances"],         defaultForNewUser: false, group: "HR Dashboard sections" },
   { key: "hr_admin_leaves",        label: "Leave Balances",       description: "Per-employee leave balance editor",            pathPrefixes: ["/dashboard/hr/admin?tab=leaves"],               defaultForNewUser: false, group: "HR Dashboard sections" },
   { key: "hr_admin_holidays",      label: "Holidays & Calendar",  description: "Company holiday list",                         pathPrefixes: ["/dashboard/hr/admin?tab=holidays"],             defaultForNewUser: false, group: "HR Dashboard sections" },
   { key: "hr_admin_assets",        label: "Assets",               description: "Company asset register",                       pathPrefixes: ["/dashboard/hr/admin?tab=assets"],               defaultForNewUser: false, group: "HR Dashboard sections" },

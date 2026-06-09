@@ -7,7 +7,7 @@ import { brandFromSlug, slugForBrand, type CompanyBrand } from "@/lib/hr-brand-s
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
-import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote, ClipboardCheck, FileSpreadsheet, FileText, HeartPulse } from "lucide-react";
+import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote, ClipboardCheck, FileSpreadsheet, FileText, HeartPulse, Home } from "lucide-react";
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import { DEPARTMENTS } from "@/lib/departments";
 import { DEPARTMENTS_YT_LABS } from "@/lib/departments-yt-labs";
@@ -17,6 +17,7 @@ import LeavesAdminPanel from "@/components/hr/LeavesAdminPanel";
 import LeavePoliciesPanel from "@/components/hr/LeavePoliciesPanel";
 import PayrollAdminPanel from "@/components/hr/PayrollAdminPanel";
 import RegularizationBalancePanel from "@/components/hr/RegularizationBalancePanel";
+import WfhBalancesPanel from "@/components/hr/WfhBalancesPanel";
 import PulseSurveysPanel from "@/components/hr/PulseSurveysPanel";
 import SalaryStructuresList from "@/components/hr/SalaryStructuresList";
 import EmployeePicker, { type PickerUser } from "@/components/hr/EmployeePicker";
@@ -44,6 +45,7 @@ const ADMIN_TABS: Array<AdminTabDef & { permKey: string }> = [
   { key: "attendance-dashboard", label: "Attendance Dashboard", icon: LayoutDashboard, permKey: "hr_admin_attendance"     },
   { key: "approvals",            label: "Approvals",            icon: CheckSquare,     permKey: "hr_admin_approvals"      },
   { key: "regularize-balance",   label: "Regularization Balance", icon: ClipboardCheck, permKey: "hr_admin_regularize_balance" },
+  { key: "wfh-balances",         label: "WFH Balances",         icon: Home,            permKey: "hr_admin_wfh_balances"   },
   { key: "leaves",               label: "Leave Balances",       icon: Calendar,        permKey: "hr_admin_leaves"         },
   { key: "holidays",             label: "Holidays & Calendar",  icon: CalendarDays,    permKey: "hr_admin_holidays"       },
   { key: "leave-types",          label: "Leave Types",          icon: Calendar,        permKey: "hr_admin_leave_types"    },
@@ -662,6 +664,7 @@ export default function HRAdminPage() {
 
           {/* ── Regularization Balance — per-user monthly quota usage ── */}
           {tab === "regularize-balance" && <RegularizationBalancePanel initialBrand={initialBrand} />}
+          {tab === "wfh-balances"       && <WfhBalancesPanel initialBrand={initialBrand} />}
 
           {/* ── Leaves — admin can edit / cancel / delete any leave ── */}
           {tab === "leaves" && <LeavesAdminPanel leaveTypes={leaveTypes} initialBrand={initialBrand} />}
