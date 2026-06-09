@@ -59,6 +59,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (typeof body?.isActive === "boolean") {
       args.push(body.isActive); sets.push(`"isActive" = $${args.length}`);
     }
+    // Brand re-tagging. Pass "" or "both" or null to reset to shared
+    // (visible to both brands); pass "NB Media" / "YT Labs" for the
+    // brand-specific variants.
+    if ("brand" in body) {
+      const raw = body.brand;
+      const v = raw == null ? null
+        : String(raw).trim().toLowerCase() === "nb_media"
+          || String(raw).trim().toLowerCase() === "nbmedia"
+          || String(raw).trim().toLowerCase() === "nb media"
+          ? "NB Media"
+        : String(raw).trim().toLowerCase() === "yt_labs"
+          || String(raw).trim().toLowerCase() === "ytlabs"
+          || String(raw).trim().toLowerCase() === "yt labs"
+          ? "YT Labs"
+        : null;
+      args.push(v); sets.push(`brand = $${args.length}`);
+    }
     if (sets.length === 0) {
       return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
     }
@@ -68,7 +85,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       `UPDATE "PulseQuestion"
           SET ${sets.join(", ")}, "updatedAt" = NOW()
         WHERE id = $${args.length}
-        RETURNING id, week, "order", text, type, emojis, "isActive", "surveyType", "createdAt", "updatedAt"`,
+        RETURNING id, week, "order", text, type, emojis, "isActive", "surveyType", brand, "createdAt", "updatedAt"`,
       ...args,
     );
     if (!updated[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
