@@ -56,17 +56,19 @@ export async function GET(req: NextRequest) {
       id: number; name: string; email: string;
       department: string | null; businessUnit: string | null;
       credited: number | null; used: number | null;
+      updatedAt: Date | null; updatedByName: string | null;
     };
     let rows: Row[];
     try {
       rows = await prisma.$queryRawUnsafe<Row[]>(
         `SELECT u.id, u.name, u.email,
-                ep.department,
-                ep."businessUnit",
-                wb.credited, wb.used
+                ep.department, ep."businessUnit",
+                wb.credited, wb.used,
+                wb."updatedAt", editor.name AS "updatedByName"
            FROM "User" u
            LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
            LEFT JOIN "WfhBalance" wb ON wb."userId" = u.id AND wb."monthKey" = $1
+           LEFT JOIN "User" editor ON editor.id = wb."updatedById"
           WHERE u."isActive" = true
             AND COALESCE(u."isDeveloper", false) = false
           ORDER BY ep."businessUnit" NULLS LAST, u.name ASC`,
@@ -78,10 +80,12 @@ export async function GET(req: NextRequest) {
         rows = await prisma.$queryRawUnsafe<Row[]>(
           `SELECT u.id, u.name, u.email,
                   ep.department, ep."businessUnit",
-                  wb.credited, wb.used
+                  wb.credited, wb.used,
+                  wb."updatedAt", editor.name AS "updatedByName"
              FROM "User" u
              LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
              LEFT JOIN "WfhBalance" wb ON wb."userId" = u.id AND wb."monthKey" = $1
+             LEFT JOIN "User" editor ON editor.id = wb."updatedById"
             WHERE u."isActive" = true
             ORDER BY ep."businessUnit" NULLS LAST, u.name ASC`,
           monthKey,
@@ -118,6 +122,8 @@ export async function GET(req: NextRequest) {
         used,
         remaining: Math.max(0, credited - used),
         hasRow: r.credited != null,    // false = synthetic (no DB row yet)
+        updatedAt: r.updatedAt,
+        updatedByName: r.updatedByName,
       };
     });
 
