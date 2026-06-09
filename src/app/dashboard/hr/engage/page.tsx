@@ -5,7 +5,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import SelectField from "@/components/ui/SelectField";
-import { ThumbsUp, MessageSquare, Send, BarChart2, Award, MoreHorizontal, X, ChevronDown, Pencil, Trash2, Link2, Check } from "lucide-react";
+import { ThumbsUp, MessageSquare, Send, BarChart2, Award, MoreHorizontal, X, ChevronDown, Pencil, Trash2, Link2, Check, SmilePlus } from "lucide-react";
 import Link from "next/link";
 import { isHRAdmin, isLeadershipOrHR } from "@/lib/access";
 import { PageShell, PageHeader, PageContainer } from "@/components/layout";
@@ -503,7 +503,7 @@ function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: an
               {myReactionEmoji ? (
                 <span className="text-[16px] leading-none">{myReactionEmoji}</span>
               ) : (
-                <ThumbsUp className="w-4 h-4" />
+                <SmilePlus className="w-4 h-4" />
               )}
               React
             </button>
