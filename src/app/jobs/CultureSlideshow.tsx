@@ -15,9 +15,9 @@ import { useEffect, useState } from "react";
 type CulturePhoto = { poster?: string; caption?: string };
 
 // Seconds per FULL revolution through all photos. Lower = faster.
-// 40s feels like a calm "behind the scenes" pace at the typical
-// 6-photo count; scales naturally with more photos.
-const DURATION_SECONDS = 40;
+// 20s feels brisk — photos visibly moving but still readable when
+// they pass through the centre. Scales naturally with photo count.
+const DURATION_SECONDS = 20;
 
 export default function CultureSlideshow({
   photos, accent,
