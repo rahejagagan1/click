@@ -7,18 +7,19 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
-import { useSearchParams } from "next/navigation";
 import { isFullHRAdmin } from "@/lib/access";
 import { REPORT_TEMPLATES } from "@/lib/reports/manager-report-format";
-import { brandFromSlug, inBrandScope } from "@/lib/hr-brand-scope";
+import { inBrandScope } from "@/lib/hr-brand-scope";
 
 type PermDef = { key: string; label: string; description: string; category: string; sensitive?: boolean };
 type ReportOwner = { id: number; name: string; role: string };
 type Designation = {
   id: number; key: string; label: string; scorecardFunction: string | null;
-  isActive: boolean; isSystem: boolean; sortOrder: number; userCount: number;
+  isActive: boolean; isSystem: boolean; sortOrder: number; businessUnit: string | null; userCount: number;
   permissionKeys: string[]; reportOwnerIds: number[]; reportTemplates: string[];
 };
+const BRANDS = ["NB Media", "YT Labs"] as const;
+type Brand = typeof BRANDS[number];
 
 const CATEGORY_ORDER = ["system", "visibility", "hr", "finance", "performance", "content"];
 const CATEGORY_LABELS: Record<string, string> = {
@@ -35,8 +36,8 @@ const SCORECARD_OPTIONS = [
 const REPORT_ROLE_ORDER = REPORT_TEMPLATES.map((t) => t.id);
 const REPORT_ROLE_LABELS: Record<string, string> = Object.fromEntries(REPORT_TEMPLATES.map((t) => [t.id, t.label]));
 
-type Draft = { label: string; scorecardFunction: string; isActive: boolean; permissionKeys: string[]; reportOwnerIds: number[]; reportTemplates: string[] };
-const BLANK: Draft = { label: "", scorecardFunction: "", isActive: true, permissionKeys: [], reportOwnerIds: [], reportTemplates: [] };
+type Draft = { label: string; scorecardFunction: string; isActive: boolean; businessUnit: string; permissionKeys: string[]; reportOwnerIds: number[]; reportTemplates: string[] };
+const BLANK: Draft = { label: "", scorecardFunction: "", isActive: true, businessUnit: "NB Media", permissionKeys: [], reportOwnerIds: [], reportTemplates: [] };
 
 export default function DesignationsPage() {
   const { data: session, status } = useSession();
@@ -45,6 +46,7 @@ export default function DesignationsPage() {
   const [catalog, setCatalog] = useState<PermDef[]>([]);
   const [reportOwners, setReportOwners] = useState<ReportOwner[]>([]);
   const [designations, setDesignations] = useState<Designation[]>([]);
+  const [brand, setBrand] = useState<Brand>("NB Media");
   const [selectedId, setSelectedId] = useState<number | "new" | null>(null);
   const [draft, setDraft] = useState<Draft>(BLANK);
   const [loading, setLoading] = useState(true);
@@ -52,11 +54,8 @@ export default function DesignationsPage() {
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [desigUsers, setDesigUsers] = useState<{ id: number; name: string; email: string; isActive: boolean; businessUnit: string | null }[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
-  // Auto-scope the assigned-users list to the brand of the HR sub-dashboard
-  // (?brand=). Designations themselves are global; only the per-user list is
-  // brand-relevant, so super-admins on "all" see everyone.
-  const searchParams = useSearchParams();
-  const brand = brandFromSlug(searchParams?.get("brand"));
+  // The brand toggle (state above) scopes BOTH the designation list and the
+  // per-designation user list.
   const shownDesigUsers = useMemo(() => desigUsers.filter((u) => inBrandScope(u.businessUnit, brand)), [desigUsers, brand]);
 
   async function load() {
@@ -91,19 +90,21 @@ export default function DesignationsPage() {
 
   function selectDesignation(d: Designation) {
     setSelectedId(d.id);
-    setDraft({ label: d.label, scorecardFunction: d.scorecardFunction ?? "", isActive: d.isActive, permissionKeys: [...d.permissionKeys], reportOwnerIds: [...(d.reportOwnerIds ?? [])], reportTemplates: [...(d.reportTemplates ?? [])] });
+    setDraft({ label: d.label, scorecardFunction: d.scorecardFunction ?? "", isActive: d.isActive, businessUnit: d.businessUnit ?? "NB Media", permissionKeys: [...d.permissionKeys], reportOwnerIds: [...(d.reportOwnerIds ?? [])], reportTemplates: [...(d.reportTemplates ?? [])] });
     setMsg(null);
   }
   function startNew() {
     setSelectedId("new");
-    setDraft({ ...BLANK });
+    setDraft({ ...BLANK, businessUnit: brand });
     setMsg(null);
   }
   function cloneFrom(id: number) {
     const src = designations.find((d) => d.id === id);
     if (!src) return;
     setSelectedId("new");
-    setDraft({ label: `${src.label} (copy)`, scorecardFunction: src.scorecardFunction ?? "", isActive: true, permissionKeys: [...src.permissionKeys], reportOwnerIds: [...(src.reportOwnerIds ?? [])], reportTemplates: [...(src.reportTemplates ?? [])] });
+    // Clone INTO the currently-selected brand — this is how you copy a role
+    // from the other brand's side into this one.
+    setDraft({ label: `${src.label} (copy)`, scorecardFunction: src.scorecardFunction ?? "", isActive: true, businessUnit: brand, permissionKeys: [...src.permissionKeys], reportOwnerIds: [...(src.reportOwnerIds ?? [])], reportTemplates: [...(src.reportTemplates ?? [])] });
     setMsg(null);
   }
   function togglePerm(key: string) {
@@ -145,6 +146,7 @@ export default function DesignationsPage() {
             label: draft.label,
             scorecardFunction: draft.scorecardFunction || null,
             isActive: draft.isActive,
+            businessUnit: draft.businessUnit,
             permissionKeys: draft.permissionKeys,
             reportOwnerIds: draft.reportOwnerIds,
             reportTemplates: draft.reportTemplates,
@@ -227,11 +229,26 @@ export default function DesignationsPage() {
         </div>
       )}
 
+      {/* Brand toggle — each brand keeps its own designation list. */}
+      <div className="flex gap-1 mb-4 border-b border-slate-200">
+        {BRANDS.map((b) => (
+          <button
+            key={b}
+            onClick={() => { setBrand(b); setSelectedId(null); }}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
+              brand === b ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {b}
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-6">
         {/* ── List ── */}
         <div className="space-y-1 h-[calc(100vh-180px)] overflow-y-auto pr-1">
           {loading && <div className="text-slate-400 text-sm">Loading…</div>}
-          {designations.map((d) => (
+          {designations.filter((d) => (d.businessUnit ?? "NB Media") === brand).map((d) => (
             <button
               key={d.id}
               onClick={() => selectDesignation(d)}
@@ -279,6 +296,17 @@ export default function DesignationsPage() {
                   {SCORECARD_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </label>
+              <label className="block">
+                <span className="text-xs font-semibold text-slate-500">Brand</span>
+                <select
+                  value={draft.businessUnit}
+                  onChange={(e) => setDraft((d) => ({ ...d, businessUnit: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                >
+                  {BRANDS.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+                <span className="mt-1 block text-[11px] text-slate-400">Which brand’s list this designation appears in.</span>
+              </label>
             </div>
 
             {/* ── Users currently on this designation ── */}
@@ -286,17 +314,15 @@ export default function DesignationsPage() {
               <div className="mb-5">
                 <span className="text-sm font-semibold text-slate-700">
                   Users on this designation{" "}
-                  <span className="text-slate-400">({brand && brand !== "all" ? shownDesigUsers.length : selected.userCount})</span>
-                  {brand && brand !== "all" && (
-                    <span className={`ml-2 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full align-middle ${brand === "YT Labs" ? "bg-rose-100 text-rose-700" : "bg-sky-100 text-sky-700"}`}>
-                      {brand}
-                    </span>
-                  )}
+                  <span className="text-slate-400">({shownDesigUsers.length})</span>
+                  <span className={`ml-2 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full align-middle ${brand === "YT Labs" ? "bg-rose-100 text-rose-700" : "bg-sky-100 text-sky-700"}`}>
+                    {brand}
+                  </span>
                 </span>
                 {usersLoading ? (
                   <p className="mt-1 text-xs text-slate-400">Loading…</p>
                 ) : shownDesigUsers.length === 0 ? (
-                  <p className="mt-1 text-xs text-slate-400">{brand && brand !== "all" ? `No ${brand} users assigned.` : "No users assigned."}</p>
+                  <p className="mt-1 text-xs text-slate-400">No {brand} users assigned.</p>
                 ) : (
                   <div className="mt-2 flex flex-wrap gap-1.5 max-h-44 overflow-y-auto">
                     {shownDesigUsers.map((u) => (
@@ -326,7 +352,7 @@ export default function DesignationsPage() {
                   className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
                 >
                   <option value="">— blank —</option>
-                  {designations.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+                  {designations.map((d) => <option key={d.id} value={d.id}>{d.label} · {d.businessUnit ?? "NB Media"}</option>)}
                 </select>
               </div>
             )}

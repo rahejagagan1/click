@@ -35,9 +35,9 @@ export async function GET() {
 
   const designations = await prisma.$queryRawUnsafe<
     { id: number; key: string; label: string; scorecardFunction: string | null;
-      isActive: boolean; isSystem: boolean; sortOrder: number; userCount: number }[]
+      isActive: boolean; isSystem: boolean; sortOrder: number; businessUnit: string | null; userCount: number }[]
   >(
-    `SELECT d."id", d."key", d."label", d."scorecardFunction", d."isActive", d."isSystem", d."sortOrder",
+    `SELECT d."id", d."key", d."label", d."scorecardFunction", d."isActive", d."isSystem", d."sortOrder", d."businessUnit",
             (SELECT count(*)::int FROM "User" u WHERE u."designationId" = d."id") AS "userCount"
      FROM "Designation" d ORDER BY d."sortOrder", d."label"`
   );
@@ -118,17 +118,20 @@ export async function POST(req: Request) {
 
   const key = (body.key ? toDesignationKey(String(body.key)) : toDesignationKey(label)) || "designation";
   const scorecardFunction = body.scorecardFunction ? String(body.scorecardFunction) : null;
+  // Brand the designation belongs to. New ones default to NB Media unless the
+  // YT Labs tab created them. Drives which brand's list it shows up in.
+  const businessUnit = body.businessUnit ? String(body.businessUnit) : "NB Media";
   const permissionKeys: string[] = Array.isArray(body.permissionKeys) ? body.permissionKeys.map(String) : [];
   const reportOwnerIds: number[] = Array.isArray(body.reportOwnerIds) ? body.reportOwnerIds.map(Number) : [];
   const reportTemplates: string[] = Array.isArray(body.reportTemplates) ? body.reportTemplates.map(String) : [];
   const actorId = (session.user as { dbId?: number }).dbId ?? null;
 
   const created = await prisma.$queryRawUnsafe<{ id: number }[]>(
-    `INSERT INTO "Designation" ("key","label","scorecardFunction","isActive","sortOrder","isSystem","createdAt","updatedAt")
-     VALUES ($1,$2,$3,true, COALESCE((SELECT max("sortOrder") + 1 FROM "Designation"), 0), false, NOW(), NOW())
+    `INSERT INTO "Designation" ("key","label","scorecardFunction","businessUnit","isActive","sortOrder","isSystem","createdAt","updatedAt")
+     VALUES ($1,$2,$3,$4,true, COALESCE((SELECT max("sortOrder") + 1 FROM "Designation"), 0), false, NOW(), NOW())
      ON CONFLICT ("key") DO NOTHING
      RETURNING "id"`,
-    key, label, scorecardFunction
+    key, label, scorecardFunction, businessUnit
   );
   if (!created.length) {
     return NextResponse.json({ error: `A designation with key "${key}" already exists` }, { status: 409 });

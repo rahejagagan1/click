@@ -53,6 +53,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (typeof body.isActive === "boolean") {
     sets.push(`"isActive" = $${i++}`); args.push(body.isActive);
   }
+  if (typeof body.businessUnit === "string" && body.businessUnit.trim()) {
+    sets.push(`"businessUnit" = $${i++}`); args.push(body.businessUnit.trim());
+  }
   if (sets.length) {
     sets.push(`"updatedAt" = NOW()`);
     args.push(id);
