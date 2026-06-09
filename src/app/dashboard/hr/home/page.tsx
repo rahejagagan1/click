@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
@@ -53,6 +53,8 @@ import {
   PenTool,
   BarChart3 as BarChart3Icon,
   Rocket,
+  MoreVertical,
+  SmilePlus,
 } from "lucide-react";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -1238,6 +1240,57 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
   const isAuthor   = post.author?.id === sessionUserId;
   const canDelete  = isAuthor || isHRAdmin(sessionUser);
 
+  // Per-comment delete rule: comment author OR developer OR
+  // orgLevel="hr_manager" (covers HR Manager + HR tier).
+  const canDeleteComment = useCallback((c: any) => {
+    if (!c) return false;
+    if (c.author?.id === sessionUserId) return true;             // owner
+    if (sessionUser?.isDeveloper === true) return true;          // dev
+    if (sessionUser?.orgLevel === "hr_manager") return true;     // HR tier
+    return false;
+  }, [sessionUserId, sessionUser?.isDeveloper, sessionUser?.orgLevel]);
+
+  // Which comment's 3-dot menu is currently open (Instagram-style,
+  // one at a time). null = no menu open.
+  const [openCommentMenu, setOpenCommentMenu] = useState<number | null>(null);
+  // Per-comment "deleting" spinner state to disable double-click.
+  const [deletingComment, setDeletingComment] = useState<number | null>(null);
+
+  const deleteComment = async (commentId: number) => {
+    if (!confirm("Delete this comment? This can't be undone.")) return;
+    setDeletingComment(commentId);
+    setOpenCommentMenu(null);
+    try {
+      const res = await fetch(`/api/hr/engage/posts/${post.id}/comments/${commentId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || `Delete failed (${res.status})`);
+      }
+      // Bust both feed scopes so the comment disappears immediately.
+      mutate((k: any) => typeof k === "string" && k.startsWith("/api/hr/engage/posts"));
+    } catch (e: any) {
+      alert(e?.message || "Couldn't delete the comment.");
+    } finally {
+      setDeletingComment(null);
+    }
+  };
+
+  // "2h ago" / "3d ago" / "12 Mar" formatter for the timestamp
+  // beneath each comment — keeps the layout tight (Instagram-style).
+  const formatCommentTime = (iso: string | Date | undefined): string => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const diffSec = (Date.now() - d.getTime()) / 1000;
+    if (diffSec < 60)              return "just now";
+    if (diffSec < 3600)            return `${Math.floor(diffSec / 60)}m`;
+    if (diffSec < 86400)           return `${Math.floor(diffSec / 3600)}h`;
+    if (diffSec < 86400 * 7)       return `${Math.floor(diffSec / 86400)}d`;
+    return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  };
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos,  setMenuPos]  = useState<{ top: number; right: number } | null>(null);
   const [editing,  setEditing]  = useState(false);
@@ -1660,7 +1713,7 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
               {myReactionEmoji ? (
                 <span className="text-[16px] leading-none">{myReactionEmoji}</span>
               ) : (
-                <ThumbsUp className="h-4 w-4" />
+                <SmilePlus className="h-4 w-4" />
               )}
               React
             </button>
@@ -1697,7 +1750,17 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
               showComments ? "text-[#008CFF]" : "text-[#5f7183]"
             }`}
           >
-            <MessageSquare className="h-4 w-4" />Comment
+            <MessageSquare className="h-4 w-4" />
+            <span>Comment</span>
+            {commentCount > 0 && (
+              <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10.5px] font-bold tabular-nums ${
+                showComments
+                  ? "bg-[#008CFF] text-white"
+                  : "bg-[#008CFF]/12 text-[#008CFF]"
+              }`}>
+                {commentCount}
+              </span>
+            )}
           </button>
         </div>
         <div className="flex items-center gap-1.5 pr-2 text-[12px] text-[#8393a3]">
@@ -1731,9 +1794,9 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
               )}
             </span>
           )}
-          {commentCount > 0 && (
-            <span>{reactionCount > 0 ? "•" : ""} {commentCount} {commentCount === 1 ? "Comment" : "Comments"}</span>
-          )}
+          {/* Comment count moved to the Comment button itself — the
+              right-side aggregate now only carries the reactor names.
+              Drop the duplicate badge here. */}
         </div>
       </div>
 
@@ -1741,18 +1804,79 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
           composer, plus an emoji picker. Existing comments render
           above the composer. */}
       {showComments && (
-        <div className="border-t border-[#eef2f6] bg-[#f9fafc] px-3 sm:px-4 py-3 space-y-3">
+        <div className="border-t border-[#eef2f6] bg-white px-3 sm:px-4 py-3 space-y-3">
           {Array.isArray(post.comments) && post.comments.length > 0 && (
-            <div className="space-y-2">
-              {post.comments.map((c: any) => (
-                <div key={c.id} className="flex items-start gap-2.5">
-                  <Av name={c.author?.name || "User"} url={c.author?.profilePictureUrl} size={26} />
-                  <div className="flex-1 bg-white border border-[#eef2f6] rounded-xl px-3 py-1.5">
-                    <p className="text-[11.5px] font-semibold text-[#3b4a5a]">{c.author?.name || "Team member"}</p>
-                    <p className="text-[12px] text-[#52647a] whitespace-pre-wrap break-words mt-0.5">{c.content}</p>
+            <div className="space-y-3.5">
+              {post.comments.map((c: any) => {
+                const showDelete = canDeleteComment(c);
+                const isMenuOpen = openCommentMenu === c.id;
+                const isDeleting = deletingComment === c.id;
+                return (
+                  <div
+                    key={c.id}
+                    className={`group flex items-start gap-2.5 transition-opacity ${isDeleting ? "opacity-50" : ""}`}
+                  >
+                    {/* Avatar (small, no card around comment — Instagram-style) */}
+                    <Av name={c.author?.name || "User"} url={c.author?.profilePictureUrl} size={32} />
+
+                    <div className="flex-1 min-w-0">
+                      {/* Single line: name bolded then content inline. */}
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-[12.5px] text-[#3b4a5a] leading-snug break-words min-w-0">
+                          <span className="font-semibold mr-1.5">{c.author?.name || "Team member"}</span>
+                          <span className="text-[#52647a] whitespace-pre-wrap">{c.content}</span>
+                        </p>
+
+                        {/* 3-dot kebab menu — only for users who can
+                            delete this specific comment (owner OR
+                            dev OR orgLevel=hr_manager). Hover-revealed
+                            on desktop, always-visible on touch. */}
+                        {showDelete && (
+                          <div className="relative shrink-0 -mt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setOpenCommentMenu(isMenuOpen ? null : c.id)}
+                              disabled={isDeleting}
+                              aria-label="Comment options"
+                              className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity h-6 w-6 inline-flex items-center justify-center rounded-full text-[#8393a3] hover:bg-[#f0f3f7] hover:text-[#3b4a5a]"
+                            >
+                              <MoreVertical className="h-3.5 w-3.5" />
+                            </button>
+                            {isMenuOpen && (
+                              <>
+                                {/* Click-outside catcher */}
+                                <button
+                                  type="button"
+                                  aria-hidden="true"
+                                  tabIndex={-1}
+                                  onClick={() => setOpenCommentMenu(null)}
+                                  className="fixed inset-0 z-30 cursor-default"
+                                  style={{ background: "transparent" }}
+                                />
+                                <div className="absolute right-0 top-7 z-40 min-w-[140px] rounded-lg border border-[#e2e8f0] bg-white shadow-lg overflow-hidden">
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteComment(c.id)}
+                                    className="w-full px-3 py-2 text-left text-[12px] font-medium text-rose-600 hover:bg-rose-50 inline-flex items-center gap-2"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    Delete comment
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Tiny timestamp line below — Instagram dense row */}
+                      <div className="mt-0.5 text-[10.5px] font-medium text-[#97a4b3] inline-flex items-center gap-2">
+                        <span>{formatCommentTime(c.createdAt)}</span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
           <div className="flex items-start gap-2.5">
