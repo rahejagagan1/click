@@ -17,6 +17,7 @@ import {
   Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
   MoreVertical, UserMinus, TreePine, Coffee,
   CheckCircle2, AlertCircle, Circle, Upload as UploadIcon, Eye, Trash2, RefreshCw,
+  Clock,
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
@@ -140,6 +141,145 @@ function Field({ label, value, capitalize = false }: { label: string; value?: st
     <div className="bg-slate-50 rounded-lg px-4 py-3 border border-slate-100">
       <p className="text-[10px] text-slate-500 uppercase tracking-[0.1em] font-semibold mb-1">{label}</p>
       <p className={`text-[13px] text-slate-800 ${capitalize ? "capitalize" : ""}`}>{value || "—"}</p>
+    </div>
+  );
+}
+
+/** Per-employee attendance counting toggle. Flips the
+ *  EmployeeNotificationPolicy.attendanceEnabled field via the existing
+ *  PUT /api/hr/admin/notification-policy endpoint. Payroll continues to
+ *  count the cycle as normal (payrollEnabled stays TRUE) — so disabled
+ *  attendance = paid notice / paid leave use case.
+ *
+ *  Visible only to developers + orgLevel="hr_manager" users. The page
+ *  gates the JSX before mounting this so we don't need an extra check
+ *  here, but the endpoint also enforces isHRAdmin server-side. */
+function AttendanceCountingToggle({ userId, userName }: { userId: number; userName: string }) {
+  type PolicyRow = {
+    id: number;
+    attendanceEnabled: boolean;
+    payrollEnabled: boolean;
+    source: "override" | "default";
+    updatedAt: string | null;
+    updatedById: number | null;
+    updatedByName: string | null;
+  };
+  const { data, isLoading, mutate: mutatePolicy } = useSWR<{ users: PolicyRow[] }>(
+    "/api/hr/admin/notification-policy",
+    fetcher,
+    { revalidateOnFocus: false },
+  );
+  const me = data?.users.find((u) => u.id === userId);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const enabled = me?.attendanceEnabled ?? true;
+
+  const flip = async () => {
+    setSaving(true); setError(null);
+    try {
+      const res = await fetch("/api/hr/admin/notification-policy", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, attendanceEnabled: !enabled }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || `Failed to toggle (${res.status})`);
+      }
+      mutatePolicy();
+    } catch (e: any) {
+      setError(e?.message || "Toggle failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="mb-5 rounded-xl border border-slate-200 bg-white px-5 py-4 text-[12.5px] text-slate-500 inline-flex items-center gap-2">
+        <span className="h-4 w-4 border-2 border-slate-300 border-t-[#008CFF] rounded-full animate-spin" />
+        Loading attendance settings…
+      </div>
+    );
+  }
+
+  // Pretty-print the audit timestamp in IST short form, e.g.
+  // "8 Jun 2026, 3:42 PM".
+  const stamp = me?.updatedAt ? new Date(me.updatedAt) : null;
+  const stampStr = stamp ? stamp.toLocaleString("en-IN", {
+    day: "numeric", month: "short", year: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: true,
+  }) : null;
+
+  return (
+    <div className="mb-5 rounded-xl border border-slate-200 bg-white overflow-hidden shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
+      <div className="px-5 py-4 flex items-start justify-between gap-5 flex-wrap">
+        {/* Left — label + description */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="text-[14px] font-semibold text-slate-900">Attendance tracking</h3>
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+              enabled
+                ? "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                : "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200"
+            }`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${enabled ? "bg-emerald-500" : "bg-amber-500"}`} />
+              {enabled ? "Active" : "Paused"}
+            </span>
+          </div>
+          <p className="text-[12.5px] text-slate-600 leading-snug max-w-2xl">
+            {enabled
+              ? `Late marks, absent flags, and missed-clockout emails are recorded for ${userName}.`
+              : `Late marks, absent flags, and missed-clockout emails are paused for ${userName}. Payroll continues to count this cycle as full pay.`}
+          </p>
+          {error && (
+            <p className="mt-2 text-[12px] text-rose-700 font-medium inline-flex items-center gap-1.5">
+              <AlertCircle size={13} /> {error}
+            </p>
+          )}
+        </div>
+
+        {/* Right — proper toggle switch */}
+        <div className="shrink-0 flex flex-col items-end gap-1">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={enabled}
+            aria-label={enabled ? "Pause attendance tracking" : "Resume attendance tracking"}
+            onClick={flip}
+            disabled={saving}
+            className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-[#008CFF]/40 disabled:opacity-50 disabled:cursor-not-allowed ${
+              enabled ? "bg-emerald-500" : "bg-slate-300"
+            }`}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-1 ring-black/5 transition-transform duration-200 ${
+                enabled ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
+          <span className="text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">
+            {saving ? "Saving…" : enabled ? "ON" : "OFF"}
+          </span>
+        </div>
+      </div>
+
+      {/* Audit-trail footer — only when there's an explicit override
+          row with updater metadata. Default policies have no
+          history so the footer hides. */}
+      {me?.source === "override" && stampStr && (
+        <div className="px-5 py-2.5 border-t border-slate-100 bg-slate-50/60 flex items-center gap-2 text-[11.5px] text-slate-500">
+          <Clock size={11} className="text-slate-400" />
+          <span>
+            Last changed by{" "}
+            <span className="font-semibold text-slate-700">
+              {me.updatedByName || "Unknown"}
+            </span>
+            {" "}· {stampStr} IST
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -997,6 +1137,18 @@ export default function EmployeeDetailPage() {
                       </button>
                     ))}
                   </div>
+                )}
+                {/* Attendance counting toggle — visible to developers
+                    and to orgLevel="hr_manager" users (the HR tier).
+                    Flipping OFF stops attendance from being counted /
+                    flagged late / marked absent for this employee from
+                    today onwards. Payroll continues to generate as
+                    normal (payrollEnabled stays TRUE) so the employee
+                    still gets paid for the full cycle — exactly what
+                    HR needs for paid-notice-period cases (e.g. Manpreet's
+                    15 days). */}
+                {(me?.isDeveloper === true || me?.orgLevel === "hr_manager") && (
+                  <AttendanceCountingToggle userId={userId} userName={user.name} />
                 )}
                 {isHRAdmin && attendanceView === "leave" ? (
                   <EmployeeLeavePanel userId={userId} userName={user.name} />
