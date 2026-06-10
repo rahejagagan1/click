@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, requireHRAdmin, serverError } from "@/lib/api-auth";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -31,19 +32,40 @@ async function setSaturday(shiftId: number, policy: string, weeks: number[]) {
   );
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const { errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   try {
-    // Raw SELECT so saturdayPolicy / saturdayWeeks are included regardless of
-    // whether the generated Prisma client knows about them yet.
-    const shifts = await prisma.$queryRawUnsafe(`SELECT * FROM "Shift" ORDER BY name ASC`);
+    // Brand filter is now URL-driven. `?brand=NB%20Media` returns
+    // that brand's shifts (plus any pre-brand-column legacy NULL
+    // rows); no brand param returns everything. Brand-isolation
+    // enforcement was moved up to the UI layer per HR direction —
+    // anyone with HR Dashboard access can browse either brand.
+    const url = new URL(req.url);
+    const rawBrand = (url.searchParams.get("brand") || "").trim();
+    const brand =
+      rawBrand === "NB Media" || rawBrand === "nb_media" || rawBrand === "nb-media" ? "NB Media" :
+      rawBrand === "YT Labs"  || rawBrand === "yt_labs"  || rawBrand === "yt-labs"  ? "YT Labs"  :
+      null;
+    let shifts: any;
+    if (brand) {
+      shifts = await prisma.$queryRawUnsafe(
+        `SELECT * FROM "Shift"
+          WHERE brand = $1 OR brand IS NULL
+          ORDER BY name ASC`,
+        brand,
+      );
+    } else {
+      shifts = await prisma.$queryRawUnsafe(
+        `SELECT * FROM "Shift" ORDER BY name ASC`,
+      );
+    }
     return NextResponse.json(shifts);
   } catch (e) { return serverError(e, "GET /api/hr/admin/shifts"); }
 }
 
 export async function POST(req: NextRequest) {
-  const { errorResponse } = await requireHRAdmin();
+  const { session, errorResponse } = await requireHRAdmin();
   if (errorResponse) return errorResponse;
   try {
     const body = await req.json();
@@ -59,11 +81,26 @@ export async function POST(req: NextRequest) {
     if (!name || !startTime || !endTime) return NextResponse.json({ error: "name, startTime, endTime required" }, { status: 400 });
     const { policy, weeks } = parseSaturday(body);
 
+    // Brand auto-tag: client may pass body.brand explicitly (allowed
+    // for super-admins). Otherwise default to the creator's brand —
+    // an NB Media HR Manager creating a new shift implicitly stamps
+    // it NB Media so it won't show up for YT Labs HR.
+    const scope = getBrandScope(session!.user);
+    const explicitBrand =
+      body.brand === "NB Media" || body.brand === "YT Labs" ? body.brand : null;
+    const brand = scope.allBrands ? (explicitBrand ?? null) : (scope.brand ?? null);
+
     const shift = await prisma.shift.create({
       data: { name, startTime, endTime, breakMinutes, workDays },
     });
     await setSaturday(shift.id, policy, weeks);
-    return NextResponse.json({ ...shift, saturdayPolicy: policy, saturdayWeeks: weeks }, { status: 201 });
+    if (brand) {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "Shift" SET brand = $1 WHERE id = $2`,
+        brand, shift.id,
+      );
+    }
+    return NextResponse.json({ ...shift, saturdayPolicy: policy, saturdayWeeks: weeks, brand }, { status: 201 });
   } catch (e) { return serverError(e, "POST /api/hr/admin/shifts"); }
 }
 
