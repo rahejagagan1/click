@@ -11,6 +11,7 @@
 // gives mobile the same "fun, on-brand decoration" the desktop hero
 // has, without the badges crashing into the typography.
 
+import { useEffect, useRef } from "react";
 import { Play } from "lucide-react";
 
 type Platform = "youtube" | "facebook" | "instagram" | "spotify";
@@ -103,7 +104,52 @@ function SpotifyMark({ size }: { size: number }) {
   );
 }
 
+// Per-badge parallax depth — how far each badge drifts relative to
+// the cursor. Varied so the four badges move at different rates,
+// creating a layered 3D-depth feel rather than moving as one sheet.
+const PARALLAX_DEPTH: Record<Platform, number> = {
+  youtube:   1.4,
+  instagram: 1.7,
+  spotify:   0.9,
+  facebook:  1.2,
+};
+
 export default function PlayBadges() {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+
+  // Mouse-parallax. On pointer move we set --px/--py (cursor offset
+  // from viewport centre, in px, damped) on the host; each badge
+  // wrapper multiplies them by its own --depth. rAF-throttled and
+  // transform-only so it stays smooth. Skipped for touch / reduced
+  // motion (no hover pointer → nothing to react to).
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    if (typeof window === "undefined") return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.matchMedia?.("(hover: none)").matches) return;
+
+    let raf = 0;
+    let tx = 0, ty = 0;
+    const onMove = (e: MouseEvent) => {
+      // Offset from centre, normalised to roughly ±18px of travel.
+      const nx = (e.clientX / window.innerWidth - 0.5) * 2;   // -1..1
+      const ny = (e.clientY / window.innerHeight - 0.5) * 2;  // -1..1
+      tx = -nx * 18;
+      ty = -ny * 18;
+      if (!raf) raf = requestAnimationFrame(() => {
+        raf = 0;
+        host.style.setProperty("--px", `${tx}px`);
+        host.style.setProperty("--py", `${ty}px`);
+      });
+    };
+    window.addEventListener("mousemove", onMove, { passive: true });
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
   return (
     <>
       <style>{`
@@ -136,8 +182,27 @@ export default function PlayBadges() {
             badgeSpread 1300ms cubic-bezier(0.18, 1.1, 0.32, 1) 200ms forwards,
             badgeFloat  6000ms ease-in-out 1500ms infinite;
         }
+
+        /* Parallax wrapper — drifts each badge by (cursor offset ×
+           its depth). Smoothed with a transition so motion eases
+           rather than snapping to the pointer. The inner .badge keeps
+           its own spread+float animation independently. */
+        .badge-host { --px: 0px; --py: 0px; }
+        .badge-parallax {
+          transition: transform 350ms cubic-bezier(0.22, 1, 0.36, 1);
+          transform: translate3d(
+            calc(var(--px) * var(--depth, 1)),
+            calc(var(--py) * var(--depth, 1)),
+            0
+          );
+          will-change: transform;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .badge-parallax { transform: none; }
+        }
       `}</style>
       <div
+        ref={hostRef}
         aria-hidden="true"
         className="badge-host pointer-events-none absolute inset-0 overflow-hidden"
       >
@@ -177,34 +242,43 @@ export default function PlayBadges() {
               {b.platform === "spotify"   && <SpotifyMark   size={iconSize} />}
             </>
           );
+          const depth = PARALLAX_DEPTH[b.platform];
           return (
             <span key={i} aria-hidden="true">
-              {/* Desktop placement — hidden on phones */}
+              {/* Desktop placement — parallax wrapper (mouse drift) >
+                  badge (spread + float). Hidden on phones. */}
               <span
-                className="badge absolute inline-flex items-center justify-center hidden sm:inline-flex"
+                className="badge-parallax absolute hidden sm:block"
                 style={{
-                  ...baseStyle,
-                  top:    b.top,
-                  bottom: b.bottom,
-                  left:   b.left,
-                  right:  b.right,
+                  top: b.top, bottom: b.bottom, left: b.left, right: b.right,
+                  ["--depth" as any]: depth,
                 }}
               >
-                {inner}
+                <span
+                  className="badge inline-flex items-center justify-center"
+                  style={baseStyle}
+                >
+                  {inner}
+                </span>
               </span>
-              {/* Mobile placement — corner-pinned, smaller via --scale */}
+              {/* Mobile placement — corner-pinned, smaller via --scale.
+                  No parallax on touch (no hover pointer). */}
               {b.mobile && (
                 <span
-                  className="badge absolute inline-flex items-center justify-center sm:hidden"
+                  className="absolute sm:hidden"
                   style={{
-                    ...baseStyle,
                     top:    b.mobile.top,
                     bottom: b.mobile.bottom,
                     left:   b.mobile.left,
                     right:  b.mobile.right,
                   }}
                 >
-                  {inner}
+                  <span
+                    className="badge inline-flex items-center justify-center"
+                    style={baseStyle}
+                  >
+                    {inner}
+                  </span>
                 </span>
               )}
             </span>
