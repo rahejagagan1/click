@@ -117,8 +117,10 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
   // ── In-app notifications ──────────────────────────────────────
   let notifications = 0;
   try {
+    // 6 params per employee now — linkUrl makes the in-app
+    // notification clickable (opens the monthly survey form).
     const values = employees
-      .map((_, i) => `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, NOW())`)
+      .map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6}, NOW())`)
       .join(",\n");
     const params: any[] = [];
     for (const e of employees) {
@@ -128,11 +130,12 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
         0,
         `${monthLabel} Engagement Survey`,
         `Help us improve — 6 quick questions, fully anonymous, ~3 minutes. (Clock-out is NOT blocked for this one.)`,
+        "/dashboard/hr/pulse/monthly",
       );
     }
     await prisma.$executeRawUnsafe(
       `INSERT INTO "Notification"
-         ("userId", "type", "entityId", "title", "body", "createdAt")
+         ("userId", "type", "entityId", "title", "body", "linkUrl", "createdAt")
        VALUES ${values}`,
       ...params,
     );
