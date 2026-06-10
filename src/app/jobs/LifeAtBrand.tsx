@@ -9,7 +9,7 @@
 // tab. Poster image goes inside /public/reels/ — fallback is a
 // brand-coloured gradient with the reel number.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Play, X as XIcon } from "lucide-react";
 import Reveal     from "./[slug]/Reveal";
 import WordReveal from "./[slug]/WordReveal";
@@ -139,8 +139,9 @@ export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, 
           </Reveal>
         </div>
 
-        {/* Carousel */}
-        <Reveal direction="up" delay={1000}>
+        {/* Carousel — no outer Reveal wrapper: each ReelCard self-
+            animates via ReelEntrance (staggered rise+scale), so an
+            outer fade would just hide the stagger underneath. */}
         <div className="relative mt-12">
           {/* Prev */}
           <button
@@ -159,7 +160,9 @@ export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, 
                        [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {reels.map((r, i) => (
-              <ReelCard key={r.url + i} reel={r} index={i} accent={accent} />
+              <ReelEntrance key={r.url + i} index={i}>
+                <ReelCard reel={r} index={i} accent={accent} />
+              </ReelEntrance>
             ))}
           </div>
 
@@ -173,7 +176,6 @@ export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, 
             <ChevronRight size={20} />
           </button>
         </div>
-        </Reveal>
 
         {/* Closing tagline — section's emotional payoff line, sits
             below the handle with a hairline divider above for
@@ -241,6 +243,48 @@ function getReelId(url: string): string | null {
   return m ? m[1] : null;
 }
 
+// Staggered scroll-entrance wrapper for each reel card. The card
+// rises + scales in as the carousel comes into view, one after
+// another (index-based delay). Kept SEPARATE from ReelCard so its
+// entrance transform doesn't fight the card's hover-lift transform.
+// This wrapper is the flex item (shrink-0 snap-start + width); the
+// card inside fills it (w-full).
+function ReelEntrance({ index, children }: { index: number; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setInView(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => { for (const e of entries) if (e.isIntersecting) setInView(true); },
+      { threshold: 0.15 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      className="shrink-0 snap-start w-[200px] sm:w-[220px]"
+      style={{
+        opacity: inView ? 1 : 0,
+        transform: inView ? "translateY(0) scale(1)" : "translateY(34px) scale(0.94)",
+        transition: "opacity 600ms cubic-bezier(0.2,0.7,0.2,1), transform 720ms cubic-bezier(0.2,0.7,0.2,1)",
+        transitionDelay: `${index * 110}ms`,
+        willChange: inView ? "auto" : "opacity, transform",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 function ReelCard({ reel, index, accent }: { reel: Reel; index: number; accent: string }) {
   // playing=true swaps the gradient/play-button for the actual player.
   // Lazy-mount means we don't hammer the page with media on load.
@@ -267,7 +311,7 @@ function ReelCard({ reel, index, accent }: { reel: Reel; index: number; accent: 
     return (
       <div
         data-reel
-        className="relative shrink-0 snap-start w-[200px] sm:w-[220px] aspect-[9/16] rounded-2xl overflow-hidden ring-1 ring-slate-200 shadow-xl bg-black"
+        className="relative w-full aspect-[9/16] rounded-2xl overflow-hidden ring-1 ring-slate-200 shadow-xl bg-black"
       >
         <video
           // key forces React to remount the <video> element if the
@@ -303,7 +347,7 @@ function ReelCard({ reel, index, accent }: { reel: Reel; index: number; accent: 
     return (
       <div
         data-reel
-        className="relative shrink-0 snap-start w-[200px] sm:w-[220px] aspect-[9/16] rounded-2xl overflow-hidden ring-1 ring-slate-200 shadow-xl bg-black"
+        className="relative w-full aspect-[9/16] rounded-2xl overflow-hidden ring-1 ring-slate-200 shadow-xl bg-black"
       >
         <iframe
           src={`https://www.instagram.com/reel/${reelId}/embed`}
@@ -341,7 +385,7 @@ function ReelCard({ reel, index, accent }: { reel: Reel; index: number; accent: 
         if (canEmbed || reel.video) setPlaying(true);
         else window.open(reel.url, "_blank", "noopener,noreferrer");
       }}
-      className="group relative shrink-0 snap-start w-[200px] sm:w-[220px] aspect-[9/16] rounded-2xl overflow-hidden ring-1 ring-slate-200 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all bg-slate-100 cursor-pointer text-left"
+      className="group relative w-full aspect-[9/16] rounded-2xl overflow-hidden ring-1 ring-slate-200 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all bg-slate-100 cursor-pointer text-left"
       aria-label={`Play reel ${index + 1}`}
     >
       {reel.poster ? (
@@ -359,10 +403,16 @@ function ReelCard({ reel, index, accent }: { reel: Reel; index: number; accent: 
       {/* Soft dark overlay for the play icon legibility */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-black/0 to-black/0" />
 
-      {/* Play icon — centred */}
+      {/* Play icon — centred, with a gently pulsing ring that
+          radiates outward (draws the eye, signals "tap to play").
+          The ring sits behind the button and loops via animate-ping;
+          the button itself pops on hover. */}
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className="inline-flex items-center justify-center h-14 w-14 rounded-full bg-white/95 shadow-lg backdrop-blur-sm group-hover:scale-110 transition-transform">
-          <Play size={22} className="text-slate-900 ml-1" fill="currentColor" />
+        <span className="relative inline-flex items-center justify-center h-14 w-14">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-white/60 opacity-75 animate-ping motion-reduce:hidden" style={{ animationDuration: "2.2s" }} />
+          <span className="relative inline-flex items-center justify-center h-14 w-14 rounded-full bg-white/95 shadow-lg backdrop-blur-sm group-hover:scale-110 transition-transform">
+            <Play size={22} className="text-slate-900 ml-1" fill="currentColor" />
+          </span>
         </span>
       </div>
 
