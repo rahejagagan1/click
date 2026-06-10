@@ -129,8 +129,10 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
   // ── In-app notifications — single bulk insert ──────────────
   let notifications = 0;
   try {
+    // 6 params per employee now — linkUrl makes the in-app
+    // notification clickable (opens the weekly pulse form).
     const values = employees
-      .map((_, i) => `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, NOW())`)
+      .map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6}, NOW())`)
       .join(",\n");
     const params: any[] = [];
     for (const e of employees) {
@@ -140,11 +142,12 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
         activeWeek,
         `Pulse: ${theme} — Week ${activeWeek}`,
         `Take 30 seconds to share how your week is going. ⚠ You won't be able to clock out today until this is submitted.`,
+        "/dashboard/hr/pulse",
       );
     }
     await prisma.$executeRawUnsafe(
       `INSERT INTO "Notification"
-         ("userId", "type", "entityId", "title", "body", "createdAt")
+         ("userId", "type", "entityId", "title", "body", "linkUrl", "createdAt")
        VALUES ${values}`,
       ...params,
     );
