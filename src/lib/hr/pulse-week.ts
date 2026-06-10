@@ -47,12 +47,19 @@ export function getWeekKey(d: Date = new Date()): string {
   return `${year}-W${String(week).padStart(2, "0")}`;
 }
 
-/** 1, 2, 3, or 4 — rotates with ISO week number. Same week every 4
- *  weeks. Subtract 1 so the math is 0-indexed for the mod, then add
- *  1 back to land in the 1-4 range. */
+/** 1, 2, 3, or 4 — the WEEK-OF-MONTH in IST. Anchored to the
+ *  calendar month so the theme matches the real date:
+ *    days  1- 7  → Week 1  (Mood & Wellbeing)
+ *    days  8-14  → Week 2  (Manager & Team)
+ *    days 15-21  → Week 3  (Workload & Resources)
+ *    days 22-31  → Week 4  (Growth & Engagement)   ← 5th-week days
+ *                                                     fold into Week 4
+ *  so the survey theme always reflects "which week of THIS month
+ *  is it" rather than a continuous ISO-week rotation. */
 export function getActiveWeekNumber(d: Date = new Date()): 1 | 2 | 3 | 4 {
-  const { week } = isoWeek(istShift(d));
-  return (((week - 1) % 4) + 1) as 1 | 2 | 3 | 4;
+  const ist = istShift(d);
+  const dayOfMonth = ist.getUTCDate();
+  return Math.min(4, Math.ceil(dayOfMonth / 7)) as 1 | 2 | 3 | 4;
 }
 
 /** True if it's Friday in IST. */
