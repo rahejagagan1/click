@@ -153,14 +153,33 @@ export default function PlayBadges() {
   return (
     <>
       <style>{`
-        /* Spread-from-centre entrance + gentle float-bob loop.
-           The final transform uses scale(var(--scale)) so the badge
-           rests at the responsive size set by --scale (0.55 mobile,
-           1 desktop). Both keyframes consume the same var. */
+        /* Theatrical reveal on page load — each badge whirls out from
+           the hero centre: starts tiny + blurred + spun back ~120°,
+           flies to its corner while sharpening, overshoots in scale +
+           rotation, then settles. Followed by the gentle float-bob.
+           The resting size is scale(var(--scale)) (0.55 mobile → 1
+           desktop) so both keyframes share the var. */
         @keyframes badgeSpread {
-          0%   { transform: translate(var(--fx), var(--fy)) rotate(var(--rot)) scale(calc(var(--scale) * 0.4)); opacity: 0; }
-          60%  { opacity: 1; }
-          100% { transform: translate(0, 0) rotate(var(--rot)) scale(var(--scale)); opacity: 1; }
+          0% {
+            transform: translate(var(--fx), var(--fy))
+                       rotate(calc(var(--rot) - 120deg))
+                       scale(0);
+            opacity: 0;
+            filter: blur(7px);
+          }
+          45% { opacity: 1; filter: blur(0); }
+          72% {
+            transform: translate(0, 0)
+                       rotate(calc(var(--rot) + 7deg))
+                       scale(calc(var(--scale) * 1.16));
+            opacity: 1;
+            filter: blur(0);
+          }
+          100% {
+            transform: translate(0, 0) rotate(var(--rot)) scale(var(--scale));
+            opacity: 1;
+            filter: blur(0);
+          }
         }
         @keyframes badgeFloat {
           0%, 100% { transform: translate3d(0, 0, 0) rotate(var(--rot)) scale(var(--scale)); }
@@ -178,9 +197,12 @@ export default function PlayBadges() {
         .badge {
           opacity: 0;
           transform-origin: center;
+          /* Longer reveal (1500ms) + a springier curve so the
+             overshoot reads. Per-badge stagger (animationDelay below)
+             makes them whirl in one-after-another. */
           animation:
-            badgeSpread 1300ms cubic-bezier(0.18, 1.1, 0.32, 1) 200ms forwards,
-            badgeFloat  6000ms ease-in-out 1500ms infinite;
+            badgeSpread 1500ms cubic-bezier(0.22, 1.15, 0.34, 1) 200ms forwards,
+            badgeFloat  6000ms ease-in-out 2000ms infinite;
         }
 
         /* Parallax wrapper — drifts each badge by (cursor offset ×
@@ -232,7 +254,10 @@ export default function PlayBadges() {
             background:     p.bg,
             boxShadow:      p.shadow,
             borderRadius,
-            animationDelay: `${i * 80}ms, ${1500 + i * 80}ms`,
+            // Stronger stagger (150ms) so the badges whirl in one
+            // after another as a clear reveal. Float starts only
+            // after each badge's 1500ms reveal completes.
+            animationDelay: `${i * 150}ms, ${1500 + i * 150}ms`,
             ["--rot" as any]: `${b.rotate}deg`,
             ["--fx"  as any]: b.fromX,
             ["--fy"  as any]: b.fromY,
