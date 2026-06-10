@@ -21,6 +21,7 @@ import ScrollProgress from "./[slug]/ScrollProgress";
 import WordReveal     from "./[slug]/WordReveal";
 import LifeAtBrand, { type Reel } from "./LifeAtBrand";
 import CultureSlideshow from "./CultureSlideshow";
+import ContactButton from "./ContactButton";
 import PlayBadges    from "./[slug]/PlayBadges";
 
 // "Life at NB Media" reel carousel.
@@ -256,10 +257,7 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
               href="#why-us"
               className="hidden sm:inline-flex items-center gap-1.5 h-9 px-3 text-[12.5px] font-medium text-slate-600 hover:text-slate-900 rounded-lg transition-colors"
             >Why join {meta.label}</a>
-            <a
-              href="mailto:hrd@nbmediaproductions.com"
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[12.5px] font-semibold transition-colors"
-            ><Mail size={13} /> Contact</a>
+            <ContactButton email="hrd@nbmediaproductions.com" />
           </nav>
         </div>
       </header>
