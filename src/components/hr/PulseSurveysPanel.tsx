@@ -17,7 +17,7 @@
 // here use visible text labels (not just icons) so HR isn't
 // guessing what the three tiny icons mean.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import {
@@ -70,31 +70,10 @@ export default function PulseSurveysPanel({ initialBrand }: { initialBrand?: "NB
     initialBrand === "YT Labs" ? "YT Labs" : "NB Media";
   const [brand, setBrand] = useState<"NB Media" | "YT Labs">(seedBrand);
 
-  // Caller's brand scope. Single-brand HR Managers (e.g. NB Media's
-  // HR Manager) get the switcher HIDDEN and the panel locked to
-  // their own brand. Super-admins keep the full [NB Media] [YT Labs]
-  // chooser. Defaults to "all brands visible" until /api/hr/me/scope
-  // resolves so first-paint doesn't flicker the switcher.
-  const [scope, setScope] = useState<{ allBrands: boolean; brand: "NB Media" | "YT Labs" | null }>({
-    allBrands: true, brand: null,
-  });
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/hr/me/scope")
-      .then((r) => r.ok ? r.json() : Promise.reject())
-      .then((s) => {
-        if (cancelled) return;
-        setScope({ allBrands: !!s.allBrands, brand: s.brand ?? null });
-        // If single-brand, lock the panel to that brand on initial
-        // load — overrides whatever was seeded from the URL so a
-        // single-brand HR can't bypass via ?brand=… in the address bar.
-        if (!s.allBrands && (s.brand === "NB Media" || s.brand === "YT Labs")) {
-          setBrand(s.brand);
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+  // Brand is driven entirely by the URL (?brand=…) + the switcher
+  // below. No user-scope lock — every viewer of the HR Dashboard
+  // can flip between brands freely per HR direction. (If finer
+  // scoping is needed later, gate it at the API layer, not here.)
 
   return (
     <div className="space-y-5">
@@ -154,47 +133,28 @@ export default function PulseSurveysPanel({ initialBrand }: { initialBrand?: "NB
             </button>
           </div>
 
-          {/* Brand picker — each brand has its own independent
-              question bank. Strict separation: NB Media employees
-              receive only NB Media questions; same for YT Labs.
-              Hidden entirely for single-brand HR Managers (they
-              only ever see their own brand's bank). */}
-          {scope.allBrands ? (
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-500 mr-1">Brand</span>
-              {(["NB Media", "YT Labs"] as const).map((b) => {
-                const active = brand === b;
-                return (
-                  <button
-                    key={b}
-                    type="button"
-                    onClick={() => setBrand(b)}
-                    className={`h-7 px-3 rounded-md text-[11.5px] font-semibold transition-colors ${
-                      active
-                        ? "bg-[#008CFF] text-white"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
-                  >
-                    {b}
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            // Single-brand HR — show a small read-only chip so the
-            // user knows which brand they're viewing, but with no
-            // switcher to cross-brand contamination.
-            <div className="flex items-center gap-2 text-[11px] text-slate-500">
-              <span className="uppercase tracking-[0.08em] font-bold">Brand</span>
-              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10.5px] font-bold ${
-                scope.brand === "YT Labs"
-                  ? "bg-[#d4143d]/10 text-[#d4143d]"
-                  : "bg-[#008CFF]/10 text-[#008CFF]"
-              }`}>
-                {scope.brand}
-              </span>
-            </div>
-          )}
+          {/* Brand picker — always visible. URL ?brand=… seeds the
+              initial selection; visitors can switch freely. */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-500 mr-1">Brand</span>
+            {(["NB Media", "YT Labs"] as const).map((b) => {
+              const active = brand === b;
+              return (
+                <button
+                  key={b}
+                  type="button"
+                  onClick={() => setBrand(b)}
+                  className={`h-7 px-3 rounded-md text-[11.5px] font-semibold transition-colors ${
+                    active
+                      ? "bg-[#008CFF] text-white"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {b}
+                </button>
+              );
+            })}
+          </div>
 
           {view === "weekly" ? <WeeklyView brand={brand} /> : <MonthlyView brand={brand} />}
         </>
