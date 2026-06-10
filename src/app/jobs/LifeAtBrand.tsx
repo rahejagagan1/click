@@ -48,67 +48,74 @@ type Props = {
 export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, igHandle, igUrl, reels }: Props) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
-  // Infinite SMOOTH FLOW: render the reels THREE times and let a
-  // requestAnimationFrame loop drift the track continuously (marquee-
-  // style) — buttery, never a discrete hop. When the scroll crosses a
-  // copy boundary we instantly wrap by one copy-width; the copies are
-  // pixel-identical so the wrap is invisible → endless seamless flow.
+  // Manual, infinite carousel — NO auto-slideshow. The reels move only
+  // when the user clicks an arrow (or swipes). Rendered THREE times and
+  // parked in the middle copy so there's runway both ways; after any
+  // scroll settles we instantly wrap by one copy-width — the copies are
+  // pixel-identical, so the loop is seamless and never dead-ends.
   const canLoop = reels.length > 1;
   const loopReels = canLoop ? [...reels, ...reels, ...reels] : reels;
 
-  // With continuous flow the cards are always moving, so they render
-  // already-revealed (no per-card scroll entrance to flicker mid-drift).
-  const [interacted] = useState(canLoop);
+  // Lock cards to revealed after the first interaction so a loop-wrap
+  // never lands on an identical-but-unrevealed copy and flashes its
+  // entrance. (Initial scroll-in entrance still plays before that.)
+  const [interacted, setInteracted] = useState(false);
 
-  // Refs drive the rAF loop WITHOUT restarting it: direction (+1 flows
-  // forward, -1 back) and paused (true while hovering / touching so the
-  // user can aim at and click a reel's play button).
-  const dirRef     = useRef<1 | -1>(1);
-  const pausedRef  = useRef(false);
-  const visibleRef = useRef(true);
-  const SPEED = 0.55; // px/frame ≈ 33px/s — a gentle, readable glide.
-
+  // Park at the middle copy on mount (instant — bypass any CSS smooth).
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el || !canLoop) return;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-
-    // Park at the middle copy + kill any CSS smooth-scroll so our
-    // per-frame scrollLeft writes land instantly (smooth would lag
-    // each tiny increment).
     el.style.scrollBehavior = "auto";
     el.scrollLeft = el.scrollWidth / 3;
-
-    // Pause the drift while the carousel is off-screen (don't burn
-    // CPU + scroll an invisible track).
-    const io = new IntersectionObserver(
-      (entries) => { for (const e of entries) visibleRef.current = e.isIntersecting; },
-      { threshold: 0 },
-    );
-    io.observe(el);
-
-    let raf = 0;
-    const step = () => {
-      if (!pausedRef.current && visibleRef.current) {
-        el.scrollLeft += SPEED * dirRef.current;
-        const setW = el.scrollWidth / 3;
-        // Seamless wrap — stay within the middle copy's band.
-        if (el.scrollLeft >= setW * 2) el.scrollLeft -= setW;
-        else if (el.scrollLeft <= 0)   el.scrollLeft += setW;
-      }
-      raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => { cancelAnimationFrame(raf); io.disconnect(); };
   }, [canLoop]);
 
-  const pause  = () => { pausedRef.current = true; };
-  const resume = () => { pausedRef.current = false; };
-  // Arrows set the flow DIRECTION (the glide keeps going); a quick
-  // unpause makes the direction change feel responsive.
+  // Instant wrap back into the middle copy once a scroll settles.
+  const wrapIfNeeded = (el: HTMLDivElement) => {
+    const setW = el.scrollWidth / 3;
+    if (el.scrollLeft >= setW * 2) el.scrollLeft -= setW;
+    else if (el.scrollLeft <= 0)   el.scrollLeft += setW;
+  };
+
+  // Manual swipe / trackpad: debounced wrap so the loop holds on touch.
+  const settleTimer = useRef<number>(0);
+  const onScroll = () => {
+    if (!canLoop) return;
+    if (!interacted) setInteracted(true);
+    if (settleTimer.current) window.clearTimeout(settleTimer.current);
+    settleTimer.current = window.setTimeout(() => {
+      const el = scrollerRef.current;
+      if (el) wrapIfNeeded(el);
+    }, 100);
+  };
+
+  // Arrow click → a smooth, EASED tween of ~2 cards (custom rAF tween,
+  // easeOutCubic) instead of the native scrollBy hop. Wraps on finish.
+  const tweenRaf = useRef<number>(0);
   const scroll = (dir: -1 | 1) => {
-    dirRef.current = dir;
-    pausedRef.current = false;
+    const el = scrollerRef.current;
+    if (!el) return;
+    if (!interacted) setInteracted(true);
+    cancelAnimationFrame(tweenRaf.current);
+    el.style.scrollBehavior = "auto"; // we drive it frame-by-frame
+
+    const cardW = (el.querySelector<HTMLElement>("[data-reel]")?.offsetWidth ?? 220) + 16;
+    const start = el.scrollLeft;
+    const distance = dir * cardW * 2;        // ~2 cards per click
+    const duration = 600;
+    const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+    let t0: number | null = null;
+
+    const tick = (now: number) => {
+      if (t0 == null) t0 = now;
+      const t = Math.min(1, (now - t0) / duration);
+      el.scrollLeft = start + distance * easeOutCubic(t);
+      if (t < 1) {
+        tweenRaf.current = requestAnimationFrame(tick);
+      } else {
+        wrapIfNeeded(el); // seamless loop at the end of the glide
+      }
+    };
+    tweenRaf.current = requestAnimationFrame(tick);
   };
 
   if (!reels || reels.length === 0) return null;
@@ -207,16 +214,14 @@ export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, 
             <ChevronLeft size={20} />
           </button>
 
-          {/* Track — continuous rAF drift (no scroll-snap / scroll-
-              smooth: both fight a per-frame glide). Pauses while the
-              pointer is over it (or a finger is down) so a reel's play
-              button is a still, tappable target. */}
+          {/* Track — manual only (no auto-slideshow). No scroll-snap /
+              scroll-smooth: snap re-snaps mid-tween (the old jerk) and
+              smooth lags our frame-by-frame writes. The arrow tween
+              moves exact card multiples so alignment holds; onScroll
+              wraps the loop seamlessly after a manual swipe settles. */}
           <div
             ref={scrollerRef}
-            onMouseEnter={pause}
-            onMouseLeave={resume}
-            onTouchStart={pause}
-            onTouchEnd={resume}
+            onScroll={onScroll}
             className="flex gap-4 overflow-x-auto pb-4 px-1 -mx-1
                        [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
