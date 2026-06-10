@@ -5,7 +5,7 @@
 // answers. The API enforces this; this component just renders what
 // comes back.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import { Loader2, Users, TrendingUp, Smile, Star, Activity, ThumbsUp, MessageSquareText, ShieldCheck } from "lucide-react";
@@ -40,6 +40,26 @@ export default function PulseResponsesView() {
   // Strict brand separation — each brand's responses live in
   // their own bucket. Defaults to NB Media (most common HR view).
   const [brand, setBrand] = useState<"NB Media" | "YT Labs">("NB Media");
+
+  // Single-brand HR Managers see only their own brand's responses;
+  // super-admins keep the [NB Media] [YT Labs] switcher.
+  const [scope, setScope] = useState<{ allBrands: boolean; brand: "NB Media" | "YT Labs" | null }>({
+    allBrands: true, brand: null,
+  });
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/hr/me/scope")
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then((s) => {
+        if (cancelled) return;
+        setScope({ allBrands: !!s.allBrands, brand: s.brand ?? null });
+        if (!s.allBrands && (s.brand === "NB Media" || s.brand === "YT Labs")) {
+          setBrand(s.brand);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
   const { data, isLoading } = useSWR<ResponsesPayload>(
     `/api/hr/pulse/responses?surveyType=${surveyType}&brand=${encodeURIComponent(brand)}`,
     fetcher,
@@ -77,27 +97,41 @@ export default function PulseResponsesView() {
       </div>
 
       {/* Brand sub-switcher — each brand's responses are isolated.
-          Matches the strict separation on the Questions tab. */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-500 mr-1">Brand</span>
-        {(["NB Media", "YT Labs"] as const).map((b) => {
-          const active = brand === b;
-          return (
-            <button
-              key={b}
-              type="button"
-              onClick={() => setBrand(b)}
-              className={`h-7 px-3 rounded-md text-[11.5px] font-semibold transition-colors ${
-                active
-                  ? "bg-[#008CFF] text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
-            >
-              {b}
-            </button>
-          );
-        })}
-      </div>
+          Matches the strict separation on the Questions tab.
+          Hidden for single-brand HR Managers. */}
+      {scope.allBrands ? (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-500 mr-1">Brand</span>
+          {(["NB Media", "YT Labs"] as const).map((b) => {
+            const active = brand === b;
+            return (
+              <button
+                key={b}
+                type="button"
+                onClick={() => setBrand(b)}
+                className={`h-7 px-3 rounded-md text-[11.5px] font-semibold transition-colors ${
+                  active
+                    ? "bg-[#008CFF] text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {b}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-[11px] text-slate-500">
+          <span className="uppercase tracking-[0.08em] font-bold">Brand</span>
+          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10.5px] font-bold ${
+            scope.brand === "YT Labs"
+              ? "bg-[#d4143d]/10 text-[#d4143d]"
+              : "bg-[#008CFF]/10 text-[#008CFF]"
+          }`}>
+            {scope.brand}
+          </span>
+        </div>
+      )}
 
       {/* Cycle header + participation + brand badge */}
       {data && (
