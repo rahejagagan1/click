@@ -13,7 +13,7 @@ import {
   IndianRupee, ChevronDown,
   // Why-Join cards — line-icons mapping to the emoji set HR wrote
   // (Flexible Working, Mental Health, Collaborative Culture, etc.).
-  Brain, Handshake, Award, Plane, PawPrint, Rocket,
+  Brain, Handshake, Award, Plane, PawPrint,
 } from "lucide-react";
 import Reveal       from "./[slug]/Reveal";
 import Magnetic     from "./[slug]/Magnetic";
@@ -207,18 +207,54 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
       // Life sections still paint their own EXPLICIT gradient on
       // top because they have additional blur-blob decorations
       // layered above.
+      // NOTE: deliberately NO `background-attachment: fixed` — a fixed
+      // background forces the browser to repaint the entire viewport
+      // on every scroll frame, which was causing the visible scroll
+      // jank. A normally-scrolling gradient paints once and is smooth.
       className="jobs-page min-h-screen text-slate-900 antialiased"
       style={{
         scrollBehavior: "smooth",
         fontFamily: '"Times New Roman", Times, serif',
         background: "linear-gradient(180deg, rgba(219,234,254,0.6) 0%, #ffffff 35%, #e2e8f0 100%)",
-        backgroundAttachment: "fixed",
       }}
     >
       <ScrollProgress />
       <style>{`
         @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
         .bob { animation: bob 2s ease-in-out infinite; }
+
+        /* ── Hero "wow" animations (all transform/opacity/bg-position
+              only — GPU-friendly, no layout or repaint thrash). ──── */
+
+        /* Flowing gradient sweep across the "millions." word. The
+           gradient is 200% wide and its position slides left↔right
+           so the warm colours drift through the letters. */
+        @keyframes gradientFlow {
+          0%   { background-position:   0% 50%; }
+          100% { background-position: 200% 50%; }
+        }
+        .grad-flow {
+          background-size: 200% auto !important;
+          animation: gradientFlow 5s linear infinite;
+        }
+
+        /* Slow drifting aurora — the hero's blur blobs gently float
+           and breathe so the backdrop feels alive, not static. */
+        @keyframes auroraA {
+          0%,100% { transform: translate3d(0,0,0) scale(1); }
+          50%     { transform: translate3d(40px,30px,0) scale(1.12); }
+        }
+        @keyframes auroraB {
+          0%,100% { transform: translate3d(0,0,0) scale(1); }
+          50%     { transform: translate3d(-30px,40px,0) scale(1.15); }
+        }
+        .aurora-a { animation: auroraA 14s ease-in-out infinite; will-change: transform; }
+        .aurora-b { animation: auroraB 18s ease-in-out infinite; will-change: transform; }
+
+        @media (prefers-reduced-motion: reduce) {
+          .grad-flow, .aurora-a, .aurora-b { animation: none !important; }
+        }
+
         /* Force Times New Roman everywhere on the careers page —
            wins over Tailwind's font utilities (font-sans, font-mono).
            tabular-nums and font-feature-settings still apply where
@@ -275,8 +311,11 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
         {/* Two-layer gradient backdrop + side blob so mobile feels
             intentional even without the desktop's floating badges. */}
         <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-b from-blue-50/60 via-white to-[#e2e8f0]" />
-        <div aria-hidden="true" className="absolute -top-32 -left-32 -z-10 h-[460px] w-[460px] rounded-full blur-[110px]" style={{ background: `${meta.accent}26` }} />
-        <div aria-hidden="true" className="absolute -top-20 -right-24 -z-10 h-[360px] w-[360px] rounded-full bg-[#a855f7]/[0.07] blur-[100px] sm:hidden" />
+        {/* Drifting aurora blobs — slowly float + breathe so the hero
+            backdrop feels alive. */}
+        <div aria-hidden="true" className="aurora-a absolute -top-32 -left-32 -z-10 h-[460px] w-[460px] rounded-full blur-[110px]" style={{ background: `${meta.accent}2e` }} />
+        <div aria-hidden="true" className="aurora-b absolute top-1/3 -right-24 -z-10 h-[420px] w-[420px] rounded-full bg-[#a855f7]/[0.10] blur-[120px] hidden sm:block" />
+        <div aria-hidden="true" className="aurora-b absolute -top-20 -right-24 -z-10 h-[360px] w-[360px] rounded-full bg-[#a855f7]/[0.07] blur-[100px] sm:hidden" />
         {/* Floating brand badges — desktop-only. Burst-from-centre
             entrance + gentle float-bob loop. Decorates the hero
             corners with YouTube / Instagram / Spotify / Facebook. */}
@@ -318,10 +357,14 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
                 // Brand name AND the trailing period share the same
                 // gradient span so the period inherits the warm tone
                 // at the end of the ramp (amber/yellow), matching the
-                // logo colour family.
+                // logo colour family. grad-flow animates the gradient
+                // position so the warm colours slowly drift through.
+                className="grad-flow"
                 style={{
                   display:                "inline-block",
-                  background:             "linear-gradient(115deg, #ef4444 0%, #f97316 45%, #fbbf24 100%)",
+                  // Repeat the ramp so the 200%-wide sweep loops
+                  // seamlessly (…amber → red → amber…).
+                  background:             "linear-gradient(115deg, #ef4444 0%, #f97316 25%, #fbbf24 50%, #f97316 75%, #ef4444 100%)",
                   WebkitBackgroundClip:   "text",
                   backgroundClip:         "text",
                   WebkitTextFillColor:    "transparent",
@@ -372,7 +415,9 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
       <section id="why-us" className="relative border-t border-slate-100">
         <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-10 sm:py-20">
           <Reveal direction="up">
-            <header className="mb-10 max-w-2xl">
+            {/* Centered header — aligns with the centered card grid
+                below for a clean, balanced perks section. */}
+            <header className="mb-10 max-w-2xl mx-auto text-center">
               {/* Eyebrow label — NB Media gets the warm logo gradient
                   (red → orange → amber). YT Labs falls back to its
                   solid violet accent. */}
@@ -389,7 +434,7 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
                 Why join {meta.label}
               </p>
               <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">More than a job. A place to grow.</h2>
-              <p className="mt-2 text-[14px] text-slate-500">Eight reasons people choose us — and what new hires tell us six months in.</p>
+              <p className="mt-2 text-[14px] text-slate-500">Six reasons people choose us — and what new hires tell us six months in.</p>
             </header>
           </Reveal>
 
@@ -399,7 +444,10 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
               On tablet (2-col) and mobile (1-col) it just flows
               naturally. `items-stretch` keeps card heights equal
               per row. */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 items-stretch">
+          {/* 3-col grid of square cards, capped at max-w-3xl so each
+              cube is a tasteful ~245px — square + filled, not bulky.
+              Centered. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch max-w-3xl mx-auto">
             <Reveal direction="up" delay={0}>
               <ValueCard
                 icon={Clock}
@@ -413,7 +461,7 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
                 icon={Brain}
                 tone="emerald"
                 title="Mental Health Support"
-                body="Access to wellness initiatives and support systems that prioritize your mental well-being."
+                body="Free, unlimited therapy sessions plus wellness initiatives that put your mental well-being first."
               />
             </Reveal>
             <Reveal direction="up" delay={160}>
@@ -421,7 +469,7 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
                 icon={Handshake}
                 tone="indigo"
                 title="Collaborative Culture"
-                body="Work alongside creative, talented, and driven individuals in an innovative and supportive environment."
+                body="Work alongside the best — talented, creative, and driven individuals in an innovative and supportive environment."
               />
             </Reveal>
             <Reveal direction="up" delay={240}>
@@ -436,8 +484,8 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
               <ValueCard
                 icon={Plane}
                 tone="violet"
-                title="Company Retreats & Team Engagement"
-                body="Enjoy team outings, celebrations, retreats, and opportunities to connect beyond work."
+                title="Fully Sponsored Retreats"
+                body="Company-funded team outings, celebrations, and retreats — connect beyond work, on us."
               />
             </Reveal>
             <Reveal direction="up" delay={400}>
@@ -445,15 +493,7 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
                 icon={PawPrint}
                 tone="rose"
                 title="Pet-Friendly Office"
-                body="Because sometimes the best coworkers have four legs and a wagging tail."
-              />
-            </Reveal>
-            <Reveal direction="up" delay={480}>
-              <ValueCard
-                icon={Rocket}
-                tone="orange"
-                title="Build the Future of Digital Media"
-                body="Be part of a company that's shaping the future of digital content and reaching millions of viewers every month."
+                body="Bring your pets to work — because sometimes the best coworkers have four legs and a wagging tail."
               />
             </Reveal>
           </div>
@@ -807,31 +847,34 @@ function ValueCard({
 }: { icon: any; title: string; body: string; tone?: ValueTone }) {
   const t = VALUE_TONE[tone];
   return (
-    <div className="group relative h-full rounded-2xl bg-white border border-slate-200 p-7 transition-all duration-300 hover:border-slate-300 hover:-translate-y-1 hover:shadow-[0_12px_32px_-12px_rgba(15,23,42,0.10)] overflow-hidden flex flex-col">
-      {/* Coloured line-icon — fixed-height block so the title
-          beneath it starts at the same Y on every card. */}
-      <div className="h-8 mb-5 flex items-start">
-        <Icon
-          size={30}
-          strokeWidth={1.75}
-          style={{ color: t.iconColor }}
-          className="transition-transform duration-300 group-hover:scale-110 origin-left"
-        />
+    <div className="group relative h-full sm:aspect-square rounded-2xl bg-white border border-slate-200 p-5 transition-[transform,box-shadow,border-color] duration-300 ease-out hover:border-slate-300 hover:-translate-y-1 hover:shadow-[0_14px_34px_-14px_rgba(15,23,42,0.14)] overflow-hidden flex flex-col">
+      {/* Oversized faded icon watermark — fills the lower-right of the
+          square so the cube reads as full, not empty. Content sits
+          ABOVE it (top-aligned); the watermark anchors the bottom. */}
+      <Icon
+        size={118}
+        strokeWidth={1.25}
+        aria-hidden
+        className="pointer-events-none absolute -bottom-4 -right-4 transition-transform duration-500 ease-out group-hover:scale-105"
+        style={{ color: t.iconColor, opacity: 0.08 }}
+      />
+
+      {/* Content — top-aligned (natural flow), sits above the watermark. */}
+      <div className="relative">
+        <div
+          className="inline-flex h-10 w-10 items-center justify-center rounded-xl mb-3 transition-transform duration-300 ease-out group-hover:scale-110"
+          style={{ background: `${t.iconColor}1a` }}
+        >
+          <Icon size={20} strokeWidth={2} style={{ color: t.iconColor }} />
+        </div>
+
+        <h3 className="text-[14px] font-semibold text-slate-900 tracking-tight leading-snug">
+          {title}
+        </h3>
+        <p className="text-[12px] text-slate-500 leading-[1.55] mt-1.5">
+          {body}
+        </p>
       </div>
-
-      {/* Title — clamped to 2 lines via min-height so 1-line
-          and 2-line titles occupy the same vertical space. The
-          body always starts at the same Y across every card. */}
-      <h3 className="text-[15px] font-semibold text-slate-900 tracking-tight leading-[1.35] min-h-[2.7rem]">
-        {title}
-      </h3>
-
-      {/* Body — softer slate, generous leading for readability.
-          flex-grow lets short bodies push the card to fill the
-          grid row's tallest sibling instead of leaving a gap. */}
-      <p className="text-[13px] text-slate-500 mt-2.5 leading-[1.7] flex-grow">
-        {body}
-      </p>
     </div>
   );
 }
