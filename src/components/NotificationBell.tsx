@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { Bell, CheckCheck, Activity, Home, Briefcase, ShieldCheck, Coffee, MoreHorizontal, BellOff, Trash2 } from "lucide-react";
+import { Bell, CheckCheck, Activity, Home, Briefcase, ShieldCheck, Coffee, MoreHorizontal, BellOff, Trash2, HeartPulse, ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 /**
@@ -63,9 +63,18 @@ const TYPE_META: Record<string, { tint: string; Icon: React.ComponentType<{ size
   on_duty:        { tint: "#8b5cf6", Icon: Briefcase   },
   leave:          { tint: "#f59e0b", Icon: Coffee      },
   comp_off:       { tint: "#14b8a6", Icon: Activity    },
+  pulse_weekly:   { tint: "#008CFF", Icon: HeartPulse  },
+  pulse_monthly:  { tint: "#8b5cf6", Icon: HeartPulse  },
   _default:       { tint: "#14b8a6", Icon: Activity    },
 };
 const metaFor = (type: string) => TYPE_META[type] || TYPE_META._default;
+
+// Pulse / survey notifications get an explicit "Take it →" CTA chip
+// so it's obvious the card is actionable (not just informational).
+const PULSE_CTA: Record<string, string> = {
+  pulse_weekly:  "Take the pulse",
+  pulse_monthly: "Take the survey",
+};
 
 export default function NotificationBell() {
   const [open, setOpen] = useState(false);
@@ -288,9 +297,22 @@ export default function NotificationBell() {
                         {n.body}
                       </p>
                     )}
-                    <p className={`text-[11px] mt-1 ${n.isRead ? "text-slate-400 dark:text-slate-500" : "text-slate-500 dark:text-slate-400"}`}>
-                      {timeAgo(n.createdAt)}
-                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <p className={`text-[11px] ${n.isRead ? "text-slate-400 dark:text-slate-500" : "text-slate-500 dark:text-slate-400"}`}>
+                        {timeAgo(n.createdAt)}
+                      </p>
+                      {/* CTA chip for pulse / survey notifications —
+                          makes the click affordance explicit. Only
+                          shown when the notification carries a link. */}
+                      {PULSE_CTA[n.type] && n.linkUrl && (
+                        <span
+                          className="inline-flex items-center gap-0.5 text-[10.5px] font-bold px-1.5 py-0.5 rounded-full"
+                          style={{ background: `${tint}1a`, color: tint }}
+                        >
+                          {PULSE_CTA[n.type]} <ArrowRight size={10} strokeWidth={2.5} />
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
