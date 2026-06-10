@@ -48,9 +48,14 @@ function prettyMonth(key: string): string {
 
 export default function WfhBalancesPanel({ initialBrand }: { initialBrand?: "NB Media" | "YT Labs" | "all" | null } = {}) {
   const [monthKey, setMonthKey] = useState<string>(currentMonthKey());
-  const [brand, setBrand] = useState<"NB Media" | "YT Labs" | "all">(
-    initialBrand === "NB Media" || initialBrand === "YT Labs" ? initialBrand : "all",
-  );
+  // Brand is derived from the URL (?brand=…) via initialBrand. No
+  // inline brand sub-tabs — the outer HR Dashboard brand tab is
+  // the single brand control. "all" only kicks in when the outer
+  // brand is "all" (e.g. when the URL has no ?brand param).
+  const brand: "NB Media" | "YT Labs" | "all" =
+    initialBrand === "NB Media" ? "NB Media"
+  : initialBrand === "YT Labs"  ? "YT Labs"
+  : "all";
   const [q, setQ] = useState<string>("");
 
   const apiKey = useMemo(() => {
@@ -109,23 +114,8 @@ export default function WfhBalancesPanel({ initialBrand }: { initialBrand?: "NB 
           </button>
         </div>
 
-        {/* Brand tabs */}
-        <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-          {(["all", "NB Media", "YT Labs"] as const).map((b) => {
-            const active = brand === b;
-            return (
-              <button
-                key={b}
-                onClick={() => setBrand(b)}
-                className={`px-3 py-1.5 rounded-md text-[11.5px] font-semibold transition-colors ${
-                  active ? "bg-white text-[#008CFF] shadow-sm" : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                {b === "all" ? "All Brands" : b}
-              </button>
-            );
-          })}
-        </div>
+        {/* (Brand tabs removed — outer HR Dashboard brand tab in
+            the page header is the single brand control.) */}
 
         {/* Search */}
         <div className="relative">
