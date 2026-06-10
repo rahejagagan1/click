@@ -42,8 +42,15 @@ function normalizeBrand(raw: unknown): "NB Media" | "YT Labs" | null {
 }
 
 export async function GET(req: NextRequest) {
-  const { errorResponse } = await requireAuth();
+  // HR-admin only — this surface manages the question bank. The
+  // employee-facing path goes through /api/hr/pulse/this-week
+  // (separate endpoint) so tightening this GET doesn't break the
+  // weekly clock-out gate.
+  const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
+  if (!isHRAdmin(session!.user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   try {
     const url = new URL(req.url);
