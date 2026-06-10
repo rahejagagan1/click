@@ -346,6 +346,23 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
         </div>
       </section>
 
+      {/* ── Life at <brand> — reel carousel sits DIRECTLY below the
+            hero so visitors meet the team vibe first, then read the
+            why-join pitch + open roles. ─────────────────────────── */}
+      {activeBrand === "nb_media" && (
+        <Reveal direction="up">
+          <LifeAtBrand
+            brandLabel={BRAND_META.nb_media.label}
+            accent={BRAND_META.nb_media.accent}
+            brandGradient="linear-gradient(135deg, #ef4444 0%, #f97316 35%, #f59e0b 70%, #fbbf24 100%)"
+            blurb={NB_MEDIA_LIFE_BLURB}
+            igHandle={NB_MEDIA_IG_HANDLE}
+            igUrl={NB_MEDIA_IG_URL}
+            reels={NB_MEDIA_REELS}
+          />
+        </Reveal>
+      )}
+
       {/* ── Why join <brand> — panel 2 ────────────────────────── */}
       {/* 8 icon cards in a 2x4 / 4x2 grid (Praper-style). Each pair
           uses a different tone so the section feels colourful without
@@ -447,23 +464,6 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
       {/* ── About brand(s) section removed per HR direction — the
             brand pitch already lives in the hero + Life at NB Media
             sections, so the dedicated About panel was redundant. ── */}
-
-      {/* ── Life at <brand> — reel carousel sits AFTER Why-Join so
-            visitors read the cards, then land in the team-vibe
-            content, then see open roles. ─────────────────────────── */}
-      {activeBrand === "nb_media" && (
-        <Reveal direction="up">
-          <LifeAtBrand
-            brandLabel={BRAND_META.nb_media.label}
-            accent={BRAND_META.nb_media.accent}
-            brandGradient="linear-gradient(135deg, #ef4444 0%, #f97316 35%, #f59e0b 70%, #fbbf24 100%)"
-            blurb={NB_MEDIA_LIFE_BLURB}
-            igHandle={NB_MEDIA_IG_HANDLE}
-            igUrl={NB_MEDIA_IG_URL}
-            reels={NB_MEDIA_REELS}
-          />
-        </Reveal>
-      )}
 
       {/* ── Open roles — panel 4 ──────────────────────────────── */}
       {/* Moved BELOW the company-info panels (Why join us + About
