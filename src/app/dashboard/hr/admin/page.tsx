@@ -683,7 +683,7 @@ export default function HRAdminPage() {
                 • Monthly Survey — eNPS + Likert engagement drivers
               HR adds / edits / deletes any question. Employee-facing
               answer flow + aggregate dashboards come in a later PR. */}
-          {tab === "pulse-surveys" && <PulseSurveysPanel />}
+          {tab === "pulse-surveys" && <PulseSurveysPanel initialBrand={initialBrand} />}
 
           {/* ── Leave Types ── */}
           {tab === "leave-types" && (
