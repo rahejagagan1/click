@@ -32,31 +32,32 @@ async function setSaturday(shiftId: number, policy: string, weeks: number[]) {
   );
 }
 
-export async function GET() {
-  const { session, errorResponse } = await requireAuth();
+export async function GET(req: NextRequest) {
+  const { errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   try {
-    // Brand-scope filter — NB Media HR Manager only sees NB Media
-    // shifts (+ brand=NULL shifts that pre-date the brand column).
-    // Developers + CROSS_BRAND_HR_USER_IDS see everything.
-    const scope = getBrandScope(session!.user);
+    // Brand filter is now URL-driven. `?brand=NB%20Media` returns
+    // that brand's shifts (plus any pre-brand-column legacy NULL
+    // rows); no brand param returns everything. Brand-isolation
+    // enforcement was moved up to the UI layer per HR direction —
+    // anyone with HR Dashboard access can browse either brand.
+    const url = new URL(req.url);
+    const rawBrand = (url.searchParams.get("brand") || "").trim();
+    const brand =
+      rawBrand === "NB Media" || rawBrand === "nb_media" || rawBrand === "nb-media" ? "NB Media" :
+      rawBrand === "YT Labs"  || rawBrand === "yt_labs"  || rawBrand === "yt-labs"  ? "YT Labs"  :
+      null;
     let shifts: any;
-    if (scope.allBrands) {
-      shifts = await prisma.$queryRawUnsafe(
-        `SELECT * FROM "Shift" ORDER BY name ASC`,
-      );
-    } else if (scope.brand) {
+    if (brand) {
       shifts = await prisma.$queryRawUnsafe(
         `SELECT * FROM "Shift"
           WHERE brand = $1 OR brand IS NULL
           ORDER BY name ASC`,
-        scope.brand,
+        brand,
       );
     } else {
-      // No brand assigned to this user — return only the un-branded
-      // legacy shifts (defensive — should rarely hit this path).
       shifts = await prisma.$queryRawUnsafe(
-        `SELECT * FROM "Shift" WHERE brand IS NULL ORDER BY name ASC`,
+        `SELECT * FROM "Shift" ORDER BY name ASC`,
       );
     }
     return NextResponse.json(shifts);
