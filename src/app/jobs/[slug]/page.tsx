@@ -339,7 +339,7 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
           slides into view as the user scrolls down. lg: only so
           mobile keeps its compact hero (the sidebar stacks below
           on mobile and doesn't have this overlap problem). */}
-      <section className="relative overflow-hidden border-b border-slate-100 lg:min-h-screen lg:flex lg:flex-col lg:justify-center">
+      <section className="relative overflow-hidden border-b border-slate-100 min-h-[calc(100vh-4rem)] flex flex-col justify-center">
         {/* Layered gradient backdrop — mobile gets a richer, more
             saturated wash so the page feels intentional even without
             the desktop's floating social badges. */}
