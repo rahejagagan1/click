@@ -419,11 +419,13 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
             )}
           </h1>
 
-          <Reveal direction="up" delay={160}>
-            <p className="mt-5 sm:mt-6 text-[14.5px] sm:text-[17px] text-slate-600 max-w-2xl leading-[1.65]">
-              Join one of India's fastest-growing digital media companies and work with creators, storytellers, researchers, writers, editors, and innovators who shape content consumed by millions every month.
-            </p>
-          </Reveal>
+          <p className="mt-5 sm:mt-6 text-[14.5px] sm:text-[17px] text-slate-600 max-w-2xl leading-[1.65]">
+            <WordReveal
+              text="Join one of India's fastest-growing digital media companies and work with creators, storytellers, researchers, writers, editors, and innovators who shape content consumed by millions every month."
+              staggerMs={22}
+              baseDelayMs={420}
+            />
+          </p>
 
           {/* Hero CTAs ("See N open roles" + "Why join NB Media")
               removed per HR direction — the sticky nav still carries
@@ -479,7 +481,9 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
               <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">
                 <CharReveal text="More than a job. A place to grow." staggerMs={26} />
               </h2>
-              <p className="mt-2 text-[14px] text-slate-500">Six reasons people choose us — and what new hires tell us six months in.</p>
+              <p className="mt-2 text-[14px] text-slate-500">
+                <WordReveal text="Six reasons people choose us — and what new hires tell us six months in." staggerMs={16} />
+              </p>
             </header>
           </Reveal>
 
@@ -585,11 +589,16 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
               >
                 Hiring now
               </p>
-              <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">Open roles</h2>
+              <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">
+                <CharReveal text="Open roles" staggerMs={34} />
+              </h2>
               <p className="mt-2 text-[14px] text-slate-500 max-w-xl">
-                {isAll
-                  ? "Filter by company or browse everything. Each role has its own page with the full brief and a downloadable JD."
-                  : `Open positions at ${meta.label}. Each role has its own page with the full brief and a downloadable JD.`}
+                <WordReveal
+                  text={isAll
+                    ? "Filter by company or browse everything. Each role has its own page with the full brief and a downloadable JD."
+                    : `Open positions at ${meta.label}. Each role has its own page with the full brief and a downloadable JD.`}
+                  staggerMs={16}
+                />
               </p>
             </header>
           </Reveal>
@@ -656,10 +665,10 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
                 Culture
               </p>
               <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">
-                Culture Highlights
+                <CharReveal text="Culture Highlights" staggerMs={30} />
               </h2>
               <p className="mt-2 text-[14px] text-slate-500">
-                Moments from the studio — team off-sites, festival celebrations, behind-the-scenes work.
+                <WordReveal text="Moments from the studio — team off-sites, festival celebrations, behind-the-scenes work." staggerMs={16} />
               </p>
             </header>
           </Reveal>
@@ -697,7 +706,7 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
                     <Sparkles size={11} /> Ready when you are
                   </div>
                   <h3 className="text-[22px] sm:text-[30px] font-semibold tracking-tight leading-tight text-slate-900">
-                    Ready to Create the{" "}
+                    <CharReveal text="Ready to Create the" staggerMs={26} />{" "}
                     {activeBrand === "yt_labs" ? (
                       <span style={{ color: "#7e22ce" }}>Next Big Story?</span>
                     ) : (
@@ -918,20 +927,25 @@ function ValueCard({
         style={{ color: t.iconColor, opacity: 0.08 }}
       />
 
-      {/* Content — top-aligned (natural flow), sits above the watermark. */}
+      {/* Content — top-aligned (natural flow), sits above the watermark.
+          Icon pops in, title flips char-by-char, body slides word-by-
+          word. blur disabled on the text (6 cards × this much text would
+          pile up blur cost); the flip/slide alone reads as lively. */}
       <div className="relative">
-        <div
-          className="inline-flex h-10 w-10 items-center justify-center rounded-xl mb-3 transition-transform duration-300 ease-out group-hover:scale-110"
-          style={{ background: `${t.iconColor}1a` }}
-        >
-          <Icon size={20} strokeWidth={2} style={{ color: t.iconColor }} />
-        </div>
+        <Reveal direction="scale" delay={120}>
+          <div
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl mb-3 transition-transform duration-300 ease-out group-hover:scale-110"
+            style={{ background: `${t.iconColor}1a` }}
+          >
+            <Icon size={20} strokeWidth={2} style={{ color: t.iconColor }} />
+          </div>
+        </Reveal>
 
         <h3 className="text-[14px] font-semibold text-slate-900 tracking-tight leading-snug">
-          {title}
+          <CharReveal text={title} staggerMs={18} baseDelayMs={180} blur={false} />
         </h3>
         <p className="text-[12px] text-slate-500 leading-[1.55] mt-1.5">
-          {body}
+          <WordReveal text={body} staggerMs={22} baseDelayMs={320} blur={false} />
         </p>
       </div>
     </div>
