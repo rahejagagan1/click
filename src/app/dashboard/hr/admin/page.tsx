@@ -176,7 +176,13 @@ export default function HRAdminPage() {
   }, [visibleTabs, tab]);
 
   const { data: leaveTypes = [] } = useSWR("/api/hr/admin/leave-types", fetcher);
-  const { data: shifts = [] }     = useSWR("/api/hr/admin/shifts", fetcher);
+  // Shifts API honours ?brand=… — pass the URL brand so the list
+  // reflects the active brand tab (NB Media / YT Labs).
+  const shiftsBrandParam =
+    initialBrand === "NB Media" ? "?brand=NB%20Media"
+  : initialBrand === "YT Labs"  ? "?brand=YT%20Labs"
+  : "";
+  const { data: shifts = [] }     = useSWR(`/api/hr/admin/shifts${shiftsBrandParam}`, fetcher);
   // Admin tabs use this for headcount + department / manager breakdowns —
   // only active employees should be counted, otherwise offboarded folks
   // would inflate the totals and "Show inactive" toggle on the People
@@ -686,7 +692,7 @@ export default function HRAdminPage() {
                 • Monthly Survey — eNPS + Likert engagement drivers
               HR adds / edits / deletes any question. Employee-facing
               answer flow + aggregate dashboards come in a later PR. */}
-          {tab === "pulse-surveys" && <PulseSurveysPanel />}
+          {tab === "pulse-surveys" && <PulseSurveysPanel initialBrand={initialBrand} />}
 
           {/* ── Leave Types ── */}
           {tab === "leave-types" && (
