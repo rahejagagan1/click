@@ -303,6 +303,12 @@ function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: an
   const reactorNames: string[] = Array.isArray(post.reactions)
     ? post.reactions.map((r: any) => r.user?.name).filter(Boolean)
     : [];
+  // Name + emoji pairs for the reactor popover (who reacted with what).
+  const reactors: Array<{ name: string; emoji: string }> = Array.isArray(post.reactions)
+    ? post.reactions
+        .filter((r: any) => r.user?.name)
+        .map((r: any) => ({ name: r.user.name as string, emoji: (r.emoji as string) || "👍" }))
+    : [];
   // Distinct emojis used on this post, top 3 by count — feeds the
   // stacked-emoji chip in the summary.
   const emojiCounts = new Map<string, number>();
@@ -684,9 +690,10 @@ function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: an
           className="rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0d1b2a] shadow-[0_6px_18px_-4px_rgba(15,23,42,0.2)] animate-in fade-in duration-100"
         >
           <ul className="max-h-[220px] overflow-y-auto py-1.5">
-            {reactorNames.map((name, i) => (
-              <li key={i} className="flex items-center gap-2 px-3 py-1">
-                <span className="truncate text-[12px] text-slate-700 dark:text-slate-200">{name}</span>
+            {reactors.map((r, i) => (
+              <li key={i} className="flex items-center gap-2 px-3 py-1.5">
+                <span className="text-[15px] leading-none shrink-0">{r.emoji}</span>
+                <span className="truncate text-[12px] text-slate-700 dark:text-slate-200">{r.name}</span>
               </li>
             ))}
           </ul>
