@@ -48,9 +48,57 @@ type Props = {
 export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, igHandle, igUrl, reels }: Props) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
+  // Infinite loop: render the reels THREE times and keep the viewport
+  // parked in the middle copy. Whenever the scroll drifts far enough
+  // into a side copy we instantly jump back by one copy-width — the
+  // copies are pixel-identical, so the jump is invisible and the
+  // arrows (or a manual swipe) scroll forever with no dead-end.
+  const canLoop = reels.length > 1;
+  const loopReels = canLoop ? [...reels, ...reels, ...reels] : reels;
+
+  // Once the carousel is interacted with (arrow / swipe), lock every
+  // card to its revealed state. Otherwise a loop-jump would land on an
+  // identical-but-not-yet-revealed copy and flash its entrance.
+  const [interacted, setInteracted] = useState(false);
+
+  // Instant scrollLeft set that bypasses the track's `scroll-smooth`
+  // (else the loop recenter would visibly slide back, breaking the
+  // seamless illusion).
+  const setScrollInstant = (el: HTMLDivElement, x: number) => {
+    const prev = el.style.scrollBehavior;
+    el.style.scrollBehavior = "auto";
+    el.scrollLeft = x;
+    el.style.scrollBehavior = prev;
+  };
+
+  // Park at the middle copy on mount.
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || !canLoop) return;
+    setScrollInstant(el, el.scrollWidth / 3);
+  }, [canLoop]);
+
+  // Recenter once the scroll settles (debounced) so we never interrupt
+  // an in-flight smooth scroll. Keeps scrollLeft oscillating around the
+  // middle copy → endless loop in both directions.
+  const recenterTimer = useRef<number>(0);
+  const onScroll = () => {
+    if (!canLoop) return;
+    if (!interacted) setInteracted(true);
+    if (recenterTimer.current) window.clearTimeout(recenterTimer.current);
+    recenterTimer.current = window.setTimeout(() => {
+      const el = scrollerRef.current;
+      if (!el) return;
+      const setW = el.scrollWidth / 3;
+      if (el.scrollLeft >= setW * 1.5) setScrollInstant(el, el.scrollLeft - setW);
+      else if (el.scrollLeft <= setW * 0.5) setScrollInstant(el, el.scrollLeft + setW);
+    }, 90);
+  };
+
   const scroll = (dir: -1 | 1) => {
     const el = scrollerRef.current;
     if (!el) return;
+    if (!interacted) setInteracted(true);
     // Scroll by ~one card width (account for gap). Selector matches
     // both <a> and <button> reel cards via the data attribute.
     const cardWidth = el.querySelector<HTMLElement>("[data-reel]")?.offsetWidth ?? 220;
@@ -156,12 +204,16 @@ export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, 
           {/* Track */}
           <div
             ref={scrollerRef}
+            onScroll={onScroll}
             className="flex gap-4 overflow-x-auto scroll-smooth snap-x snap-mandatory pb-4 px-1 -mx-1
                        [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
-            {reels.map((r, i) => (
-              <ReelEntrance key={r.url + i} index={i}>
-                <ReelCard reel={r} index={i} accent={accent} />
+            {loopReels.map((r, i) => (
+              // Bounded entrance stagger (index % reels.length) so the
+              // tripled copies never wait on a huge delay when scrolled
+              // into view. fallback-gradient index also uses the modulo.
+              <ReelEntrance key={i} index={i % reels.length} forceVisible={interacted}>
+                <ReelCard reel={r} index={i % reels.length} accent={accent} />
               </ReelEntrance>
             ))}
           </div>
@@ -249,7 +301,7 @@ function getReelId(url: string): string | null {
 // entrance transform doesn't fight the card's hover-lift transform.
 // This wrapper is the flex item (shrink-0 snap-start + width); the
 // card inside fills it (w-full).
-function ReelEntrance({ index, children }: { index: number; children: React.ReactNode }) {
+function ReelEntrance({ index, children, forceVisible = false }: { index: number; children: React.ReactNode; forceVisible?: boolean }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [inView, setInView] = useState(false);
 
@@ -268,16 +320,21 @@ function ReelEntrance({ index, children }: { index: number; children: React.Reac
     return () => io.disconnect();
   }, []);
 
+  // forceVisible (carousel interacted) snaps the card to revealed with
+  // no transition, so infinite-loop jumps never flash an entrance.
+  const shown = inView || forceVisible;
   return (
     <div
       ref={ref}
       className="shrink-0 snap-start w-[200px] sm:w-[220px]"
       style={{
-        opacity: inView ? 1 : 0,
-        transform: inView ? "translateY(0) scale(1)" : "translateY(34px) scale(0.94)",
-        transition: "opacity 600ms cubic-bezier(0.2,0.7,0.2,1), transform 720ms cubic-bezier(0.2,0.7,0.2,1)",
-        transitionDelay: `${index * 110}ms`,
-        willChange: inView ? "auto" : "opacity, transform",
+        opacity: shown ? 1 : 0,
+        transform: shown ? "translateY(0) scale(1)" : "translateY(34px) scale(0.94)",
+        transition: forceVisible
+          ? "none"
+          : "opacity 600ms cubic-bezier(0.2,0.7,0.2,1), transform 720ms cubic-bezier(0.2,0.7,0.2,1)",
+        transitionDelay: forceVisible ? "0ms" : `${index * 110}ms`,
+        willChange: shown ? "auto" : "opacity, transform",
       }}
     >
       {children}
