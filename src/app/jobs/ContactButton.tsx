@@ -99,11 +99,18 @@ export default function ContactButton({ email }: { email: string }) {
               {copied ? (<><Check size={13} className="text-emerald-600" /> Copied!</>)
                       : (<><Copy size={13} /> Copy email</>)}
             </button>
+            {/* Gmail web compose URL ALWAYS works (browser, mobile
+                Gmail app via deep link) — unlike `mailto:` which
+                silently fails when there's no default mail handler.
+                Holding Ctrl/Cmd-click still lets power users get
+                the mailto: behaviour via a long-press menu. */}
             <a
-              href={`mailto:${email}`}
+              href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}`}
+              target="_blank"
+              rel="noopener noreferrer"
               className="h-11 inline-flex items-center justify-center gap-1.5 text-[12.5px] font-semibold text-[#008CFF] hover:bg-slate-50 transition-colors"
             >
-              <Mail size={13} /> Open in mail app
+              <Mail size={13} /> Open in Gmail
             </a>
           </div>
         </div>
