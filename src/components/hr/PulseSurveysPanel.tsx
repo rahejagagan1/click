@@ -57,12 +57,18 @@ const LIKERT_LABELS = [
   "Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree",
 ];
 
-export default function PulseSurveysPanel() {
+export default function PulseSurveysPanel({ initialBrand }: { initialBrand?: "NB Media" | "YT Labs" | "all" | null } = {}) {
   const [outer, setOuter] = useState<"questions" | "responses">("questions");
   const [view, setView] = useState<"weekly" | "monthly">("weekly");
   // Brand sub-switcher. Strict brand separation — each brand has
   // its own independent question bank. No shared layer.
-  const [brand, setBrand] = useState<"NB Media" | "YT Labs">("NB Media");
+  // Seed from initialBrand (URL ?brand=…) when provided + valid,
+  // else default to NB Media. Super-admins can switch freely; the
+  // useEffect below locks single-brand HR Managers to their own
+  // brand regardless of what was passed in.
+  const seedBrand: "NB Media" | "YT Labs" =
+    initialBrand === "YT Labs" ? "YT Labs" : "NB Media";
+  const [brand, setBrand] = useState<"NB Media" | "YT Labs">(seedBrand);
 
   // Caller's brand scope. Single-brand HR Managers (e.g. NB Media's
   // HR Manager) get the switcher HIDDEN and the panel locked to
@@ -79,7 +85,9 @@ export default function PulseSurveysPanel() {
       .then((s) => {
         if (cancelled) return;
         setScope({ allBrands: !!s.allBrands, brand: s.brand ?? null });
-        // If single-brand, lock the panel to that brand on initial load.
+        // If single-brand, lock the panel to that brand on initial
+        // load — overrides whatever was seeded from the URL so a
+        // single-brand HR can't bypass via ?brand=… in the address bar.
         if (!s.allBrands && (s.brand === "NB Media" || s.brand === "YT Labs")) {
           setBrand(s.brand);
         }
@@ -121,7 +129,7 @@ export default function PulseSurveysPanel() {
       </div>
 
       {outer === "responses" ? (
-        <PulseResponsesView />
+        <PulseResponsesView initialBrand={initialBrand} />
       ) : (
         <>
           {/* Weekly / Monthly switcher (Questions only) */}

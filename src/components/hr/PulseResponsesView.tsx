@@ -35,11 +35,15 @@ type ResponsesPayload = {
 
 const LIKERT_LABELS = ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"];
 
-export default function PulseResponsesView() {
+export default function PulseResponsesView({ initialBrand }: { initialBrand?: "NB Media" | "YT Labs" | "all" | null } = {}) {
   const [surveyType, setSurveyType] = useState<"weekly" | "monthly">("weekly");
   // Strict brand separation — each brand's responses live in
-  // their own bucket. Defaults to NB Media (most common HR view).
-  const [brand, setBrand] = useState<"NB Media" | "YT Labs">("NB Media");
+  // their own bucket. Seed from initialBrand (URL ?brand=…) if
+  // provided; super-admins can switch freely; single-brand HR is
+  // locked by the useEffect below.
+  const seedBrand: "NB Media" | "YT Labs" =
+    initialBrand === "YT Labs" ? "YT Labs" : "NB Media";
+  const [brand, setBrand] = useState<"NB Media" | "YT Labs">(seedBrand);
 
   // Single-brand HR Managers see only their own brand's responses;
   // super-admins keep the [NB Media] [YT Labs] switcher.
