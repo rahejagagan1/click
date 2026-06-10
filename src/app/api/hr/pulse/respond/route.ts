@@ -49,19 +49,41 @@ export async function POST(req: NextRequest) {
 
     const cycleKey = getCycleKey(surveyType);
 
-    // Active question set for the chosen surveyType.
+    // Brand scope — strict separation. The active-question set the
+    // submission is validated against is filtered to the CALLER'S
+    // brand, so a hand-crafted POST carrying the other brand's
+    // questionIds is rejected (the form itself only ever surfaces
+    // the caller's brand questions, but the API must not trust that).
+    // A user with no businessUnit has no valid question set to
+    // answer → 400.
+    const profile = await prisma.employeeProfile.findUnique({
+      where: { userId },
+      select: { businessUnit: true },
+    });
+    const callerBrand = profile?.businessUnit ?? null;
+    if (callerBrand !== "NB Media" && callerBrand !== "YT Labs") {
+      return NextResponse.json(
+        { error: "No brand assigned to your profile — nothing to submit." },
+        { status: 400 },
+      );
+    }
+
+    // Active question set for the chosen surveyType, scoped to brand.
     let activeRows: any[];
     if (surveyType === "monthly") {
       activeRows = await prisma.$queryRawUnsafe(
         `SELECT id, type FROM "PulseQuestion"
-          WHERE "surveyType" = 'monthly' AND "isActive" = true`,
+          WHERE "surveyType" = 'monthly' AND "isActive" = true
+            AND brand = $1`,
+        callerBrand,
       );
     } else {
       const activeWeek = getActiveWeekNumber();
       activeRows = await prisma.$queryRawUnsafe(
         `SELECT id, type FROM "PulseQuestion"
-          WHERE "surveyType" = 'weekly' AND week = $1 AND "isActive" = true`,
-        activeWeek,
+          WHERE "surveyType" = 'weekly' AND week = $1 AND "isActive" = true
+            AND brand = $2`,
+        activeWeek, callerBrand,
       );
     }
     const activeMap = new Map<number, string>(activeRows.map((r) => [Number(r.id), r.type]));
