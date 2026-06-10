@@ -1495,6 +1495,13 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
   const reactorNames: string[] = Array.isArray(post.reactions)
     ? post.reactions.map((r: any) => r.user?.name).filter(Boolean)
     : [];
+  // Name + emoji pairs for the reactor popover, so HR can see WHO
+  // reacted with WHICH emoji (not just a list of names).
+  const reactors: Array<{ name: string; emoji: string }> = Array.isArray(post.reactions)
+    ? post.reactions
+        .filter((r: any) => r.user?.name)
+        .map((r: any) => ({ name: r.user.name as string, emoji: (r.emoji as string) || "👍" }))
+    : [];
   // Distinct emojis used on this post, ordered by frequency desc
   // then most-recent. Drives the stacked-emoji chip in the summary
   // so the surface reflects what people actually picked instead of
@@ -1944,9 +1951,10 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
           className="rounded-lg border border-slate-200 bg-white shadow-[0_6px_18px_-4px_rgba(15,23,42,0.15)] animate-in fade-in duration-100"
         >
           <ul className="max-h-[220px] overflow-y-auto py-1.5">
-            {reactorNames.map((name, i) => (
-              <li key={i} className="flex items-center gap-2 px-3 py-1">
-                <span className="truncate text-[12px] text-slate-700">{name}</span>
+            {reactors.map((r, i) => (
+              <li key={i} className="flex items-center gap-2 px-3 py-1.5">
+                <span className="text-[15px] leading-none shrink-0">{r.emoji}</span>
+                <span className="truncate text-[12px] text-slate-700">{r.name}</span>
               </li>
             ))}
           </ul>
