@@ -1,22 +1,26 @@
 "use client";
 
-// Culture Highlights — continuous rolling marquee. Photos slide from
-// right to left at a constant pace, never stop, never reset visibly.
-// The track is the photos array rendered TWICE in a row: animating
-// translateX from 0% to -50% scrolls through exactly one full set,
-// and because the second copy is identical and sits right after the
-// first, the loop point is invisible.
+// Culture Highlights — continuous rolling marquee that loops
+// SEAMLESSLY without any visible jump at the wrap-around point.
 //
-// No chrome — no chevrons, no dots. Hover pauses the animation so
-// visitors can read a caption without it sliding past.
+// Why it doesn't jump:
+//   • Tile widths are in `vw` units (viewport-relative), NOT % of
+//     the flex parent. % of flex parent is ambiguous in some
+//     browsers and can subpixel-round, causing the loop point at
+//     translateX(-50%) to land 1px off and produce a visible snap.
+//   • We render the photos array TWICE in the track.
+//   • The keyframe translates by EXACTLY -(photos.length * tileVw)
+//     vw — i.e. one full original-set width in pixel-exact units.
+//     At the end of one cycle, tile N+1 sits where tile 1 was;
+//     since they're literally the same image, the snap back to
+//     translateX(0) is invisible.
+//   • Hover pauses the animation so visitors can dwell on a caption.
 
 import { useEffect, useState } from "react";
 
 type CulturePhoto = { poster?: string; caption?: string };
 
 // Seconds per FULL revolution through all photos. Lower = faster.
-// 20s feels brisk — photos visibly moving but still readable when
-// they pass through the centre. Scales naturally with photo count.
 const DURATION_SECONDS = 20;
 
 export default function CultureSlideshow({
@@ -36,23 +40,29 @@ export default function CultureSlideshow({
     return () => window.removeEventListener("resize", calc);
   }, []);
 
-  // Each tile is (100 / visibleCount)% of the visible track. Doubling
-  // the photo array keeps the animation seamless.
-  const tilePercent = 100 / visibleCount;
+  // Each tile = (100 / visibleCount) vw. So 3-up tiles are 33.33vw,
+  // 2-up are 50vw, 1-up are 100vw. The total track is the doubled
+  // array's worth of tiles = 2 * photos.length * tileVw vw.
+  const tileVw = 100 / visibleCount;
+  const singleSetVw = photos.length * tileVw;
   const doubled = [...photos, ...photos];
+
+  // Unique animation name keyed by the precise translate amount so
+  // the keyframe rule swaps cleanly when viewport size changes
+  // (visibleCount → tileVw → singleSetVw).
+  const animName = `culture-roll-${singleSetVw.toFixed(3).replace(".", "_")}`;
 
   return (
     <div className="relative group/marquee overflow-hidden rounded-2xl">
       <style>{`
-        @keyframes culture-roll {
-          0%   { transform: translate3d(0, 0, 0); }
-          100% { transform: translate3d(-50%, 0, 0); }
+        @keyframes ${animName} {
+          from { transform: translate3d(0, 0, 0); }
+          to   { transform: translate3d(-${singleSetVw}vw, 0, 0); }
         }
         .culture-track {
-          animation: culture-roll ${DURATION_SECONDS}s linear infinite;
+          animation: ${animName} ${DURATION_SECONDS}s linear infinite;
           will-change: transform;
         }
-        /* Pause on hover so visitors can read a caption */
         .group\\/marquee:hover .culture-track {
           animation-play-state: paused;
         }
@@ -79,7 +89,7 @@ export default function CultureSlideshow({
           <div
             key={i}
             className="shrink-0 px-2"
-            style={{ width: `${tilePercent}%` }}
+            style={{ width: `${tileVw}vw` }}
           >
             <CultureSlide
               poster={p.poster}
@@ -121,7 +131,12 @@ function CultureSlide({
         </>
       )}
       {caption && (
-        <div className="absolute bottom-0 left-0 right-0 px-4 py-3 text-[12px] font-semibold text-white bg-gradient-to-t from-black/65 via-black/15 to-transparent">
+        <div
+          className="absolute bottom-0 left-0 right-0 px-4 py-3 text-[12px] font-semibold bg-gradient-to-t from-black/70 via-black/25 to-transparent"
+          // Force pure white — `style` beats any cascading colour
+          // from the page-wide Times New Roman / accent rules.
+          style={{ color: "#ffffff", textShadow: "0 1px 3px rgba(0,0,0,0.45)" }}
+        >
           {caption}
         </div>
       )}
