@@ -35,11 +35,13 @@ type ResponsesPayload = {
 
 const LIKERT_LABELS = ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"];
 
-export default function PulseResponsesView() {
+export default function PulseResponsesView({ initialBrand }: { initialBrand?: "NB Media" | "YT Labs" | "all" | null } = {}) {
   const [surveyType, setSurveyType] = useState<"weekly" | "monthly">("weekly");
-  // Strict brand separation — each brand's responses live in
-  // their own bucket. Defaults to NB Media (most common HR view).
-  const [brand, setBrand] = useState<"NB Media" | "YT Labs">("NB Media");
+  // Brand derived entirely from URL ?brand=… (passed via
+  // initialBrand). No inline switcher — outer HR Dashboard brand
+  // tab is the single source of truth.
+  const brand: "NB Media" | "YT Labs" =
+    initialBrand === "YT Labs" ? "YT Labs" : "NB Media";
   const { data, isLoading } = useSWR<ResponsesPayload>(
     `/api/hr/pulse/responses?surveyType=${surveyType}&brand=${encodeURIComponent(brand)}`,
     fetcher,
@@ -76,28 +78,7 @@ export default function PulseResponsesView() {
         </button>
       </div>
 
-      {/* Brand sub-switcher — each brand's responses are isolated.
-          Matches the strict separation on the Questions tab. */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-500 mr-1">Brand</span>
-        {(["NB Media", "YT Labs"] as const).map((b) => {
-          const active = brand === b;
-          return (
-            <button
-              key={b}
-              type="button"
-              onClick={() => setBrand(b)}
-              className={`h-7 px-3 rounded-md text-[11.5px] font-semibold transition-colors ${
-                active
-                  ? "bg-[#008CFF] text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
-            >
-              {b}
-            </button>
-          );
-        })}
-      </div>
+      {/* (Brand picker removed — outer brand tab drives this panel.) */}
 
       {/* Cycle header + participation + brand badge */}
       {data && (
