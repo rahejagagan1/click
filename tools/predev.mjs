@@ -86,6 +86,21 @@ function runPrisma(...args) {
   return { ok: r.status === 0, status: r.status, msg: r.error ? String(r.error) : "" };
 }
 
+/** Same as runPrisma but captures stdout/stderr so the caller can
+ *  pattern-match against the output (e.g. detect a connectivity
+ *  failure vs a real migration error). Output is also echoed to
+ *  the console so the user sees what happened. */
+function runPrismaCapture(...args) {
+  const r = spawnSync(
+    process.execPath,
+    [prismaCliEntry, ...args],
+    { encoding: "utf8", shell: false },
+  );
+  const out = (r.stdout || "") + (r.stderr || "");
+  if (out) process.stdout.write(out);
+  return { ok: r.status === 0, status: r.status, out };
+}
+
 function killStaleDevProcesses() {
   if (!isWin) return 0;
   try {
@@ -157,10 +172,36 @@ function killStaleDevProcesses() {
 
 function run() {
   // Step 1 — migrate deploy (idempotent + fast + no DLL conflict).
-  const mig = runPrisma("migrate", "deploy");
-  if (!mig.ok) {
-    err(`prisma migrate deploy failed (status=${mig.status}) ${mig.msg}`);
-    process.exit(1);
+  // Capture output so we can tell a DB-reachability failure (which
+  // we tolerate during local UI dev) from a real migration error
+  // (which we still fail loud on).
+  //
+  // Override switches:
+  //   SKIP_PRISMA_MIGRATE=1  →  skip migrate deploy entirely
+  //   SKIP_PREDEV=1          →  skip the whole predev (incl. generate)
+  if (process.env.SKIP_PREDEV === "1") {
+    log("SKIP_PREDEV=1 — skipping predev entirely.");
+    return;
+  }
+  if (process.env.SKIP_PRISMA_MIGRATE !== "1") {
+    const mig = runPrismaCapture("migrate", "deploy");
+    if (!mig.ok) {
+      const isUnreachable =
+        /P1001|Can'?t reach database server|ECONNREFUSED|ETIMEDOUT/i.test(mig.out);
+      if (isUnreachable) {
+        log("──────────────────────────────────────────────────────────");
+        log("DATABASE UNREACHABLE — skipping migrate deploy and continuing.");
+        log("The dev server will start but API routes hitting the DB will fail.");
+        log("UI-only work (e.g. the careers page) still works fine.");
+        log("To suppress this check entirely, run: SKIP_PRISMA_MIGRATE=1 npm run dev");
+        log("──────────────────────────────────────────────────────────");
+      } else {
+        err(`prisma migrate deploy failed (status=${mig.status})`);
+        process.exit(1);
+      }
+    }
+  } else {
+    log("SKIP_PRISMA_MIGRATE=1 — skipping migrate deploy.");
   }
 
   // Step 2 — skip generate if the client is already up-to-date.
