@@ -257,7 +257,7 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
               className="hidden sm:inline-flex items-center gap-1.5 h-9 px-3 text-[12.5px] font-medium text-slate-600 hover:text-slate-900 rounded-lg transition-colors"
             >Why join {meta.label}</a>
             <a
-              href="mailto:careers@nbmediaproductions.com"
+              href="mailto:hrd@nbmediaproductions.com"
               className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[12.5px] font-semibold transition-colors"
             ><Mail size={13} /> Contact</a>
           </nav>
@@ -516,8 +516,8 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
                 <p className="text-[15px] font-semibold text-slate-800">No open roles right now</p>
                 <p className="mt-1.5 text-[13px] text-slate-500 max-w-sm mx-auto">
                   We're between hiring cycles. Drop us your CV at{" "}
-                  <a href="mailto:careers@nbmediaproductions.com" className="text-[#3b82f6] font-medium hover:underline">
-                    careers@nbmediaproductions.com
+                  <a href="mailto:hrd@nbmediaproductions.com" className="text-[#3b82f6] font-medium hover:underline">
+                    hrd@nbmediaproductions.com
                   </a>{" "}
                   and we'll reach out when something opens up.
                 </p>
@@ -658,9 +658,8 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
               © {new Date().getFullYear()} {meta.label}. All rights reserved.
             </span>
           </div>
-          <div className="flex items-center gap-5 text-[11.5px] text-slate-500">
-            <a href="mailto:careers@nbmediaproductions.com" className="hover:text-slate-800 transition-colors inline-flex items-center gap-1.5"><Mail size={11} /> careers</a>
-          </div>
+          {/* Footer "careers" link removed per HR — contact lives on
+              the Contact button in the sticky nav now. */}
         </div>
       </footer>
     </div>

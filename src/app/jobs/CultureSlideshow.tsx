@@ -131,7 +131,12 @@ function CultureSlide({
         </>
       )}
       {caption && (
-        <div className="absolute bottom-0 left-0 right-0 px-4 py-3 text-[12px] font-semibold text-white bg-gradient-to-t from-black/65 via-black/15 to-transparent">
+        <div
+          className="absolute bottom-0 left-0 right-0 px-4 py-3 text-[12px] font-semibold bg-gradient-to-t from-black/70 via-black/25 to-transparent"
+          // Force pure white — `style` beats any cascading colour
+          // from the page-wide Times New Roman / accent rules.
+          style={{ color: "#ffffff", textShadow: "0 1px 3px rgba(0,0,0,0.45)" }}
+        >
           {caption}
         </div>
       )}
