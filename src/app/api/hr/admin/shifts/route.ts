@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, requireHRAdmin, serverError } from "@/lib/api-auth";
+import { requireHRAdmin, serverError } from "@/lib/api-auth";
 import { getBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
@@ -33,14 +33,18 @@ async function setSaturday(shiftId: number, policy: string, weeks: number[]) {
 }
 
 export async function GET(req: NextRequest) {
-  const { errorResponse } = await requireAuth();
+  // HR-admin only — this is the admin shift template manager. The
+  // employee-facing path (their own assigned shift) goes through
+  // /api/hr/me/shift, which stays open to any logged-in user.
+  const { errorResponse } = await requireHRAdmin();
   if (errorResponse) return errorResponse;
   try {
-    // Brand filter is now URL-driven. `?brand=NB%20Media` returns
-    // that brand's shifts (plus any pre-brand-column legacy NULL
-    // rows); no brand param returns everything. Brand-isolation
-    // enforcement was moved up to the UI layer per HR direction —
-    // anyone with HR Dashboard access can browse either brand.
+    // Brand filter is URL-driven. `?brand=NB%20Media` returns that
+    // brand's shifts (plus any pre-brand-column legacy NULL rows);
+    // no brand param returns everything. HR-admin gate above means
+    // only vetted HR users can hit this — cross-brand browsing is
+    // intentional per HR direction so an NB Media HR Manager can
+    // still see YT Labs shifts via the outer brand tab in the URL.
     const url = new URL(req.url);
     const rawBrand = (url.searchParams.get("brand") || "").trim();
     const brand =
