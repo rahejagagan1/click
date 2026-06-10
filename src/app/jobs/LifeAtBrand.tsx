@@ -9,10 +9,11 @@
 // tab. Poster image goes inside /public/reels/ — fallback is a
 // brand-coloured gradient with the reel number.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Play, X as XIcon } from "lucide-react";
 import Reveal     from "./[slug]/Reveal";
 import WordReveal from "./[slug]/WordReveal";
+import CharReveal from "./CharReveal";
 
 export type Reel = {
   /** Instagram reel URL — e.g. https://www.instagram.com/reel/XXXXX/ */
@@ -47,13 +48,74 @@ type Props = {
 export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, igHandle, igUrl, reels }: Props) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
+  // Manual, infinite carousel — NO auto-slideshow. The reels move only
+  // when the user clicks an arrow (or swipes). Rendered THREE times and
+  // parked in the middle copy so there's runway both ways; after any
+  // scroll settles we instantly wrap by one copy-width — the copies are
+  // pixel-identical, so the loop is seamless and never dead-ends.
+  const canLoop = reels.length > 1;
+  const loopReels = canLoop ? [...reels, ...reels, ...reels] : reels;
+
+  // Lock cards to revealed after the first interaction so a loop-wrap
+  // never lands on an identical-but-unrevealed copy and flashes its
+  // entrance. (Initial scroll-in entrance still plays before that.)
+  const [interacted, setInteracted] = useState(false);
+
+  // Park at the middle copy on mount (instant — bypass any CSS smooth).
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || !canLoop) return;
+    el.style.scrollBehavior = "auto";
+    el.scrollLeft = el.scrollWidth / 3;
+  }, [canLoop]);
+
+  // Instant wrap back into the middle copy once a scroll settles.
+  const wrapIfNeeded = (el: HTMLDivElement) => {
+    const setW = el.scrollWidth / 3;
+    if (el.scrollLeft >= setW * 2) el.scrollLeft -= setW;
+    else if (el.scrollLeft <= 0)   el.scrollLeft += setW;
+  };
+
+  // Manual swipe / trackpad: debounced wrap so the loop holds on touch.
+  const settleTimer = useRef<number>(0);
+  const onScroll = () => {
+    if (!canLoop) return;
+    if (!interacted) setInteracted(true);
+    if (settleTimer.current) window.clearTimeout(settleTimer.current);
+    settleTimer.current = window.setTimeout(() => {
+      const el = scrollerRef.current;
+      if (el) wrapIfNeeded(el);
+    }, 100);
+  };
+
+  // Arrow click → a smooth, EASED tween of ~2 cards (custom rAF tween,
+  // easeOutCubic) instead of the native scrollBy hop. Wraps on finish.
+  const tweenRaf = useRef<number>(0);
   const scroll = (dir: -1 | 1) => {
     const el = scrollerRef.current;
     if (!el) return;
-    // Scroll by ~one card width (account for gap). Selector matches
-    // both <a> and <button> reel cards via the data attribute.
-    const cardWidth = el.querySelector<HTMLElement>("[data-reel]")?.offsetWidth ?? 220;
-    el.scrollBy({ left: dir * (cardWidth + 16), behavior: "smooth" });
+    if (!interacted) setInteracted(true);
+    cancelAnimationFrame(tweenRaf.current);
+    el.style.scrollBehavior = "auto"; // we drive it frame-by-frame
+
+    const cardW = (el.querySelector<HTMLElement>("[data-reel]")?.offsetWidth ?? 220) + 16;
+    const start = el.scrollLeft;
+    const distance = dir * cardW * 2;        // ~2 cards per click
+    const duration = 600;
+    const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+    let t0: number | null = null;
+
+    const tick = (now: number) => {
+      if (t0 == null) t0 = now;
+      const t = Math.min(1, (now - t0) / duration);
+      el.scrollLeft = start + distance * easeOutCubic(t);
+      if (t < 1) {
+        tweenRaf.current = requestAnimationFrame(tick);
+      } else {
+        wrapIfNeeded(el); // seamless loop at the end of the glide
+      }
+    };
+    tweenRaf.current = requestAnimationFrame(tick);
   };
 
   if (!reels || reels.length === 0) return null;
@@ -81,7 +143,7 @@ export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, 
               + inline-block Reveal stop the brand span from
               breaking onto a second row. */}
           <h2 className="text-[40px] sm:text-[56px] font-black tracking-tight leading-[1.05] text-slate-900 whitespace-nowrap">
-            <WordReveal text="Life at" staggerMs={80} baseDelayMs={120} />
+            <CharReveal text="Life at" staggerMs={55} baseDelayMs={100} />
             {" "}
             <Reveal direction="up" delay={400} className="inline-block align-baseline">
               {brandGradient ? (
@@ -102,11 +164,9 @@ export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, 
               )}
             </Reveal>
           </h2>
-          <Reveal direction="up" delay={600}>
-            <p className="mt-5 text-[15px] sm:text-[16.5px] text-slate-600 leading-relaxed">
-              {blurb}
-            </p>
-          </Reveal>
+          <p className="mt-5 text-[15px] sm:text-[16.5px] text-slate-600 leading-relaxed">
+            <WordReveal text={blurb} staggerMs={13} baseDelayMs={650} />
+          </p>
 
           {/* IG CTA — white pill with gradient-clipped text + icon
               so the button itself wears the brand's logo colours.
@@ -140,8 +200,9 @@ export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, 
           </Reveal>
         </div>
 
-        {/* Carousel */}
-        <Reveal direction="up" delay={1000}>
+        {/* Carousel — no outer Reveal wrapper: each ReelCard self-
+            animates via ReelEntrance (staggered rise+scale), so an
+            outer fade would just hide the stagger underneath. */}
         <div className="relative mt-12">
           {/* Prev */}
           <button
@@ -153,14 +214,24 @@ export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, 
             <ChevronLeft size={20} />
           </button>
 
-          {/* Track */}
+          {/* Track — manual only (no auto-slideshow). No scroll-snap /
+              scroll-smooth: snap re-snaps mid-tween (the old jerk) and
+              smooth lags our frame-by-frame writes. The arrow tween
+              moves exact card multiples so alignment holds; onScroll
+              wraps the loop seamlessly after a manual swipe settles. */}
           <div
             ref={scrollerRef}
-            className="flex gap-4 overflow-x-auto scroll-smooth snap-x snap-mandatory pb-4 px-1 -mx-1
+            onScroll={onScroll}
+            className="flex gap-4 overflow-x-auto pb-4 px-1 -mx-1
                        [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
-            {reels.map((r, i) => (
-              <ReelCard key={r.url + i} reel={r} index={i} accent={accent} />
+            {loopReels.map((r, i) => (
+              // Bounded entrance stagger (index % reels.length) so the
+              // tripled copies never wait on a huge delay when scrolled
+              // into view. fallback-gradient index also uses the modulo.
+              <ReelEntrance key={i} index={i % reels.length} forceVisible={interacted}>
+                <ReelCard reel={r} index={i % reels.length} accent={accent} />
+              </ReelEntrance>
             ))}
           </div>
 
@@ -174,7 +245,6 @@ export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, 
             <ChevronRight size={20} />
           </button>
         </div>
-        </Reveal>
 
         {/* Closing tagline — section's emotional payoff line, sits
             below the handle with a hairline divider above for
@@ -242,6 +312,53 @@ function getReelId(url: string): string | null {
   return m ? m[1] : null;
 }
 
+// Staggered scroll-entrance wrapper for each reel card. The card
+// rises + scales in as the carousel comes into view, one after
+// another (index-based delay). Kept SEPARATE from ReelCard so its
+// entrance transform doesn't fight the card's hover-lift transform.
+// This wrapper is the flex item (shrink-0 snap-start + width); the
+// card inside fills it (w-full).
+function ReelEntrance({ index, children, forceVisible = false }: { index: number; children: React.ReactNode; forceVisible?: boolean }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setInView(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => { for (const e of entries) if (e.isIntersecting) setInView(true); },
+      { threshold: 0.15 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  // forceVisible (carousel interacted) snaps the card to revealed with
+  // no transition, so infinite-loop jumps never flash an entrance.
+  const shown = inView || forceVisible;
+  return (
+    <div
+      ref={ref}
+      className="shrink-0 snap-start w-[200px] sm:w-[220px]"
+      style={{
+        opacity: shown ? 1 : 0,
+        transform: shown ? "translateY(0) scale(1)" : "translateY(34px) scale(0.94)",
+        transition: forceVisible
+          ? "none"
+          : "opacity 600ms cubic-bezier(0.2,0.7,0.2,1), transform 720ms cubic-bezier(0.2,0.7,0.2,1)",
+        transitionDelay: forceVisible ? "0ms" : `${index * 110}ms`,
+        willChange: shown ? "auto" : "opacity, transform",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 function ReelCard({ reel, index, accent }: { reel: Reel; index: number; accent: string }) {
   // playing=true swaps the gradient/play-button for the actual player.
   // Lazy-mount means we don't hammer the page with media on load.
@@ -268,7 +385,7 @@ function ReelCard({ reel, index, accent }: { reel: Reel; index: number; accent: 
     return (
       <div
         data-reel
-        className="relative shrink-0 snap-start w-[200px] sm:w-[220px] aspect-[9/16] rounded-2xl overflow-hidden ring-1 ring-slate-200 shadow-xl bg-black"
+        className="relative w-full aspect-[9/16] rounded-2xl overflow-hidden ring-1 ring-slate-200 shadow-xl bg-black"
       >
         <video
           // key forces React to remount the <video> element if the
@@ -304,7 +421,7 @@ function ReelCard({ reel, index, accent }: { reel: Reel; index: number; accent: 
     return (
       <div
         data-reel
-        className="relative shrink-0 snap-start w-[200px] sm:w-[220px] aspect-[9/16] rounded-2xl overflow-hidden ring-1 ring-slate-200 shadow-xl bg-black"
+        className="relative w-full aspect-[9/16] rounded-2xl overflow-hidden ring-1 ring-slate-200 shadow-xl bg-black"
       >
         <iframe
           src={`https://www.instagram.com/reel/${reelId}/embed`}
@@ -342,7 +459,7 @@ function ReelCard({ reel, index, accent }: { reel: Reel; index: number; accent: 
         if (canEmbed || reel.video) setPlaying(true);
         else window.open(reel.url, "_blank", "noopener,noreferrer");
       }}
-      className="group relative shrink-0 snap-start w-[200px] sm:w-[220px] aspect-[9/16] rounded-2xl overflow-hidden ring-1 ring-slate-200 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all bg-slate-100 cursor-pointer text-left"
+      className="group relative w-full aspect-[9/16] rounded-2xl overflow-hidden ring-1 ring-slate-200 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all bg-slate-100 cursor-pointer text-left"
       aria-label={`Play reel ${index + 1}`}
     >
       {reel.poster ? (
@@ -360,10 +477,16 @@ function ReelCard({ reel, index, accent }: { reel: Reel; index: number; accent: 
       {/* Soft dark overlay for the play icon legibility */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-black/0 to-black/0" />
 
-      {/* Play icon — centred */}
+      {/* Play icon — centred, with a gently pulsing ring that
+          radiates outward (draws the eye, signals "tap to play").
+          The ring sits behind the button and loops via animate-ping;
+          the button itself pops on hover. */}
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className="inline-flex items-center justify-center h-14 w-14 rounded-full bg-white/95 shadow-lg backdrop-blur-sm group-hover:scale-110 transition-transform">
-          <Play size={22} className="text-slate-900 ml-1" fill="currentColor" />
+        <span className="relative inline-flex items-center justify-center h-14 w-14">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-white/60 opacity-75 animate-ping motion-reduce:hidden" style={{ animationDuration: "2.2s" }} />
+          <span className="relative inline-flex items-center justify-center h-14 w-14 rounded-full bg-white/95 shadow-lg backdrop-blur-sm group-hover:scale-110 transition-transform">
+            <Play size={22} className="text-slate-900 ml-1" fill="currentColor" />
+          </span>
         </span>
       </div>
 
