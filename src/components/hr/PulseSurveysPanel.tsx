@@ -60,20 +60,12 @@ const LIKERT_LABELS = [
 export default function PulseSurveysPanel({ initialBrand }: { initialBrand?: "NB Media" | "YT Labs" | "all" | null } = {}) {
   const [outer, setOuter] = useState<"questions" | "responses">("questions");
   const [view, setView] = useState<"weekly" | "monthly">("weekly");
-  // Brand sub-switcher. Strict brand separation — each brand has
-  // its own independent question bank. No shared layer.
-  // Seed from initialBrand (URL ?brand=…) when provided + valid,
-  // else default to NB Media. Super-admins can switch freely; the
-  // useEffect below locks single-brand HR Managers to their own
-  // brand regardless of what was passed in.
-  const seedBrand: "NB Media" | "YT Labs" =
+  // Brand is derived entirely from the URL (?brand=…). No inline
+  // switcher in this panel — the outer HR Dashboard brand tab
+  // (header chip) is the single brand control. NB Media tab →
+  // NB Media everywhere; YT Labs tab → YT Labs everywhere.
+  const brand: "NB Media" | "YT Labs" =
     initialBrand === "YT Labs" ? "YT Labs" : "NB Media";
-  const [brand, setBrand] = useState<"NB Media" | "YT Labs">(seedBrand);
-
-  // Brand is driven entirely by the URL (?brand=…) + the switcher
-  // below. No user-scope lock — every viewer of the HR Dashboard
-  // can flip between brands freely per HR direction. (If finer
-  // scoping is needed later, gate it at the API layer, not here.)
 
   return (
     <div className="space-y-5">
@@ -133,28 +125,8 @@ export default function PulseSurveysPanel({ initialBrand }: { initialBrand?: "NB
             </button>
           </div>
 
-          {/* Brand picker — always visible. URL ?brand=… seeds the
-              initial selection; visitors can switch freely. */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-500 mr-1">Brand</span>
-            {(["NB Media", "YT Labs"] as const).map((b) => {
-              const active = brand === b;
-              return (
-                <button
-                  key={b}
-                  type="button"
-                  onClick={() => setBrand(b)}
-                  className={`h-7 px-3 rounded-md text-[11.5px] font-semibold transition-colors ${
-                    active
-                      ? "bg-[#008CFF] text-white"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  {b}
-                </button>
-              );
-            })}
-          </div>
+          {/* (Brand picker removed — the active brand is driven by
+              the HR Dashboard's outer brand tab via ?brand=….) */}
 
           {view === "weekly" ? <WeeklyView brand={brand} /> : <MonthlyView brand={brand} />}
         </>
