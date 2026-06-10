@@ -48,61 +48,67 @@ type Props = {
 export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, igHandle, igUrl, reels }: Props) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
-  // Infinite loop: render the reels THREE times and keep the viewport
-  // parked in the middle copy. Whenever the scroll drifts far enough
-  // into a side copy we instantly jump back by one copy-width — the
-  // copies are pixel-identical, so the jump is invisible and the
-  // arrows (or a manual swipe) scroll forever with no dead-end.
+  // Infinite SMOOTH FLOW: render the reels THREE times and let a
+  // requestAnimationFrame loop drift the track continuously (marquee-
+  // style) — buttery, never a discrete hop. When the scroll crosses a
+  // copy boundary we instantly wrap by one copy-width; the copies are
+  // pixel-identical so the wrap is invisible → endless seamless flow.
   const canLoop = reels.length > 1;
   const loopReels = canLoop ? [...reels, ...reels, ...reels] : reels;
 
-  // Once the carousel is interacted with (arrow / swipe), lock every
-  // card to its revealed state. Otherwise a loop-jump would land on an
-  // identical-but-not-yet-revealed copy and flash its entrance.
-  const [interacted, setInteracted] = useState(false);
+  // With continuous flow the cards are always moving, so they render
+  // already-revealed (no per-card scroll entrance to flicker mid-drift).
+  const [interacted] = useState(canLoop);
 
-  // Instant scrollLeft set that bypasses the track's `scroll-smooth`
-  // (else the loop recenter would visibly slide back, breaking the
-  // seamless illusion).
-  const setScrollInstant = (el: HTMLDivElement, x: number) => {
-    const prev = el.style.scrollBehavior;
-    el.style.scrollBehavior = "auto";
-    el.scrollLeft = x;
-    el.style.scrollBehavior = prev;
-  };
+  // Refs drive the rAF loop WITHOUT restarting it: direction (+1 flows
+  // forward, -1 back) and paused (true while hovering / touching so the
+  // user can aim at and click a reel's play button).
+  const dirRef     = useRef<1 | -1>(1);
+  const pausedRef  = useRef(false);
+  const visibleRef = useRef(true);
+  const SPEED = 0.55; // px/frame ≈ 33px/s — a gentle, readable glide.
 
-  // Park at the middle copy on mount.
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el || !canLoop) return;
-    setScrollInstant(el, el.scrollWidth / 3);
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+
+    // Park at the middle copy + kill any CSS smooth-scroll so our
+    // per-frame scrollLeft writes land instantly (smooth would lag
+    // each tiny increment).
+    el.style.scrollBehavior = "auto";
+    el.scrollLeft = el.scrollWidth / 3;
+
+    // Pause the drift while the carousel is off-screen (don't burn
+    // CPU + scroll an invisible track).
+    const io = new IntersectionObserver(
+      (entries) => { for (const e of entries) visibleRef.current = e.isIntersecting; },
+      { threshold: 0 },
+    );
+    io.observe(el);
+
+    let raf = 0;
+    const step = () => {
+      if (!pausedRef.current && visibleRef.current) {
+        el.scrollLeft += SPEED * dirRef.current;
+        const setW = el.scrollWidth / 3;
+        // Seamless wrap — stay within the middle copy's band.
+        if (el.scrollLeft >= setW * 2) el.scrollLeft -= setW;
+        else if (el.scrollLeft <= 0)   el.scrollLeft += setW;
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => { cancelAnimationFrame(raf); io.disconnect(); };
   }, [canLoop]);
 
-  // Recenter once the scroll settles (debounced) so we never interrupt
-  // an in-flight smooth scroll. Keeps scrollLeft oscillating around the
-  // middle copy → endless loop in both directions.
-  const recenterTimer = useRef<number>(0);
-  const onScroll = () => {
-    if (!canLoop) return;
-    if (!interacted) setInteracted(true);
-    if (recenterTimer.current) window.clearTimeout(recenterTimer.current);
-    recenterTimer.current = window.setTimeout(() => {
-      const el = scrollerRef.current;
-      if (!el) return;
-      const setW = el.scrollWidth / 3;
-      if (el.scrollLeft >= setW * 1.5) setScrollInstant(el, el.scrollLeft - setW);
-      else if (el.scrollLeft <= setW * 0.5) setScrollInstant(el, el.scrollLeft + setW);
-    }, 90);
-  };
-
+  const pause  = () => { pausedRef.current = true; };
+  const resume = () => { pausedRef.current = false; };
+  // Arrows set the flow DIRECTION (the glide keeps going); a quick
+  // unpause makes the direction change feel responsive.
   const scroll = (dir: -1 | 1) => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    if (!interacted) setInteracted(true);
-    // Scroll by ~one card width (account for gap). Selector matches
-    // both <a> and <button> reel cards via the data attribute.
-    const cardWidth = el.querySelector<HTMLElement>("[data-reel]")?.offsetWidth ?? 220;
-    el.scrollBy({ left: dir * (cardWidth + 16), behavior: "smooth" });
+    dirRef.current = dir;
+    pausedRef.current = false;
   };
 
   if (!reels || reels.length === 0) return null;
@@ -201,11 +207,17 @@ export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, 
             <ChevronLeft size={20} />
           </button>
 
-          {/* Track */}
+          {/* Track — continuous rAF drift (no scroll-snap / scroll-
+              smooth: both fight a per-frame glide). Pauses while the
+              pointer is over it (or a finger is down) so a reel's play
+              button is a still, tappable target. */}
           <div
             ref={scrollerRef}
-            onScroll={onScroll}
-            className="flex gap-4 overflow-x-auto scroll-smooth snap-x snap-mandatory pb-4 px-1 -mx-1
+            onMouseEnter={pause}
+            onMouseLeave={resume}
+            onTouchStart={pause}
+            onTouchEnd={resume}
+            className="flex gap-4 overflow-x-auto pb-4 px-1 -mx-1
                        [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {loopReels.map((r, i) => (
