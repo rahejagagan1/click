@@ -19,11 +19,15 @@ export default function CharReveal({
   className = "",
   staggerMs = 28,
   baseDelayMs = 0,
+  blur = true,
 }: {
   text: string;
   className?: string;
   staggerMs?: number;
   baseDelayMs?: number;
+  /** Blur-to-sharp focus pull. Disable for many-instance spots
+   *  (e.g. the 6 perk-card titles) to avoid a blur-cost pile-up. */
+  blur?: boolean;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(false);
@@ -64,13 +68,18 @@ export default function CharReveal({
                   transformOrigin: "50% 100%",
                   transformStyle: "preserve-3d",
                   opacity: visible ? 1 : 0,
+                  // 3D flip-up + (optional) blur-to-sharp focus pull —
+                  // each letter resolves from a soft blur as it rotates
+                  // into place. Premium, cinematic.
+                  filter: blur ? (visible ? "blur(0px)" : "blur(6px)") : undefined,
                   transform: visible
                     ? "rotateX(0deg) translateY(0)"
-                    : "rotateX(-90deg) translateY(0.35em)",
-                  transition:
-                    "transform 620ms cubic-bezier(0.2,0.7,0.2,1), opacity 380ms ease",
+                    : "rotateX(-92deg) translateY(0.4em)",
+                  transition: blur
+                    ? "transform 640ms cubic-bezier(0.2,0.75,0.25,1), opacity 420ms ease, filter 520ms ease"
+                    : "transform 640ms cubic-bezier(0.2,0.75,0.25,1), opacity 420ms ease",
                   transitionDelay: `${baseDelayMs + i * staggerMs}ms`,
-                  willChange: visible ? "auto" : "transform, opacity",
+                  willChange: visible ? "auto" : (blur ? "transform, opacity, filter" : "transform, opacity"),
                 }}
               >
                 {ch}

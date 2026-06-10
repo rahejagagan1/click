@@ -13,6 +13,7 @@ import { useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Play, X as XIcon } from "lucide-react";
 import Reveal     from "./[slug]/Reveal";
 import WordReveal from "./[slug]/WordReveal";
+import CharReveal from "./CharReveal";
 
 export type Reel = {
   /** Instagram reel URL — e.g. https://www.instagram.com/reel/XXXXX/ */
@@ -81,7 +82,7 @@ export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, 
               + inline-block Reveal stop the brand span from
               breaking onto a second row. */}
           <h2 className="text-[40px] sm:text-[56px] font-black tracking-tight leading-[1.05] text-slate-900 whitespace-nowrap">
-            <WordReveal text="Life at" staggerMs={80} baseDelayMs={120} />
+            <CharReveal text="Life at" staggerMs={55} baseDelayMs={100} />
             {" "}
             <Reveal direction="up" delay={400} className="inline-block align-baseline">
               {brandGradient ? (
@@ -102,11 +103,9 @@ export default function LifeAtBrand({ brandLabel, accent, brandGradient, blurb, 
               )}
             </Reveal>
           </h2>
-          <Reveal direction="up" delay={600}>
-            <p className="mt-5 text-[15px] sm:text-[16.5px] text-slate-600 leading-relaxed">
-              {blurb}
-            </p>
-          </Reveal>
+          <p className="mt-5 text-[15px] sm:text-[16.5px] text-slate-600 leading-relaxed">
+            <WordReveal text={blurb} staggerMs={13} baseDelayMs={650} />
+          </p>
 
           {/* IG CTA — white pill with gradient-clipped text + icon
               so the button itself wears the brand's logo colours.
