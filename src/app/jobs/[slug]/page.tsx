@@ -20,6 +20,7 @@ import Reveal from "./Reveal";
 import Magnetic from "./Magnetic";
 import ScrollProgress from "./ScrollProgress";
 import WordReveal from "./WordReveal";
+import CharReveal from "../CharReveal";
 import PlayBadges from "./PlayBadges";
 
 // JDs authored via the new Quill-based editor are stored as HTML;
@@ -375,22 +376,21 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
             </div>
           </Reveal>
 
-          {/* Title — word-by-word reveal. Plain slate-900 so the
-              animation is the focus, not a gradient. Mobile floor
-              tightened to 1.75rem so 2 long words still fit on one
-              line on most 360px+ devices. */}
+          {/* Title — character-by-character 3D flip + blur-to-sharp
+              focus pull (matches the careers-index headline treatment).
+              Plain slate-900 so the animation is the focus. Mobile
+              floor tightened to 1.75rem so 2 long words still fit on
+              one line on most 360px+ devices. */}
           <h1
             className="font-bold tracking-[-0.028em] text-slate-900 leading-[1.06] sm:leading-[1.04] break-words"
             style={{ fontSize: "clamp(1.75rem, 6vw, 3.8rem)" }}
           >
-            <WordReveal text={job.title} staggerMs={70} baseDelayMs={120} />
+            <CharReveal text={job.title} staggerMs={34} baseDelayMs={120} />
           </h1>
           {job.department && (
-            <Reveal direction="up" delay={120 + job.title.split(/\s+/).length * 70}>
-              <p className="mt-3 sm:mt-4 text-[14px] sm:text-[16px] text-slate-500">
-                on the <span className="font-semibold text-slate-800">{job.department}</span> team
-              </p>
-            </Reveal>
+            <p className="mt-3 sm:mt-4 text-[14px] sm:text-[16px] text-slate-500">
+              <WordReveal text={`on the ${job.department} team`} staggerMs={24} baseDelayMs={120 + job.title.length * 34} blur={false} />
+            </p>
           )}
 
           {/* Meta chips — on mobile we display them as a 2-column
