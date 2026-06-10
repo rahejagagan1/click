@@ -12,11 +12,14 @@ export default function WordReveal({
   className = "",
   staggerMs = 60,
   baseDelayMs = 0,
+  blur = true,
 }: {
   text: string;
   className?: string;
   staggerMs?: number;
   baseDelayMs?: number;
+  /** Blur-to-sharp focus pull. Disable for many-instance spots. */
+  blur?: boolean;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(false);
@@ -65,10 +68,14 @@ export default function WordReveal({
             style={{
               display: "inline-block",
               opacity: visible ? 1 : 0,
+              // Slide-up + (optional) blur-to-sharp focus pull.
+              filter: blur ? (visible ? "blur(0px)" : "blur(5px)") : undefined,
               transform: visible ? "translateY(0)" : "translateY(110%)",
-              transition: "transform 800ms cubic-bezier(0.16,1,0.3,1), opacity 600ms cubic-bezier(0.16,1,0.3,1)",
+              transition: blur
+                ? "transform 800ms cubic-bezier(0.16,1,0.3,1), opacity 600ms cubic-bezier(0.16,1,0.3,1), filter 500ms ease"
+                : "transform 800ms cubic-bezier(0.16,1,0.3,1), opacity 600ms cubic-bezier(0.16,1,0.3,1)",
               transitionDelay: `${baseDelayMs + i * staggerMs}ms`,
-              willChange: "opacity, transform",
+              willChange: visible ? "auto" : (blur ? "opacity, transform, filter" : "opacity, transform"),
             }}
           >
             {w}
