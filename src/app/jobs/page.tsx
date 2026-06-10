@@ -22,6 +22,8 @@ import WordReveal     from "./[slug]/WordReveal";
 import LifeAtBrand, { type Reel } from "./LifeAtBrand";
 import CultureSlideshow from "./CultureSlideshow";
 import ContactButton from "./ContactButton";
+import Card3D from "./Card3D";
+import CharReveal from "./CharReveal";
 import PlayBadges    from "./[slug]/PlayBadges";
 
 // "Life at NB Media" reel carousel.
@@ -238,21 +240,62 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
           animation: gradientFlow 5s linear infinite;
         }
 
-        /* Slow drifting aurora — the hero's blur blobs gently float
-           and breathe so the backdrop feels alive, not static. */
+        /* Slow drifting aurora — the hero's blur blobs gently float.
+           TRANSLATE ONLY (no scale): scaling a filter:blur element
+           forces the browser to re-rasterize the ~110px blur every
+           frame; a pure translate just re-composites the cached
+           blurred texture (cheap + smooth). Drift bumped a touch to
+           stay noticeable without the scale. */
         @keyframes auroraA {
-          0%,100% { transform: translate3d(0,0,0) scale(1); }
-          50%     { transform: translate3d(40px,30px,0) scale(1.12); }
+          0%,100% { transform: translate3d(0,0,0); }
+          50%     { transform: translate3d(55px,42px,0); }
         }
         @keyframes auroraB {
-          0%,100% { transform: translate3d(0,0,0) scale(1); }
-          50%     { transform: translate3d(-30px,40px,0) scale(1.15); }
+          0%,100% { transform: translate3d(0,0,0); }
+          50%     { transform: translate3d(-46px,54px,0); }
         }
         .aurora-a { animation: auroraA 14s ease-in-out infinite; will-change: transform; }
         .aurora-b { animation: auroraB 18s ease-in-out infinite; will-change: transform; }
 
+        /* ── 3D interactive card (Card3D) ──────────────────────── */
+        .card3d-inner {
+          transform-style: preserve-3d;
+          transform:
+            rotateX(var(--rx, 0deg))
+            rotateY(var(--ry, 0deg))
+            translateZ(calc(var(--lift, 0) * 14px))
+            scale(calc(1 + var(--lift, 0) * 0.015));
+          /* --t is short (90ms) while the pointer is in the card so
+             the tilt tracks the cursor without lag, and long (500ms)
+             on leave so it eases smoothly back to flat. */
+          transition: transform var(--t, 350ms) cubic-bezier(0.22,1,0.36,1);
+        }
+        .card3d-glow {
+          background: radial-gradient(
+            220px circle at var(--mx, 50%) var(--my, 50%),
+            var(--glow, rgba(255,255,255,0.5)),
+            transparent 62%
+          );
+          opacity: calc(var(--lift, 0) * 0.9);
+          transition: opacity 350ms ease;
+          mix-blend-mode: soft-light;
+        }
+
+        /* ── Cards flip up in 3D as they scroll into view ──────── */
+        @keyframes card3dRise {
+          from { opacity: 0; transform: perspective(900px) rotateX(18deg) translateY(36px); }
+          to   { opacity: 1; transform: perspective(900px) rotateX(0deg)  translateY(0); }
+        }
+        .card-rise {
+          opacity: 0;
+          animation: card3dRise 0.7s cubic-bezier(0.2,0.7,0.2,1) forwards;
+        }
+
         @media (prefers-reduced-motion: reduce) {
           .grad-flow, .aurora-a, .aurora-b { animation: none !important; }
+          .card3d-inner { transform: none !important; }
+          .card3d-glow  { opacity: 0 !important; }
+          .card-rise    { animation: none !important; opacity: 1 !important; }
         }
 
         /* Force Times New Roman everywhere on the careers page —
@@ -433,7 +476,9 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
               >
                 Why join {meta.label}
               </p>
-              <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">More than a job. A place to grow.</h2>
+              <h2 className="text-[22px] sm:text-[32px] font-semibold text-slate-900 tracking-tight">
+                <CharReveal text="More than a job. A place to grow." staggerMs={26} />
+              </h2>
               <p className="mt-2 text-[14px] text-slate-500">Six reasons people choose us — and what new hires tell us six months in.</p>
             </header>
           </Reveal>
@@ -447,54 +492,68 @@ export default async function CareersIndexPage({ searchParams }: { searchParams:
           {/* 3-col grid of square cards, capped at max-w-3xl so each
               cube is a tasteful ~245px — square + filled, not bulky.
               Centered. */}
+          {/* Each card: rise3d scroll-entrance (flips up into place) +
+              Card3D hover (tilts toward cursor with a spotlight). */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch max-w-3xl mx-auto">
-            <Reveal direction="up" delay={0}>
-              <ValueCard
-                icon={Clock}
-                tone="cyan"
-                title="Flexible Working"
-                body="A work environment that values productivity, ownership, and flexibility."
-              />
+            <Reveal direction="rise3d" delay={0}>
+              <Card3D>
+                <ValueCard
+                  icon={Clock}
+                  tone="cyan"
+                  title="Flexible Working"
+                  body="A work environment that values productivity, ownership, and flexibility."
+                />
+              </Card3D>
             </Reveal>
-            <Reveal direction="up" delay={80}>
-              <ValueCard
-                icon={Brain}
-                tone="emerald"
-                title="Mental Health Support"
-                body="Free, unlimited therapy sessions plus wellness initiatives that put your mental well-being first."
-              />
+            <Reveal direction="rise3d" delay={90}>
+              <Card3D>
+                <ValueCard
+                  icon={Brain}
+                  tone="emerald"
+                  title="Mental Health Support"
+                  body="Free, unlimited therapy sessions plus wellness initiatives that put your mental well-being first."
+                />
+              </Card3D>
             </Reveal>
-            <Reveal direction="up" delay={160}>
-              <ValueCard
-                icon={Handshake}
-                tone="indigo"
-                title="Collaborative Culture"
-                body="Work alongside the best — talented, creative, and driven individuals in an innovative and supportive environment."
-              />
+            <Reveal direction="rise3d" delay={180}>
+              <Card3D>
+                <ValueCard
+                  icon={Handshake}
+                  tone="indigo"
+                  title="Collaborative Culture"
+                  body="Work alongside the best — talented, creative, and driven individuals in an innovative and supportive environment."
+                />
+              </Card3D>
             </Reveal>
-            <Reveal direction="up" delay={240}>
-              <ValueCard
-                icon={Award}
-                tone="amber"
-                title="Employee Recognition Programs"
-                body="We celebrate achievements, milestones, and exceptional contributions across teams."
-              />
+            <Reveal direction="rise3d" delay={270}>
+              <Card3D>
+                <ValueCard
+                  icon={Award}
+                  tone="amber"
+                  title="Employee Recognition Programs"
+                  body="We celebrate achievements, milestones, and exceptional contributions across teams."
+                />
+              </Card3D>
             </Reveal>
-            <Reveal direction="up" delay={320}>
-              <ValueCard
-                icon={Plane}
-                tone="violet"
-                title="Fully Sponsored Retreats"
-                body="Company-funded team outings, celebrations, and retreats — connect beyond work, on us."
-              />
+            <Reveal direction="rise3d" delay={360}>
+              <Card3D>
+                <ValueCard
+                  icon={Plane}
+                  tone="violet"
+                  title="Fully Sponsored Retreats"
+                  body="Company-funded team outings, celebrations, and retreats — connect beyond work, on us."
+                />
+              </Card3D>
             </Reveal>
-            <Reveal direction="up" delay={400}>
-              <ValueCard
-                icon={PawPrint}
-                tone="rose"
-                title="Pet-Friendly Office"
-                body="Bring your pets to work — because sometimes the best coworkers have four legs and a wagging tail."
-              />
+            <Reveal direction="rise3d" delay={450}>
+              <Card3D>
+                <ValueCard
+                  icon={PawPrint}
+                  tone="rose"
+                  title="Pet-Friendly Office"
+                  body="Bring your pets to work — because sometimes the best coworkers have four legs and a wagging tail."
+                />
+              </Card3D>
             </Reveal>
           </div>
         </div>
