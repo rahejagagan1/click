@@ -199,6 +199,9 @@ export default function PlayBadges() {
         }
         @media (prefers-reduced-motion: reduce) {
           .badge-parallax { transform: none; }
+          /* Reduced-motion: skip the burst-in + perpetual float.
+             Badges just appear in place (opacity 1, no animation). */
+          .badge { animation: none !important; opacity: 1 !important; }
         }
       `}</style>
       <div
