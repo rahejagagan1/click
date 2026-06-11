@@ -526,6 +526,7 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
           runId={selected.run.id}
           monthLabel={monthLabelShort}
           runStatus={selected.run.status ?? null}
+          brand={payrollEntity}
           onClose={() => setPreCheckOpen(false)}
         />
       )}
@@ -886,7 +887,7 @@ function RailCard({ title, children }: { title: string; children: React.ReactNod
 // Slides in from the right showing every payslip for the selected run with
 // gross / deductions / net so HR can sanity-check before lock. Read-only.
 
-function PreCheckPanel({ runId, monthLabel, runStatus, onClose }: { runId: number; monthLabel: string; runStatus: string | null; onClose: () => void }) {
+function PreCheckPanel({ runId, monthLabel, runStatus, brand, onClose }: { runId: number; monthLabel: string; runStatus: string | null; brand: "NB Media" | "YT Labs"; onClose: () => void }) {
   // Pull payslips for the run. The /api/hr/payroll/payslips route already
   // supports a runId filter via query string.
   const { data: payslips = [] } = useSWR<any[]>(`/api/hr/payroll/payslips?runId=${runId}`, fetcher);
@@ -918,7 +919,7 @@ function PreCheckPanel({ runId, monthLabel, runStatus, onClose }: { runId: numbe
           <StatBlock label="Net Pay"    value={fmtInr(totalNet)}   small />
         </div>
 
-        <DownloadBar runId={runId} enabled={downloadsEnabled} runStatus={runStatus} />
+        <DownloadBar runId={runId} enabled={downloadsEnabled} runStatus={runStatus} brand={brand} />
 
         <div className="flex-1 overflow-y-auto">
           {payslips.length === 0 ? (
@@ -967,7 +968,7 @@ const PAYROLL_EXPORTS: ExportDef[] = [
   { key: "pay-register",  label: "Pay Register",  sub: "Master register (Keka format)" },
 ];
 
-function DownloadBar({ runId, enabled, runStatus }: { runId: number; enabled: boolean; runStatus: string | null }) {
+function DownloadBar({ runId, enabled, runStatus, brand }: { runId: number; enabled: boolean; runStatus: string | null; brand: "NB Media" | "YT Labs" }) {
   const [busy, setBusy] = useState<string | null>(null);
 
   // Fetch the file as a blob first so 4xx errors (e.g. 422 "missing bank
@@ -976,7 +977,7 @@ function DownloadBar({ runId, enabled, runStatus }: { runId: number; enabled: bo
   async function download(key: string) {
     setBusy(key);
     try {
-      const res = await fetch(`/api/hr/payroll/runs/${runId}/exports/${key}`);
+      const res = await fetch(`/api/hr/payroll/runs/${runId}/exports/${key}?brand=${encodeURIComponent(brand)}`);
       if (!res.ok) {
         const ct = res.headers.get("content-type") || "";
         if (ct.includes("application/json")) {

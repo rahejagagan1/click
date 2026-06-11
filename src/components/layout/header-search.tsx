@@ -104,10 +104,11 @@ function HeaderSearchInner() {
 
   const shouldFetch = open && debounced.length >= 2;
 
-  // Only suggest active employees — offboarded users stay in the DB for
-  // history but shouldn't be discoverable from the global search bar.
+  // Search both active AND inactive (offboarded) employees — HR often needs to
+  // pull up a past employee. Inactive ones are flagged in the result row. The
+  // employees API returns everyone when the isActive param is omitted.
   const { data: peopleData, error: peopleErr } = useSWR(
-    shouldFetch ? `/api/hr/employees?search=${encodeURIComponent(debounced)}&isActive=true` : null,
+    shouldFetch ? `/api/hr/employees?search=${encodeURIComponent(debounced)}` : null,
     fetcher,
     { dedupingInterval: 500, keepPreviousData: true },
   );
@@ -273,6 +274,15 @@ function HeaderSearchInner() {
                               >
                                 <span className="inline-block h-1 w-1 rounded-full bg-slate-500" />
                                 Exited
+                              </span>
+                            )}
+                            {/* Fallback for anyone deactivated without an exit
+                                record (or when the exit badge is hidden) so
+                                inactive employees are clearly marked. */}
+                            {exitState === null && u.isActive === false && (
+                              <span className="inline-flex items-center gap-0.5 rounded-full bg-slate-100 px-1.5 py-px text-[8.5px] font-bold uppercase tracking-wider text-slate-500 ring-1 ring-inset ring-slate-300 shrink-0">
+                                <span className="inline-block h-1 w-1 rounded-full bg-slate-400" />
+                                Inactive
                               </span>
                             )}
                           </div>

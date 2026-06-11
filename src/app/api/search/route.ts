@@ -62,13 +62,15 @@ export async function GET(req: NextRequest) {
       // ── Employees ────────────────────────────────────────────────
       prisma.user.findMany({
         where: {
-          isActive: true,
+          // Include inactive (offboarded) employees too — HR often searches for
+          // a past employee. `isActive` is returned so the UI can flag them.
           OR: [{ name: contains }, { email: contains }],
           ...(hideDevEmails.length > 0 ? { NOT: { email: { in: hideDevEmails } } } : {}),
         },
-        select: { id: true, name: true, email: true, role: true, orgLevel: true, profilePictureUrl: true, teamCapsule: true },
+        select: { id: true, name: true, email: true, role: true, orgLevel: true, profilePictureUrl: true, teamCapsule: true, isActive: true },
         take: limit,
-        orderBy: { name: "asc" },
+        // Active first, then by name — so current employees stay at the top.
+        orderBy: [{ isActive: "desc" }, { name: "asc" }],
       }),
 
       // ── Cases ────────────────────────────────────────────────────
