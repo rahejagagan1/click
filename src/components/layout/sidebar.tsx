@@ -857,7 +857,6 @@ export default function Sidebar() {
                                     {fl("/dashboard/hr/attendance", "Attendance"       )}
                                     {fl("/dashboard/hr/leaves",     "Leave"            )}
                                     <div className="my-1 mx-3 border-t border-[#d1dae5]" />
-                                    {fl("/dashboard/hr/goals",      "Goals"            )}
                                     {fl("/dashboard/hr/documents",  "Documents"        )}
                                     {fl("/dashboard/hr/tickets",    "Helpdesk"         )}
                                     {/* Refer & Earn — visible to every employee.
