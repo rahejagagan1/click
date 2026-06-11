@@ -20,7 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { isHRAdmin } from "@/lib/access";
-import { getWfhPolicy, quotaForBrand } from "@/lib/hr/wfh-balance";
+import { getWfhPolicy, quotaForBrand, wfhDayWeight } from "@/lib/hr/wfh-balance";
 import { getMonthKey } from "@/lib/hr/pulse-week";
 import { getBrandScope } from "@/lib/hr/brand-scope";
 
@@ -106,12 +106,37 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Project into the response shape — synthesize credited/used
-    // from the policy for employees with no row yet.
+    // USED is computed LIVE + half-day-weighted from the actual WFH
+    // requests for this month (one aggregate query for everyone), NOT
+    // the stored WfhBalance.used integer (which couldn't hold 0.5 and
+    // was never auto-updated). Same in-flight set + weight the apply
+    // cap uses, so the panel can never disagree with what blocks a
+    // request. CREDITED stays HR-overridable via the stored row.
+    const [yStr, mStr] = monthKey.split("-M");
+    const yy = Number(yStr), mm = Number(mStr);
+    const usedByUser = new Map<number, number>();
+    if (Number.isInteger(yy) && Number.isInteger(mm)) {
+      const mStart   = new Date(Date.UTC(yy, mm - 1, 1));
+      const mEndExcl = new Date(Date.UTC(yy, mm, 1));
+      const wfhRows = await prisma.wFHRequest.findMany({
+        where: {
+          status: { in: ["pending", "partially_approved", "approved"] },
+          date:   { gte: mStart, lt: mEndExcl },
+        },
+        select: { userId: true, reason: true },
+      });
+      for (const w of wfhRows) {
+        usedByUser.set(w.userId, (usedByUser.get(w.userId) ?? 0) + wfhDayWeight(w.reason));
+      }
+    }
+
+    // Project into the response shape — credited synthesized from the
+    // policy for employees with no override row; used from the live
+    // weighted map.
     const out = filtered.map((r) => {
       const expected = quotaForBrand(policy, r.businessUnit);
       const credited = r.credited ?? expected;
-      const used     = r.used ?? 0;
+      const used     = usedByUser.get(r.id) ?? 0;
       return {
         userId: r.id,
         name: r.name,
