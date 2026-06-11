@@ -20,7 +20,17 @@ export default function DocumentsPage() {
   const [category, setCategory] = useState("All");
   const [showUpload, setShowUpload] = useState(false);
 
-  const { data: documents = [], isLoading } = useSWR("/api/hr/documents", fetcher);
+  // This page lives under the personal "Me → My Space" section, so it
+  // shows ONLY the logged-in user's own documents — never the org-wide
+  // list. Non-admins already get their own (the API returns own docs
+  // when no userId is passed). Admins would otherwise get EVERYONE's,
+  // so we explicitly request their own id. (Admins browse other
+  // employees' docs from the People directory → employee profile.)
+  const myId = (session?.user as any)?.dbId;
+  const docsKey = isAdmin && myId
+    ? `/api/hr/documents?userId=${myId}`
+    : "/api/hr/documents";
+  const { data: documents = [], isLoading } = useSWR(docsKey, fetcher);
   const filtered = category === "All" ? documents : documents.filter((d: any) => d.category === category);
 
   // EmployeeDocument stores a boolean `isVerified` (no separate
