@@ -153,7 +153,7 @@ ${SIGNOFF_HTML}
   // shared as the source of truth.
   {
     key: "revised_offer_letter",
-    title: "Revised Offer Letter",
+    title: "Offer Letter",
     category: "onboarding",
     // HR types the annual package + ticks PF. The salary breakup
     // table is auto-computed at render time using {{Salary.*}}
@@ -236,17 +236,17 @@ ${SIGNOFF_HTML}
 <p style="text-align:center"><strong>FIXED MONTHLY PAY:</strong></p>
 <table class="pay-table">
   <thead>
-    <tr><th>PAY COMPONENT</th><th>MONTHLY (₹)</th><th>BASIS</th></tr>
+    <tr><th>PAY COMPONENT</th><th>MONTHLY (₹)</th><th>ANNUAL (₹)</th></tr>
   </thead>
   <tbody>
-    <tr><td>Basic Pay</td><td>{{Salary.Basic}}</td><td>50%</td></tr>
-    <tr><td>House Rent Allowance</td><td>{{Salary.HRA}}</td><td>20%</td></tr>
+    <tr><td>Basic Pay</td><td>{{Salary.Basic}}</td><td>{{Salary.BasicAnnual}}</td></tr>
+    <tr><td>House Rent Allowance</td><td>{{Salary.HRA}}</td><td>{{Salary.HRAAnnual}}</td></tr>
     {{Salary.PfRow}}
-    <tr><td>Dearness Allowance</td><td>{{Salary.DA}}</td><td>10%</td></tr>
-    <tr><td>Conveyance Allowance</td><td>{{Salary.Conveyance}}</td><td>7.50%</td></tr>
-    <tr><td>Medical Allowance</td><td>{{Salary.Medical}}</td><td>₹15,000 / year</td></tr>
-    <tr><td>Special Allowance</td><td>{{Salary.Special}}</td><td>Remaining</td></tr>
-    <tr><td><strong>TOTAL MONTHLY CTC</strong></td><td><strong>{{Salary.Total}}</strong></td><td></td></tr>
+    <tr><td>Dearness Allowance</td><td>{{Salary.DA}}</td><td>{{Salary.DAAnnual}}</td></tr>
+    <tr><td>Conveyance Allowance</td><td>{{Salary.Conveyance}}</td><td>{{Salary.ConveyanceAnnual}}</td></tr>
+    <tr><td>Medical Allowance</td><td>{{Salary.Medical}}</td><td>{{Salary.MedicalAnnual}}</td></tr>
+    <tr><td>Special Allowance</td><td>{{Salary.Special}}</td><td>{{Salary.SpecialAnnual}}</td></tr>
+    <tr><td><strong>TOTAL CTC</strong></td><td><strong>{{Salary.Total}}</strong></td><td><strong>{{Salary.TotalAnnual}}</strong></td></tr>
   </tbody>
 </table>
 <p><strong>Note:</strong></p>
@@ -383,7 +383,7 @@ ${SIGNOFF_HTML_YT_LABS}
   // ── YT Labs · Revised Offer Letter ──────────────────────────
   {
     key: "revised_offer_letter",
-    title: "Revised Offer Letter",
+    title: "Offer Letter",
     category: "onboarding",
     businessUnit: "YT Labs",
     // HR types the annual package + ticks PF. The salary breakup
@@ -459,17 +459,17 @@ ${SIGNOFF_HTML_YT_LABS}
 <p style="text-align:center"><strong>FIXED MONTHLY PAY:</strong></p>
 <table class="pay-table">
   <thead>
-    <tr><th>PAY COMPONENT</th><th>MONTHLY (₹)</th><th>BASIS</th></tr>
+    <tr><th>PAY COMPONENT</th><th>MONTHLY (₹)</th><th>ANNUAL (₹)</th></tr>
   </thead>
   <tbody>
-    <tr><td>Basic Pay</td><td>{{Salary.Basic}}</td><td>50%</td></tr>
-    <tr><td>House Rent Allowance</td><td>{{Salary.HRA}}</td><td>20%</td></tr>
+    <tr><td>Basic Pay</td><td>{{Salary.Basic}}</td><td>{{Salary.BasicAnnual}}</td></tr>
+    <tr><td>House Rent Allowance</td><td>{{Salary.HRA}}</td><td>{{Salary.HRAAnnual}}</td></tr>
     {{Salary.PfRow}}
-    <tr><td>Dearness Allowance</td><td>{{Salary.DA}}</td><td>10%</td></tr>
-    <tr><td>Conveyance Allowance</td><td>{{Salary.Conveyance}}</td><td>7.50%</td></tr>
-    <tr><td>Medical Allowance</td><td>{{Salary.Medical}}</td><td>₹15,000 / year</td></tr>
-    <tr><td>Special Allowance</td><td>{{Salary.Special}}</td><td>Remaining</td></tr>
-    <tr><td><strong>TOTAL MONTHLY CTC</strong></td><td><strong>{{Salary.Total}}</strong></td><td></td></tr>
+    <tr><td>Dearness Allowance</td><td>{{Salary.DA}}</td><td>{{Salary.DAAnnual}}</td></tr>
+    <tr><td>Conveyance Allowance</td><td>{{Salary.Conveyance}}</td><td>{{Salary.ConveyanceAnnual}}</td></tr>
+    <tr><td>Medical Allowance</td><td>{{Salary.Medical}}</td><td>{{Salary.MedicalAnnual}}</td></tr>
+    <tr><td>Special Allowance</td><td>{{Salary.Special}}</td><td>{{Salary.SpecialAnnual}}</td></tr>
+    <tr><td><strong>TOTAL CTC</strong></td><td><strong>{{Salary.Total}}</strong></td><td><strong>{{Salary.TotalAnnual}}</strong></td></tr>
   </tbody>
 </table>
 <p><strong>Note:</strong></p>
