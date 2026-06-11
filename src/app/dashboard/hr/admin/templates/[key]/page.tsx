@@ -15,6 +15,7 @@ import "react-quill-new/dist/quill.snow.css";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { isLeadershipOrHR } from "@/lib/access";
+import { DateField } from "@/components/ui/date-field";
 import { Search, Save, FileText, RefreshCw } from "lucide-react";
 
 // Reuse the same Quill build the JD editor uses so HR gets a
@@ -411,9 +412,22 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
                         placeholder={f.placeholder}
                         className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF] resize-none"
                       />
+                    ) : f.type === "date" ? (
+                      // Custom DateField (consistent dd/mm/yyyy calendar
+                      // across browsers) instead of the native
+                      // <input type="date"> picker, which renders with
+                      // the OS theme + an inconsistent month/year grid.
+                      // DateField stores YYYY-MM-DD — same value shape as
+                      // the native input, so it's a drop-in.
+                      <DateField
+                        value={customValues[f.key] ?? ""}
+                        onChange={(v) => setCustomValues((s) => ({ ...s, [f.key]: v }))}
+                        className="w-full"
+                        placeholder={f.placeholder || "dd/mm/yyyy"}
+                      />
                     ) : (
                       <input
-                        type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
+                        type={f.type === "number" ? "number" : "text"}
                         // For number inputs: `min={0}` blocks the
                         // user from typing/spinning negative values,
                         // and the onWheel/onKeyDown handlers stop

@@ -1926,11 +1926,10 @@ function ProbationExtendModal({
           {mode === "custom" && (
             <div>
               <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 mb-1.5">New probation end date</label>
-              <input
-                type="date"
+              <DateField
                 value={customDate}
-                onChange={(e) => setCustomDate(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                onChange={setCustomDate}
+                className="w-full"
               />
             </div>
           )}
