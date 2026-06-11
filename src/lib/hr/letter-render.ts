@@ -733,18 +733,19 @@ export async function wrapLetterPreviewHtml(
        them — fixes the "congested / words running together"
        feel users hit at the 0.5px default. Letter-spacing
        inherits 0.5px from body. */
-    /* margin-bottom 7pt (was 2pt) clearly separates consecutive
-       paragraphs — the old 2pt gap ran them together and read as
-       "congested". line-height bumped 1.5 → 1.6 for an airier,
-       formal feel. orphans/widows:2 stop a single dangling line
-       splitting across a page break. */
-    p { font-size: 12pt; line-height: 1.6; margin: 0 0 7pt; text-align: left; word-spacing: 2px; orphans: 2; widows: 2; }
-    p.signoff, p[data-role="signoff"] { text-align: left; margin: 0 0 7pt; }
+    /* margin-bottom 5pt (was 2pt) clearly separates consecutive
+       paragraphs so they no longer read as "congested", while
+       line-height stays at 1.5 — a moderate bump that de-clutters
+       WITHOUT pushing the short single-page letters (relieving, FnF,
+       internship, probation) onto a second page. orphans/widows:2
+       stop a single dangling line splitting across a page break. */
+    p { font-size: 12pt; line-height: 1.5; margin: 0 0 5pt; text-align: left; word-spacing: 2px; orphans: 2; widows: 2; }
+    p.signoff, p[data-role="signoff"] { text-align: left; margin: 0 0 5pt; }
     p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; }
     h2 { font-size: 14pt; margin: 12pt 0 6pt; }
     h3 { font-size: 13pt; margin: 10pt 0 6pt; }
-    ol, ul { padding-left: 22pt; margin: 6pt 0 10pt; }
-    ol li, ul li { margin-bottom: 5pt; font-size: 12pt; line-height: 1.6; word-spacing: 2px; orphans: 2; widows: 2; }
+    ol, ul { padding-left: 22pt; margin: 6pt 0 8pt; }
+    ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.5; word-spacing: 2px; orphans: 2; widows: 2; }
     /* Keep the signature cluster (Regards / Name / Founder & CEO +
        cursive image) together — it has the cursive PNG and
        splitting it mid-block would look broken. We deliberately
