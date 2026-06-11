@@ -858,7 +858,6 @@ export default function Sidebar() {
                                     {fl("/dashboard/hr/leaves",     "Leave"            )}
                                     <div className="my-1 mx-3 border-t border-[#d1dae5]" />
                                     {fl("/dashboard/hr/documents",  "Documents"        )}
-                                    {fl("/dashboard/hr/tickets",    "Helpdesk"         )}
                                     {/* Refer & Earn — visible to every employee.
                                         Lists open jobs HR has tagged for referrals
                                         and lets the employee refer someone from
