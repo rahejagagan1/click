@@ -254,7 +254,13 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
 
   // RBAC designations for the single Designation picker (replaces Role + Org Level).
   const { data: desigData } = useSWR("/api/designations", fetcher);
-  const designations = (desigData?.designations ?? []) as { id: number; key: string; label: string }[];
+  const designations = (desigData?.designations ?? []) as { id: number; key: string; label: string; businessUnit?: string | null }[];
+  // Small brand chip shown next to each designation in the picker so HR can see
+  // which brand (NB Media / YT Labs) a designation — and thus its users — belong to.
+  const brandBadge = (bu?: string | null) =>
+    (bu || "NB Media") === "YT Labs"
+      ? { text: "YT Labs", className: "bg-pink-100 text-pink-700" }
+      : { text: "NB Media", className: "bg-sky-100 text-sky-700" };
   // The designation the HR user explicitly picked this session (null until they
   // change it). Until then, the field is DERIVED each render from the employee's
   // stored designationId once the list loads — so it shows the correct value on
@@ -804,7 +810,7 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
                 const { orgLevel, role } = legacyFromDesignationKey(v);
                 setJob((j) => ({ ...j, orgLevel, role }));
               }}
-              options={designations.map((d) => ({ value: d.key, label: d.label }))}
+              options={designations.map((d) => ({ value: d.key, label: d.label, badge: brandBadge(d.businessUnit) }))}
             />
             <p className="mt-1 text-[11px] text-slate-400">Sets access tier + scorecard. Replaces the old Role + Org Level.</p>
           </div>

@@ -63,7 +63,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       const hra      = isIntern ? 0 : (r.hraAnnual / 12) * lopFactor;
       const medical  = isIntern ? 0 : (r.medicalAnnual / 12) * lopFactor;
       const conv     = isIntern ? 0 : (r.conveyanceAnnual / 12) * lopFactor;
-      const special  = isIntern ? 0 : (r.specialAnnual / 12) * lopFactor;
+      // Special Allowance absorbs the employee PF so it's shown as part of
+      // earnings (e.g. 3200 special + 1800 PF = 5000). PF is still subtracted
+      // again as a contribution (column B) below, so net = gross − PF − tax.
+      // This also makes gross(A) include PF, matching the stored payslip.
+      const special  = isIntern ? 0 : (r.specialAnnual / 12) * lopFactor + r.pfEmployee;
       const da       = isIntern ? 0 : (r.daAnnual / 12) * lopFactor;
       // Interns receive their whole monthly amount as a stipend; basic
       // / HRA / etc. stay at zero on the register.
