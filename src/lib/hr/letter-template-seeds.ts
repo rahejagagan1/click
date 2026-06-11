@@ -153,7 +153,7 @@ ${SIGNOFF_HTML}
   // shared as the source of truth.
   {
     key: "revised_offer_letter",
-    title: "Revised Offer Letter",
+    title: "Offer Letter",
     category: "onboarding",
     // HR types the annual package + ticks PF. The salary breakup
     // table is auto-computed at render time using {{Salary.*}}
@@ -383,7 +383,7 @@ ${SIGNOFF_HTML_YT_LABS}
   // ── YT Labs · Revised Offer Letter ──────────────────────────
   {
     key: "revised_offer_letter",
-    title: "Revised Offer Letter",
+    title: "Offer Letter",
     category: "onboarding",
     businessUnit: "YT Labs",
     // HR types the annual package + ticks PF. The salary breakup
