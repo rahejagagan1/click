@@ -146,17 +146,30 @@ export async function POST(req: NextRequest) {
         const quota = quotaForBrand(policy, subjectBrand);
 
         const { start: monthStart, end: monthEnd } = istMonthRange(fromIst);
-        const usedThisMonth = await prisma.wFHRequest.count({
+        // Half-day WFH counts as 0.5, not a full day. Half-days are
+        // encoded as a reason prefix ([First Half] / [Second Half] /
+        // [Half Day]) — the same marker the attendance board reads
+        // (board/route.ts). So we SUM the day-weights of the in-flight
+        // requests (0.5 each for half-days, 1 for full days) instead of
+        // counting rows, and block only if adding THIS request's weight
+        // would exceed the quota.
+        const HALF_DAY_RE = /\[(?:First Half|Second Half|Half Day)\]/i;
+        const dayWeight = (r: string | null | undefined) => (HALF_DAY_RE.test(r ?? "") ? 0.5 : 1);
+        const inFlight = await prisma.wFHRequest.findMany({
           where: {
             userId: subjectUserId,
             status: { in: ["pending", "partially_approved", "approved"] },
             date:   { gte: monthStart, lte: monthEnd },
           },
+          select: { reason: true },
         });
-        if (usedThisMonth >= quota) {
+        const usedDays  = inFlight.reduce((sum, r) => sum + dayWeight(r.reason), 0);
+        const newWeight = dayWeight(reason); // self-apply cap is always a single day
+        if (usedDays + newWeight > quota) {
           const monthLabel = monthStart.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
+          const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
           return NextResponse.json({
-            error: `WFH limit reached: ${quota} of ${quota} already used for ${monthLabel}.`,
+            error: `WFH limit reached: you've used ${fmt(usedDays)} of ${quota} WFH day(s) for ${monthLabel}. This ${newWeight === 0.5 ? "half-day" : "full-day"} request would exceed the limit.`,
           }, { status: 400 });
         }
       }
