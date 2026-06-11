@@ -68,7 +68,7 @@ export default function DocumentsPage() {
             <h1 className="text-[17px] font-semibold text-slate-800 dark:text-white tracking-tight">Documents</h1>
             <p className="text-[12px] text-slate-500 mt-0.5">{documents.length} documents uploaded</p>
           </div>
-          <button onClick={() => setShowUpload(true)} className="h-9 px-4 bg-[#008CFF] hover:bg-[#0077dd] text-slate-800 dark:text-white rounded-lg text-[12px] font-semibold">+ Upload Document</button>
+          <button onClick={() => setShowUpload(true)} className="h-9 px-4 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded-lg text-[12px] font-semibold">+ Upload Document</button>
         </div>
       </div>
 
@@ -166,7 +166,7 @@ export default function DocumentsPage() {
             </div>
             <div className="px-6 py-4 border-t border-slate-200 dark:border-white/[0.06] flex justify-end gap-3">
               <button onClick={() => setShowUpload(false)} className="h-9 px-5 text-[13px] text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:text-white rounded-lg">Cancel</button>
-              <button className="h-9 px-5 bg-[#008CFF] hover:bg-[#0077dd] text-slate-800 dark:text-white rounded-lg text-[13px] font-semibold">Upload</button>
+              <button className="h-9 px-5 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded-lg text-[13px] font-semibold">Upload</button>
             </div>
           </div>
         </>
