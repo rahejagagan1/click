@@ -9,15 +9,15 @@ import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 import {
-  loadExportRows, monYearDash, monShort,
-  HEADERS_PAY_REGISTER,
+  loadExportRows, monYearDash, monShort, HEADERS_PAY_REGISTER,
+  brandParam, filterRowsByBrand, COMPANY_BY_BRAND,
 } from "@/lib/payroll-exports";
 
 export const dynamic = "force-dynamic";
 
 const NB_MEDIA_COMPANY = "YT Money Productions Pvt. Ltd (NB Media)";
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   if (!canViewSalary(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -35,7 +35,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // PayRegister includes EVERY processed payslip — including on-hold
     // ones — so the register documents the complete cycle, not just
     // what got paid out. Bookkeeping needs to see the whole picture.
-    const all = rows;
+    // Brand split: ?brand=NB Media|YT Labs exports only that brand's
+    // employees under that brand's legal entity; no brand => all (legacy).
+    const brand = brandParam(req);
+    const all = filterRowsByBrand(rows, brand);
+    if (brand && all.length === 0) {
+      return NextResponse.json({ error: `No ${brand} employees in this payroll run.` }, { status: 422 });
+    }
+    const company = brand ? COMPANY_BY_BRAND[brand] : NB_MEDIA_COMPANY;
 
     const monLabel = monShort(run.month);
     const sheetName = `${monLabel} ${run.year}`;
@@ -148,7 +155,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
      14, 14, 18, 18, 18].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
     const buf = await wb.xlsx.writeBuffer();
-    const filename = `Keka PayRegister_${NB_MEDIA_COMPANY}_${monYearDash(run.month, run.year)}.xlsx`;
+    const filename = `Keka PayRegister_${company}_${monYearDash(run.month, run.year)}.xlsx`;
     return new NextResponse(buf as any, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
