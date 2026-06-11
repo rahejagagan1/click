@@ -5,6 +5,35 @@
 
 import prisma from "@/lib/prisma";
 import { getMonthKey } from "@/lib/hr/pulse-week";
+import { istMonthRange } from "@/lib/ist-date";
+
+/** Half-day WFH counts as 0.5; a full day as 1. Half-days are encoded
+ *  as a reason prefix ([First Half] / [Second Half] / [Half Day]) — the
+ *  same marker the attendance board reads. SINGLE source of truth for
+ *  the day-weight, shared by the apply cap, the employee badge, and the
+ *  HR balances panel so they can never disagree. */
+export const WFH_HALF_DAY_RE = /\[(?:First Half|Second Half|Half Day)\]/i;
+export function wfhDayWeight(reason: string | null | undefined): number {
+  return WFH_HALF_DAY_RE.test(reason ?? "") ? 0.5 : 1;
+}
+
+/** Live, half-day-weighted WFH usage for ONE user in the month of `now`.
+ *  Counts the in-flight set (pending + partially_approved + approved) —
+ *  the same rows the apply cap counts — so "used" shown anywhere always
+ *  matches what actually blocks a new request. Replaces the old stored
+ *  WfhBalance.used integer counter (couldn't hold 0.5; never auto-updated). */
+export async function computeWfhUsed(userId: number, now: Date = new Date()): Promise<number> {
+  const { start, end } = istMonthRange(now);
+  const rows = await prisma.wFHRequest.findMany({
+    where: {
+      userId,
+      status: { in: ["pending", "partially_approved", "approved"] },
+      date:   { gte: start, lte: end },
+    },
+    select: { reason: true },
+  });
+  return rows.reduce((sum, r) => sum + wfhDayWeight(r.reason), 0);
+}
 
 export type WfhPolicy = {
   limitEnabled: boolean;
@@ -60,24 +89,25 @@ export async function getBalance(userId: number, brand: string | null, now: Date
 }> {
   const policy = await getWfhPolicy();
   const monthKey = getMonthKey(now);
-  const credited = quotaForBrand(policy, brand);
+  // CREDITED (the allowance) is still HR-overridable via the stored
+  // WfhBalance row; falls back to the brand policy quota when there's
+  // no override.
+  let credited = quotaForBrand(policy, brand);
   try {
-    const rows = await prisma.$queryRawUnsafe<Array<{ credited: number; used: number }>>(
-      `SELECT credited, used FROM "WfhBalance"
+    const rows = await prisma.$queryRawUnsafe<Array<{ credited: number }>>(
+      `SELECT credited FROM "WfhBalance"
         WHERE "userId" = $1 AND "monthKey" = $2 LIMIT 1`,
       userId, monthKey,
     );
-    if (rows[0]) {
-      const used = Number(rows[0].used) || 0;
-      return { credited: rows[0].credited, used, remaining: Math.max(0, rows[0].credited - used), monthKey, policy };
-    }
+    if (rows[0]?.credited != null) credited = Number(rows[0].credited);
   } catch {
-    /* table missing — fall through */
+    /* table missing — fall back to policy quota */
   }
-  // No row yet — return the would-be credited amount with 0 used.
-  // This lets the request POST + employee badge work even before
-  // the cron runs for the month.
-  return { credited, used: 0, remaining: credited, monthKey, policy };
+  // USED is now ALWAYS computed live + half-day-weighted from the actual
+  // WFH requests — never the stored integer counter (which couldn't hold
+  // 0.5 and was never auto-incremented). One source of truth with the cap.
+  const used = await computeWfhUsed(userId, now);
+  return { credited, used, remaining: Math.max(0, credited - used), monthKey, policy };
 }
 
 /** Increment a user's `used` count by N (default 1). Creates the
