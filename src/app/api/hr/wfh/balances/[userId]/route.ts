@@ -1,14 +1,15 @@
 // PATCH /api/hr/wfh/balances/:userId?monthKey=YYYY-Mxx
 //
-// HR-admin manual override of a single employee's WFH balance
+// HR-admin override of a single employee's WFH CREDITED allowance
 // for one month. Use cases:
 //   • Grant an exception (e.g. Manpreet on notice → +3 extra)
 //   • Correct a mistake (cron credited wrong amount)
-//   • Set `used` directly for a back-fill / migration
 //
-// Body: { credited?: number, used?: number }
-//   • Either / both can be passed.
-//   • Range 0-31 (a month's worth of days).
+// `used` is NO LONGER editable — it's computed live + half-day-weighted
+// from the employee's actual WFH requests (see computeWfhUsed). Only
+// `credited` (the allowance) can be overridden here.
+//
+// Body: { credited: number }   (0-31)
 // Optional `monthKey` query param (defaults to current month).
 //
 // Returns the updated balance row + the editor's name for the
@@ -23,7 +24,7 @@ import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { isHRAdmin } from "@/lib/access";
 import { getMonthKey } from "@/lib/hr/pulse-week";
 import { getBrandScope } from "@/lib/hr/brand-scope";
-import { getWfhPolicy, quotaForBrand } from "@/lib/hr/wfh-balance";
+import { getWfhPolicy, quotaForBrand, computeWfhUsed } from "@/lib/hr/wfh-balance";
 
 export const dynamic = "force-dynamic";
 
@@ -51,17 +52,17 @@ export async function PATCH(
 
     const body = await req.json().catch(() => ({}));
     const credited = body?.credited;
-    const used     = body?.used;
     const hasCredited = credited !== undefined && credited !== null;
-    const hasUsed     = used     !== undefined && used     !== null;
-    if (!hasCredited && !hasUsed) {
-      return NextResponse.json({ error: "Provide credited and/or used" }, { status: 400 });
+    // `used` is computed live now — silently ignore any used in the body
+    // (older clients may still send it) rather than persisting it.
+    if (!hasCredited) {
+      return NextResponse.json(
+        { error: "Provide credited. (used is auto-computed from WFH requests and can't be set manually.)" },
+        { status: 400 },
+      );
     }
-    if (hasCredited && (!Number.isInteger(credited) || credited < 0 || credited > 31)) {
+    if (!Number.isInteger(credited) || credited < 0 || credited > 31) {
       return NextResponse.json({ error: "credited must be an integer 0-31" }, { status: 400 });
-    }
-    if (hasUsed && (!Number.isInteger(used) || used < 0 || used > 31)) {
-      return NextResponse.json({ error: "used must be an integer 0-31" }, { status: 400 });
     }
 
     // Brand scope check — fetch the subject's brand and bounce
@@ -97,12 +98,11 @@ export async function PATCH(
     );
     const existing = existingRows[0];
 
-    const finalCredited = hasCredited
-      ? credited
-      : (existing?.credited ?? defaultCredited);
-    const finalUsed = hasUsed
-      ? used
-      : (existing?.used ?? 0);
+    const finalCredited = credited;
+    // The `used` column is now vestigial (display uses the live
+    // computed value). Preserve whatever's there to keep the NOT NULL
+    // column valid; never derive display from it.
+    const finalUsed = existing?.used ?? 0;
 
     const rows = await prisma.$queryRawUnsafe<Array<any>>(
       `INSERT INTO "WfhBalance" ("userId", "monthKey", "credited", "used", "updatedById", "updatedAt")
@@ -128,12 +128,17 @@ export async function PATCH(
       updatedByName = u[0]?.name ?? null;
     }
 
+    // Return the LIVE half-day-weighted used for this month (not the
+    // vestigial stored column) so the panel reflects reality on save.
+    const [yy, mm] = monthKey.split("-M").map(Number);
+    const liveUsed = await computeWfhUsed(userId, new Date(Date.UTC(yy, mm - 1, 15)));
+
     return NextResponse.json({
       userId: updated.userId,
       monthKey: updated.monthKey,
       credited: updated.credited,
-      used: updated.used,
-      remaining: Math.max(0, updated.credited - updated.used),
+      used: liveUsed,
+      remaining: Math.max(0, updated.credited - liveUsed),
       updatedAt: updated.updatedAt,
       updatedByName,
     });
