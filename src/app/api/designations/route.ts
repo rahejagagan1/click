@@ -16,9 +16,9 @@ export async function GET() {
   }
   try {
     const designations = await prisma.$queryRawUnsafe<
-      { id: number; key: string; label: string; scorecardFunction: string | null }[]
+      { id: number; key: string; label: string; scorecardFunction: string | null; businessUnit: string | null }[]
     >(
-      `SELECT "id","key","label","scorecardFunction"
+      `SELECT "id","key","label","scorecardFunction","businessUnit"
        FROM "Designation" WHERE "isActive" = true ORDER BY "sortOrder","label"`
     );
     return NextResponse.json({ designations });

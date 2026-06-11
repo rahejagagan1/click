@@ -116,11 +116,16 @@ export async function POST(req: Request) {
   const label = String(body.label ?? "").trim();
   if (!label) return NextResponse.json({ error: "Label is required" }, { status: 400 });
 
-  const key = (body.key ? toDesignationKey(String(body.key)) : toDesignationKey(label)) || "designation";
+  const baseKey = (body.key ? toDesignationKey(String(body.key)) : toDesignationKey(label)) || "designation";
   const scorecardFunction = body.scorecardFunction ? String(body.scorecardFunction) : null;
   // Brand the designation belongs to. New ones default to NB Media unless the
   // YT Labs tab created them. Drives which brand's list it shows up in.
   const businessUnit = body.businessUnit ? String(body.businessUnit) : "NB Media";
+  // Designations are per-brand, but `key` is globally unique — so the SAME label
+  // can legitimately exist in two brands with different permissions. Qualify the
+  // key with the brand for non-NB-Media brands; NB Media keeps the bare key for
+  // back-compat with the seed/legacy keys (hr_manager, production_manager, …).
+  const key = businessUnit === "NB Media" ? baseKey : `${baseKey}_${toDesignationKey(businessUnit)}`;
   const permissionKeys: string[] = Array.isArray(body.permissionKeys) ? body.permissionKeys.map(String) : [];
   const reportOwnerIds: number[] = Array.isArray(body.reportOwnerIds) ? body.reportOwnerIds.map(Number) : [];
   const reportTemplates: string[] = Array.isArray(body.reportTemplates) ? body.reportTemplates.map(String) : [];
@@ -134,7 +139,7 @@ export async function POST(req: Request) {
     key, label, scorecardFunction, businessUnit
   );
   if (!created.length) {
-    return NextResponse.json({ error: `A designation with key "${key}" already exists` }, { status: 409 });
+    return NextResponse.json({ error: `A "${label}" designation already exists in ${businessUnit}.` }, { status: 409 });
   }
   await syncGrants(created[0].id, permissionKeys, actorId);
   await syncReportGrants(created[0].id, reportOwnerIds, actorId);
