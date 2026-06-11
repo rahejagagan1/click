@@ -637,10 +637,11 @@ export default function Sidebar() {
                     </div>
                 ))}
 
-                {/* KPIs — visible to all users (the page itself scopes the
-                    visible employees by role: self / team / all-departments).
+                {/* KPIs — NB Media only (hidden for YT Labs, same brand rule as
+                    Feedback). The page itself further scopes the visible
+                    employees by role (self / team / all-departments).
                     Tab-permission still gates show/hide. */}
-                {tabAllowed("departments") && (() => {
+                {tabAllowed("departments") && user?.businessUnit !== "YT Labs" && (() => {
                     const isKpiActive = pathname.startsWith("/dashboard/kpis");
                     return (
                         <Link

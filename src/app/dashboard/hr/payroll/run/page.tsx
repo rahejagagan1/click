@@ -39,8 +39,9 @@ function daysInMonth(year: number, month1: number): number {
 }
 
 function fmtInr(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return "INR 0";
-  return `INR ${Math.round(n).toLocaleString("en-IN")}`;
+  if (n == null || !Number.isFinite(n)) return "INR 0.00";
+  // Show the actual value (with paise) — never round payroll amounts on screen.
+  return `INR ${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function timeAgo(iso: string): string {

@@ -99,7 +99,7 @@ export default function OrgTree({
     }>({ role: "", orgLevel: "", designationKey: "", managerId: null, monthlyDeliveryTargetCases: null, teamCapsuleKey: "" });
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
-    const [designations, setDesignations] = useState<{ id: number; key: string; label: string }[]>([]);
+    const [designations, setDesignations] = useState<{ id: number; key: string; label: string; businessUnit?: string | null }[]>([]);
 
     // Label to show on a node: the user's stored designation, else the one
     // derived from their legacy orgLevel/role, else the raw orgLevel.
@@ -527,7 +527,7 @@ export default function OrgTree({
                                     {designations.length === 0 && (
                                         <option value={editData.designationKey}>{editData.designationKey || "—"}</option>
                                     )}
-                                    {designations.map(dg => <option key={dg.key} value={dg.key}>{dg.label}</option>)}
+                                    {designations.map(dg => <option key={dg.key} value={dg.key}>{dg.label} · {dg.businessUnit ?? "NB Media"}</option>)}
                                 </select>
                                 <p className="mt-1.5 text-[10px] text-slate-400">Sets access tier + scorecard. Replaces the old Org&nbsp;Level + Role.</p>
                             </div>
