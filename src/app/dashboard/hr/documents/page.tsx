@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import SelectField from "@/components/ui/SelectField";
 import { isHRAdmin } from "@/lib/access";
+import { FileText } from "lucide-react";
 
 const DOC_CATEGORIES = ["All", "Identity", "Education", "Experience", "Finance", "Legal", "Other"];
 
@@ -22,11 +23,14 @@ export default function DocumentsPage() {
   const { data: documents = [], isLoading } = useSWR("/api/hr/documents", fetcher);
   const filtered = category === "All" ? documents : documents.filter((d: any) => d.category === category);
 
+  // EmployeeDocument stores a boolean `isVerified` (no separate
+  // pending/rejected states), so verified = isVerified, pending =
+  // everything not yet verified. Rejected isn't modelled → always 0.
   const counts = {
     total: documents.length,
-    verified: documents.filter((d: any) => d.verificationStatus === "verified").length,
-    pending: documents.filter((d: any) => d.verificationStatus === "pending").length,
-    rejected: documents.filter((d: any) => d.verificationStatus === "rejected").length,
+    verified: documents.filter((d: any) => d.isVerified).length,
+    pending: documents.filter((d: any) => !d.isVerified).length,
+    rejected: 0,
   };
 
   return (
@@ -93,9 +97,9 @@ export default function DocumentsPage() {
                   <tr key={doc.id} className={`border-b border-slate-100 dark:border-white/[0.03] ${i % 2 === 0 ? "" : "bg-slate-50 dark:bg-white/[0.01]"}`}>
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center"><span className="material-icons-outlined text-[#008CFF] md-icon-sm">description</span></div>
-                        <div>
-                          <p className="text-[13px] text-slate-800 dark:text-white font-medium">{doc.name}</p>
+                        <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0"><FileText size={16} className="text-[#008CFF]" /></div>
+                        <div className="min-w-0">
+                          <p className="text-[13px] text-slate-800 dark:text-white font-medium truncate">{doc.fileName || "Untitled document"}</p>
                           {doc.fileUrl && <a href={doc.fileUrl} target="_blank" className="text-[11px] text-[#008CFF] hover:underline">View file</a>}
                         </div>
                       </div>
@@ -103,12 +107,12 @@ export default function DocumentsPage() {
                     <td className="px-5 py-3"><span className="text-[12px] px-2 py-0.5 rounded bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300">{doc.category}</span></td>
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-slate-800 dark:text-white text-[10px] font-bold">{doc.employee?.name?.charAt(0)}</div>
-                        <span className="text-[13px] text-slate-800 dark:text-white">{doc.employee?.name}</span>
+                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white text-[10px] font-bold shrink-0">{(doc.user?.name ?? "?").charAt(0).toUpperCase()}</div>
+                        <span className="text-[13px] text-slate-800 dark:text-white">{doc.user?.name ?? "—"}</span>
                       </div>
                     </td>
                     <td className="px-5 py-3 text-[13px] text-slate-500 dark:text-slate-400">{new Date(doc.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
-                    <td className="px-5 py-3"><span className={`text-[11px] px-2 py-0.5 rounded-full capitalize ${doc.verificationStatus === "verified" ? "bg-emerald-500/10 text-emerald-400" : doc.verificationStatus === "pending" ? "bg-amber-500/10 text-amber-400" : "bg-red-500/10 text-red-400"}`}>{doc.verificationStatus}</span></td>
+                    <td className="px-5 py-3"><span className={`text-[11px] px-2 py-0.5 rounded-full ${doc.isVerified ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-600"}`}>{doc.isVerified ? "Verified" : "Pending"}</span></td>
                   </tr>
                 ))}
               </tbody>
