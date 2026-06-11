@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
@@ -220,6 +221,18 @@ export default function ProfilePage() {
     return { label: "NOT IN YET", cls: "bg-red-500/10 text-red-500 border-red-200 dark:border-red-500/20" };
   })();
   const [tab, setTab] = useState<ProfileTab>("ABOUT");
+
+  // Deep-link support: "Me → My Space → Documents" links here with
+  // ?tab=DOCUMENTS so it opens straight on the folder-based documents
+  // view. Reactive to query changes so it works even when already on
+  // this page (client-side nav doesn't remount).
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const t = searchParams.get("tab")?.toUpperCase();
+    if (t && (PROFILE_TABS as readonly string[]).includes(t)) {
+      setTab(t as ProfileTab);
+    }
+  }, [searchParams]);
 
   // Persist whether the user has ever opened the PROFILE tab so the red
   // "incomplete profile" dot can be cleared once acknowledged. Lives in
