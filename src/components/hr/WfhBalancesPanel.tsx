@@ -256,16 +256,16 @@ function EditBalanceModal({
   onSaved: () => void;
 }) {
   const [credited, setCredited] = useState<string>(String(row.credited));
-  const [used,     setUsed]     = useState<string>(String(row.used));
   const [busy, setBusy] = useState(false);
   const [err,  setErr]  = useState<string>("");
 
   const cNum = Number(credited);
-  const uNum = Number(used);
-  const valid = Number.isInteger(cNum) && cNum >= 0 && cNum <= 31
-             && Number.isInteger(uNum) && uNum >= 0 && uNum <= 31;
-  const remaining = Math.max(0, cNum - uNum);
-  const dirty = cNum !== row.credited || uNum !== row.used;
+  // `used` is auto-computed (half-day weighted) from the employee's WFH
+  // requests — read-only here. Only `credited` (the allowance) is editable.
+  const usedVal = row.used;
+  const valid = Number.isInteger(cNum) && cNum >= 0 && cNum <= 31;
+  const remaining = Math.max(0, cNum - usedVal);
+  const dirty = cNum !== row.credited;
 
   const save = async () => {
     if (!valid || !dirty) return;
@@ -274,7 +274,7 @@ function EditBalanceModal({
       const res = await fetch(`/api/hr/wfh/balances/${row.userId}?monthKey=${encodeURIComponent(monthKey)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credited: cNum, used: uNum }),
+        body: JSON.stringify({ credited: cNum }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -334,14 +334,16 @@ function EditBalanceModal({
             />
           </div>
           <div>
-            <label className="block text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-500 mb-1">Used</label>
-            <input
-              type="number" min={0} max={31}
-              value={used}
-              onChange={(e) => setUsed(e.target.value)}
-              disabled={busy}
-              className="h-10 w-full px-3 border border-slate-200 rounded-md text-[15px] font-bold text-slate-900 tabular-nums focus:outline-none focus:border-[#008CFF] disabled:opacity-50"
-            />
+            <label className="block text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-500 mb-1">
+              Used <span className="normal-case font-medium text-slate-400">(auto)</span>
+            </label>
+            <div
+              className="h-10 w-full px-3 border border-slate-100 bg-slate-50 rounded-md text-[15px] font-bold text-slate-700 tabular-nums flex items-center"
+              title="Auto-calculated from this employee's WFH requests (half-days count as 0.5). Not manually editable."
+            >
+              {usedVal}
+            </div>
+            <p className="mt-1 text-[10px] text-slate-400 leading-tight">From WFH requests · half-day = 0.5</p>
           </div>
         </div>
 

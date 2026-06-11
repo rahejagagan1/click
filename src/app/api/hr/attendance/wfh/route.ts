@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
     // partially_approved interim state ALL count against the cap so
     // users can't queue more than `quota` in flight at once.
     if (!isHRGrant) {
-      const { getWfhPolicy, quotaForBrand } = await import("@/lib/hr/wfh-balance");
+      const { getWfhPolicy, quotaForBrand, wfhDayWeight } = await import("@/lib/hr/wfh-balance");
       const policy = await getWfhPolicy();
       if (policy.limitEnabled) {
         const subjProfile = await prisma.employeeProfile.findUnique({
@@ -146,15 +146,11 @@ export async function POST(req: NextRequest) {
         const quota = quotaForBrand(policy, subjectBrand);
 
         const { start: monthStart, end: monthEnd } = istMonthRange(fromIst);
-        // Half-day WFH counts as 0.5, not a full day. Half-days are
-        // encoded as a reason prefix ([First Half] / [Second Half] /
-        // [Half Day]) — the same marker the attendance board reads
-        // (board/route.ts). So we SUM the day-weights of the in-flight
-        // requests (0.5 each for half-days, 1 for full days) instead of
-        // counting rows, and block only if adding THIS request's weight
-        // would exceed the quota.
-        const HALF_DAY_RE = /\[(?:First Half|Second Half|Half Day)\]/i;
-        const dayWeight = (r: string | null | undefined) => (HALF_DAY_RE.test(r ?? "") ? 0.5 : 1);
+        // Half-day WFH counts as 0.5, not a full day. wfhDayWeight()
+        // (shared with the balance display) reads the [First Half] /
+        // [Second Half] / [Half Day] reason marker. SUM the day-weights
+        // of the in-flight requests instead of counting rows, and block
+        // only if adding THIS request's weight would exceed the quota.
         const inFlight = await prisma.wFHRequest.findMany({
           where: {
             userId: subjectUserId,
@@ -163,8 +159,8 @@ export async function POST(req: NextRequest) {
           },
           select: { reason: true },
         });
-        const usedDays  = inFlight.reduce((sum, r) => sum + dayWeight(r.reason), 0);
-        const newWeight = dayWeight(reason); // self-apply cap is always a single day
+        const usedDays  = inFlight.reduce((sum, r) => sum + wfhDayWeight(r.reason), 0);
+        const newWeight = wfhDayWeight(reason); // self-apply cap is always a single day
         if (usedDays + newWeight > quota) {
           const monthLabel = monthStart.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
           const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
