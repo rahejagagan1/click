@@ -8,7 +8,20 @@ import SelectField from "@/components/ui/SelectField";
 import { isHRAdmin } from "@/lib/access";
 import { FileText } from "lucide-react";
 
-const DOC_CATEGORIES = ["All", "Identity", "Education", "Experience", "Finance", "Legal", "Other"];
+// Folder taxonomy — mirrors the personal "My documents" view
+// (profile page SELF_DOC_FOLDERS) so the two stay consistent on names
+// AND grouping. Each tab filters by the raw category values it holds;
+// `cats: null` is the All tab (no filter). The old tabs (Identity /
+// Finance / Legal / …) never matched the stored category values
+// (employee_letter, offer_letter, …) so every tab but "All" was empty.
+const DOC_FOLDERS: { key: string; label: string; cats: string[] | null }[] = [
+  { key: "all",       label: "All",                 cats: null },
+  { key: "identity",  label: "Identity Documents",  cats: ["pan_card", "aadhar", "passport", "driving_license"] },
+  { key: "education", label: "Education",           cats: ["education_certificate"] },
+  { key: "letters",   label: "Employment Letters",  cats: ["offer_letter"] },
+  { key: "previous",  label: "Previous Experience", cats: ["previous_relieving_letter", "previous_offer_letter"] },
+  { key: "other",     label: "Other Documents",     cats: ["other", "employee_letter"] },
+];
 
 export default function DocumentsPage() {
   const { data: session } = useSession();
@@ -17,7 +30,7 @@ export default function DocumentsPage() {
   // + role=admin + hr_manager). HR admins now correctly see the upload
   // button — matches what /api/hr/documents accepts.
   const isAdmin = isHRAdmin(user);
-  const [category, setCategory] = useState("All");
+  const [folderKey, setFolderKey] = useState("all");
   const [showUpload, setShowUpload] = useState(false);
 
   // This page lives under the personal "Me → My Space" section, so it
@@ -31,7 +44,10 @@ export default function DocumentsPage() {
     ? `/api/hr/documents?userId=${myId}`
     : "/api/hr/documents";
   const { data: documents = [], isLoading } = useSWR(docsKey, fetcher);
-  const filtered = category === "All" ? documents : documents.filter((d: any) => d.category === category);
+  const activeFolder = DOC_FOLDERS.find((f) => f.key === folderKey);
+  const filtered = !activeFolder?.cats
+    ? documents
+    : documents.filter((d: any) => activeFolder.cats!.includes(d.category));
 
   // EmployeeDocument stores a boolean `isVerified` (no separate
   // pending/rejected states), so verified = isVerified, pending =
@@ -90,8 +106,8 @@ export default function DocumentsPage() {
 
         {/* ── Category Tabs ── */}
         <div className="flex gap-0 border-b border-slate-200 dark:border-white/[0.06]">
-          {DOC_CATEGORIES.map((c) => (
-            <button key={c} onClick={() => setCategory(c)} className={`px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors ${category === c ? "border-[#008CFF] text-slate-800 dark:text-white" : "border-transparent text-slate-500 hover:text-slate-800 dark:text-white"}`}>{c}</button>
+          {DOC_FOLDERS.map((f) => (
+            <button key={f.key} onClick={() => setFolderKey(f.key)} className={`px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors whitespace-nowrap ${folderKey === f.key ? "border-[#008CFF] text-slate-800 dark:text-white" : "border-transparent text-slate-500 hover:text-slate-800 dark:text-white"}`}>{f.label}</button>
           ))}
         </div>
 
@@ -151,7 +167,7 @@ export default function DocumentsPage() {
                 <SelectField
                   value=""
                   onChange={() => { /* unwired in this stub modal */ }}
-                  options={DOC_CATEGORIES.filter((c) => c !== "All")}
+                  options={DOC_FOLDERS.filter((f) => f.key !== "all").map((f) => f.label)}
                   className="w-full h-10 px-3 bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.08] rounded-lg text-[13px] text-slate-800 dark:text-white"
                 />
               </div>
