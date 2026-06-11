@@ -23,8 +23,19 @@ import { ChevronDown, Check } from "lucide-react";
  * and re-pins on resize/scroll so it survives sidebar collapses, etc.
  */
 
-export type SelectOption = { value: string; label: string };
+// Optional small chip rendered on the right of an option (e.g. a brand badge so
+// HR can tell which brand a designation belongs to).
+export type SelectBadge = { text: string; className?: string };
+export type SelectOption = { value: string; label: string; badge?: SelectBadge };
 type SelectInput = SelectOption | string;
+
+function Chip({ badge }: { badge: SelectBadge }) {
+  return (
+    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${badge.className ?? "bg-slate-100 text-slate-600"}`}>
+      {badge.text}
+    </span>
+  );
+}
 
 function normalize(opts: SelectInput[]): SelectOption[] {
   return opts.map((o) => (typeof o === "string" ? { value: o, label: o } : o));
@@ -99,8 +110,9 @@ export default function SelectField({
         onClick={() => !disabled && setOpen((v) => !v)}
         className={`${triggerCls} flex items-center justify-between gap-2 text-left`}
       >
-        <span className={current ? "" : "text-slate-400"}>
-          {current?.label ?? placeholder}
+        <span className={`flex items-center gap-1.5 min-w-0 ${current ? "" : "text-slate-400"}`}>
+          <span className="truncate">{current?.label ?? placeholder}</span>
+          {current?.badge && <Chip badge={current.badge} />}
         </span>
         <ChevronDown size={14} strokeWidth={2} className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
@@ -162,7 +174,8 @@ export default function SelectField({
                           : "text-slate-700 hover:bg-slate-100"
                       }`}
                     >
-                      <span className="truncate">{o.label}</span>
+                      <span className="truncate flex-1">{o.label}</span>
+                      {o.badge && <Chip badge={o.badge} />}
                       {isSel && <Check size={14} strokeWidth={2.5} className="text-[#3b82f6] shrink-0" />}
                     </button>
                   );

@@ -87,7 +87,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       const sum = items.reduce((s, i) => s + i.netPay, 0);
       summary.getCell(`B${r}`).value = bank.toUpperCase();
       summary.getCell(`C${r}`).value = items.length;
-      summary.getCell(`D${r}`).value = Math.round(sum);
+      summary.getCell(`D${r}`).value = Math.round(sum * 100) / 100; // actual value, with paise
       r += 1;
     }
 
@@ -122,7 +122,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         ws.getCell(row, 6).value = r.bankName ?? "";    // Title Case as stored
         ws.getCell(row, 7).value = r.bankIfsc ?? "";
         ws.getCell(row, 8).value = r.bankAccountNumber ?? "";
-        ws.getCell(row, 9).value = Math.round(r.netPay);
+        ws.getCell(row, 9).value = Math.round(r.netPay * 100) / 100; // actual value, with paise
       });
 
       ws.getColumn(2).width = 6;
