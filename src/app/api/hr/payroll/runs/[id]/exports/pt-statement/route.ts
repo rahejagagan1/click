@@ -10,7 +10,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
-import { loadExportRows, monYearSpace } from "@/lib/payroll-exports";
+import { loadExportRows, monYearSpace,
+  brandParam, filterRowsByBrand, COMPANY_BY_BRAND, BRAND_SLUG } from "@/lib/payroll-exports";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ const NB_MEDIA = {
   ptRegisteredLocation: "Mohali",
 } as const;
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   if (!canViewSalary(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -37,10 +38,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: `Lock the run first — currently '${run.status}'` }, { status: 409 });
     }
 
+    // Brand split: ?brand= exports only that brand's employees; no brand => all.
+    // NOTE: ptState / ptRegisteredLocation below are NB Media's PT registration;
+    // YT Labs' PT registration may differ — configure per-entity when known.
+    const brand = brandParam(req);
+    const scoped = filterRowsByBrand(rows, brand);
+    if (brand && scoped.length === 0) {
+      return NextResponse.json({ error: `No ${brand} employees in this payroll run.` }, { status: 422 });
+    }
+    const companyName = brand ? COMPANY_BY_BRAND[brand] : NB_MEDIA.companyName;
+
     // PT is per-payslip — skip on-hold rows (no salary processed)
     // but keep rows even where PT is 0 (waived due to LOP > 5) so the
     // filing shows everyone the company accounted for this cycle.
-    const payable = rows.filter(r => r.status !== "on_hold");
+    const payable = scoped.filter(r => r.status !== "on_hold");
 
     const monthLabel = monYearSpace(run.month, run.year);
 
@@ -48,7 +59,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const ws = wb.addWorksheet("PT Monthly Statement");
 
     ws.mergeCells("A1:F1");
-    ws.getCell("A1").value = NB_MEDIA.companyName;
+    ws.getCell("A1").value = companyName;
     ws.getCell("A1").font = { bold: true };
     ws.mergeCells("A2:F2");
     ws.getCell("A2").value = `Professional Tax Summary - ${monthLabel}`;
@@ -79,7 +90,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     ws.getColumn(6).width = 12;
 
     const buf = await wb.xlsx.writeBuffer();
-    const filename = `PT Monthly Statement_${monthLabel}.xlsx`;
+    const filename = `PT Monthly Statement_${monthLabel}${brand ? `_${BRAND_SLUG[brand]}` : ""}.xlsx`;
     return new NextResponse(buf as any, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
