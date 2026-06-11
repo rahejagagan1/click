@@ -8,11 +8,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
-import { loadExportRows, monYearDash, EPF_CEILING, EDLI_CEILING } from "@/lib/payroll-exports";
+import { loadExportRows, monYearDash, EPF_CEILING, EDLI_CEILING,
+  brandParam, filterRowsByBrand, BRAND_SLUG } from "@/lib/payroll-exports";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   if (!canViewSalary(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -27,9 +28,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: `Lock the run first — currently '${run.status}'` }, { status: 409 });
     }
 
+    // Brand split: ?brand= exports only that brand's employees; no brand => all.
+    const brand = brandParam(req);
+    const scoped = filterRowsByBrand(rows, brand);
+    if (brand && scoped.length === 0) {
+      return NextResponse.json({ error: `No ${brand} employees in this payroll run.` }, { status: 422 });
+    }
+
     // ECR only covers PF members; skip non-eligible employees and any
     // on-hold payslips (no contribution to remit for those).
-    const eligible = rows.filter(r => r.pfEligible && r.status !== "on_hold");
+    const eligible = scoped.filter(r => r.pfEligible && r.status !== "on_hold");
 
     // EPFO won't accept the file if any row is missing a UAN — block
     // with a 422 + the list so HR can backfill before re-trying.
@@ -41,7 +49,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       }, { status: 422 });
     }
 
-    const sheetName = `EmployerECR_${monYearDash(run.month, run.year)}`;
+    const sheetName = `EmployerECR_${monYearDash(run.month, run.year)}${brand ? `_${BRAND_SLUG[brand]}` : ""}`;
 
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet(sheetName);

@@ -42,6 +42,9 @@ export type ExportRow = {
   designation: string | null;
   employmentType: string | null;
   joiningDate: Date | null;
+  // Brand / entity — used to split the exports per brand (NB Media vs YT Labs).
+  businessUnit: string | null;
+  legalEntity: string | null;
   // Bank
   bankName: string | null;
   bankAccountNumber: string | null;
@@ -117,6 +120,8 @@ export async function loadExportRows(runId: number): Promise<{
       bankAccountNumber: true,
       bankIfsc: true,
       uanNumber: true,
+      businessUnit: true,
+      legalEntity: true,
     },
   });
   const profileByUserId = new Map(profiles.map(p => [p.userId, p]));
@@ -154,6 +159,8 @@ export async function loadExportRows(runId: number): Promise<{
       designation: prof?.designation ?? null,
       employmentType: prof?.employmentType ?? null,
       joiningDate: prof?.joiningDate ?? null,
+      businessUnit: prof?.businessUnit ?? null,
+      legalEntity: prof?.legalEntity ?? null,
       bankName: prof?.bankName ?? null,
       // Bank account / IFSC / UAN are encrypted at rest. Decrypt for the
       // file — finance / banks / EPFO need the cleartext values.
@@ -196,6 +203,42 @@ export async function loadExportRows(runId: number): Promise<{
 // but a long name could go over.
 export function safeSheetName(name: string): string {
   return name.slice(0, 31);
+}
+
+// ── Brand split ───────────────────────────────────────────────────────
+// Each brand's payroll exports as a separate file with its own legal
+// entity. brandOf mirrors the app convention: YT Labs is exact, NB Media
+// is everything else (incl. null / legacy) so nobody is silently dropped.
+export type PayrollBrand = "NB Media" | "YT Labs";
+
+export function brandOf(businessUnit: string | null | undefined): PayrollBrand {
+  return businessUnit === "YT Labs" ? "YT Labs" : "NB Media";
+}
+
+// Legal entity / company name printed on each brand's exports.
+// NB Media keeps its existing Keka label verbatim (bookkeepers reconcile
+// against it). Replace the YT Labs value with its exact registered name.
+export const COMPANY_BY_BRAND: Record<PayrollBrand, string> = {
+  "NB Media": "YT Money Productions Pvt. Ltd (NB Media)",
+  "YT Labs":  "YT Labs",
+};
+
+// Short slug used in non-Keka filenames so a YT Labs file never overwrites
+// the NB Media one when both are downloaded for the same month.
+export const BRAND_SLUG: Record<PayrollBrand, string> = {
+  "NB Media": "NB-Media",
+  "YT Labs":  "YT-Labs",
+};
+
+// Parse + validate the ?brand= query param. null => no filter (all employees,
+// the legacy behaviour) so existing links keep working.
+export function brandParam(req: Request): PayrollBrand | null {
+  const b = new URL(req.url).searchParams.get("brand");
+  return b === "NB Media" || b === "YT Labs" ? b : null;
+}
+
+export function filterRowsByBrand(rows: ExportRow[], brand: PayrollBrand | null): ExportRow[] {
+  return brand ? rows.filter(r => brandOf(r.businessUnit) === brand) : rows;
 }
 
 // "Aganist" typo deliberately preserved — Keka's existing exports use

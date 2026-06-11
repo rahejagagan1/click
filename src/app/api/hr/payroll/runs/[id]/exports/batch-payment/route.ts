@@ -14,11 +14,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
-import { loadExportRows, monShort, monYearUnderscore, safeSheetName } from "@/lib/payroll-exports";
+import { loadExportRows, monShort, monYearUnderscore, safeSheetName,
+  brandParam, filterRowsByBrand, COMPANY_BY_BRAND, BRAND_SLUG } from "@/lib/payroll-exports";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   if (!canViewSalary(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -35,9 +36,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: `Lock the run first — currently '${run.status}'` }, { status: 409 });
     }
 
+    // Brand split: ?brand= exports only that brand's employees; no brand => all.
+    const brand = brandParam(req);
+    const scoped = filterRowsByBrand(rows, brand);
+    if (brand && scoped.length === 0) {
+      return NextResponse.json({ error: `No ${brand} employees in this payroll run.` }, { status: 422 });
+    }
+
     // Skip on-hold payslips entirely. Hold means HR isn't paying them
     // this cycle, so they shouldn't appear in the bank transfer file.
-    const payable = rows.filter(r => r.status !== "on_hold");
+    const payable = scoped.filter(r => r.status !== "on_hold");
 
     // Reject the download if any payable row is missing bank info —
     // dumping a half-filled file to the bank would bounce the batch.
@@ -68,7 +76,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // ── Sheet 1: Payment Summary ────────────────────────────────────
     const summary = wb.addWorksheet("Payment Summary");
     summary.mergeCells("A1:D1");
-    summary.getCell("A1").value = "YT MONEY PRODUCTIONS PRIVATE LIMITED";
+    summary.getCell("A1").value = brand === "YT Labs"
+      ? COMPANY_BY_BRAND["YT Labs"].toUpperCase()
+      : "YT MONEY PRODUCTIONS PRIVATE LIMITED";
     summary.getCell("A1").font = { bold: true };
     summary.mergeCells("A2:D2");
     summary.getCell("A2").value = `Bank Transfer Statement for the month of ${monthYearTitle}`;
@@ -136,7 +146,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     const buf = await wb.xlsx.writeBuffer();
-    const filename = `BatchPayment_Monthly_Statement_${monYearUnderscore(run.month, run.year)}.xlsx`;
+    const filename = `BatchPayment_Monthly_Statement_${monYearUnderscore(run.month, run.year)}${brand ? `_${BRAND_SLUG[brand]}` : ""}.xlsx`;
     return new NextResponse(buf as any, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
