@@ -721,13 +721,18 @@ export async function wrapLetterPreviewHtml(
        them — fixes the "congested / words running together"
        feel users hit at the 0.5px default. Letter-spacing
        inherits 0.5px from body. */
-    p { font-size: 12pt; line-height: 1.5; margin: 2pt 0; text-align: left; word-spacing: 2px; }
-    p.signoff, p[data-role="signoff"] { text-align: left; margin: 2pt 0; }
+    /* margin-bottom 7pt (was 2pt) clearly separates consecutive
+       paragraphs — the old 2pt gap ran them together and read as
+       "congested". line-height bumped 1.5 → 1.6 for an airier,
+       formal feel. orphans/widows:2 stop a single dangling line
+       splitting across a page break. */
+    p { font-size: 12pt; line-height: 1.6; margin: 0 0 7pt; text-align: left; word-spacing: 2px; orphans: 2; widows: 2; }
+    p.signoff, p[data-role="signoff"] { text-align: left; margin: 0 0 7pt; }
     p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; }
     h2 { font-size: 14pt; margin: 12pt 0 6pt; }
     h3 { font-size: 13pt; margin: 10pt 0 6pt; }
-    ol, ul { padding-left: 22pt; margin: 6pt 0; }
-    ol li, ul li { margin-bottom: 3pt; font-size: 12pt; line-height: 1.5; word-spacing: 2px; }
+    ol, ul { padding-left: 22pt; margin: 6pt 0 10pt; }
+    ol li, ul li { margin-bottom: 5pt; font-size: 12pt; line-height: 1.6; word-spacing: 2px; orphans: 2; widows: 2; }
     /* Keep the signature cluster (Regards / Name / Founder & CEO +
        cursive image) together — it has the cursive PNG and
        splitting it mid-block would look broken. We deliberately
@@ -773,6 +778,12 @@ export async function wrapLetterPreviewHtml(
     table.pay-table { page-break-inside: avoid; break-inside: avoid; }
     table.pay-table tr { page-break-inside: avoid; break-inside: avoid; }
     h2.section-title, h3 { page-break-after: avoid; break-after: avoid; }
+    /* Keep the lead-in line ("FIXED MONTHLY PAY:") — and any element
+       immediately before a pay table — glued to that table, so it
+       never orphans at the bottom of a page while the table jumps to
+       the next one. :has() is honoured by the Chromium engine that
+       renders the PDF (and the live preview iframe). */
+    *:has(+ table.pay-table) { page-break-after: avoid; break-after: avoid; }
     .page-break { display: block; height: 22pt; border-top: 1pt dashed #cbd5e1; margin: 18pt 0; padding-top: 8pt; }
   </style>
 </head>
