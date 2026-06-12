@@ -32,16 +32,26 @@ export async function GET() {
             return NextResponse.json({ channels: [], year, quarter });
         }
 
+        // Soft-fail each query so the panel still renders something
+        // when:
+        //   • YoutubeDashboardQuarterMetrics is empty (cron hasn't
+        //     run yet)
+        //   • ChannelViewTarget table doesn't exist (HR hasn't run
+        //     the migration yet)
+        // In both cases callers degrade to 0s for the missing data
+        // without losing the configured channel list.
+        async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
+            try { return await p; } catch (e: any) {
+                const code = e?.meta?.code || e?.code;
+                const msg = String(e?.meta?.message || e?.message || "");
+                if (code === "42P01" || /does not exist|42P01/i.test(msg)) return fallback;
+                throw e;
+            }
+        }
         const [currentQuarterRows, ytdRows, targetRows] = await Promise.all([
-            prisma.youtubeDashboardQuarterMetrics.findMany({
-                where: { year, quarter },
-            }),
-            prisma.youtubeDashboardQuarterMetrics.findMany({
-                where: { year, quarter: { lte: quarter } },
-            }),
-            prisma.channelViewTarget.findMany({
-                where: { year, quarter: { in: [0, quarter] } },
-            }),
+            safe(prisma.youtubeDashboardQuarterMetrics.findMany({ where: { year, quarter } }), []),
+            safe(prisma.youtubeDashboardQuarterMetrics.findMany({ where: { year, quarter: { lte: quarter } } }), []),
+            safe(prisma.channelViewTarget.findMany({ where: { year, quarter: { in: [0, quarter] } } }), []),
         ]);
 
         const currentByChannel = new Map<string, number>();
