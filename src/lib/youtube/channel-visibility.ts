@@ -40,6 +40,20 @@ const CHANNEL_CAPSULES: Record<string, ReadonlySet<string>> = {
     "UCWuhiF3rWQ7gZgpaTh-4tIg": new Set(["C4"]),
 };
 
+/**
+ * Designations that always see every channel (no capsule filter).
+ *
+ * Currently: "Executive Assistant" (Palak Dhiman) — needs full
+ * cross-channel visibility because the EA role coordinates across all
+ * brands and capsules on behalf of leadership. Compared
+ * case-insensitively against EmployeeProfile.designation.
+ *
+ * Add more designations here as policy evolves; one-line change.
+ */
+const BYPASS_DESIGNATIONS: ReadonlySet<string> = new Set([
+    "executive assistant",
+]);
+
 function suffixOf(capsule: string | null | undefined): string | null {
     if (!capsule) return null;
     const trimmed = capsule.trim();
@@ -77,16 +91,23 @@ export async function filterVisibleChannels<T extends { channelId: string }>(
         return channels.filter((c) => !CHANNEL_CAPSULES[c.channelId]);
     }
 
-    const rows = await prisma.$queryRawUnsafe<Array<{ teamCapsule: string | null }>>(
-        `SELECT cap."teamCapsule"
+    const rows = await prisma.$queryRawUnsafe<Array<{ teamCapsule: string | null; designation: string | null }>>(
+        `SELECT cap."teamCapsule", ep.designation
            FROM "User" me
-      LEFT JOIN "User" mgr   ON mgr.id   = me."managerId"
-      LEFT JOIN "User" inl   ON inl.id   = me."inlineManagerId"
+      LEFT JOIN "User" mgr  ON mgr.id = me."managerId"
+      LEFT JOIN "User" inl  ON inl.id = me."inlineManagerId"
+      LEFT JOIN "EmployeeProfile" ep ON ep."userId" = me.id
       JOIN LATERAL (VALUES (me."teamCapsule"), (mgr."teamCapsule"), (inl."teamCapsule"))
            AS cap("teamCapsule") ON TRUE
           WHERE me.id = $1`,
         userId,
     );
+
+    // Designation-based bypass — fires before the capsule filter so an
+    // EA / equivalent sees every channel regardless of org placement.
+    const designation = rows.find((r) => r.designation)?.designation?.trim().toLowerCase();
+    if (designation && BYPASS_DESIGNATIONS.has(designation)) return channels;
+
     const mySuffixes = new Set(
         rows.map((r) => suffixOf(r.teamCapsule)).filter((s): s is string => s != null),
     );
