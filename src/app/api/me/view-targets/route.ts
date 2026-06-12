@@ -85,8 +85,23 @@ export async function GET() {
             quarter,
             year,
         }));
+        // Page-friendly alias: same data keyed by quarter (0 = year so far).
+        // The admin editor reads this to render the "currently 124,500"
+        // hint under each input.
+        const pageRows = configured.map((c) => ({
+            channelId: c.channelId,
+            channelName: c.name,
+            year,
+            currentViews: {
+                0: ytdByChannel.get(c.channelId) ?? 0,
+                1: quarter === 1 ? (currentByChannel.get(c.channelId) ?? 0) : null,
+                2: quarter === 2 ? (currentByChannel.get(c.channelId) ?? 0) : null,
+                3: quarter === 3 ? (currentByChannel.get(c.channelId) ?? 0) : null,
+                4: quarter === 4 ? (currentByChannel.get(c.channelId) ?? 0) : null,
+            },
+        }));
 
-        return NextResponse.json({ channels, year, quarter });
+        return NextResponse.json({ channels, year, quarter, rows: pageRows });
     } catch (error) {
         return serverError(error, "GET /api/me/view-targets");
     }

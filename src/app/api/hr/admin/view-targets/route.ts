@@ -54,6 +54,10 @@ export async function GET(req: NextRequest) {
             byChannelQuarter.set(`${row.channelId}:${row.quarter}`, Number(row.target));
         }
 
+        // Build BOTH response shapes so the admin editor page and any
+        // legacy consumer of the original {channels:...} contract both
+        // work. The page reads `rows` + `row.targets[quarter]` (Map-by-
+        // quarter); the original shape kept `yearTarget` + `quarterTargets[]`.
         const channels = configured.map((c) => ({
             channelId: c.channelId,
             channelName: c.name,
@@ -66,8 +70,20 @@ export async function GET(req: NextRequest) {
                 byChannelQuarter.get(`${c.channelId}:4`) ?? 0,
             ],
         }));
+        const pageRows = configured.map((c) => ({
+            channelId: c.channelId,
+            channelName: c.name,
+            year,
+            targets: {
+                0: byChannelQuarter.get(`${c.channelId}:0`) ?? null,
+                1: byChannelQuarter.get(`${c.channelId}:1`) ?? null,
+                2: byChannelQuarter.get(`${c.channelId}:2`) ?? null,
+                3: byChannelQuarter.get(`${c.channelId}:3`) ?? null,
+                4: byChannelQuarter.get(`${c.channelId}:4`) ?? null,
+            },
+        }));
 
-        return NextResponse.json({ year, channels });
+        return NextResponse.json({ year, channels, rows: pageRows });
     } catch (error) {
         return serverError(error, "GET /api/hr/admin/view-targets");
     }
