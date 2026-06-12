@@ -2554,6 +2554,44 @@ model JobApplication {
   referredById     Int?
   referredBy       User?      @relation("JobApplicationReferrer", fields: [referredById], references: [id], onDelete: SetNull)
 
+  /// Archive metadata — set by the ArchiveCandidateModal flow. archivedAt
+  /// drives the "Archived" badge in the list view; archiveReason +
+  /// archiveNote capture HR's "why" so the candidate can be re-opened
+  /// later with full context. All three were never in the schema but
+  /// were already in production — re-added after a prisma db push
+  /// silently dropped them on 2026-06-12.
+  archivedAt      DateTime?
+  archiveReason   String?
+  archiveNote     String?  @db.Text
+
+  /// Smart-form columns written by the public /api/jobs/apply route
+  /// (and read by the CandidateDrawer Profile tab). Added to the schema
+  /// after the same 2026-06-12 prisma db push dropped them — production
+  /// code reads/writes via $queryRawUnsafe, the schema was the source of
+  /// truth that lagged behind.
+  firstName               String?
+  middleName              String?
+  lastName                String?
+  gender                  String?
+  dateOfBirth             DateTime?
+  mobileCountryCode       String?
+  experienceMonths        Int?
+  currentSalary           Float?
+  currentSalaryCurrency   String?
+  currentSalaryFreq       String?
+  expectedSalary          Float?
+  expectedSalaryCurrency  String?
+  expectedSalaryFreq      String?
+  availableToJoinDays     Int?
+  preferredLocation       String?
+  currentLocation         String?
+  /// Comma-separated free-text list from the chip input on the apply form.
+  skills                  String?  @db.Text
+  /// JSON-stringified array of repeatable Education Details cards.
+  educationDetails        String?  @db.Text
+  /// JSON-stringified array of repeatable Experience Details cards.
+  experienceDetails       String?  @db.Text
+
   // Cascade collections
   stageHistory     JobApplicationStage[]
   interviews       Interview[]
