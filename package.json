@@ -9,6 +9,9 @@
     "build:ci": "prisma generate && next build",
     "start": "prisma migrate deploy && next start -p 3005",
     "db:setup": "prisma migrate deploy && prisma generate",
+    "db:push": "node tools/safe-prisma-push.mjs",
+    "db:push:unsafe": "prisma db push",
+    "db:diff": "prisma migrate diff --from-url $DATABASE_URL --to-schema-datamodel ./prisma/schema.prisma --script",
     "setup": "npm ci && prisma migrate deploy && prisma generate",
     "lint": "eslint",
     "postinstall": "prisma generate"
