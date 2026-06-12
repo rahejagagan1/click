@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
+import ChannelViewsTargetsPanel from "@/components/hr/ChannelViewsTargetsPanel";
 import { fetcher } from "@/lib/swr";
 import SelectField from "@/components/ui/SelectField";
 import { useSession } from "next-auth/react";
@@ -2182,6 +2183,7 @@ export default function HRHomePage() {
   const { data: session } = useSession();
   const user    = session?.user as any;
   const isAdmin = isHRAdmin(user);
+  const canCompose = isAdmin;
 
   const monthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
 
@@ -3376,6 +3378,7 @@ export default function HRHomePage() {
 
           <div className="min-w-0 min-h-0 overflow-y-auto pr-1">
             <div className="max-w-[700px] space-y-3">
+              <ChannelViewsTargetsPanel />
               <div className={`${C.card} overflow-hidden`}>
                 <div className={`flex items-center border-b ${C.div} px-1`}>
                   {[["org", "Organization"], ["team", teamLabel]].map(([k, l]) => (
@@ -3391,6 +3394,7 @@ export default function HRHomePage() {
                   ))}
                 </div>
 
+                {canCompose && (
                 <div className="px-4 pt-3 pb-4">
                   {!composerOpen ? (
                     /* Collapsed prompt — clicking opens the full composer */
@@ -3832,8 +3836,10 @@ export default function HRHomePage() {
                     </div>
                   )}
                 </div>
+                )}
               </div>
 
+              {canCompose && (
               <div className={`${C.card} flex items-center justify-between px-4 py-3`}>
                 <div className="min-w-0">
                   <p className={`truncate text-[12.5px] ${C.t3}`}>
@@ -3849,6 +3855,7 @@ export default function HRHomePage() {
                   </Link>
                 ) : null}
               </div>
+              )}
 
               <EventsWidget bTab={bTab} setBTab={setBTab} C={C} />
 

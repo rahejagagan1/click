@@ -781,7 +781,8 @@ export default function EngagePage() {
             developer). Regular employees still see the feed but
             can't create new posts. Matches the moderation tier
             used for Edit / Delete on individual posts. */}
-        {canCompose ? (
+        <ChannelViewsTargetsPanel />
+        {canCompose && (
         <div className="bg-white dark:bg-[#0d1b2a] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
           {/* Scope tabs */}
           <div className="flex items-center border-b border-slate-100 dark:border-white/[0.04] px-4">
@@ -876,8 +877,6 @@ export default function EngagePage() {
             )}
           </div>
         </div>
-        ) : (
-          <ChannelViewsTargetsPanel />
         )}
 
         {/* Feed */}
