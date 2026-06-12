@@ -106,6 +106,7 @@ model User {
   dashboardFeedbacks     UserFeedback[]
   youtubeDashUserQuarterChannels YoutubeDashUserQuarterChannel[]
   channelViewTargetsUpdated ChannelViewTarget[] @relation("ChannelViewTargetUpdater")
+  pulseResponses           PulseResponse[]     @relation("PulseResponseUser")
 
   // ── HR Module Relations ──
   employeeProfile        EmployeeProfile?
@@ -2869,4 +2870,55 @@ model JobApplicationFormField {
   sortOrder   Int     @default(0)
   isMandatory Boolean @default(false)  // System-locked — HR can't hide these (name/email/etc.)
   updatedAt   DateTime @updatedAt
+}
+
+/// Pulse survey question — both weekly and monthly cycles. Each question
+/// is keyed by a brand (EmployeeProfile.businessUnit) so NB Media and YT
+/// Labs employees see different surveys. Was missing from schema for a
+/// long time even though production code wrote/read it via raw SQL.
+/// Restored on 2026-06-12 after a prisma db push silently dropped it.
+model PulseQuestion {
+  id          Int       @id @default(autoincrement())
+  /// 1-4 for weekly surveys (rotates by ISO week). NULL for monthly.
+  week        Int?
+  order       Int       @default(0)
+  text        String
+  /// "emoji" | "rating" | "likert" | "enps" | "text"
+  type        String
+  /// JSON-stringified emoji list (only used when type === "emoji").
+  emojis      Json?
+  isActive    Boolean   @default(true)
+  /// "weekly" | "monthly"
+  surveyType  String    @default("weekly")
+  /// Brand filter — "NB Media" / "YT Labs". Strict brand separation.
+  brand       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  responses   PulseResponse[]
+
+  @@index([surveyType, brand, isActive])
+}
+
+/// One row per user per question per submission cycle. cycleKey
+/// is stored as "weekKey" historically — for weekly cycles it holds
+/// the ISO week (e.g. "2026-W23"); for monthly cycles it holds the
+/// month key (e.g. "2026-M06"). The (userId, weekKey, questionId)
+/// unique constraint lets the server enforce idempotency on a
+/// re-submit. Restored from production on 2026-06-12 after the same
+/// prisma db push dropped it.
+model PulseResponse {
+  id           Int       @id @default(autoincrement())
+  userId       Int
+  weekKey      String
+  questionId   Int
+  score        Int?
+  comment      String?   @db.Text
+  submittedAt  DateTime  @default(now())
+
+  user         User          @relation("PulseResponseUser",     fields: [userId],     references: [id], onDelete: Cascade)
+  question     PulseQuestion @relation(                          fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, weekKey, questionId])
+  @@index([userId, weekKey])
 }
