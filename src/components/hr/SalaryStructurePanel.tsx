@@ -13,7 +13,7 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import {
   CheckCircle2, AlertCircle, IndianRupee, Save, Wallet, Info, Lock, Calendar,
-  MoreVertical, Plus, X, Paperclip,
+  MoreVertical, Plus, X, Paperclip, TrendingUp,
 } from "lucide-react";
 import CustomSelect from "@/components/ui/CustomSelect";
 import SelectField from "@/components/ui/SelectField";
@@ -102,9 +102,8 @@ const PF_EMPLOYEE_ANNUAL_FIXED  = 21600;   // ₹21,600 / yr = ₹1,800 / month 
 const PF_EMPLOYER_ANNUAL_FIXED  = 21600;   // matched employer contribution (not part of CTC)
 
 // Compute the per-component annual amounts for a regular employee given
-// the entered annual CTC and the pfEligible flag. Returns `special < 0`
-// when the CTC is too low to cover the fixed portions — onSave checks
-// this and refuses to submit (per the "block / show error" UX choice).
+// the entered annual CTC and the pfEligible flag. When the CTC is too low to
+// cover the fixed portions, Special Allowance floors at 0 (no minimum-CTC gate).
 //
 // Split rule:
 //   Basic   = 50%  of CTC
@@ -122,7 +121,10 @@ function regularSplit(annualCtc: number, pfEligible: boolean) {
   const medical = MEDICAL_ALLOWANCE_ANNUAL;
   const pfEmp   = pfEligible ? PF_EMPLOYEE_ANNUAL_FIXED : 0;
   const pfEmpr  = pfEligible ? PF_EMPLOYER_ANNUAL_FIXED : 0;
-  const special = annualCtc - (basic + hra + da + conv + medical + pfEmp);
+  // Floor at 0: for a low CTC the fixed portions (Basic/HRA/DA/Conv % + Medical
+  // + PF) can exceed the CTC. Rather than block the save or store a negative
+  // Special Allowance, clamp it to 0 (the other components absorb the rest).
+  const special = Math.max(0, annualCtc - (basic + hra + da + conv + medical + pfEmp));
   return { basic, hra, da, conv, medical, pfEmp, pfEmpr, special };
 }
 
@@ -198,6 +200,12 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [showBonusModal, setShowBonusModal] = useState(false);
+  // Salary Revision modal — a focused "new salary, effective from <date>" flow.
+  const [showRevisionModal, setShowRevisionModal] = useState(false);
+  const [revSalary, setRevSalary] = useState("");
+  const [revDate, setRevDate] = useState("");
+  const [revBusy, setRevBusy] = useState(false);
+  const [revErr, setRevErr] = useState("");
   // Close the dots menu on outside click / Escape so it behaves like the
   // rest of the dashboard's overflow menus.
   useEffect(() => {
@@ -236,26 +244,8 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
       setError("Enter the annual salary.");
       return;
     }
-    // Block-and-warn: when the CTC is too low for the fixed portions
-    // (Medical ₹15k/yr + optional PF ₹21.6k/yr) the formula's Special
-    // Allowance would go negative. Show the exact minimum so HR knows
-    // what to bump to.
-    if (form.salaryType === "Regular Employee") {
-      const annual = parseFloat(form.annualSalary || "0") || 0;
-      const split  = regularSplit(annual, !!form.pfEligible);
-      if (split.special < 0) {
-        const minAnnual = form.pfEligible
-          ? Math.ceil((MEDICAL_ALLOWANCE_ANNUAL + PF_EMPLOYEE_ANNUAL_FIXED) / 0.125)
-          : Math.ceil(MEDICAL_ALLOWANCE_ANNUAL / 0.125);
-        const minMonthly = Math.ceil(minAnnual / 12);
-        setError(
-          `CTC is too low for the salary formula. ` +
-          `With PF ${form.pfEligible ? "ON" : "OFF"} the minimum annual CTC is ` +
-          `₹${minAnnual.toLocaleString("en-IN")} (≈ ₹${minMonthly.toLocaleString("en-IN")} / month).`
-        );
-        return;
-      }
-    }
+    // (No minimum-CTC gate: a low CTC is allowed — Special Allowance just
+    // floors at 0 in regularSplit instead of going negative.)
     if (!form.effectiveFrom) {
       setError("Pick an effective-from date.");
       return;
@@ -275,6 +265,39 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
       setError(e?.message || "Save failed");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Salary Revision — set a new salary effective from a chosen date. Reuses the
+  // same POST endpoint as a full edit, so the change is audited and shows up
+  // under Payroll → Salary Revisions. The single SalaryStructure row is updated
+  // in place to the new CTC + effectiveFrom (the AuditLog before/after is the
+  // revision record — there is no separate history table).
+  const submitRevision = async () => {
+    setRevErr("");
+    const amt = parseFloat(revSalary || "0") || 0;
+    if (amt <= 0) { setRevErr(form.salaryType === "Intern" ? "Enter the new monthly stipend." : "Enter the new annual salary (CTC)."); return; }
+    if (!revDate) { setRevErr("Pick the date the new salary takes effect."); return; }
+    setRevBusy(true);
+    try {
+      const revised: FormState = form.salaryType === "Intern"
+        ? { ...form, monthlyStipend: revSalary, effectiveFrom: revDate }
+        : { ...form, annualSalary: revSalary, effectiveFrom: revDate };
+      const res = await fetch("/api/hr/payroll/salary-structure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formToApi(revised, userId)),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Revision failed");
+      setForm(revised);          // reflect the revised figures in the panel
+      setSavedAt(Date.now());
+      mutate(apiUrl);
+      setShowRevisionModal(false);
+    } catch (e: any) {
+      setRevErr(e?.message || "Revision failed");
+    } finally {
+      setRevBusy(false);
     }
   };
 
@@ -352,6 +375,20 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
               </button>
               {menuOpen && (
                 <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-slate-200 bg-white shadow-lg py-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setRevErr("");
+                      setRevSalary(form.salaryType === "Intern" ? form.monthlyStipend : form.annualSalary);
+                      setRevDate(new Date().toISOString().slice(0, 10));
+                      setShowRevisionModal(true);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-[13px] text-slate-700 hover:bg-slate-50"
+                  >
+                    <TrendingUp size={13} className="text-emerald-600" />
+                    Salary Revision
+                  </button>
                   <button
                     type="button"
                     onClick={() => { setMenuOpen(false); setShowBonusModal(true); }}
@@ -562,6 +599,50 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
           userId={userId}
           onClose={() => setShowBonusModal(false)}
         />
+      )}
+
+      {showRevisionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !revBusy && setShowRevisionModal(false)}>
+          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5">
+              <div className="flex items-center gap-2">
+                <TrendingUp size={16} className="text-emerald-600" />
+                <h3 className="text-[14px] font-bold text-slate-800">Salary Revision</h3>
+              </div>
+              <button type="button" onClick={() => setShowRevisionModal(false)} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+            </div>
+            <div className="space-y-4 px-5 py-4">
+              <p className="text-[12px] text-slate-500">
+                Set the revised {form.salaryType === "Intern" ? "stipend" : "salary"} and the date it takes effect. It&apos;s recorded as a revision (Payroll → Salary Revisions).
+              </p>
+              <div>
+                <label className={cls.label}>{form.salaryType === "Intern" ? "New Monthly Stipend (INR)" : "New Annual Salary / CTC (INR)"}</label>
+                <div className="relative">
+                  <IndianRupee size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="number"
+                    value={revSalary}
+                    onChange={(e) => setRevSalary(e.target.value)}
+                    className={`${cls.field} pl-8`}
+                    placeholder="e.g. 360000"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className={cls.label}>Revised From</label>
+                <DateField value={revDate} onChange={setRevDate} className="w-full" />
+                <p className="mt-1 text-[11px] text-slate-400">The new salary applies to payroll from this date onward.</p>
+              </div>
+              {revErr && <p className="text-[12px] text-rose-600">{revErr}</p>}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
+              <button type="button" onClick={() => setShowRevisionModal(false)} disabled={revBusy} className="rounded-lg px-3.5 py-2 text-[13px] font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
+              <button type="button" onClick={submitRevision} disabled={revBusy} className="inline-flex items-center gap-1.5 rounded-lg bg-[#3b82f6] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[#2f6fe0] disabled:opacity-60">
+                <Save size={14} /> {revBusy ? "Applying…" : "Apply Revision"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );
