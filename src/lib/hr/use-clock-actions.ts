@@ -57,6 +57,13 @@ export interface UseClockActionsOptions {
   onClockOutSuccess?: (record: { totalMinutes?: number | null } | null) => void;
 }
 
+export interface PulseGate {
+  /** "Submit this week's Pulse before clocking out." — straight from the API. */
+  message: string;
+  /** Deep-link to the pulse form — usually "/dashboard/hr/pulse". */
+  pulseUrl: string;
+}
+
 export interface UseClockActionsReturn {
   clockIn: () => Promise<void>;
   clockOut: () => Promise<void>;
@@ -64,6 +71,13 @@ export interface UseClockActionsReturn {
   clockingOut: boolean;
   error: ClockBanner | null;
   clearError: () => void;
+  /**
+   * Set when a clock-out 403'd with `reason: "pulse_required"`. UI
+   * should render a blocking modal that funnels the user to `pulseUrl`.
+   * Null at all other times (including normal errors).
+   */
+  pulseGate: PulseGate | null;
+  dismissPulseGate: () => void;
 }
 
 /** Sleep helper — used for the single auto-retry backoff. */
@@ -81,6 +95,18 @@ class ClockApiError extends Error {
     message: string,
     readonly transient: boolean,
     readonly status?: number,
+    /**
+     * Server-side enum on 4xx rejections — e.g. "pulse_required" when
+     * the Friday Weekly Pulse gate fires. Lets the caller render a
+     * specific UX (e.g. modal) instead of a generic error banner.
+     */
+    readonly reason?: string,
+    /**
+     * Caller-actionable URL paired with `reason`. For pulse_required
+     * it's "/dashboard/hr/pulse" so we can "Take Pulse Now" the user
+     * straight into the form.
+     */
+    readonly actionUrl?: string,
   ) {
     super(message);
   }
@@ -117,6 +143,8 @@ async function postWithRetry(url: string, body?: unknown): Promise<any> {
       first.data?.error || `Request rejected (${first.status}).`,
       false,
       first.status,
+      first.data?.reason,
+      first.data?.pulseUrl,
     );
   } catch (e: any) {
     if (e instanceof ClockApiError) throw e;
@@ -144,6 +172,7 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
   const [clockingIn, setClockingIn] = useState(false);
   const [clockingOut, setClockingOut] = useState(false);
   const [error, setError] = useState<ClockBanner | null>(null);
+  const [pulseGate, setPulseGate] = useState<PulseGate | null>(null);
   // Synchronous re-entry guards. React state is async (set, then
   // re-render); a `useRef` flag flips immediately so the next onClick
   // in the same event loop tick is a no-op.
@@ -190,13 +219,20 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
     inFlightOut.current = true;
     setClockingOut(true);
     setError(null);
+    setPulseGate(null);
     try {
       const data = await postWithRetry("/api/hr/attendance/clock-out");
       refreshAfter();
       onClockOutSuccess?.(data);
     } catch (e: any) {
-      const msg = e instanceof ClockApiError ? e.message : "Clock-out failed. Please try again.";
-      setError({ message: msg, severity: "error" });
+      // Weekly Pulse gate — show a blocking modal instead of the
+      // generic banner so the user lands on the form in one click.
+      if (e instanceof ClockApiError && e.reason === "pulse_required" && e.actionUrl) {
+        setPulseGate({ message: e.message, pulseUrl: e.actionUrl });
+      } else {
+        const msg = e instanceof ClockApiError ? e.message : "Clock-out failed. Please try again.";
+        setError({ message: msg, severity: "error" });
+      }
       console.warn("[clock-out] failed:", e);
     } finally {
       inFlightOut.current = false;
@@ -205,6 +241,7 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
   }, [refreshAfter, onClockOutSuccess]);
 
   const clearError = useCallback(() => setError(null), []);
+  const dismissPulseGate = useCallback(() => setPulseGate(null), []);
 
-  return { clockIn, clockOut, clockingIn, clockingOut, error, clearError };
+  return { clockIn, clockOut, clockingIn, clockingOut, error, clearError, pulseGate, dismissPulseGate };
 }
