@@ -10,6 +10,7 @@
 // per-IP rate-limit shield can be added later if abuse becomes an issue.
 
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
 import prisma from "@/lib/prisma";
 import { notifyUsers } from "@/lib/notifications";
