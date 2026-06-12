@@ -133,6 +133,36 @@ export default function ExitFinaliseWizard({
     return () => { document.body.style.overflow = ""; };
   }, []);
 
+  // ── Auto-fill pending salary (days worked up to the last working day, net) ──
+  // into the Salary section — but only when HR hasn't already recorded a salary
+  // line, so we never clobber a manual edit. The amount comes from the same
+  // payslip-style proration (see /settlement/pending-salary). Editable + still
+  // needs a Save like any other line.
+  useEffect(() => {
+    if (items.some(l => l.section === "salary")) return;
+    let cancelled = false;
+    fetch(`/api/hr/exits/${exit.id}/settlement/pending-salary`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (cancelled || !d || d.alreadyPaid || !(Number(d.amount) > 0)) return;
+        setItems(prev => prev.some(l => l.section === "salary") ? prev : [
+          ...prev,
+          {
+            section: "salary", subsection: "salary_arrear",
+            label: d.label || "Pending salary (days worked)",
+            amount: Number(d.amount), payAction: "pay",
+            days: d.paidDays ?? null,
+            comment: "Auto-calculated for days worked up to the last working day (net). Edit if needed.",
+          },
+        ]);
+        setOpen(o => ({ ...o, salary: true }));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // run once on open
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Derived totals (for Step 2) ────────────────────────────────
   const totals = useMemo(() => {
     let pay = 0, recover = 0, hold = 0, carry = 0;
