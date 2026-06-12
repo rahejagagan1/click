@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { listConfiguredChannels } from "@/lib/youtube/channels-config";
+import { filterVisibleChannels } from "@/lib/youtube/channel-visibility";
 
 export const dynamic = "force-dynamic";
 
@@ -27,9 +28,16 @@ export async function GET() {
         const month = now.getUTCMonth(); // 0-based
         const quarter = Math.floor(month / 3) + 1;
 
-        const configured = listConfiguredChannels();
-        if (configured.length === 0) {
+        const allConfigured = listConfiguredChannels();
+        if (allConfigured.length === 0) {
             return NextResponse.json({ channels: [], year, quarter });
+        }
+        // Capsule-based visibility: each channel is gated to its assigned
+        // capsules (M7 + M7CS → C1/C2/C5, Echo 3D → 3D, Bodycam → C4).
+        // HR-admin / CEO / Developer / Special Access bypass and see all.
+        const configured = await filterVisibleChannels(session!.user, allConfigured);
+        if (configured.length === 0) {
+            return NextResponse.json({ channels: [], year, quarter, rows: [] });
         }
 
         // Soft-fail each query so the panel still renders something

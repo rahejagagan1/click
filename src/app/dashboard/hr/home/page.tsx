@@ -12,6 +12,7 @@ import { parseAttLoc } from "@/lib/attendance-location";
 import { isHRAdmin, canApplyRestrictedLeave, canViewAllBrands } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
+import PulseGateModal from "@/components/hr/PulseGateModal";
 import { isDesktopBypassActive } from "@/lib/desktop-bypass";
 import { PageShell } from "@/components/layout";
 import { DateField } from "@/components/ui/date-field";
@@ -2684,7 +2685,7 @@ export default function HRHomePage() {
   // one automatic retry on transient failures, all of which were
   // silently dropped in the previous inline handlers (hence the
   // "click 3-4 times before it works" reports).
-  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError } = useClockActions({
+  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError, pulseGate, dismissPulseGate } = useClockActions({
     mutateKeys: [`/api/hr/attendance?month=${monthKey}`],
   });
   // Auto-collapse the Confirm/Cancel pair after 6s of idle.
@@ -3904,6 +3905,7 @@ export default function HRHomePage() {
           onClose={() => setShowHolidaysModal(false)}
         />
       )}
+      <PulseGateModal gate={pulseGate} onDismiss={dismissPulseGate} />
     </PageShell>
   );
 }
