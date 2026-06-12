@@ -105,6 +105,7 @@ model User {
   teamRatingsReceived    TeamManagerRating[] @relation("ManagerRated")
   dashboardFeedbacks     UserFeedback[]
   youtubeDashUserQuarterChannels YoutubeDashUserQuarterChannel[]
+  channelViewTargetsUpdated ChannelViewTarget[] @relation("ChannelViewTargetUpdater")
 
   // ── HR Module Relations ──
   employeeProfile        EmployeeProfile?
@@ -621,6 +622,26 @@ model YoutubeDashboardQuarterMetrics {
   analyticsEndStr      String
   viewsGainedInQuarter BigInt?
   fetchedAt            DateTime @default(now()) @updatedAt
+
+  @@unique([channelId, year, quarter])
+  @@index([year, quarter])
+}
+
+model ChannelViewTarget {
+  id            Int      @id @default(autoincrement())
+  /// YouTube channel id (e.g. "UCjRdMPERN1T0LwAtnshS9UQ"). Matches YOUTUBE_CHANNELS env.
+  channelId     String
+  /// Display name cached at write time so the UI does not need to re-resolve from env.
+  channelName   String
+  year          Int
+  /// 0 = year-level target. 1-4 = quarter target. One row per (channelId, year, quarter).
+  quarter       Int
+  /// Target view count. BigInt so 10M+ figures survive serialisation.
+  target        BigInt
+  updatedAt     DateTime @updatedAt
+  /// HR-admin who last set this. Null for legacy / seed rows.
+  updatedById   Int?
+  updatedBy     User?    @relation("ChannelViewTargetUpdater", fields: [updatedById], references: [id])
 
   @@unique([channelId, year, quarter])
   @@index([year, quarter])
