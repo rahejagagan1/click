@@ -7,7 +7,7 @@ import { brandFromSlug, slugForBrand, type CompanyBrand } from "@/lib/hr-brand-s
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
-import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote, ClipboardCheck, FileSpreadsheet, FileText, HeartPulse, Home } from "lucide-react";
+import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote, ClipboardCheck, FileSpreadsheet, FileText, HeartPulse, Home, Target } from "lucide-react";
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import { DEPARTMENTS } from "@/lib/departments";
 import { DEPARTMENTS_YT_LABS } from "@/lib/departments-yt-labs";
@@ -614,6 +614,18 @@ export default function HRAdminPage() {
                   >
                     <FileSpreadsheet className="w-4 h-4" />
                     <span className="flex-1">Master Sheet</span>
+                    <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </Link>
+                )}
+                {isFullAdmin && (
+                  <Link
+                    href={`/dashboard/hr/admin/view-targets${brandQs}`}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors text-left text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+                  >
+                    <Target className="w-4 h-4" />
+                    <span className="flex-1">View Targets</span>
                     <svg className="w-3.5 h-3.5 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                     </svg>

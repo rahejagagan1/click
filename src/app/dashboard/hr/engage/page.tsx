@@ -8,6 +8,7 @@ import SelectField from "@/components/ui/SelectField";
 import { ThumbsUp, MessageSquare, Send, BarChart2, Award, MoreHorizontal, X, ChevronDown, Pencil, Trash2, Link2, Check, SmilePlus } from "lucide-react";
 import Link from "next/link";
 import { isHRAdmin, isLeadershipOrHR } from "@/lib/access";
+import ChannelViewsTargetsPanel from "@/components/hr/ChannelViewsTargetsPanel";
 import { PageShell, PageHeader, PageContainer } from "@/components/layout";
 
 function Avatar({ name, url, size = 36 }: { name: string; url?: string | null; size?: number }) {
@@ -727,7 +728,11 @@ export default function EngagePage() {
   // general workforce. content text serves as the caption.
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
-  const canCompose = isLeadershipOrHR(user);
+  // Wider HR-admin tier so role=admin + special_access also see the
+  // composer, matching the rest of the dashboard's gate. Everyone
+  // else (regular employees) sees the per-channel YouTube view
+  // targets panel in the same slot below.
+  const canCompose = isHRAdmin(user);
 
   const pickImage = (file: File | null) => {
     setMediaError(null);
@@ -776,7 +781,7 @@ export default function EngagePage() {
             developer). Regular employees still see the feed but
             can't create new posts. Matches the moderation tier
             used for Edit / Delete on individual posts. */}
-        {canCompose && (
+        {canCompose ? (
         <div className="bg-white dark:bg-[#0d1b2a] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
           {/* Scope tabs */}
           <div className="flex items-center border-b border-slate-100 dark:border-white/[0.04] px-4">
@@ -871,6 +876,8 @@ export default function EngagePage() {
             )}
           </div>
         </div>
+        ) : (
+          <ChannelViewsTargetsPanel />
         )}
 
         {/* Feed */}
