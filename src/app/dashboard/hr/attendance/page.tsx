@@ -14,6 +14,7 @@ import { isHRAdmin, canApplyRestrictedLeave } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { DateField } from "@/components/ui/date-field";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
+import PulseGateModal from "@/components/hr/PulseGateModal";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
 import { isDesktopBypassActive } from "@/lib/desktop-bypass";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
@@ -731,7 +732,7 @@ export default function AttendancePage() {
   //     times before anything happened)
   //   • one automatic retry on 5xx / network failure
   //   • per-page SWR refresh after success
-  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError } = useClockActions({
+  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError, pulseGate, dismissPulseGate } = useClockActions({
     mutateKeys: [`/api/hr/attendance?${attendanceQs}`],
     onClockOutSuccess: (rec) => {
       if (typeof rec?.totalMinutes === "number" && rec.totalMinutes >= 540) {
@@ -2266,6 +2267,7 @@ export default function AttendancePage() {
           onClose={() => setFormState(null)}
         />
       )}
+      <PulseGateModal gate={pulseGate} onDismiss={dismissPulseGate} />
       </div>
     </div>
   );
