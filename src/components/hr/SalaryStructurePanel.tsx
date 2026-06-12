@@ -188,9 +188,25 @@ const cls = {
   label: "block text-[11.5px] font-semibold text-slate-600 mb-1",
 };
 
+type SalaryHistoryRow = {
+  id: number;
+  action: string;
+  oldCtc: string | null;
+  newCtc: string | null;
+  effectiveFrom: string | null;
+  changedAt: string;
+  actorName: string | null;
+};
+
 export default function SalaryStructurePanel({ userId, canEdit }: Props) {
   const apiUrl = `/api/hr/payroll/salary-structure?userId=${userId}`;
   const { data, isLoading } = useSWR<ApiStructure | null>(apiUrl, fetcher);
+  // Salary revision timeline (old CTC → new CTC + effective date), from the
+  // audit log. Mutated alongside apiUrl on every save/revision.
+  const historyUrl = `/api/hr/payroll/salary-structure/history?userId=${userId}`;
+  const { data: historyData } = useSWR<{ items: SalaryHistoryRow[] }>(historyUrl, fetcher);
+  const history = historyData?.items ?? [];
+  const [showHistory, setShowHistory] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -260,7 +276,7 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Save failed");
       setSavedAt(Date.now());
-      mutate(apiUrl);
+      mutate(apiUrl); mutate(historyUrl);
     } catch (e: any) {
       setError(e?.message || "Save failed");
     } finally {
@@ -292,7 +308,7 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
       if (!res.ok) throw new Error(json?.error || "Revision failed");
       setForm(revised);          // reflect the revised figures in the panel
       setSavedAt(Date.now());
-      mutate(apiUrl);
+      mutate(apiUrl); mutate(historyUrl);
       setShowRevisionModal(false);
     } catch (e: any) {
       setRevErr(e?.message || "Revision failed");
@@ -593,6 +609,53 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
           </div>
         )}
       </form>
+
+      {/* ── Salary history / revision timeline (old CTC → new CTC + dates) ── */}
+      {history.length > 0 && (
+        <div className="border-t border-slate-200 px-6 py-4">
+          <button
+            type="button"
+            onClick={() => setShowHistory((v) => !v)}
+            className="flex w-full items-center justify-between text-left"
+          >
+            <span className="flex items-center gap-2 text-[12.5px] font-semibold text-slate-700">
+              <TrendingUp size={14} className="text-emerald-600" />
+              Salary history
+              <span className="font-normal text-slate-400">({history.length})</span>
+            </span>
+            <svg className={`h-4 w-4 text-slate-400 transition-transform ${showHistory ? "rotate-90" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+          </button>
+          {showHistory && (
+            <ol className="mt-3 space-y-2.5 border-l-2 border-slate-100 pl-4">
+              {history.map((h) => {
+                const fmtMoney = (v: string | null) => v == null ? "—" : `₹${Number(v).toLocaleString("en-IN")}`;
+                const fmtDate  = (d: string | null) => d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+                const isInitial = h.oldCtc == null;
+                return (
+                  <li key={h.id} className="relative">
+                    <span className={`absolute -left-[21px] top-1.5 h-2 w-2 rounded-full ring-2 ring-white ${isInitial ? "bg-slate-400" : "bg-emerald-500"}`} />
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      {isInitial ? (
+                        <span className="text-[12.5px] font-semibold text-slate-800">Initial · {fmtMoney(h.newCtc)}</span>
+                      ) : (
+                        <span className="text-[12.5px] font-semibold text-slate-800">
+                          <span className="text-slate-400 line-through">{fmtMoney(h.oldCtc)}</span>
+                          {" → "}
+                          <span className="text-emerald-700">{fmtMoney(h.newCtc)}</span>
+                        </span>
+                      )}
+                      <span className="text-[11px] text-slate-500">effective {fmtDate(h.effectiveFrom)}</span>
+                    </div>
+                    <p className="text-[10.5px] text-slate-400">
+                      {h.actorName ? `by ${h.actorName} · ` : ""}changed {fmtDate(h.changedAt)}
+                    </p>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </div>
+      )}
 
       {showBonusModal && (
         <AddBonusModal
