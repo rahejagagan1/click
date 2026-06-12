@@ -131,6 +131,13 @@ export default function ChannelViewsTargetsPanel() {
     : [];
   const active = tabs.find((c) => c.channelId === activeTab) ?? tabs[0];
 
+  // Capsule-based visibility (api/me/view-targets) returns an empty
+  // channel list for employees not assigned to any channel. Hide the
+  // whole panel for them instead of showing an empty "No channels
+  // configured yet." card. HR-admin / CEO / Developer always get
+  // channels back, so they still see the panel.
+  if (data && !error && channels.length === 0) return null;
+
   return (
     <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 overflow-hidden">
       {/* ── Header strip ─────────────────────────────────────── */}
