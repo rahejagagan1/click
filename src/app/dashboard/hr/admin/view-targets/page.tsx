@@ -170,7 +170,8 @@ export default function ViewTargetsPage() {
               No channels found
             </p>
             <p className="mt-1 text-[12px] text-slate-500">
-              Check that the YOUTUBE_CHANNELS env var is configured and the cron has run at least once.
+              Either the YOUTUBE_CHANNELS env var isn't set, or the dev server hasn't picked it up yet.
+              Restart <code className="px-1 py-0.5 rounded bg-slate-100 text-slate-700">npm run dev</code> and reload.
             </p>
           </div>
         ) : (

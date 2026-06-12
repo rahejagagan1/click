@@ -33,9 +33,20 @@ export async function GET(req: NextRequest) {
             : new Date().getUTCFullYear();
 
         const configured = listConfiguredChannels();
-        const rows = await prisma.channelViewTarget.findMany({
-            where: { year },
-        });
+        // Soft-fail when the ChannelViewTarget table doesn't exist
+        // yet (HR hasn't run the migration). Returning an empty rows
+        // list lets HR still see the editor pre-filled with zeros so
+        // they can type values; saves will only land after the
+        // migration runs.
+        let rows: Array<{ channelId: string; quarter: number; target: bigint }> = [];
+        try {
+            rows = await prisma.channelViewTarget.findMany({ where: { year } });
+        } catch (e: any) {
+            const code = e?.meta?.code || e?.code;
+            const msg = String(e?.meta?.message || e?.message || "");
+            if (code !== "42P01" && !/does not exist|42P01/i.test(msg)) throw e;
+            // Table is missing — that's expected pre-migration. Continue with empty rows.
+        }
 
         // Per (channelId, quarter) lookup — 0 = year-level, 1..4 = quarter.
         const byChannelQuarter = new Map<string, number>();
