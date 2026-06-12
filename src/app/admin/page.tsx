@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useSession } from "next-auth/react";
+import Link from "next/link";
 import {
     ChevronRight, Clock, CheckCircle2, XCircle, Play, Save,
-    PlayCircle, ListTree, Users as UsersIcon, Star, Layers,
+    PlayCircle, ListTree, Users as UsersIcon, Star, Layers, Target,
 } from "lucide-react";
 import OrgTree from "@/components/admin/org-tree";
 import RegularizationPolicyCard from "@/components/admin/RegularizationPolicyCard";
@@ -576,6 +577,24 @@ export default function AdminPage() {
                     </button>
                 ))}
             </div>
+
+            {/* Quick Admin Actions — persistent shortcuts for full admins. */}
+            {canManageUsers && (
+                <div className="max-w-7xl">
+                    <div className="rounded-2xl bg-[#12122a] border border-white/5 p-5">
+                        <h2 className="text-sm font-semibold text-white mb-4">Quick Admin Actions</h2>
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                            <Link
+                                href="/dashboard/hr/admin/view-targets"
+                                className="w-full flex items-center gap-2 justify-center px-4 py-2.5 rounded-xl border text-sm text-white transition-all bg-white/5 hover:bg-violet-600/20 border-white/10 hover:border-violet-500/30"
+                            >
+                                <Target className="w-4 h-4" />
+                                View Targets
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {activeTab === "workspaces" && (
                 <div className="max-w-7xl">
