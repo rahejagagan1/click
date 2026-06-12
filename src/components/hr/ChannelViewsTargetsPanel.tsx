@@ -1,21 +1,26 @@
 "use client";
 
-// Employee-side panel showing per-channel quarterly view targets vs current views.
-// Fetches /api/me/view-targets and lets the viewer toggle between
-// the current quarter and the full year. Pure read-only display.
+// Employee-side panel: per-channel quarterly view targets vs current views.
+//
+// Compact tabbed layout — instead of stacking all channels vertically (which
+// got tall fast with 4+ channels), the active channel is shown in a single
+// detail block and the others are reachable via a horizontal tab strip.
+// The first tab is "All" — it sums views + targets across every channel
+// for an at-a-glance organisation-wide number.
+//
+// Period toggle (top right) flips every number + the active progress bar
+// between the current quarter (Q1-Q4) and the full calendar year.
 
 import { useState } from "react";
 import useSWR from "swr";
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, ArrowDown } from "lucide-react";
 import { fetcher } from "@/lib/swr";
 
 type ChannelRow = {
   channelId: string;
   channelName: string;
-  // Current quarter
   quarterViews: number;
   quarterTarget: number | null;
-  // Full year
   yearViews: number;
   yearTarget: number | null;
 };
@@ -26,6 +31,8 @@ type Payload = {
   channels: ChannelRow[];
 };
 
+type Mode = "quarter" | "year";
+
 const QUARTER_LABEL: Record<1 | 2 | 3 | 4, string> = {
   1: "Jan-Mar",
   2: "Apr-Jun",
@@ -33,30 +40,27 @@ const QUARTER_LABEL: Record<1 | 2 | 3 | 4, string> = {
   4: "Oct-Dec",
 };
 
-// Small palette for the channel initials chip — keep brand-friendly tones.
+// Channel-initial chip palette — keep the active tab readable on a white
+// background. Same hash → same colour across reloads.
 const CIRCLE_PALETTE: Array<{ bg: string; text: string }> = [
-  { bg: "bg-blue-100", text: "text-blue-700" },
-  { bg: "bg-violet-100", text: "text-violet-700" },
-  { bg: "bg-rose-100", text: "text-rose-700" },
-  { bg: "bg-amber-100", text: "text-amber-700" },
+  { bg: "bg-blue-100",    text: "text-blue-700"    },
+  { bg: "bg-violet-100",  text: "text-violet-700"  },
+  { bg: "bg-rose-100",    text: "text-rose-700"    },
+  { bg: "bg-amber-100",   text: "text-amber-700"   },
   { bg: "bg-emerald-100", text: "text-emerald-700" },
-  { bg: "bg-cyan-100", text: "text-cyan-700" },
+  { bg: "bg-cyan-100",    text: "text-cyan-700"    },
 ];
 
 function hashToPalette(name: string): { bg: string; text: string } {
   let h = 0;
-  for (let i = 0; i < name.length; i++) {
-    h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  }
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return CIRCLE_PALETTE[h % CIRCLE_PALETTE.length];
 }
 
 function initials(name: string): string {
   const trimmed = (name || "").trim();
   if (!trimmed) return "··";
-  // First two visible chars (after collapsing whitespace).
-  const compact = trimmed.replace(/\s+/g, "");
-  return compact.slice(0, 2).toUpperCase();
+  return trimmed.replace(/\s+/g, "").slice(0, 2).toUpperCase();
 }
 
 function formatLocale(n: number): string {
@@ -66,17 +70,8 @@ function formatLocale(n: number): string {
 function formatAbbrev(n: number): string {
   const v = Number(n || 0);
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-  if (v >= 1_000) return `${(v / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  if (v >= 1_000)     return `${(v / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
   return String(v);
-}
-
-function clampPct(views: number, target: number | null): number {
-  if (!target || target <= 0) return 0;
-  const pct = (views / target) * 100;
-  if (!Number.isFinite(pct)) return 0;
-  if (pct < 0) return 0;
-  if (pct > 100) return 100;
-  return pct;
 }
 
 function rawPct(views: number, target: number | null): number {
@@ -85,32 +80,69 @@ function rawPct(views: number, target: number | null): number {
   return Number.isFinite(pct) ? pct : 0;
 }
 
-type Mode = "quarter" | "year";
+function clampPct(views: number, target: number | null): number {
+  const pct = rawPct(views, target);
+  if (pct < 0) return 0;
+  if (pct > 100) return 100;
+  return pct;
+}
+
+// Synthesises an "All channels" aggregate row from the per-channel data.
+// Views / targets are summed straight. Percent is computed from the sums,
+// not averaged, so a channel that's hit 200% and one that's at 0% net to
+// 100% only if their target weights match.
+function aggregateAll(rows: ChannelRow[]): ChannelRow {
+  let qv = 0, qt = 0, yv = 0, yt = 0;
+  let qtHasAny = false, ytHasAny = false;
+  for (const r of rows) {
+    qv += r.quarterViews;
+    yv += r.yearViews;
+    if (r.quarterTarget && r.quarterTarget > 0) { qt += r.quarterTarget; qtHasAny = true; }
+    if (r.yearTarget    && r.yearTarget    > 0) { yt += r.yearTarget;    ytHasAny = true; }
+  }
+  return {
+    channelId: "__ALL__",
+    channelName: "All channels",
+    quarterViews:  qv,
+    quarterTarget: qtHasAny ? qt : null,
+    yearViews:     yv,
+    yearTarget:    ytHasAny ? yt : null,
+  };
+}
 
 export default function ChannelViewsTargetsPanel() {
   const { data, error, isLoading } = useSWR<Payload>(
     "/api/me/view-targets",
     fetcher,
-    { refreshInterval: 300_000 }
+    { refreshInterval: 300_000 },
   );
-  const [mode, setMode] = useState<Mode>("quarter");
 
-  const year = data?.year ?? new Date().getFullYear();
-  const quarter = (data?.quarter ?? 1) as 1 | 2 | 3 | 4;
+  const [mode,      setMode]      = useState<Mode>("quarter");
+  const [activeTab, setActiveTab] = useState<string>("__ALL__");
+
+  const year     = data?.year ?? new Date().getFullYear();
+  const quarter  = (data?.quarter ?? 1) as 1 | 2 | 3 | 4;
   const subtitle = `Q${quarter} ${year} · ${QUARTER_LABEL[quarter]}`;
+
+  const channels = data?.channels ?? [];
+  // Tabs = "All" + every configured channel. Aggregate stays on top.
+  const tabs: ChannelRow[] = channels.length > 0
+    ? [aggregateAll(channels), ...channels]
+    : [];
+  const active = tabs.find((c) => c.channelId === activeTab) ?? tabs[0];
 
   return (
     <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70 overflow-hidden">
-      {/* Header strip */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-5 py-4 border-b border-slate-100">
-        <div>
-          <h2 className="text-base font-semibold text-slate-900">Quarterly Targets</h2>
-          <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
+      {/* ── Header strip ─────────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-100">
+        <div className="min-w-0">
+          <h2 className="text-[14px] font-semibold text-slate-900">Quarterly Targets</h2>
+          <p className="text-[11px] text-slate-500 mt-0.5">{subtitle}</p>
         </div>
         <div
           role="tablist"
           aria-label="Targets period"
-          className="inline-flex items-center rounded-full bg-slate-100 p-1 text-xs font-medium"
+          className="inline-flex items-center rounded-full bg-slate-100 p-0.5 text-[11px] font-medium shrink-0"
         >
           <button
             type="button"
@@ -118,13 +150,13 @@ export default function ChannelViewsTargetsPanel() {
             aria-selected={mode === "quarter"}
             onClick={() => setMode("quarter")}
             className={
-              "px-3 py-1.5 rounded-full transition-all " +
+              "px-2.5 py-1 rounded-full transition-all " +
               (mode === "quarter"
                 ? "bg-white text-slate-900 shadow-sm"
                 : "text-slate-500 hover:text-slate-700")
             }
           >
-            This Quarter
+            Quarter
           </button>
           <button
             type="button"
@@ -132,157 +164,184 @@ export default function ChannelViewsTargetsPanel() {
             aria-selected={mode === "year"}
             onClick={() => setMode("year")}
             className={
-              "px-3 py-1.5 rounded-full transition-all " +
+              "px-2.5 py-1 rounded-full transition-all " +
               (mode === "year"
                 ? "bg-white text-slate-900 shadow-sm"
                 : "text-slate-500 hover:text-slate-700")
             }
           >
-            This Year
+            Year
           </button>
         </div>
       </div>
 
-      {/* Body */}
-      <div className="px-5 py-4">
-        {isLoading && !data ? (
-          <SkeletonRows />
-        ) : error ? (
-          <div className="py-10 text-center text-sm text-rose-600">
-            Could not load targets right now.
+      {/* ── Body ─────────────────────────────────────────────── */}
+      {isLoading && !data ? (
+        <Skeleton />
+      ) : error ? (
+        <div className="px-5 py-8 text-center text-[12.5px] text-rose-600">
+          Could not load targets right now.
+        </div>
+      ) : !data || tabs.length === 0 ? (
+        <div className="px-5 py-8 text-center text-[12.5px] text-slate-500">
+          No channels configured yet.
+        </div>
+      ) : (
+        <>
+          {/* ── Channel tabs (horizontal scroll on mobile) ── */}
+          <div
+            role="tablist"
+            aria-label="Channels"
+            className="flex items-center gap-1 px-2 pt-2 border-b border-slate-100 overflow-x-auto"
+            style={{ scrollbarWidth: "thin" }}
+          >
+            {tabs.map((t) => {
+              const isActive = active?.channelId === t.channelId;
+              const palette  = t.channelId === "__ALL__"
+                ? { bg: "bg-slate-100", text: "text-slate-700" }
+                : hashToPalette(t.channelName);
+              return (
+                <button
+                  key={t.channelId}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setActiveTab(t.channelId)}
+                  className={
+                    "relative inline-flex items-center gap-1.5 px-3 py-2 text-[12px] font-medium whitespace-nowrap transition-colors " +
+                    (isActive
+                      ? "text-slate-900"
+                      : "text-slate-500 hover:text-slate-800")
+                  }
+                >
+                  <span
+                    className={
+                      "inline-flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold " +
+                      palette.bg + " " + palette.text
+                    }
+                    aria-hidden
+                  >
+                    {t.channelId === "__ALL__" ? "★" : initials(t.channelName)}
+                  </span>
+                  <span className="truncate max-w-[120px]">{t.channelName}</span>
+                  {isActive ? (
+                    <span
+                      aria-hidden
+                      className="absolute left-2 right-2 -bottom-px h-0.5 rounded-full bg-[#3b82f6]"
+                    />
+                  ) : null}
+                </button>
+              );
+            })}
           </div>
-        ) : !data || data.channels.length === 0 ? (
-          <div className="py-10 text-center text-sm text-slate-500">
-            No channels configured yet.
-          </div>
-        ) : (
-          <ul className="divide-y divide-slate-100">
-            {data.channels.map((c) => (
-              <ChannelRowItem key={c.channelId} row={c} mode={mode} />
-            ))}
-          </ul>
-        )}
-      </div>
+
+          {/* ── Active channel detail ── */}
+          {active ? <Detail row={active} mode={mode} /> : null}
+        </>
+      )}
     </div>
   );
 }
 
-function ChannelRowItem({ row, mode }: { row: ChannelRow; mode: Mode }) {
-  const views = mode === "quarter" ? row.quarterViews : row.yearViews;
-  const target = mode === "quarter" ? row.quarterTarget : row.yearTarget;
+function Detail({ row, mode }: { row: ChannelRow; mode: Mode }) {
+  const views    = mode === "quarter" ? row.quarterViews  : row.yearViews;
+  const target   = mode === "quarter" ? row.quarterTarget : row.yearTarget;
   const hasTarget = !!target && target > 0;
   const pctClamped = clampPct(views, target);
-  const pctRaw = rawPct(views, target);
-  const reached = hasTarget && pctRaw >= 100;
-  const palette = hashToPalette(row.channelName);
-  const viewsLocale = formatLocale(views);
-  const targetLocale = target != null ? formatLocale(target) : "—";
+  const pctRaw     = rawPct(views, target);
+  const reached    = hasTarget && pctRaw >= 100;
+  const remaining  = hasTarget ? Math.max(0, (target as number) - views) : 0;
 
   return (
-    <li className="py-4 first:pt-2 last:pb-2">
-      <div className="flex items-start gap-3">
-        {/* Initials chip */}
-        <div
-          className={
-            "flex-none h-10 w-10 rounded-full flex items-center justify-center text-xs font-semibold " +
-            palette.bg +
-            " " +
-            palette.text
-          }
-          aria-hidden
-        >
-          {initials(row.channelName)}
-        </div>
-
-        <div className="flex-1 min-w-0">
-          {/* Top line: name + headline number + percent */}
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-slate-900 truncate">
-                {row.channelName}
-              </div>
-              <div
-                className="text-xl font-bold text-slate-900 leading-tight mt-0.5"
-                title={viewsLocale}
-              >
-                {formatAbbrev(views)}
-              </div>
-              <div className="text-xs text-slate-500 mt-0.5">
-                Target {hasTarget ? formatAbbrev(target!) : "—"}
-                {hasTarget ? (
-                  <span className="sr-only"> ({targetLocale})</span>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="flex-none flex items-center gap-1 text-right">
-              {hasTarget ? (
-                <>
-                  <span
-                    className={
-                      "text-sm font-semibold " +
-                      (reached ? "text-emerald-600" : "text-slate-700")
-                    }
-                  >
-                    {Math.round(pctRaw)}%
-                  </span>
-                  {reached ? (
-                    <ArrowUp className="h-4 w-4 text-emerald-600" aria-hidden />
-                  ) : null}
-                </>
-              ) : (
-                <span className="text-xs italic text-slate-400">No target set</span>
-              )}
-            </div>
+    <div className="px-5 py-5">
+      {/* Headline number + status pill */}
+      <div className="flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <div
+            className="text-[34px] sm:text-[40px] font-bold text-slate-900 leading-none tabular-nums"
+            title={formatLocale(views)}
+          >
+            {formatAbbrev(views)}
           </div>
-
-          {/* Progress / no-target */}
-          <div className="mt-2">
-            {hasTarget ? (
-              <div
-                className="h-2.5 rounded-full bg-slate-100 overflow-hidden"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(pctClamped)}
-                aria-label={`${row.channelName} progress`}
-              >
-                <div
-                  className={
-                    "h-full rounded-full transition-all duration-500 " +
-                    (reached ? "bg-emerald-500" : "")
-                  }
-                  style={{
-                    width: `${pctClamped}%`,
-                    backgroundColor: reached ? undefined : "#3b82f6",
-                  }}
-                />
-              </div>
-            ) : (
-              <div className="text-xs italic text-slate-400">No target set</div>
-            )}
+          <div className="mt-1 text-[11.5px] uppercase tracking-wider text-slate-500 font-semibold">
+            {mode === "quarter" ? "Views this quarter" : "Views this year"}
           </div>
         </div>
+        {hasTarget ? (
+          <div
+            className={
+              "shrink-0 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-bold " +
+              (reached
+                ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                : pctRaw >= 70
+                  ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200"
+                  : "bg-amber-50 text-amber-700 ring-1 ring-amber-200")
+            }
+          >
+            {reached
+              ? <ArrowUp size={12} strokeWidth={2.5} />
+              : <ArrowDown size={12} strokeWidth={2.5} className="opacity-60" />}
+            {Math.round(pctRaw)}%
+          </div>
+        ) : (
+          <div className="shrink-0 text-[11px] italic text-slate-400">No target set</div>
+        )}
       </div>
-    </li>
+
+      {/* Progress bar + target footer */}
+      {hasTarget ? (
+        <>
+          <div
+            className="mt-3 h-2.5 rounded-full bg-slate-100 overflow-hidden"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(pctClamped)}
+            aria-label={`${row.channelName} progress`}
+          >
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${pctClamped}%`,
+                background: reached
+                  ? "linear-gradient(90deg, #10b981 0%, #34d399 100%)"
+                  : "linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%)",
+              }}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between text-[11.5px]">
+            <span className="text-slate-500">
+              Target <span className="font-semibold text-slate-700">{formatAbbrev(target as number)}</span>
+            </span>
+            <span className="text-slate-500">
+              {reached
+                ? <span className="text-emerald-700 font-semibold">Goal reached!</span>
+                : <>
+                    <span className="font-semibold text-slate-700">{formatAbbrev(remaining)}</span>
+                    {" to go"}
+                  </>
+              }
+            </span>
+          </div>
+        </>
+      ) : (
+        <div className="mt-3 h-2.5 rounded-full bg-slate-100" aria-hidden />
+      )}
+    </div>
   );
 }
 
-function SkeletonRows() {
+function Skeleton() {
   return (
-    <ul className="divide-y divide-slate-100">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <li key={i} className="py-4 first:pt-2 last:pb-2">
-          <div className="flex items-start gap-3 animate-pulse">
-            <div className="h-10 w-10 rounded-full bg-slate-100 flex-none" />
-            <div className="flex-1 min-w-0 space-y-2">
-              <div className="h-3 w-32 rounded bg-slate-100" />
-              <div className="h-5 w-24 rounded bg-slate-100" />
-              <div className="h-2.5 w-full rounded-full bg-slate-100" />
-            </div>
-          </div>
-        </li>
-      ))}
-    </ul>
+    <div className="px-5 py-5 animate-pulse">
+      <div className="flex items-center gap-1 mb-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-7 w-20 rounded-md bg-slate-100" />
+        ))}
+      </div>
+      <div className="h-10 w-32 rounded bg-slate-100" />
+      <div className="mt-3 h-2.5 w-full rounded-full bg-slate-100" />
+      <div className="mt-2 h-3 w-40 rounded bg-slate-100" />
+    </div>
   );
 }
