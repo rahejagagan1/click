@@ -1329,10 +1329,37 @@ model Attendance {
   updatedAt       DateTime  @updatedAt
 
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions        AttendanceSession[]
 
   @@unique([userId, date])
   @@index([date])
   @@index([status])
+}
+
+/// Per-punch session row. Each Attendance row can have many sessions
+/// (e.g. clock-in → lunch out → lunch in → clock-out = 2 sessions).
+/// totalMinutes on the parent Attendance row is re-derived from these
+/// sessions on every GET (see src/app/api/hr/attendance/route.ts:
+/// rederive()) — defensive against drift if a session is edited
+/// directly. This model was missing from prisma/schema.prisma for a
+/// long time even though production code already wrote to it; adding
+/// it here so future `prisma db push` runs never silently drop the
+/// table again.
+model AttendanceSession {
+  id                Int       @id @default(autoincrement())
+  attendanceId      Int
+  clockIn           DateTime
+  /// Null while the session is still open (clocked in, not yet out).
+  clockOut          DateTime?
+  /// JSON-stringified geo blob captured at clock-in (same shape as
+  /// Attendance.location). Stored per-session so multi-session days
+  /// can show where each individual punch happened.
+  clockInLocation   String?
+  clockOutLocation  String?
+
+  attendance        Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+
+  @@index([attendanceId])
 }
 
 // ═══════════════════════════════════════════════════════
