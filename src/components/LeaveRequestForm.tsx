@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import useSWR, { mutate as globalMutate } from "swr";
+import { showToast } from "@/components/ui/Toast";
 import { fetcher } from "@/lib/swr";
 import { X, Info, Search, Check, ChevronDown } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -325,6 +326,13 @@ export default function LeaveRequestForm({
       globalMutate((key: any) => typeof key === "string" && key.startsWith(k));
     }
     globalMutate((k: any) => typeof k === "string" && k.startsWith("/api/hr/notifications"));
+    // Confirmation toast so the user KNOWS it went through (the form closes
+    // immediately; the toast lives at the app root and outlives it).
+    const TOAST_LABEL: Record<string, string> = {
+      wfh: "Work From Home", leave: "Leave", on_duty: "On-Duty",
+      half_day: "Half-day", regularize: "Regularization",
+    };
+    showToast(`${TOAST_LABEL[kind] ?? "Request"} request submitted`, "success");
     onSaved?.();
     onClose();
   };
