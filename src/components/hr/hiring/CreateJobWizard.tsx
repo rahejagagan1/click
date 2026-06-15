@@ -196,6 +196,21 @@ function plainTextToQuillHtml(input: string, knownTitle?: string): string {
   return out.join("");
 }
 
+// First real content line of an extracted JD = its title. Used to seed
+// the Job Title field when HR hasn't typed one, so the preview header,
+// the body-strip, and the PDF/careers <h1> all show the title from one
+// source. Mirrors the title detection in plainTextToQuillHtml.
+function extractJdTitle(text: string): string {
+  if (!text) return "";
+  for (const raw of stripLeadingCompanyContent(text).replace(/\r\n/g, "\n").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^(?:Job\s+Description|Job\s+Title)\s*[-–—:]\s*(.+)$/i);
+    return (m ? m[1] : line).trim();
+  }
+  return "";
+}
+
 const LOCATIONS = ["Mohali", "Remote"];
 const EMPLOYMENT_TYPES = ["Full-time", "Remote", "Internship"];
 const EXPERIENCE_LEVELS = [
@@ -774,7 +789,13 @@ function Step1Description({
           (mammoth/pdf-parse on the server) and HR can tweak any line
           before publishing. The edited copy lands in JobOpening.jdText. */}
       {jdFile && (
-        <JdPreviewEditor file={jdFile} value={jdText} onChange={setJdText} jobTitle={form.title} />
+        <JdPreviewEditor
+          file={jdFile}
+          value={jdText}
+          onChange={setJdText}
+          jobTitle={form.title}
+          onTitleExtract={(t) => setField("title", t)}
+        />
       )}
     </SectionCard>
   );
@@ -786,12 +807,14 @@ function Step1Description({
 // fingerprint). Manual edits stay sticky — once HR types into the
 // textarea, we don't auto-overwrite on the next extraction.
 function JdPreviewEditor({
-  file, value, onChange, jobTitle,
+  file, value, onChange, jobTitle, onTitleExtract,
 }: {
   file: File;
   value: string;
   onChange: (v: string) => void;
   jobTitle: string;
+  /// Seed the Job Title field from the JD's first line when it's blank.
+  onTitleExtract?: (title: string) => void;
 }) {
   const [extracting, setExtracting] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
@@ -859,11 +882,16 @@ function JdPreviewEditor({
         if (!res.ok) throw new Error(j?.error || `Couldn't read the file (HTTP ${res.status})`);
         const text = String(j?.text ?? "").trim();
         rawTextRef.current = text;
+        // Seed the Job Title from the JD's first line when HR hasn't
+        // typed one — so the preview header, the body-strip, and the
+        // PDF/careers <h1> all read the title from a single source.
+        const derivedTitle = extractJdTitle(text);
+        if (derivedTitle && !jobTitle.trim()) onTitleExtract?.(derivedTitle);
         // Convert plain-text extractor output → Quill HTML so the
         // editor opens with light auto-formatting (headings + lists)
         // that HR can refine via the toolbar. Already-HTML values
         // pass through untouched.
-        const html = plainTextToQuillHtml(text, jobTitle);
+        const html = plainTextToQuillHtml(text, jobTitle.trim() || derivedTitle);
         // Don't clobber HR's manual edits. Only auto-fill when the
         // editor is empty / untouched for the current file.
         if (!dirtied.current || !value.trim()) {
