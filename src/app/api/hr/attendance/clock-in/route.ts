@@ -9,6 +9,7 @@ import { isMobileRequest } from "@/lib/is-mobile-device";
 import { hasDesktopBypassHeader } from "@/lib/desktop-bypass";
 import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
 import { evaluateOfficeGeofence } from "@/lib/office-geofence";
+import { resolveClientPunchAt } from "@/lib/hr/punch-time";
 
 // Real GPS coordinates required so the attendance log always has a verifiable
 // physical location. Address is optional and capped to keep payloads small.
@@ -16,6 +17,10 @@ const ClockInBody = z.object({
   lat: z.number().finite().min(-90).max(90),
   lng: z.number().finite().min(-180).max(180),
   address: z.string().trim().max(240).optional(),
+  // Original click time from the offline retry queue. Honored only within
+  // a tight window (resolveClientPunchAt, 30 min) so a late sync records
+  // near the real time WITHOUT letting anyone backdate their start by hours.
+  clientPunchAt: z.string().max(40).optional(),
 });
 
 // Single-line, greppable deny logger. Use `pm2 logs 11 | grep "\[clock-in\] deny"`
@@ -112,9 +117,19 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    const { lat: bodyLat, lng: bodyLng, address: bodyAddr } = parsed.data;
+    const { lat: bodyLat, lng: bodyLng, address: bodyAddr, clientPunchAt } = parsed.data;
 
-    const now = new Date();
+    // Effective clock-in time. Normally serverNow; the offline retry queue
+    // replays a punch with its original click time as clientPunchAt so a
+    // late sync records on-time (and keeps the correct late/present status).
+    // Bounded to a 30-min window to block backdating the start time.
+    const serverNow = new Date();
+    const { at: now, usedClient: usedClientPunch } = resolveClientPunchAt(
+      clientPunchAt, serverNow, { maxAgeMs: 30 * 60_000 },
+    );
+    if (usedClientPunch) {
+      console.log(`[clock-in] userId=${userId} used clientPunchAt=${now.toISOString()} (serverNow=${serverNow.toISOString()})`);
+    }
     const today = istTodayDateOnly();
 
     // Derive status + location up-front so the write step is one DB call.

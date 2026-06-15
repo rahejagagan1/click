@@ -134,7 +134,14 @@ export async function POST(req: NextRequest) {
     // from the admin Leave Policies panel). Pending + approved + the
     // partially_approved interim state ALL count against the cap so
     // users can't queue more than `quota` in flight at once.
-    if (!isHRGrant) {
+    //
+    // BYPASS for HR-admins: CEO / developers / HR managers / admin /
+    // special_access (callerIsHRAdmin) are never capped — they can grant
+    // unlimited WFH to ANY user, and their own WFH isn't limited either.
+    // The cap only constrains a regular employee self-applying. (Previously
+    // the bypass needed an explicit forceGrant on-behalf grant; broadened
+    // here so HR/dev never hit "WFH limit reached".)
+    if (!isHRGrant && !callerIsHRAdmin) {
       const { getWfhPolicy, quotaForBrand, wfhDayWeight } = await import("@/lib/hr/wfh-balance");
       const policy = await getWfhPolicy();
       if (policy.limitEnabled) {
