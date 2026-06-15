@@ -316,6 +316,11 @@ function htmlToBodyXml(html: string): string {
       out.push(paraBlank());
       continue;
     }
+    // Page-break artefacts ("Page 1 of 2", "— 1 of 2 —") that PDF
+    // extractors emit. buildBodyXml's plain-text path filters these via
+    // PAGE_MARKER_RE; the Quill HTML path (added in 20415b2) regressed by
+    // skipping it — re-apply here so they don't render in generated PDFs.
+    if (PAGE_MARKER_RE.test(stripped.replace(/<[^>]+>/g, "").trim())) continue;
 
     if (tag === "h1") {
       out.push(

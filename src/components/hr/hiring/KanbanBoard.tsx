@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useUrlState } from "@/lib/hooks/useUrlState";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
+import { showToast } from "@/components/ui/Toast";
 import { Star, Clock, Mail, Phone, Briefcase, ExternalLink, MessageSquare, ChevronDown } from "lucide-react";
 import CandidateDrawer from "./CandidateDrawer";
 
@@ -110,6 +111,9 @@ export default function KanbanBoard({ jobId }: { jobId: number }) {
     if (!Number.isFinite(candidateId)) return;
     const curr = candidates.find((c) => c.id === candidateId);
     if (!curr || curr.currentStage?.id === stageId) return;
+    // Already moving this card — ignore a second drag so two PATCHes can't
+    // race and land out of order.
+    if (moving.has(candidateId)) return;
 
     setMoving((prev) => new Set(prev).add(candidateId));
     // Optimistic patch — update SWR cache first so the card jumps
@@ -130,11 +134,14 @@ export default function KanbanBoard({ jobId }: { jobId: number }) {
       { revalidate: false },
     );
     try {
-      await fetch(`/api/hr/hiring/candidates/${candidateId}`, {
+      const res = await fetch(`/api/hr/hiring/candidates/${candidateId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "moveStage", stageId }),
       });
+      if (!res.ok) showToast("Couldn't move the candidate — reverting.", "error");
+    } catch {
+      showToast("Couldn't move the candidate — reverting.", "error");
     } finally {
       setMoving((prev) => {
         const next = new Set(prev); next.delete(candidateId); return next;
