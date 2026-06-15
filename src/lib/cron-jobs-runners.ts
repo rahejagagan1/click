@@ -11,6 +11,7 @@ import { sendViolationInProgressReminders, sendViolationFollowUpReminders } from
 import { sendProbationEndingReminders } from "@/lib/hr/probation-reminders";
 import { sendMissingDocReminders } from "@/lib/hr/doc-compliance";
 import { runAutoLOP } from "@/lib/hr/auto-lop";
+import { applyDueManagerChanges } from "@/lib/hr/manager-changes";
 import { getCronJobsConfig } from "@/lib/cron-jobs-config";
 import type { CronJobId } from "@/lib/cron-jobs-registry";
 
@@ -42,4 +43,6 @@ export const CRON_JOB_RUNNERS: Record<CronJobId, () => Promise<void>> = {
   probation_reminders: async () => { await sendProbationEndingReminders(); },
   doc_compliance:      async () => { await sendMissingDocReminders(); },
   auto_lop:            async () => { await runAutoLOP(); },
+  // Apply effective-dated reporting-manager changes whose date arrived.
+  reporting_manager_changes: async () => { await applyDueManagerChanges(); },
 };
