@@ -64,10 +64,20 @@ export async function GET(req: NextRequest) {
       params.push(statusParam); where += ` AND o."status" = $${params.length}`;
     }
 
+    // Explicit projection — the jobs LIST never renders the heavy @db.Text
+    // columns (description / internalNotes / jdText). Shipping them on every
+    // row (re-fetched constantly) was the biggest list-payload cost; the
+    // single-job + edit views fetch those separately. Everything JobsTab
+    // renders is kept.
+    const JOB_LIST_COLS =
+      `o."id", o."title", o."department", o."location", o."isOpen", o."createdAt", o."updatedAt", ` +
+      `o."brand", o."employmentType", o."experienceLevel", o."salaryRange", o."closesAt", o."status", ` +
+      `o."publicSlug", o."publishedAt", o."vacancies", o."isPriority", o."jdFileUrl", o."jdFileName", ` +
+      `o."recruiterId", o."hiringManagerId"`;
     let rows: any[] = [];
     try {
       rows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT o.*,
+        `SELECT ${JOB_LIST_COLS},
                 r."name" AS "recruiterName",
                 h."name" AS "hiringManagerName",
                 (SELECT COUNT(*) FROM "JobApplication" a WHERE a."jobOpeningId" = o."id") AS "applicationCount",
@@ -101,7 +111,7 @@ export async function GET(req: NextRequest) {
       const msg = String(e?.meta?.message || e?.message || "");
       if (code === "42703" || code === "42P01" || /does not exist/i.test(msg)) {
         rows = await prisma.$queryRawUnsafe<any[]>(
-          `SELECT o.*,
+          `SELECT ${JOB_LIST_COLS},
                   NULL AS "recruiterName",
                   NULL AS "hiringManagerName",
                   (SELECT COUNT(*) FROM "JobApplication" a WHERE a."jobOpeningId" = o."id") AS "applicationCount",
