@@ -2442,7 +2442,10 @@ model JobOpening {
   /// status = 'published').
   isOpen      Boolean  @default(true)
   createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  // @default(now()) mirrors the DB default — the hiring create handler
+  // writes JobOpening via raw SQL (bypassing Prisma's @updatedAt), so the
+  // column needs a DB-level default or that INSERT hits a NOT NULL error.
+  updatedAt   DateTime @default(now()) @updatedAt
 
   // ── Keka-parity additions ────────────────────────────────────────
   /// nb_media | yt_labs — which brand this opening belongs to. Drives
@@ -2496,6 +2499,26 @@ model JobOpening {
   /// edited copy lands here. Independent of jdFileUrl so the
   /// original file remains downloadable too.
   jdText     String? @db.Text
+
+  // ── Compensation + hiring-config (restored 2026-06-15) ──
+  // Dropped from the DB by a past `prisma db push`; re-added to match the
+  // live schema. The create handler (POST /api/hr/hiring/jobs) writes all
+  // of these, so their absence broke every draft/publish. Defaults mirror
+  // that handler.
+  currency                      String   @default("INR")
+  salaryMin                     Int?
+  salaryMax                     Int?
+  salaryUnit                    String   @default("lpa")
+  allowReapplyDays              Int      @default(0)
+  archiveAfterFilled            Boolean  @default(false)
+  inboundOwnerStrategy          String   @default("none")
+  inboundOwnerUserId            Int?
+  interviewFeedbackVisibility   String   @default("open")
+  recruitersAccessOwnOnly       Boolean  @default(false)
+  interviewersAccessOwnOnly     Boolean  @default(false)
+  notifyRecruiterOnNewCandidate Boolean  @default(true)
+  notifyHiringMgrOnNewCandidate Boolean  @default(true)
+  publishChannels               String[] @default(["career_site"])
 
   // Hiring team — who is responsible for this requisition.
   recruiterId     Int?
