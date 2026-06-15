@@ -132,7 +132,7 @@ type Job = {
   title: string;
   department: string | null;
   location: string | null;
-  description: string | null;
+  description?: string | null;  // not returned by the list projection (perf) — fetched per-job when needed
   isOpen: boolean;
   status: JobStatus;
   publicSlug: string | null;
