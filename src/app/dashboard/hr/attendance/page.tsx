@@ -15,6 +15,7 @@ import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { DateField } from "@/components/ui/date-field";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
 import PulseGateModal from "@/components/hr/PulseGateModal";
+import DesktopGateModal from "@/components/hr/DesktopGateModal";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
 import { isDesktopBypassActive } from "@/lib/desktop-bypass";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
@@ -732,7 +733,7 @@ export default function AttendancePage() {
   //     times before anything happened)
   //   • one automatic retry on 5xx / network failure
   //   • per-page SWR refresh after success
-  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError, pulseGate, dismissPulseGate } = useClockActions({
+  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError, pulseGate, dismissPulseGate, desktopGate, dismissDesktopGate } = useClockActions({
     mutateKeys: [`/api/hr/attendance?${attendanceQs}`],
     onClockOutSuccess: (rec) => {
       if (typeof rec?.totalMinutes === "number" && rec.totalMinutes >= 540) {
@@ -1293,6 +1294,15 @@ export default function AttendancePage() {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-1 w-fit">
+                    {clockError && (
+                      <div className="flex items-start gap-1.5 max-w-[420px] px-2.5 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-700 dark:text-rose-300 text-[11.5px] leading-tight">
+                        <AlertCircle size={13} className="shrink-0 mt-px" />
+                        <span className="flex-1">{clockError.message}</span>
+                        <button onClick={clearClockError} className="shrink-0 text-rose-500 hover:text-rose-700" aria-label="Dismiss">
+                          <X size={11} />
+                        </button>
+                      </div>
+                    )}
                     <button onClick={mobileBlocked ? undefined : () => setConfirmingClockOut(true)}
                       disabled={mobileBlocked}
                       style={{
@@ -2268,6 +2278,7 @@ export default function AttendancePage() {
         />
       )}
       <PulseGateModal gate={pulseGate} onDismiss={dismissPulseGate} />
+      <DesktopGateModal gate={desktopGate} onDismiss={dismissDesktopGate} />
       </div>
     </div>
   );
