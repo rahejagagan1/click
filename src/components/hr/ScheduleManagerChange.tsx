@@ -112,80 +112,115 @@ export default function ScheduleManagerChange({
   const opts = managerOpts.map((m) => ({ value: String(m.id), label: m.name }));
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-      <div className="flex items-center gap-2 mb-2">
-        <CalendarClock size={14} className="text-[#d97706]" />
-        <span className="text-[12px] font-semibold text-slate-700">Schedule a future change</span>
-      </div>
+    <div>
+      <label className="block text-[11.5px] font-semibold text-slate-600 mb-1">
+        Schedule a future change
+      </label>
 
       {loading ? (
-        <p className="text-[12px] text-slate-400">Loading…</p>
+        <div className="flex items-center gap-2 h-9 text-[12px] text-slate-400">
+          <CalendarClock size={14} className="text-slate-300" />
+          <span>Checking for a scheduled change…</span>
+        </div>
       ) : pending ? (
-        <div className="flex items-center justify-between gap-3 rounded-md bg-amber-50 border border-amber-200 px-3 py-2">
-          <p className="text-[12.5px] text-amber-800 leading-snug">
-            Will change to{" "}
-            <strong>{pending.newManagerName ?? `#${pending.newManagerId}`}</strong> on{" "}
-            <strong>{fmt(pending.effectiveDate)}</strong>
-            {currentManagerName ? (
-              <span className="text-amber-700"> (currently {currentManagerName})</span>
-            ) : null}
-          </p>
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            <CalendarClock size={15} className="shrink-0 text-[#3b82f6]" />
+            <p className="min-w-0 text-[12.5px] leading-snug text-slate-600">
+              <span className="text-slate-500">
+                {currentManagerName ?? "Current manager"}
+              </span>
+              <ArrowRight size={12} className="mx-1 inline-block align-[-1px] text-slate-400" />
+              <span className="font-semibold text-slate-800">
+                {pending.newManagerName ?? `#${pending.newManagerId}`}
+              </span>
+              <span className="text-slate-500"> · effective </span>
+              <span className="font-semibold text-[#1e40af]">{fmt(pending.effectiveDate)}</span>
+            </p>
+          </div>
           <button
             type="button"
             onClick={cancel}
             disabled={busy}
-            className="shrink-0 inline-flex items-center gap-1 text-[11.5px] font-medium text-amber-700 hover:text-rose-600 disabled:opacity-50"
+            aria-label="Cancel scheduled manager change"
+            title="Cancel scheduled change"
+            className="shrink-0 inline-flex items-center justify-center h-7 w-7 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-rose-600 disabled:opacity-50 transition-colors"
           >
-            <X size={12} /> Cancel
+            <X size={14} />
           </button>
         </div>
       ) : open ? (
-        <div className="space-y-2.5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        <div
+          id={`sched-mgr-${userId}`}
+          role="group"
+          aria-label="Schedule a future reporting-manager change"
+          className="space-y-2.5"
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-500 mb-1">New reporting manager</label>
-              <SelectField value={newManagerId} onChange={setNewManagerId} placeholder="Select manager" options={opts} />
+              <label className="block text-[11.5px] font-semibold text-slate-600 mb-1">
+                New reporting manager
+              </label>
+              <SelectField
+                value={newManagerId}
+                onChange={setNewManagerId}
+                placeholder="Select manager"
+                options={opts}
+              />
             </div>
             <div>
-              <label className="block text-[11px] font-semibold text-slate-500 mb-1">With effect from</label>
+              <label className="block text-[11.5px] font-semibold text-slate-600 mb-1">
+                With effect from
+              </label>
               <DateField value={date} onChange={setDate} min={tomorrowIso()} className="w-full" />
             </div>
           </div>
-          <div className="flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                setNewManagerId("");
-                setDate("");
-              }}
-              className="h-8 px-3 rounded-lg text-[12px] font-semibold text-slate-600 hover:bg-slate-100"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={schedule}
-              disabled={busy}
-              className="h-8 px-4 rounded-lg bg-[#d97706] hover:bg-[#b45309] disabled:bg-slate-300 text-white text-[12px] font-semibold shadow-sm"
-            >
-              {busy ? "Scheduling…" : "Schedule change"}
-            </button>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] text-slate-400 leading-snug">
+              The reporting manager updates automatically on this date.
+            </p>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  setNewManagerId("");
+                  setDate("");
+                }}
+                className="h-9 px-3 rounded-lg text-[12.5px] font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={schedule}
+                disabled={busy}
+                className="h-9 px-4 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-slate-300 text-white text-[12.5px] font-semibold shadow-sm transition-colors"
+              >
+                {busy ? "Scheduling…" : "Schedule change"}
+              </button>
+            </div>
           </div>
         </div>
       ) : (
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#d97706] hover:text-[#b45309]"
+          aria-expanded={false}
+          aria-controls={`sched-mgr-${userId}`}
+          className="group inline-flex items-center gap-2 h-9 px-3 rounded-lg border border-slate-200 bg-white text-[12.5px] font-semibold text-slate-600 hover:border-[#3b82f6] hover:text-[#1e40af] focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 transition-colors"
         >
-          <ArrowRight size={13} /> Schedule a manager change for a future date
+          <CalendarClock
+            size={14}
+            className="text-slate-400 group-hover:text-[#3b82f6] transition-colors"
+          />
+          Schedule for later…
         </button>
       )}
-
-      <p className="mt-2 text-[11px] text-slate-400 leading-snug">
-        The reporting manager auto-updates on the chosen date. Until then the current manager stays. One scheduled change at a time.
-      </p>
     </div>
   );
 }
