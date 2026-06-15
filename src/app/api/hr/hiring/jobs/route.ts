@@ -90,7 +90,14 @@ export async function GET(req: NextRequest) {
                 (SELECT COUNT(*) FROM "JobApplication" a
                    LEFT JOIN "HiringStage" s ON s."id" = a."currentStageId"
                   WHERE a."jobOpeningId" = o."id"
-                    AND (s."id" IS NULL OR a."status" = 'new')) AS "newCount"
+                    AND (s."id" IS NULL OR a."status" = 'new')
+                    AND a."createdAt" >= NOW() - INTERVAL '48 hours') AS "newCount",
+                -- Still SOURCED / stage-unchanged but older than 48h → "recent"
+                (SELECT COUNT(*) FROM "JobApplication" a
+                   LEFT JOIN "HiringStage" s ON s."id" = a."currentStageId"
+                  WHERE a."jobOpeningId" = o."id"
+                    AND (s."id" IS NULL OR a."status" = 'new')
+                    AND a."createdAt" <  NOW() - INTERVAL '48 hours') AS "recentCount"
            FROM "JobOpening" o
            LEFT JOIN "User" r ON r."id" = o."recruiterId"
            LEFT JOIN "User" h ON h."id" = o."hiringManagerId"
@@ -118,7 +125,8 @@ export async function GET(req: NextRequest) {
                   0 AS "activeCount",
                   0 AS "hiredCount",
                   0 AS "rejectedCount",
-                  0 AS "newCount"
+                  0 AS "newCount",
+                  0 AS "recentCount"
              FROM "JobOpening" o
             ORDER BY o."isOpen" DESC, o."createdAt" DESC`,
         );
