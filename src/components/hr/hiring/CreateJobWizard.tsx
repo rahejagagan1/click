@@ -30,6 +30,7 @@ import { DEPARTMENTS }          from "@/lib/departments";
 import { DEPARTMENTS_YT_LABS }  from "@/lib/departments-yt-labs";
 import { DateField }            from "@/components/ui/date-field";
 import { stripLeadingCompanyContent } from "@/lib/hr/jd-format";
+import { showToast } from "@/components/ui/Toast";
 import dynamic from "next/dynamic";
 import "react-quill-new/dist/quill.snow.css";
 
@@ -509,11 +510,12 @@ export default function CreateJobWizard({
       // already saved and HR can add questions later via the per-job
       // Application Form panel.
       if (id && form.questions.length > 0) {
+        let failedQuestions = 0;
         for (const q of form.questions) {
           const text = q.text.trim();
           if (!text) continue;
           try {
-            await fetch(`/api/hr/hiring/jobs/${id}/questions`, {
+            const qRes = await fetch(`/api/hr/hiring/jobs/${id}/questions`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -525,7 +527,16 @@ export default function CreateJobWizard({
                   : undefined,
               }),
             });
-          } catch { /* non-fatal — job is already saved */ }
+            if (!qRes.ok) failedQuestions++;
+          } catch { failedQuestions++; }
+        }
+        // Non-fatal (the job is saved), but tell HR instead of silently
+        // dropping screening questions.
+        if (failedQuestions > 0) {
+          showToast(
+            `Job saved, but ${failedQuestions} screening question${failedQuestions === 1 ? "" : "s"} couldn't be saved — add them from the job's Application Form.`,
+            "error",
+          );
         }
       }
       // Successful create — wipe the saved draft so the next time
