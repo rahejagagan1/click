@@ -33,17 +33,12 @@ export default function DocumentsPage() {
   const [folderKey, setFolderKey] = useState("all");
   const [showUpload, setShowUpload] = useState(false);
 
-  // This page lives under the personal "Me → My Space" section, so it
-  // shows ONLY the logged-in user's own documents — never the org-wide
-  // list. Non-admins already get their own (the API returns own docs
-  // when no userId is passed). Admins would otherwise get EVERYONE's,
-  // so we explicitly request their own id. (Admins browse other
-  // employees' docs from the People directory → employee profile.)
-  const myId = (session?.user as any)?.dbId;
-  const docsKey = isAdmin && myId
-    ? `/api/hr/documents?userId=${myId}`
-    : "/api/hr/documents";
-  const { data: documents = [], isLoading } = useSWR(docsKey, fetcher);
+  // This page shows ONLY the logged-in user's own documents — never
+  // the org-wide list. `self=true` scopes server-side to the caller
+  // for admins AND non-admins alike (an HR-admin would otherwise fall
+  // through to everyone's docs). Admins browse other employees' docs
+  // from the People directory → employee profile.
+  const { data: documents = [], isLoading } = useSWR("/api/hr/documents?self=true", fetcher);
   const activeFolder = DOC_FOLDERS.find((f) => f.key === folderKey);
   const filtered = !activeFolder?.cats
     ? documents
