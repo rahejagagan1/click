@@ -31,8 +31,17 @@ export async function GET(req: NextRequest) {
     // when not admin → 403 (not silent fallback to self) so UI bugs
     // surface instead of leaking your own docs into the wrong page.
     const requested = searchParams.get("userId");
+    // Explicit self-view (profile "My documents", the personal Documents
+    // page). ALWAYS scopes to the authenticated caller — even for HR
+    // admins, who would otherwise fall through to the org-wide list
+    // below and see everyone's (incl. other-brand) documents in their
+    // OWN profile. The self-view must never depend on the client
+    // sending its own id.
+    const selfOnly = searchParams.get("self") === "true";
     let userId: number;
-    if (requested) {
+    if (selfOnly) {
+      userId = myId;
+    } else if (requested) {
       const n = parseInt(requested);
       if (!Number.isFinite(n)) {
         return NextResponse.json({ error: "Bad userId" }, { status: 400 });
@@ -46,7 +55,7 @@ export async function GET(req: NextRequest) {
     }
 
     const docs = await prisma.employeeDocument.findMany({
-      where: admin && !requested ? {} : { userId },
+      where: admin && !requested && !selfOnly ? {} : { userId },
       include: {
         user: { select: { id: true, name: true } },
         uploadedBy: { select: { id: true, name: true } },
