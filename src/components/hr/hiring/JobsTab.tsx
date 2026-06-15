@@ -22,6 +22,7 @@ import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { stripLeadingCompanyContent } from "@/lib/hr/jd-format";
 import { useDebouncedValue } from "@/lib/hooks/useDebouncedValue";
+import { showToast } from "@/components/ui/Toast";
 import {
   Plus, Briefcase, MapPin, Users, Search,
   Share2, Send, Pause, CheckCircle2, FileEdit, Pencil, MoreHorizontal,
@@ -304,7 +305,7 @@ export default function JobsTab({
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        alert(j?.error || "Could not update the job status.");
+        showToast(j?.error || "Could not update the job status.", "error");
         return;
       }
       globalMutate(url);
@@ -341,7 +342,7 @@ export default function JobsTab({
       }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        alert(body?.error || "Could not delete the job.");
+        showToast(body?.error || "Could not delete the job.", "error");
         return;
       }
       // If we were viewing the just-deleted job, close the detail view.
@@ -583,7 +584,7 @@ export default function JobsTab({
               }}
               onBulkUpload={() => {
                 setCreateMenuOpen(false);
-                alert("Bulk upload jobs — coming next. We'll accept a CSV with title, department, location, brand and create draft openings.");
+                showToast("Bulk upload jobs — coming next. We'll accept a CSV with title, department, location, brand and create draft openings.", "info");
               }}
             />
           </div>
@@ -1165,7 +1166,7 @@ function JdButton({
       const res = await fetch(`/api/hr/hiring/jobs/${jobId}/jd`, { method: "POST", body: fd });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        alert(j?.error || "JD upload failed");
+        showToast(j?.error || "JD upload failed", "error");
         return false;
       }
       onChange();
@@ -1324,11 +1325,11 @@ function JdReplaceModal({
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        alert(j?.error || "Preview render failed");
+        showToast(j?.error || "Preview render failed", "error");
         return;
       }
       const blob = await res.blob();
-      if (blob.size === 0) { alert("Server returned an empty PDF"); return; }
+      if (blob.size === 0) { showToast("Server returned an empty PDF", "error"); return; }
       setPreviewUrl(URL.createObjectURL(blob));
     } finally {
       setPreviewing(false);

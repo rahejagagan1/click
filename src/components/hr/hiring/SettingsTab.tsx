@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
+import { showToast } from "@/components/ui/Toast";
 import { fetcher } from "@/lib/swr";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import { Mail, ChevronDown, ChevronRight, Edit3, Trash2, Plus, Save, X, ToggleLeft, ToggleRight, Upload, FileText, GripVertical } from "lucide-react";
@@ -431,7 +432,7 @@ function StagesPanel() {
         body: JSON.stringify({ label, color: addColor }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok) { alert(j?.error || "Failed to add stage"); return; }
+      if (!res.ok) { showToast(j?.error || "Failed to add stage", "error"); return; }
       setAdding(false); setAddLabel(""); setAddColor("slate");
       refresh();
     } finally { setBusy(false); }
@@ -472,7 +473,7 @@ function StagesPanel() {
     const res = await fetch(`/api/hr/hiring/stages/${s.id}`, { method: "DELETE" });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      alert(j?.error || "Failed to delete");
+      showToast(j?.error || "Failed to delete", "error");
       return;
     }
     refresh();

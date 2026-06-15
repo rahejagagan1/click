@@ -89,6 +89,16 @@ const JD_SECTION_HEADINGS = new Set([
   "about us", "about the company", "about nb media",
   "how to apply", "application process", "next steps",
   "education", "experience", "key skills",
+  // "Who We are Looking For"-style headers + common JD section names
+  // that were missing — so the editor promotes them to headings the
+  // same way the PDF does (keeps the preview WYSIWYG).
+  "who we are looking for", "who we're looking for",
+  "what we are looking for", "what we're looking for",
+  "who you are", "the ideal candidate", "ideal candidate",
+  "the role", "about the role", "role overview", "your role",
+  "what you'll bring", "what you will bring", "what you bring",
+  "what success looks like", "day to day", "day-to-day",
+  "responsibilities & duties", "duties", "your responsibilities",
 ]);
 
 function plainTextToQuillHtml(input: string): string {
@@ -1080,8 +1090,8 @@ function JdUploader({ file, setFile }: { file: File | null; setFile: (f: File | 
   const pick = (f: File | null) => {
     if (!f) { setFile(null); return; }
     const ext = f.name.toLowerCase().slice(f.name.lastIndexOf("."));
-    if (!ALLOWED.includes(ext)) return alert("Allowed: PDF, DOC, DOCX, RTF, TXT");
-    if (f.size > MAX)            return alert("Max 5 MB");
+    if (!ALLOWED.includes(ext)) return showToast("Allowed: PDF, DOC, DOCX, RTF, TXT", "error");
+    if (f.size > MAX)            return showToast("Max 5 MB", "error");
     setFile(f);
   };
   return (
