@@ -5,10 +5,11 @@
 // answers. The API enforces this; this component just renders what
 // comes back.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
-import { Loader2, Users, TrendingUp, Smile, Star, Activity, ThumbsUp, MessageSquareText, ShieldCheck } from "lucide-react";
+import { Loader2, Users, TrendingUp, Smile, Star, Activity, ThumbsUp, MessageSquareText, ShieldCheck, Calendar } from "lucide-react";
+import SelectField from "@/components/ui/SelectField";
 
 type QStats = {
   id: number;
@@ -37,15 +38,51 @@ const LIKERT_LABELS = ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Str
 
 export default function PulseResponsesView({ initialBrand }: { initialBrand?: "NB Media" | "YT Labs" | "all" | null } = {}) {
   const [surveyType, setSurveyType] = useState<"weekly" | "monthly">("weekly");
+  // Which cycle to view. "" = the live week/month (the API default);
+  // any past cycleKey shows that week's/month's aggregates.
+  const [cycleKey, setCycleKey] = useState<string>("");
   // Brand derived entirely from URL ?brand=… (passed via
   // initialBrand). No inline switcher — outer HR Dashboard brand
   // tab is the single source of truth.
   const brand: "NB Media" | "YT Labs" =
     initialBrand === "YT Labs" ? "YT Labs" : "NB Media";
-  const { data, isLoading } = useSWR<ResponsesPayload>(
-    `/api/hr/pulse/responses?surveyType=${surveyType}&brand=${encodeURIComponent(brand)}`,
+
+  // Available cycles (newest first) for the past-weeks picker.
+  const { data: cyclesData } = useSWR<{
+    current: string;
+    cycles: { key: string; label: string; responded: number; isCurrent: boolean }[];
+  }>(
+    `/api/hr/pulse/cycles?surveyType=${surveyType}&brand=${encodeURIComponent(brand)}`,
     fetcher,
   );
+
+  const { data, isLoading } = useSWR<ResponsesPayload>(
+    `/api/hr/pulse/responses?surveyType=${surveyType}&brand=${encodeURIComponent(brand)}${cycleKey ? `&cycleKey=${encodeURIComponent(cycleKey)}` : ""}`,
+    fetcher,
+  );
+
+  // Switching survey type resets to that type's current cycle.
+  const switchType = (t: "weekly" | "monthly") => { setSurveyType(t); setCycleKey(""); };
+
+  const cycleOptions = (cyclesData?.cycles ?? []).map((c) => ({
+    value: c.key,
+    label: `${c.label}${c.isCurrent ? " · current" : ""}${c.responded ? ` · ${c.responded} responded` : ""}`,
+  }));
+  // Value shown in the picker: explicit pick, else the live cycle.
+  const selectedCycle = cycleKey || cyclesData?.current || "";
+
+  // The weekly pulse goes out Fridays, so the live week is often empty
+  // mid-week. If HR hasn't picked a cycle and the current one has zero
+  // responses, auto-jump to the most recent cycle that DOES have data —
+  // so the Responses tab lands on real results, not a blank week.
+  useEffect(() => {
+    if (cycleKey || !cyclesData) return;          // respect an explicit pick
+    const cur = cyclesData.cycles.find((c) => c.isCurrent);
+    if (cur && cur.responded === 0) {
+      const latestWithData = cyclesData.cycles.find((c) => c.responded > 0);
+      if (latestWithData) setCycleKey(latestWithData.key);
+    }
+  }, [cyclesData, cycleKey]);
 
   return (
     <div className="space-y-4">
@@ -56,26 +93,44 @@ export default function PulseResponsesView({ initialBrand }: { initialBrand?: "N
         </div>
       </div>
 
-      {/* Weekly / Monthly switcher */}
-      <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-        <button
-          type="button"
-          onClick={() => setSurveyType("weekly")}
-          className={`px-4 py-1.5 rounded-md text-[12.5px] font-semibold inline-flex items-center gap-1.5 transition-colors ${
-            surveyType === "weekly" ? "bg-white text-[#008CFF] shadow-sm" : "text-slate-600 hover:text-slate-900"
-          }`}
-        >
-          <Activity size={13} /> Weekly Pulse
-        </button>
-        <button
-          type="button"
-          onClick={() => setSurveyType("monthly")}
-          className={`px-4 py-1.5 rounded-md text-[12.5px] font-semibold inline-flex items-center gap-1.5 transition-colors ${
-            surveyType === "monthly" ? "bg-white text-[#008CFF] shadow-sm" : "text-slate-600 hover:text-slate-900"
-          }`}
-        >
-          <ThumbsUp size={13} /> Monthly Survey
-        </button>
+      {/* Weekly / Monthly switcher + past-cycle picker */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+          <button
+            type="button"
+            onClick={() => switchType("weekly")}
+            className={`px-4 py-1.5 rounded-md text-[12.5px] font-semibold inline-flex items-center gap-1.5 transition-colors ${
+              surveyType === "weekly" ? "bg-white text-[#008CFF] shadow-sm" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <Activity size={13} /> Weekly Pulse
+          </button>
+          <button
+            type="button"
+            onClick={() => switchType("monthly")}
+            className={`px-4 py-1.5 rounded-md text-[12.5px] font-semibold inline-flex items-center gap-1.5 transition-colors ${
+              surveyType === "monthly" ? "bg-white text-[#008CFF] shadow-sm" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <ThumbsUp size={13} /> Monthly Survey
+          </button>
+        </div>
+
+        {/* Past-cycle picker — browse any prior week / month. */}
+        <div className="inline-flex items-center gap-2">
+          <span className="text-[11.5px] font-semibold text-slate-500 inline-flex items-center gap-1.5">
+            <Calendar size={13} /> {surveyType === "weekly" ? "Week" : "Month"}
+          </span>
+          <div className="w-[240px]">
+            <SelectField
+              value={selectedCycle}
+              onChange={(v) => setCycleKey(v)}
+              options={cycleOptions}
+              placeholder={cyclesData ? "Select…" : "Loading…"}
+              width={240}
+            />
+          </div>
+        </div>
       </div>
 
       {/* (Brand picker removed — outer brand tab drives this panel.) */}
@@ -98,7 +153,9 @@ export default function PulseResponsesView({ initialBrand }: { initialBrand?: "N
                   {brand}
                 </span>
               </p>
-              <h3 className="text-[16px] font-semibold text-slate-900">{data.cycleKey}</h3>
+              <h3 className="text-[16px] font-semibold text-slate-900">
+                {cyclesData?.cycles.find((c) => c.key === data.cycleKey)?.label ?? data.cycleKey}
+              </h3>
             </div>
             <div className="text-right">
               <p className="text-[10.5px] uppercase tracking-[0.08em] font-bold text-slate-400 mb-0.5 inline-flex items-center gap-1.5">
