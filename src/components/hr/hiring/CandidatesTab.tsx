@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import { showToast } from "@/components/ui/Toast";
+import { useDebouncedValue } from "@/lib/hooks/useDebouncedValue";
 import {
   Search, Star, Mail, ChevronDown, ChevronRight, Phone, Plus,
   Download, MoreHorizontal, Users, CheckCircle2, XCircle,
@@ -105,6 +106,9 @@ export default function CandidatesTab() {
 
   const [stageFilter, setStageFilter] = useState<string>("");
   const [search, setSearch]           = useState("");
+  // Filter keys off the debounced value so typing stays smooth on a big
+  // candidate list (the input itself updates instantly).
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [source, setSource]           = useState("");
   const [experience, setExperience]   = useState("");
   const [salary, setSalary]           = useState("");
@@ -150,7 +154,7 @@ export default function CandidatesTab() {
   const sourceOpts = useMemo(() => unique(candidates.map((c) => c.source)), [candidates]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     return candidates.filter((c) => {
       if (stageFilter && (c.currentStage?.key ?? "") !== stageFilter) return false;
       if (source && (c.source ?? "") !== source) return false;
@@ -179,7 +183,7 @@ export default function CandidatesTab() {
       const hay = `${c.fullName} ${c.email} ${c.phone ?? ""} ${c.currentCompany ?? ""} ${c.roleTitle ?? ""} ${c.source ?? ""}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [candidates, stageFilter, source, experience, salary, availableIn, search]);
+  }, [candidates, stageFilter, source, experience, salary, availableIn, debouncedSearch]);
 
   const anyFilterActive = !!(stageFilter || source || experience || salary || availableIn || search);
   const clearAll = () => {

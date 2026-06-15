@@ -21,6 +21,7 @@ import { createPortal } from "react-dom";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { stripLeadingCompanyContent } from "@/lib/hr/jd-format";
+import { useDebouncedValue } from "@/lib/hooks/useDebouncedValue";
 import {
   Plus, Briefcase, MapPin, Users, Search,
   Share2, Send, Pause, CheckCircle2, FileEdit, Pencil, MoreHorizontal,
@@ -217,6 +218,7 @@ export default function JobsTab({
   const [recruiter, setRecruiter]     = useState("");
   const [location, setLocation]       = useState("");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [showPriorityOnly, setShowPriorityOnly] = useState(false);
 
   // ── View state ──────────────────────────────────────────────────
@@ -270,7 +272,7 @@ export default function JobsTab({
 
   // ── Apply remaining client-side filters & search ────────────────
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     return jobs.filter(j => {
       if (showPriorityOnly && !j.isPriority) return false;
       if (department   && j.department         !== department)   return false;
@@ -281,7 +283,7 @@ export default function JobsTab({
       return [j.title, j.department, j.location, j.recruiterName, j.hiringManagerName, String(j.id)]
         .filter(Boolean).join(" ").toLowerCase().includes(q);
     });
-  }, [jobs, search, department, hiringManager, recruiter, location, showPriorityOnly]);
+  }, [jobs, debouncedSearch, department, hiringManager, recruiter, location, showPriorityOnly]);
 
   // Header count shows the count for the currently-displayed filter
   // (matches Keka's "Active Jobs (5)" treatment which updates as you
