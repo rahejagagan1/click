@@ -29,7 +29,7 @@ import { JOB_TITLES_YT_LABS }   from "@/lib/job-titles-yt-labs";
 import { DEPARTMENTS }          from "@/lib/departments";
 import { DEPARTMENTS_YT_LABS }  from "@/lib/departments-yt-labs";
 import { DateField }            from "@/components/ui/date-field";
-import { stripLeadingCompanyContent } from "@/lib/hr/jd-format";
+import { stripLeadingCompanyContent, looksLikeKnownTitle } from "@/lib/hr/jd-format";
 import { showToast } from "@/components/ui/Toast";
 import dynamic from "next/dynamic";
 import "react-quill-new/dist/quill.snow.css";
@@ -101,7 +101,7 @@ const JD_SECTION_HEADINGS = new Set([
   "responsibilities & duties", "duties", "your responsibilities",
 ]);
 
-function plainTextToQuillHtml(input: string): string {
+function plainTextToQuillHtml(input: string, knownTitle?: string): string {
   if (!input) return "";
   const trimmed = input.trim();
   if (trimmed.startsWith("<")) return input;
@@ -111,7 +111,8 @@ function plainTextToQuillHtml(input: string): string {
   const out: string[] = [];
   let bulletBuf: string[] = [];
   let numberedBuf: string[] = [];
-  let sawTitle = false; // only promote the FIRST job-title line
+  let sawTitle = false;   // only handle the FIRST job-title line
+  let sawContent = false; // true once the first real body line is emitted
   const escape = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const flushB = () => {
@@ -162,7 +163,17 @@ function plainTextToQuillHtml(input: string): string {
       // so DROP this line rather than promoting it — promoting it (the old
       // behaviour) rendered the title twice (regression from b6d2471).
       if (titleMatch) { sawTitle = true; continue; }
+      // Bare title (no "Job Description -" label): the template's
+      // {{JobTitle}}, the careers <h1>, and the preview header all print
+      // the title from the Title FIELD — so drop a leading body line that
+      // IS that title. Anchored to the known title (not line shape), so a
+      // real opening sentence is never eaten.
+      if (!sawContent && knownTitle && looksLikeKnownTitle(line, knownTitle)) { sawTitle = true; continue; }
     }
+    // Past the title checks → real body content. Gate the bare-title
+    // strip above to the FIRST content line only, so a role name that
+    // recurs mid-body is never silently deleted.
+    sawContent = true;
     // ── Known section heading anywhere in the document.
     if (isSectionHeading(line)) {
       out.push(`<h3>${escape(line.replace(/[:\s]+$/, ""))}</h3>`);
@@ -801,12 +812,29 @@ function JdPreviewEditor({
   // skip when the file object identity changes for unrelated reasons.
   const fp = `${file.name}-${file.size}-${file.lastModified}`;
   const dirtied = useRef<boolean>(false);
+  // Last raw extracted plain text — kept so we can re-derive (and re-strip
+  // the title from) the body if the Job Title arrives AFTER extraction.
+  const rawTextRef = useRef<string>("");
   const hasUnsavedChanges = value.trim() !== savedValue.trim();
   // canSave needs the body to be non-empty AFTER tag-stripping —
   // Quill emits "<p><br></p>" for an "empty" editor, which is
   // non-empty by string length but visually blank to the user.
   const stripped = value.replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;/g, " ").trim();
   const canSave  = !extracting && stripped.length > 0 && hasUnsavedChanges;
+
+  // The Job Title field + the JD uploader share this wizard step with no
+  // ordering, so HR may upload BEFORE typing the title. When the title
+  // arrives (or changes), re-derive the body from the raw extract so the
+  // now-known title gets stripped — but only while HR hasn't hand-edited.
+  // Without this the title renders in BOTH the header and the body (and
+  // persists into jdText → doubles on the PDF + careers too).
+  useEffect(() => {
+    if (!rawTextRef.current || dirtied.current) return;
+    const html = plainTextToQuillHtml(rawTextRef.current, jobTitle);
+    onChange(html);
+    setSavedValue(html);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobTitle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -830,11 +858,12 @@ function JdPreviewEditor({
         if (cancelled) return;
         if (!res.ok) throw new Error(j?.error || `Couldn't read the file (HTTP ${res.status})`);
         const text = String(j?.text ?? "").trim();
+        rawTextRef.current = text;
         // Convert plain-text extractor output → Quill HTML so the
         // editor opens with light auto-formatting (headings + lists)
         // that HR can refine via the toolbar. Already-HTML values
         // pass through untouched.
-        const html = plainTextToQuillHtml(text);
+        const html = plainTextToQuillHtml(text, jobTitle);
         // Don't clobber HR's manual edits. Only auto-fill when the
         // editor is empty / untouched for the current file.
         if (!dirtied.current || !value.trim()) {
@@ -932,6 +961,19 @@ function JdPreviewEditor({
         className={`jd-quill-wrap bg-white ${expanded ? "flex-1 overflow-auto" : ""} ${extracting ? "opacity-60 pointer-events-none" : ""}`}
         style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
       >
+        {/* Non-editable title header — mirrors the .docx {{JobTitle}} +
+            careers <h1> (big, centered) so the preview matches the PDF.
+            Lives OUTSIDE ReactQuill so it never leaks into value/onChange;
+            the matching title line is stripped from the body above. */}
+        {jobTitle && jobTitle.trim() ? (
+          <div
+            contentEditable={false}
+            aria-hidden="true"
+            style={{ fontSize: "20px", fontWeight: 700, textAlign: "center", margin: "18px 20px 14px", color: "#0f172a" }}
+          >
+            {jobTitle}
+          </div>
+        ) : null}
         <ReactQuill
           theme="snow"
           value={value}
