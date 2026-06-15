@@ -22,6 +22,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
+import { showToast } from "@/components/ui/Toast";
 import { fetcher } from "@/lib/swr";
 import { DateField } from "@/components/ui/date-field";
 import { technicalRoundEmail, finalRoundEmail, stageToInterviewRound } from "@/lib/email/hr-templates";
@@ -110,10 +111,10 @@ export default function ScheduleInterviewModal({
 
   // Used by the Note tab (schedule without sending an email).
   const scheduleOnly = async () => {
-    if (!title.trim())                  return alert("Title required");
-    if (!date || !time)                 return alert("Date and time required");
+    if (!title.trim())                  return showToast("Title required", "error");
+    if (!date || !time)                 return showToast("Date and time required", "error");
     const scheduledAt = new Date(`${date}T${time}`);
-    if (isNaN(scheduledAt.getTime()))   return alert("Invalid date/time");
+    if (isNaN(scheduledAt.getTime()))   return showToast("Invalid date/time", "error");
     setSaving(true);
     try {
       const r1 = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
@@ -137,7 +138,7 @@ export default function ScheduleInterviewModal({
       onDone?.();
       onClose();
     } catch (e: any) {
-      alert(e?.message || "Failed to schedule");
+      showToast(e?.message || "Failed to schedule", "error");
     } finally {
       setSaving(false);
     }
