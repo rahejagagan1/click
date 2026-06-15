@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { mutate as globalMutate } from "swr";
 import { captureClockInGeo } from "@/lib/attendance-location";
 import { desktopBypassHeader, withDesktopBypassParam } from "@/lib/desktop-bypass";
+import { enqueuePunch, getQueuedPunches, removeQueuedPunch } from "@/lib/hr/clock-queue";
 
 // Shared clock-in / clock-out hook used by both the HR Attendance page
 // and the HR Home page. Hardens against the three failure modes that
@@ -212,6 +213,10 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
     setClockingIn(true);
     setError(null);
     setDesktopGate(null);
+    // Stamp the click moment now — carried as clientPunchAt so a punch
+    // that has to be queued + synced later still records at the real time.
+    const clickAt = new Date().toISOString();
+    let geoSnapshot: { lat: number; lng: number; address?: string } | null = null;
     try {
       const geo = await captureClockInGeo();
       if (!geo.ok) {
@@ -222,8 +227,9 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
         console.warn("[clock-in] geo failed:", geo.reason, geo.message);
         return;
       }
+      geoSnapshot = { lat: geo.lat, lng: geo.lng, address: geo.address };
       await postWithRetry("/api/hr/attendance/clock-in", {
-        lat: geo.lat, lng: geo.lng, address: geo.address,
+        lat: geo.lat, lng: geo.lng, address: geo.address, clientPunchAt: clickAt,
       });
       refreshAfter();
     } catch (e: any) {
@@ -232,6 +238,11 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
       // click seeming to do nothing.
       if (e instanceof ClockApiError && e.reason === "desktop_only") {
         setDesktopGate({ message: e.message });
+      } else if (e instanceof ClockApiError && e.transient && geoSnapshot) {
+        // Network blip — stash the punch (with its real click time + geo)
+        // so it auto-syncs when the connection is back, instead of vanishing.
+        enqueuePunch({ kind: "in", at: clickAt, ...geoSnapshot });
+        setError({ message: "No connection — your clock-in is saved and will sync automatically.", severity: "info" });
       } else {
         const msg = e instanceof ClockApiError ? e.message : "Clock-in failed. Please try again.";
         setError({ message: msg, severity: "error" });
@@ -250,8 +261,9 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
     setError(null);
     setPulseGate(null);
     setDesktopGate(null);
+    const clickAt = new Date().toISOString();
     try {
-      const data = await postWithRetry("/api/hr/attendance/clock-out");
+      const data = await postWithRetry("/api/hr/attendance/clock-out", { clientPunchAt: clickAt });
       refreshAfter();
       onClockOutSuccess?.(data);
     } catch (e: any) {
@@ -264,6 +276,12 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
         // is visible (the generic banner isn't rendered in the
         // clocked-in UI state, which made this fail silently before).
         setDesktopGate({ message: e.message });
+      } else if (e instanceof ClockApiError && e.transient) {
+        // Network blip — stash the clock-out (with its real click time) so
+        // it auto-syncs when the connection returns; the original time is
+        // sent so a late sync doesn't inflate the day's hours.
+        enqueuePunch({ kind: "out", at: clickAt });
+        setError({ message: "No connection — your clock-out is saved and will sync automatically.", severity: "info" });
       } else {
         const msg = e instanceof ClockApiError ? e.message : "Clock-out failed. Please try again.";
         setError({ message: msg, severity: "error" });
@@ -274,6 +292,67 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
       setClockingOut(false);
     }
   }, [refreshAfter, onClockOutSuccess]);
+
+  // ── Offline retry queue ─────────────────────────────────────────────
+  // Replays punches that a network blip stranded in localStorage. Sends
+  // each with its original click time (clientPunchAt) so it records at the
+  // right moment. A 4xx (gate / already-clocked-out) is permanent → drop
+  // it; a transient failure is left for the next flush.
+  const flushing = useRef(false);
+  const flushQueue = useCallback(async () => {
+    if (flushing.current) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    const queue = getQueuedPunches();
+    if (queue.length === 0) return;
+    flushing.current = true;
+    let synced = false;
+    try {
+      for (const p of queue) {
+        const url = p.kind === "in" ? "/api/hr/attendance/clock-in" : "/api/hr/attendance/clock-out";
+        const body = p.kind === "in"
+          ? { lat: p.lat, lng: p.lng, address: p.address, clientPunchAt: p.at }
+          : { clientPunchAt: p.at };
+        try {
+          await postWithRetry(url, body);
+          removeQueuedPunch(p.id);
+          synced = true;
+        } catch (e: any) {
+          // Permanent (4xx gate, already-clocked-out, bad payload) → stop
+          // retrying it. Transient → keep it for the next flush.
+          if (e instanceof ClockApiError && !e.transient) removeQueuedPunch(p.id);
+        }
+      }
+    } finally {
+      flushing.current = false;
+    }
+    if (synced) {
+      refreshAfter();
+      setError({ message: "✓ Your saved clock punch synced.", severity: "info" });
+    }
+  }, [refreshAfter]);
+
+  // Flush on mount (replays anything a prior session left behind), when the
+  // browser regains connectivity, when the tab is refocused, and on a slow
+  // interval as a backstop while the queue is non-empty.
+  useEffect(() => {
+    flushQueue();
+    const onOnline = () => { flushQueue(); };
+    const onVisible = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") flushQueue();
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", onOnline);
+      document.addEventListener("visibilitychange", onVisible);
+    }
+    const iv = setInterval(() => { if (getQueuedPunches().length > 0) flushQueue(); }, 30_000);
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("online", onOnline);
+        document.removeEventListener("visibilitychange", onVisible);
+      }
+      clearInterval(iv);
+    };
+  }, [flushQueue]);
 
   const clearError = useCallback(() => setError(null), []);
   const dismissPulseGate = useCallback(() => setPulseGate(null), []);
