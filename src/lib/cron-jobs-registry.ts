@@ -14,7 +14,8 @@ export type CronJobId =
   | "violation_reminders"
   | "probation_reminders"
   | "doc_compliance"
-  | "auto_lop";
+  | "auto_lop"
+  | "reporting_manager_changes";
 
 export type CronJobDefinition = {
   id: CronJobId;
@@ -89,6 +90,13 @@ export const CRON_JOB_DEFINITIONS: CronJobDefinition[] = [
     name: "Auto-mark missing attendance as LOP",
     description:
       "For each working day in the last 7 days where the 48-hour grace has passed, mark active users as status=\"lop\" if they have no Attendance row AND no pending/approved leave, regularization, WFH, OD, or comp-off for that date. Skips holidays and days outside each user's shift workDays. Idempotent.",
+    defaultIntervalHours: 24,
+  },
+  {
+    id: "reporting_manager_changes",
+    name: "Apply scheduled reporting-manager changes",
+    description:
+      "Daily sweep: applies every effective-dated reporting-manager change whose date has arrived (IST). Flips User.managerId to the scheduled new manager, marks the ManagerChangeSchedule row 'applied', and emails the employee + new manager + brand HR. Idempotent — the apply is guarded on status='pending'. Enabled by default so HR's scheduled changes take effect automatically.",
     defaultIntervalHours: 24,
   },
 ];

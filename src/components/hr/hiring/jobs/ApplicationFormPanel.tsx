@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import useSWR from "swr";
+import { showToast } from "@/components/ui/Toast";
 import { fetcher } from "@/lib/swr";
 import {
   Plus, Edit3, Trash2, GripVertical, ChevronDown, ExternalLink,
@@ -70,7 +71,7 @@ function ScreeningQuestionsPanel({ jobId }: { jobId: number }) {
     const res = await fetch(`/api/hr/hiring/jobs/${jobId}/questions/${q.id}`, { method: "DELETE" });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      alert(j?.error || "Failed to delete");
+      showToast(j?.error || "Failed to delete", "error");
       return;
     }
     refresh();
@@ -246,14 +247,14 @@ function QuestionEditor({
 
   const save = async () => {
     const trimmed = text.trim();
-    if (!trimmed) return alert("Question text is required");
+    if (!trimmed) return showToast("Question text is required", "error");
     setSaving(true);
     const payload: any = { text: trimmed, type, required };
     if (isMulti) {
       const cleaned = options.map((o) => o.trim()).filter(Boolean);
       if (cleaned.length < 2) {
         setSaving(false);
-        return alert("Multiple choice needs at least 2 options");
+        return showToast("Multiple choice needs at least 2 options", "error");
       }
       payload.options = cleaned;
     } else {
@@ -270,7 +271,7 @@ function QuestionEditor({
     setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      alert(j?.error || "Failed to save");
+      showToast(j?.error || "Failed to save", "error");
       return;
     }
     onSaved();

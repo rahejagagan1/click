@@ -64,10 +64,20 @@ export async function GET(req: NextRequest) {
       params.push(statusParam); where += ` AND o."status" = $${params.length}`;
     }
 
+    // Explicit projection — the jobs LIST never renders the heavy @db.Text
+    // columns (description / internalNotes / jdText). Shipping them on every
+    // row (re-fetched constantly) was the biggest list-payload cost; the
+    // single-job + edit views fetch those separately. Everything JobsTab
+    // renders is kept.
+    const JOB_LIST_COLS =
+      `o."id", o."title", o."department", o."location", o."isOpen", o."createdAt", o."updatedAt", ` +
+      `o."brand", o."employmentType", o."experienceLevel", o."salaryRange", o."closesAt", o."status", ` +
+      `o."publicSlug", o."publishedAt", o."vacancies", o."isPriority", o."jdFileUrl", o."jdFileName", ` +
+      `o."recruiterId", o."hiringManagerId"`;
     let rows: any[] = [];
     try {
       rows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT o.*,
+        `SELECT ${JOB_LIST_COLS},
                 r."name" AS "recruiterName",
                 h."name" AS "hiringManagerName",
                 (SELECT COUNT(*) FROM "JobApplication" a WHERE a."jobOpeningId" = o."id") AS "applicationCount",
@@ -80,7 +90,14 @@ export async function GET(req: NextRequest) {
                 (SELECT COUNT(*) FROM "JobApplication" a
                    LEFT JOIN "HiringStage" s ON s."id" = a."currentStageId"
                   WHERE a."jobOpeningId" = o."id"
-                    AND (s."id" IS NULL OR a."status" = 'new')) AS "newCount"
+                    AND (s."id" IS NULL OR a."status" = 'new')
+                    AND a."createdAt" >= NOW() - INTERVAL '48 hours') AS "newCount",
+                -- Still SOURCED / stage-unchanged but older than 48h → "recent"
+                (SELECT COUNT(*) FROM "JobApplication" a
+                   LEFT JOIN "HiringStage" s ON s."id" = a."currentStageId"
+                  WHERE a."jobOpeningId" = o."id"
+                    AND (s."id" IS NULL OR a."status" = 'new')
+                    AND a."createdAt" <  NOW() - INTERVAL '48 hours') AS "recentCount"
            FROM "JobOpening" o
            LEFT JOIN "User" r ON r."id" = o."recruiterId"
            LEFT JOIN "User" h ON h."id" = o."hiringManagerId"
@@ -101,14 +118,15 @@ export async function GET(req: NextRequest) {
       const msg = String(e?.meta?.message || e?.message || "");
       if (code === "42703" || code === "42P01" || /does not exist/i.test(msg)) {
         rows = await prisma.$queryRawUnsafe<any[]>(
-          `SELECT o.*,
+          `SELECT ${JOB_LIST_COLS},
                   NULL AS "recruiterName",
                   NULL AS "hiringManagerName",
                   (SELECT COUNT(*) FROM "JobApplication" a WHERE a."jobOpeningId" = o."id") AS "applicationCount",
                   0 AS "activeCount",
                   0 AS "hiredCount",
                   0 AS "rejectedCount",
-                  0 AS "newCount"
+                  0 AS "newCount",
+                  0 AS "recentCount"
              FROM "JobOpening" o
             ORDER BY o."isOpen" DESC, o."createdAt" DESC`,
         );
@@ -125,6 +143,7 @@ export async function GET(req: NextRequest) {
         hiredCount:       Number(r.hiredCount ?? 0),
         rejectedCount:    Number(r.rejectedCount ?? 0),
         newCount:         Number(r.newCount ?? 0),
+        recentCount:      Number(r.recentCount ?? 0),
         // isPriority may be absent on pre-migration rows. Default to
         // false so the front-end star treats the column as off.
         isPriority:       r.isPriority === true,

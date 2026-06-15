@@ -29,6 +29,8 @@ import { JOB_TITLES_YT_LABS }   from "@/lib/job-titles-yt-labs";
 import { DEPARTMENTS }          from "@/lib/departments";
 import { DEPARTMENTS_YT_LABS }  from "@/lib/departments-yt-labs";
 import { DateField }            from "@/components/ui/date-field";
+import { stripLeadingCompanyContent } from "@/lib/hr/jd-format";
+import { showToast } from "@/components/ui/Toast";
 import dynamic from "next/dynamic";
 import "react-quill-new/dist/quill.snow.css";
 
@@ -87,13 +89,25 @@ const JD_SECTION_HEADINGS = new Set([
   "about us", "about the company", "about nb media",
   "how to apply", "application process", "next steps",
   "education", "experience", "key skills",
+  // "Who We are Looking For"-style headers + common JD section names
+  // that were missing — so the editor promotes them to headings the
+  // same way the PDF does (keeps the preview WYSIWYG).
+  "who we are looking for", "who we're looking for",
+  "what we are looking for", "what we're looking for",
+  "who you are", "the ideal candidate", "ideal candidate",
+  "the role", "about the role", "role overview", "your role",
+  "what you'll bring", "what you will bring", "what you bring",
+  "what success looks like", "day to day", "day-to-day",
+  "responsibilities & duties", "duties", "your responsibilities",
 ]);
 
 function plainTextToQuillHtml(input: string): string {
   if (!input) return "";
   const trimmed = input.trim();
   if (trimmed.startsWith("<")) return input;
-  const lines = input.replace(/\r\n/g, "\n").split("\n");
+  // Drop a pasted company letterhead from the top so it can't double the
+  // .docx template's own letterhead (and drag in a typo'd email).
+  const lines = stripLeadingCompanyContent(input).replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];
   let bulletBuf: string[] = [];
   let numberedBuf: string[] = [];
@@ -114,7 +128,12 @@ function plainTextToQuillHtml(input: string): string {
   };
   const flushAll = () => { flushB(); flushN(); };
   const isSectionHeading = (line: string): boolean => {
-    const norm = line.replace(/[:\s]+$/, "").trim().toLowerCase();
+    const norm = line.replace(/[:\s]+$/, "").trim().toLowerCase()
+      // Normalise curly/smart apostrophes (’ ‘ ʼ) to a straight ' so PDF
+      // extractor output like "What You’ll Do" matches the set entry
+      // "what you'll do" — otherwise that heading rendered as plain text
+      // in the editor while the PDF bolded it.
+      .replace(/[‘’ʼ]/g, "'");
     return JD_SECTION_HEADINGS.has(norm);
   };
   for (const raw of lines) {
@@ -139,11 +158,10 @@ function plainTextToQuillHtml(input: string): string {
     //    emitted the right HTML.
     if (!sawTitle) {
       const titleMatch = line.match(/^(?:Job\s+Description|Job\s+Title)\s*[-–—:]\s*(.+)$/i);
-      if (titleMatch) {
-        out.push(`<h2 class="ql-align-center">${escape(titleMatch[0])}</h2>`);
-        sawTitle = true;
-        continue;
-      }
+      // The .docx template already prints "Job Description - {{JobTitle}}",
+      // so DROP this line rather than promoting it — promoting it (the old
+      // behaviour) rendered the title twice (regression from b6d2471).
+      if (titleMatch) { sawTitle = true; continue; }
     }
     // ── Known section heading anywhere in the document.
     if (isSectionHeading(line)) {
@@ -507,11 +525,12 @@ export default function CreateJobWizard({
       // already saved and HR can add questions later via the per-job
       // Application Form panel.
       if (id && form.questions.length > 0) {
+        let failedQuestions = 0;
         for (const q of form.questions) {
           const text = q.text.trim();
           if (!text) continue;
           try {
-            await fetch(`/api/hr/hiring/jobs/${id}/questions`, {
+            const qRes = await fetch(`/api/hr/hiring/jobs/${id}/questions`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -523,7 +542,16 @@ export default function CreateJobWizard({
                   : undefined,
               }),
             });
-          } catch { /* non-fatal — job is already saved */ }
+            if (!qRes.ok) failedQuestions++;
+          } catch { failedQuestions++; }
+        }
+        // Non-fatal (the job is saved), but tell HR instead of silently
+        // dropping screening questions.
+        if (failedQuestions > 0) {
+          showToast(
+            `Job saved, but ${failedQuestions} screening question${failedQuestions === 1 ? "" : "s"} couldn't be saved — add them from the job's Application Form.`,
+            "error",
+          );
         }
       }
       // Successful create — wipe the saved draft so the next time
@@ -1067,8 +1095,8 @@ function JdUploader({ file, setFile }: { file: File | null; setFile: (f: File | 
   const pick = (f: File | null) => {
     if (!f) { setFile(null); return; }
     const ext = f.name.toLowerCase().slice(f.name.lastIndexOf("."));
-    if (!ALLOWED.includes(ext)) return alert("Allowed: PDF, DOC, DOCX, RTF, TXT");
-    if (f.size > MAX)            return alert("Max 5 MB");
+    if (!ALLOWED.includes(ext)) return showToast("Allowed: PDF, DOC, DOCX, RTF, TXT", "error");
+    if (f.size > MAX)            return showToast("Max 5 MB", "error");
     setFile(f);
   };
   return (
