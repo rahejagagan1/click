@@ -31,3 +31,32 @@ export function stripLeadingCompanyContent(text: string): string {
   }
   return removed ? lines.slice(i).join("\n").replace(/^\n+/, "") : text;
 }
+
+/**
+ * Does a body line look like the job's title? Anchored to the KNOWN title
+ * (the Title field) — never to line SHAPE — so we only strip a leading
+ * line we're confident is the title and never eat a real opening sentence.
+ * A word-boundary prefix match both ways handles a title that carries an
+ * extra subtitle: line "Social Media Lead — Content & Short-Form Video"
+ * still matches a Title field of "Social Media Lead" (and vice-versa).
+ *
+ * Used to drop the title from the editable JD body, since the title is
+ * printed from the Title field everywhere it matters — the .docx
+ * {{JobTitle}}, the careers-page <h1>, and the wizard preview header.
+ */
+export function looksLikeKnownTitle(line: string, title: string): boolean {
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[‘’ʼ]/g, "'")
+      .replace(/[–—-]/g, " ")
+      .replace(/[^\w\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const a = norm(line);
+  const b = norm(title);
+  if (!a || !b) return false;
+  if (a === b) return true;                 // exact match is safe at any length
+  if (b.length < 4) return false;           // prefix arms only for non-tiny titles
+  return a.startsWith(b + " ") || b.startsWith(a + " ");
+}
