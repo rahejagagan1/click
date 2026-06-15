@@ -151,7 +151,8 @@ type Job = {
   activeCount: number;
   hiredCount: number;
   rejectedCount: number;
-  newCount: number;
+  newCount: number;       // still SOURCED, applied within last 48h
+  recentCount: number;    // still SOURCED, applied > 48h ago
   createdAt: string;
   closesAt: string | null;
   jdFileUrl: string | null;
@@ -848,6 +849,11 @@ function JobCard({
               {job.newCount}
             </span>
             <span className="ml-1 uppercase">new</span>
+            <span className="mx-1.5 text-slate-300">·</span>
+            <span className={`tabular-nums ${job.recentCount > 0 ? "text-amber-600 font-bold" : "text-slate-700"}`}>
+              {job.recentCount}
+            </span>
+            <span className="ml-1 uppercase">recent</span>
             <span className="mx-1.5 text-slate-300">·</span>
             <span className="text-slate-700 tabular-nums">{job.rejectedCount}</span>
             <span className="ml-1 uppercase">archived</span>

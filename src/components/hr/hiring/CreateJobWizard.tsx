@@ -128,7 +128,12 @@ function plainTextToQuillHtml(input: string): string {
   };
   const flushAll = () => { flushB(); flushN(); };
   const isSectionHeading = (line: string): boolean => {
-    const norm = line.replace(/[:\s]+$/, "").trim().toLowerCase();
+    const norm = line.replace(/[:\s]+$/, "").trim().toLowerCase()
+      // Normalise curly/smart apostrophes (’ ‘ ʼ) to a straight ' so PDF
+      // extractor output like "What You’ll Do" matches the set entry
+      // "what you'll do" — otherwise that heading rendered as plain text
+      // in the editor while the PDF bolded it.
+      .replace(/[‘’ʼ]/g, "'");
     return JD_SECTION_HEADINGS.has(norm);
   };
   for (const raw of lines) {
