@@ -8,6 +8,7 @@ import { useMemo, useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
+import { showToast } from "@/components/ui/Toast";
 import {
   Search, Star, Mail, ChevronDown, ChevronRight, Phone, Plus,
   Download, MoreHorizontal, Users, CheckCircle2, XCircle,
@@ -554,7 +555,7 @@ export default function CandidatesTab() {
               .then((r) => {
                 if (!r.ok) return r.json().then((j) => Promise.reject(j));
               })
-              .catch((j) => alert(j?.error || "Couldn't add tag"))
+              .catch((j) => showToast(j?.error || "Couldn't add tag", "error"))
               .finally(() => mutateCandidates());
           }}
         />
@@ -572,6 +573,7 @@ export default function CandidatesTab() {
           x={rowMenuFor.x}
           y={rowMenuFor.y}
           onClose={() => setRowMenuFor(null)}
+          onMutated={() => mutateCandidates()}
           onOpenDrawer={() => { setActiveId(rowMenuFor.id); setRowMenuFor(null); }}
           onOpenAction={(action) => {
             const id = rowMenuFor.id;
@@ -922,7 +924,7 @@ function RowActionButton({
 //   • or fires a side-effect like WhatsApp deep-link
 function RowActionsMenu({
   candidate, stages, archiveStage, x, y,
-  onClose, onOpenDrawer, onOpenAction, onOpenTagPopover,
+  onClose, onMutated, onOpenDrawer, onOpenAction, onOpenTagPopover,
 }: {
   candidate: Candidate | null;
   stages: Stage[];
@@ -930,6 +932,7 @@ function RowActionsMenu({
   x: number;
   y: number;
   onClose: () => void;
+  onMutated: () => void;
   onOpenDrawer: () => void;
   onOpenAction: (action: CandidateAction) => void;
   onOpenTagPopover: () => void;
@@ -984,7 +987,7 @@ function RowActionsMenu({
 
   const archive = async () => {
     if (!archiveStage) {
-      alert("No archive stage configured on this pipeline yet.");
+      showToast("No archive stage configured on this pipeline yet.", "error");
       return;
     }
     if (!confirm(`Archive ${candidate.fullName}? They'll move to the "${archiveStage.label}" stage and disappear from the active pipeline.`)) return;
@@ -996,12 +999,13 @@ function RowActionsMenu({
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        alert(j?.error || "Couldn't archive candidate");
+        showToast(j?.error || "Couldn't archive candidate", "error");
+        return;                       // keep the menu open so they can retry
       }
-    } catch {
-      alert("Network error — couldn't archive.");
-    } finally {
+      onMutated();                    // refresh the list so the row leaves the active pipeline
       onClose();
+    } catch {
+      showToast("Network error — couldn't archive.", "error");
     }
   };
 
@@ -1014,12 +1018,13 @@ function RowActionsMenu({
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        alert(j?.error || `Couldn't move to ${stage.label}`);
+        showToast(j?.error || `Couldn't move to ${stage.label}`, "error");
+        return;                       // keep the menu open on failure
       }
-    } catch {
-      alert("Network error — couldn't move stage.");
-    } finally {
+      onMutated();                    // refresh so the row reflects its new stage
       onClose();
+    } catch {
+      showToast("Network error — couldn't move stage.", "error");
     }
   };
 
@@ -1038,7 +1043,7 @@ function RowActionsMenu({
       <MenuRow icon={Send}            label="Send Email"         onClick={() => { onOpenAction("sendEmail"); onClose(); }} />
       <MenuRow icon={MessageCircle}   label="Message on WhatsApp" onClick={() => {
         const phone = (candidate.phone ?? "").replace(/\D/g, "");
-        if (!phone) { alert("No phone number on file."); return; }
+        if (!phone) { showToast("No phone number on file.", "error"); return; }
         window.open(`https://wa.me/${phone}`, "_blank", "noopener,noreferrer");
         onClose();
       }} />
