@@ -143,6 +143,7 @@ export async function GET(req: NextRequest) {
         hiredCount:       Number(r.hiredCount ?? 0),
         rejectedCount:    Number(r.rejectedCount ?? 0),
         newCount:         Number(r.newCount ?? 0),
+        recentCount:      Number(r.recentCount ?? 0),
         // isPriority may be absent on pre-migration rows. Default to
         // false so the front-end star treats the column as off.
         isPriority:       r.isPriority === true,
