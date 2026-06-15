@@ -31,7 +31,11 @@ function clampHours(n: number, fallback: number): number {
 function defaultStateFor(id: CronJobId): CronJobState {
   const def = CRON_JOB_DEFINITIONS.find((d) => d.id === id);
   return {
-    enabled: false,
+    // Applying scheduled reporting-manager changes must run unattended,
+    // so this one defaults ON (existing installs pick this up too — the
+    // config reader falls back to this default for any key it's missing).
+    // Every other sync stays opt-in via Admin → Crons.
+    enabled: id === "reporting_manager_changes",
     intervalHours: def?.defaultIntervalHours ?? 6,
     lastAutoRunAt: null,
     lastManualRunAt: null,

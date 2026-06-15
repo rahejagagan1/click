@@ -22,6 +22,7 @@ import SalaryStructurePanel from "@/components/hr/SalaryStructurePanel";
 import CustomSelect from "@/components/ui/CustomSelect";
 import SelectField from "@/components/ui/SelectField";
 import { DateField } from "@/components/ui/date-field";
+import ScheduleManagerChange from "@/components/hr/ScheduleManagerChange";
 import { DEPARTMENTS } from "@/lib/departments";
 import { legacyFromDesignationKey } from "@/lib/permissions/designation-seed";
 import {
@@ -973,6 +974,15 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
             <label className={cls.label}>Team Capsule</label>
             <input className={cls.field} value={job.teamCapsule}
               onChange={(e) => setJob({ ...job, teamCapsule: e.target.value })} />
+          </div>
+          {/* Effective-dated reporting-manager change — auto-applies on
+              the chosen date via the reporting_manager_changes cron. */}
+          <div className="sm:col-span-2">
+            <ScheduleManagerChange
+              userId={userId}
+              currentManagerName={user.manager?.name ?? null}
+              managerOpts={managerOpts}
+            />
           </div>
         </div>
       </Section>
