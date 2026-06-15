@@ -29,6 +29,7 @@ import { JOB_TITLES_YT_LABS }   from "@/lib/job-titles-yt-labs";
 import { DEPARTMENTS }          from "@/lib/departments";
 import { DEPARTMENTS_YT_LABS }  from "@/lib/departments-yt-labs";
 import { DateField }            from "@/components/ui/date-field";
+import { stripLeadingCompanyContent } from "@/lib/hr/jd-format";
 import dynamic from "next/dynamic";
 import "react-quill-new/dist/quill.snow.css";
 
@@ -93,7 +94,9 @@ function plainTextToQuillHtml(input: string): string {
   if (!input) return "";
   const trimmed = input.trim();
   if (trimmed.startsWith("<")) return input;
-  const lines = input.replace(/\r\n/g, "\n").split("\n");
+  // Drop a pasted company letterhead from the top so it can't double the
+  // .docx template's own letterhead (and drag in a typo'd email).
+  const lines = stripLeadingCompanyContent(input).replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];
   let bulletBuf: string[] = [];
   let numberedBuf: string[] = [];
@@ -139,11 +142,10 @@ function plainTextToQuillHtml(input: string): string {
     //    emitted the right HTML.
     if (!sawTitle) {
       const titleMatch = line.match(/^(?:Job\s+Description|Job\s+Title)\s*[-–—:]\s*(.+)$/i);
-      if (titleMatch) {
-        out.push(`<h2 class="ql-align-center">${escape(titleMatch[0])}</h2>`);
-        sawTitle = true;
-        continue;
-      }
+      // The .docx template already prints "Job Description - {{JobTitle}}",
+      // so DROP this line rather than promoting it — promoting it (the old
+      // behaviour) rendered the title twice (regression from b6d2471).
+      if (titleMatch) { sawTitle = true; continue; }
     }
     // ── Known section heading anywhere in the document.
     if (isSectionHeading(line)) {

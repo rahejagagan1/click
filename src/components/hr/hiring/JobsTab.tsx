@@ -20,6 +20,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
+import { stripLeadingCompanyContent } from "@/lib/hr/jd-format";
 import {
   Plus, Briefcase, MapPin, Users, Search,
   Share2, Send, Pause, CheckCircle2, FileEdit, Pencil, MoreHorizontal,
@@ -77,10 +78,13 @@ function plainTextToQuillHtml(input: string): string {
   if (!input) return "";
   const trimmed = input.trim();
   if (trimmed.startsWith("<")) return input;  // already HTML — likely re-edit
-  const lines = input.replace(/\r\n/g, "\n").split("\n");
+  // Drop a pasted company letterhead from the top so it can't double the
+  // .docx template's own letterhead (and drag in a typo'd email).
+  const lines = stripLeadingCompanyContent(input).replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];
   let bulletBuf: string[] = [];
   let numberedBuf: string[] = [];
+  let sawTitle = false;
   const escape = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const flushB = () => {
@@ -104,6 +108,12 @@ function plainTextToQuillHtml(input: string): string {
     const num = line.match(/^\d+[.)]\s+(.*)$/);
     if (num) { flushB(); numberedBuf.push(num[1]); continue; }
     flushAll();
+    // The .docx template prints "Job Description - {{JobTitle}}" itself —
+    // drop a title line from the body so it isn't duplicated.
+    if (!sawTitle) {
+      const titleMatch = line.match(/^(?:Job\s+Description|Job\s+Title)\s*[-–—:]\s*(.+)$/i);
+      if (titleMatch) { sawTitle = true; continue; }
+    }
     if (/:\s*$/.test(line) && line.length <= 60) {
       out.push(`<h3>${escape(line.replace(/:\s*$/, ""))}</h3>`);
     } else {
