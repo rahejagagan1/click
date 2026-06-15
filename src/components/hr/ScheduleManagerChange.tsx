@@ -5,6 +5,8 @@
 // Pick the incoming manager (searchable) + an effective date; the
 // `reporting_manager_changes` cron flips User.managerId on that date.
 // One pending change at a time — scheduling a new one replaces it.
+// The form is always visible (no collapse) until a change is pending,
+// at which point it's replaced by the pending row.
 
 import { useEffect, useState } from "react";
 import { CalendarClock, X, ArrowRight } from "lucide-react";
@@ -43,7 +45,6 @@ export default function ScheduleManagerChange({
 }) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
   const [newManagerId, setNewManagerId] = useState("");
   const [date, setDate] = useState("");
   const [busy, setBusy] = useState(false);
@@ -57,7 +58,7 @@ export default function ScheduleManagerChange({
         setPending(j?.pending ?? null);
       }
     } catch {
-      /* ignore — control just shows the empty state */
+      /* ignore — control just shows the empty form */
     }
     setLoading(false);
   };
@@ -83,7 +84,6 @@ export default function ScheduleManagerChange({
         return;
       }
       setPending(j?.pending ?? null);
-      setOpen(false);
       setNewManagerId("");
       setDate("");
       showToast("Reporting-manager change scheduled", "success");
@@ -153,13 +153,8 @@ export default function ScheduleManagerChange({
             <X size={14} />
           </button>
         </div>
-      ) : open ? (
-        <div
-          id={`sched-mgr-${userId}`}
-          role="group"
-          aria-label="Schedule a future reporting-manager change"
-          className="space-y-2.5"
-        >
+      ) : (
+        <div role="group" aria-label="Schedule a future reporting-manager change" className="space-y-2.5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[11.5px] font-semibold text-slate-600 mb-1">
@@ -183,43 +178,16 @@ export default function ScheduleManagerChange({
             <p className="text-[11px] text-slate-400 leading-snug">
               The reporting manager updates automatically on this date.
             </p>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  setNewManagerId("");
-                  setDate("");
-                }}
-                className="h-9 px-3 rounded-lg text-[12.5px] font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={schedule}
-                disabled={busy}
-                className="h-9 px-4 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-slate-300 text-white text-[12.5px] font-semibold shadow-sm transition-colors"
-              >
-                {busy ? "Scheduling…" : "Schedule change"}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={schedule}
+              disabled={busy}
+              className="shrink-0 h-9 px-4 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-slate-300 text-white text-[12.5px] font-semibold shadow-sm transition-colors"
+            >
+              {busy ? "Scheduling…" : "Schedule change"}
+            </button>
           </div>
         </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-expanded={false}
-          aria-controls={`sched-mgr-${userId}`}
-          className="group inline-flex items-center gap-2 h-9 px-3 rounded-lg border border-slate-200 bg-white text-[12.5px] font-semibold text-slate-600 hover:border-[#3b82f6] hover:text-[#1e40af] focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 transition-colors"
-        >
-          <CalendarClock
-            size={14}
-            className="text-slate-400 group-hover:text-[#3b82f6] transition-colors"
-          />
-          Schedule for later…
-        </button>
       )}
     </div>
   );
