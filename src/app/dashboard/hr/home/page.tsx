@@ -13,6 +13,7 @@ import { isHRAdmin, canApplyRestrictedLeave, canViewAllBrands } from "@/lib/acce
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
 import PulseGateModal from "@/components/hr/PulseGateModal";
+import DesktopGateModal from "@/components/hr/DesktopGateModal";
 import { isDesktopBypassActive } from "@/lib/desktop-bypass";
 import { PageShell } from "@/components/layout";
 import { DateField } from "@/components/ui/date-field";
@@ -2685,7 +2686,7 @@ export default function HRHomePage() {
   // one automatic retry on transient failures, all of which were
   // silently dropped in the previous inline handlers (hence the
   // "click 3-4 times before it works" reports).
-  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError, pulseGate, dismissPulseGate } = useClockActions({
+  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError, pulseGate, dismissPulseGate, desktopGate, dismissDesktopGate } = useClockActions({
     mutateKeys: [`/api/hr/attendance?month=${monthKey}`],
   });
   // Auto-collapse the Confirm/Cancel pair after 6s of idle.
@@ -3023,6 +3024,12 @@ export default function HRHomePage() {
                       </div>
                     ) : (
                       <div className="flex flex-col items-center gap-1">
+                        {clockError && (
+                          <div className="flex items-start gap-1 max-w-[340px] px-2 py-1 rounded bg-rose-500/20 border border-rose-500/40 text-rose-100 text-[10px] leading-tight">
+                            <span className="flex-1">{clockError.message}</span>
+                            <button onClick={clearClockError} className="shrink-0 text-rose-200 hover:text-white" aria-label="Dismiss">✕</button>
+                          </div>
+                        )}
                         <button
                           onClick={mobileBlocked ? undefined : () => setConfirmingClockOut(true)}
                           disabled={mobileBlocked}
@@ -3906,6 +3913,7 @@ export default function HRHomePage() {
         />
       )}
       <PulseGateModal gate={pulseGate} onDismiss={dismissPulseGate} />
+      <DesktopGateModal gate={desktopGate} onDismiss={dismissDesktopGate} />
     </PageShell>
   );
 }
