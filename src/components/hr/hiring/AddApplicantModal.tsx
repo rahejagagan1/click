@@ -116,11 +116,14 @@ export default function AddApplicantModal({ jobId, jobTitle, onClose, onCreated 
         setError(j?.error || `Add failed (${res.status})`);
         return;
       }
-      // Refresh both the per-job list (CandidatesTab) and any
-      // global views (HR Dashboard) that subscribe to the same
-      // SWR keys.
-      await globalMutate(`/api/hr/hiring/candidates?openingId=${jobId}`);
-      await globalMutate("/api/hr/hiring/candidates");
+      // Refresh both the per-job list (CandidatesTab) and any global views
+      // (HR Dashboard) that subscribe to the same SWR keys. Best-effort —
+      // a mutate that throws must NOT fall through to the catch and make a
+      // successfully-created candidate look like a failed add.
+      try {
+        await globalMutate(`/api/hr/hiring/candidates?openingId=${jobId}`);
+        await globalMutate("/api/hr/hiring/candidates");
+      } catch { /* refresh is best-effort */ }
       onCreated?.(j?.id);
       onClose();
     } catch (e: any) {

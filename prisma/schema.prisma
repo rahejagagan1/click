@@ -204,9 +204,36 @@ model User {
   // ── Legacy candidate-stage history (restored 2026-06-12) ──
   candidateStageMoves CandidateStage[] @relation("CandidateStageMover")
 
+  // ── Scheduled (effective-dated) reporting-manager changes ──
+  managerChangesAsEmployee   ManagerChangeSchedule[] @relation("MgrChangeEmployee")
+  managerChangesAsNewManager ManagerChangeSchedule[] @relation("MgrChangeNewManager")
+
   @@index([managerId])
   @@index([inlineManagerId])
   @@index([designationId])
+}
+
+// Effective-dated reporting-manager change. HR schedules a future
+// manager for an employee; the `reporting_manager_changes` daily cron
+// flips User.managerId on/after effectiveDate and marks the row applied.
+// Accessed via raw SQL in the API + cron (the typed client lags on the
+// dev/VPS box), so this model is the source of truth for migrations.
+model ManagerChangeSchedule {
+  id            Int       @id @default(autoincrement())
+  userId        Int       // employee whose reporting manager changes
+  newManagerId  Int       // the incoming reporting manager
+  effectiveDate DateTime  @db.Date // IST calendar day the change applies
+  status        String    @default("pending") // pending | applied | cancelled
+  note          String?
+  createdBy     Int? // HR/admin who scheduled it
+  createdAt     DateTime  @default(now())
+  appliedAt     DateTime?
+
+  user       User @relation("MgrChangeEmployee",  fields: [userId],       references: [id], onDelete: Cascade)
+  newManager User @relation("MgrChangeNewManager", fields: [newManagerId], references: [id], onDelete: Cascade)
+
+  @@index([status, effectiveDate])
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════

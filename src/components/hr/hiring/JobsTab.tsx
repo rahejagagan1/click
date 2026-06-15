@@ -20,6 +20,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
+import { stripLeadingCompanyContent } from "@/lib/hr/jd-format";
+import { useDebouncedValue } from "@/lib/hooks/useDebouncedValue";
+import { showToast } from "@/components/ui/Toast";
 import {
   Plus, Briefcase, MapPin, Users, Search,
   Share2, Send, Pause, CheckCircle2, FileEdit, Pencil, MoreHorizontal,
@@ -77,10 +80,13 @@ function plainTextToQuillHtml(input: string): string {
   if (!input) return "";
   const trimmed = input.trim();
   if (trimmed.startsWith("<")) return input;  // already HTML — likely re-edit
-  const lines = input.replace(/\r\n/g, "\n").split("\n");
+  // Drop a pasted company letterhead from the top so it can't double the
+  // .docx template's own letterhead (and drag in a typo'd email).
+  const lines = stripLeadingCompanyContent(input).replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];
   let bulletBuf: string[] = [];
   let numberedBuf: string[] = [];
+  let sawTitle = false;
   const escape = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const flushB = () => {
@@ -104,6 +110,12 @@ function plainTextToQuillHtml(input: string): string {
     const num = line.match(/^\d+[.)]\s+(.*)$/);
     if (num) { flushB(); numberedBuf.push(num[1]); continue; }
     flushAll();
+    // The .docx template prints "Job Description - {{JobTitle}}" itself —
+    // drop a title line from the body so it isn't duplicated.
+    if (!sawTitle) {
+      const titleMatch = line.match(/^(?:Job\s+Description|Job\s+Title)\s*[-–—:]\s*(.+)$/i);
+      if (titleMatch) { sawTitle = true; continue; }
+    }
     if (/:\s*$/.test(line) && line.length <= 60) {
       out.push(`<h3>${escape(line.replace(/:\s*$/, ""))}</h3>`);
     } else {
@@ -122,7 +134,7 @@ type Job = {
   title: string;
   department: string | null;
   location: string | null;
-  description: string | null;
+  description?: string | null;  // not returned by the list projection (perf) — fetched per-job when needed
   isOpen: boolean;
   status: JobStatus;
   publicSlug: string | null;
@@ -139,7 +151,8 @@ type Job = {
   activeCount: number;
   hiredCount: number;
   rejectedCount: number;
-  newCount: number;
+  newCount: number;       // still SOURCED, applied within last 48h
+  recentCount: number;    // still SOURCED, applied > 48h ago
   createdAt: string;
   closesAt: string | null;
   jdFileUrl: string | null;
@@ -207,6 +220,7 @@ export default function JobsTab({
   const [recruiter, setRecruiter]     = useState("");
   const [location, setLocation]       = useState("");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [showPriorityOnly, setShowPriorityOnly] = useState(false);
 
   // ── View state ──────────────────────────────────────────────────
@@ -260,7 +274,7 @@ export default function JobsTab({
 
   // ── Apply remaining client-side filters & search ────────────────
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     return jobs.filter(j => {
       if (showPriorityOnly && !j.isPriority) return false;
       if (department   && j.department         !== department)   return false;
@@ -271,7 +285,7 @@ export default function JobsTab({
       return [j.title, j.department, j.location, j.recruiterName, j.hiringManagerName, String(j.id)]
         .filter(Boolean).join(" ").toLowerCase().includes(q);
     });
-  }, [jobs, search, department, hiringManager, recruiter, location, showPriorityOnly]);
+  }, [jobs, debouncedSearch, department, hiringManager, recruiter, location, showPriorityOnly]);
 
   // Header count shows the count for the currently-displayed filter
   // (matches Keka's "Active Jobs (5)" treatment which updates as you
@@ -292,7 +306,7 @@ export default function JobsTab({
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        alert(j?.error || "Could not update the job status.");
+        showToast(j?.error || "Could not update the job status.", "error");
         return;
       }
       globalMutate(url);
@@ -329,7 +343,7 @@ export default function JobsTab({
       }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        alert(body?.error || "Could not delete the job.");
+        showToast(body?.error || "Could not delete the job.", "error");
         return;
       }
       // If we were viewing the just-deleted job, close the detail view.
@@ -571,7 +585,7 @@ export default function JobsTab({
               }}
               onBulkUpload={() => {
                 setCreateMenuOpen(false);
-                alert("Bulk upload jobs — coming next. We'll accept a CSV with title, department, location, brand and create draft openings.");
+                showToast("Bulk upload jobs — coming next. We'll accept a CSV with title, department, location, brand and create draft openings.", "info");
               }}
             />
           </div>
@@ -835,6 +849,11 @@ function JobCard({
               {job.newCount}
             </span>
             <span className="ml-1 uppercase">new</span>
+            <span className="mx-1.5 text-slate-300">·</span>
+            <span className={`tabular-nums ${job.recentCount > 0 ? "text-amber-600 font-bold" : "text-slate-700"}`}>
+              {job.recentCount}
+            </span>
+            <span className="ml-1 uppercase">recent</span>
             <span className="mx-1.5 text-slate-300">·</span>
             <span className="text-slate-700 tabular-nums">{job.rejectedCount}</span>
             <span className="ml-1 uppercase">archived</span>
@@ -1153,7 +1172,7 @@ function JdButton({
       const res = await fetch(`/api/hr/hiring/jobs/${jobId}/jd`, { method: "POST", body: fd });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        alert(j?.error || "JD upload failed");
+        showToast(j?.error || "JD upload failed", "error");
         return false;
       }
       onChange();
@@ -1312,11 +1331,11 @@ function JdReplaceModal({
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        alert(j?.error || "Preview render failed");
+        showToast(j?.error || "Preview render failed", "error");
         return;
       }
       const blob = await res.blob();
-      if (blob.size === 0) { alert("Server returned an empty PDF"); return; }
+      if (blob.size === 0) { showToast("Server returned an empty PDF", "error"); return; }
       setPreviewUrl(URL.createObjectURL(blob));
     } finally {
       setPreviewing(false);
