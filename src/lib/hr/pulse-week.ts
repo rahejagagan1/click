@@ -98,6 +98,29 @@ export function getMonthKey(d: Date = new Date()): string {
   return `${ist.getUTCFullYear()}-M${String(ist.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+/** Friendly week label from a "YYYY-Www" key, e.g. "9–15 Jun 2026".
+ *  Computes the Mon–Sun date range of the ISO week so HR sees real dates
+ *  in the past-weeks picker rather than a bare "2026-W24". */
+export function prettyWeek(weekKey: string): string {
+  const m = /^(\d{4})-W(\d{1,2})$/.exec(weekKey);
+  if (!m) return weekKey;
+  const year = Number(m[1]);
+  const week = Number(m[2]);
+  // Monday of ISO week 1 = the Monday on/before Jan 4 (ISO definition).
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4Dow = jan4.getUTCDay() || 7; // Mon=1..Sun=7
+  const mon = new Date(jan4);
+  mon.setUTCDate(jan4.getUTCDate() - (jan4Dow - 1) + (week - 1) * 7);
+  const sun = new Date(mon);
+  sun.setUTCDate(mon.getUTCDate() + 6);
+  const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const dd = (x: Date) => x.getUTCDate();
+  if (mon.getUTCMonth() === sun.getUTCMonth() && mon.getUTCFullYear() === sun.getUTCFullYear()) {
+    return `${dd(mon)}–${dd(sun)} ${MON[mon.getUTCMonth()]} ${mon.getUTCFullYear()}`;
+  }
+  return `${dd(mon)} ${MON[mon.getUTCMonth()]} – ${dd(sun)} ${MON[sun.getUTCMonth()]} ${sun.getUTCFullYear()}`;
+}
+
 /** Friendly month label, e.g. "June 2026". */
 export function prettyMonth(monthKey: string): string {
   const [yStr, mStr] = monthKey.split("-M");
