@@ -1355,6 +1355,10 @@ model Shift {
   //                 (ceil(dayOfMonth/7) ∈ 1..5; e.g. [1,3] = 1st & 3rd).
   saturdayPolicy String   @default("all")
   saturdayWeeks  Int[]    @default([])
+  /// Brand scope ("NB Media" | "YT Labs" | null). Restored 2026-06-15 —
+  /// written via raw SQL but dropped from the DB by a past `prisma db
+  /// push`; re-added additively to match the live DB.
+  brand          String?
   createdAt      DateTime @default(now())
 
   userShifts UserShift[]
@@ -2638,6 +2642,13 @@ model JobApplication {
   /// once the kanban migration runs. New code should read currentStage.
   status  String  @default("new")
   hrNotes String? @db.Text
+
+  /// Recruiter who "owns" this candidate (the assign-owner action).
+  /// Restored 2026-06-15 — written via raw SQL but dropped from the DB by
+  /// a past `prisma db push`; re-added additively to match the live DB.
+  recruiterOwnerId Int?
+  /// Free-form candidate tags (add/remove-tag action) — TEXT[] in PG.
+  tags             String[] @default([])
 
   // ── Keka-parity additions ────────────────────────────────────────
   /// Current stage in the kanban pipeline (FK to HiringStage). Null
