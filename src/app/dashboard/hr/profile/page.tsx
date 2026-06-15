@@ -919,15 +919,16 @@ export default function ProfilePage() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Self-view Documents panel — fetches the logged-in user's own
-// documents from /api/hr/documents (the route defaults to caller-
-// scoped when no userId param is sent), lets them upload new files,
-// and lets them delete their own. Same API + auth model the HR-side
-// DocumentsPanel uses; only difference is this view never asks for
-// someone else's docs.
+// Self-view Documents panel — fetches the logged-in user's OWN
+// documents via /api/hr/documents?self=true. The `self=true` flag is
+// REQUIRED: without it an HR-admin (orgLevel=hr_manager / ceo) falls
+// through to the org-wide list and sees every employee's (incl.
+// other-brand) documents in their own profile. self=true forces the
+// server to scope to the caller regardless of admin status.
 // ─────────────────────────────────────────────────────────────────────
+const SELF_DOCS_KEY = "/api/hr/documents?self=true";
 function SelfDocumentsPanel() {
-  const { data: documents = [], isLoading } = useSWR<any[]>("/api/hr/documents", fetcher);
+  const { data: documents = [], isLoading } = useSWR<any[]>(SELF_DOCS_KEY, fetcher);
   const [folder, setFolder] = useState<string>("identity");
   const active = SELF_DOC_FOLDERS.find((f) => f.key === folder)!;
   const filesInFolder = documents.filter((d: any) => active.cats.includes((d.category || "").toLowerCase()));
@@ -979,7 +980,7 @@ function SelfDocumentsPanel() {
         setUploadError(j?.error || `Upload failed (${res.status})`);
         return;
       }
-      await mutate("/api/hr/documents");
+      await mutate(SELF_DOCS_KEY);
       setUploadOpen(false);
     } catch (e: any) {
       setUploadError(e?.message || "Upload failed");
