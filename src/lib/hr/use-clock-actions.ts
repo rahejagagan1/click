@@ -64,6 +64,15 @@ export interface PulseGate {
   pulseUrl: string;
 }
 
+export interface DesktopGate {
+  /**
+   * "Clock-in/out is only available on Laptop & Desktop…" — straight from
+   * the API's `desktop_only` 403. Carried so a blocking modal can explain
+   * WHY the punch was refused instead of failing silently.
+   */
+  message: string;
+}
+
 export interface UseClockActionsReturn {
   clockIn: () => Promise<void>;
   clockOut: () => Promise<void>;
@@ -78,6 +87,14 @@ export interface UseClockActionsReturn {
    */
   pulseGate: PulseGate | null;
   dismissPulseGate: () => void;
+  /**
+   * Set when a clock-in OR clock-out 403'd with `code: "desktop_only"`
+   * (the mobile guard — punching is desktop-only unless the user has an
+   * On-Duty record for today). UI renders a blocking modal so the user
+   * understands WHY instead of the click appearing to do nothing.
+   */
+  desktopGate: DesktopGate | null;
+  dismissDesktopGate: () => void;
 }
 
 /** Sleep helper — used for the single auto-retry backoff. */
@@ -139,11 +156,14 @@ async function postWithRetry(url: string, body?: unknown): Promise<any> {
       );
     }
     // 4xx — return the server-provided error directly, no retry.
+    // The server tags rejections two ways: `reason` (pulse_required) and
+    // `code` (desktop_only, attendance_disabled, location_required).
+    // Carry whichever is present so the caller can branch on it.
     throw new ClockApiError(
       first.data?.error || `Request rejected (${first.status}).`,
       false,
       first.status,
-      first.data?.reason,
+      first.data?.reason ?? first.data?.code,
       first.data?.pulseUrl,
     );
   } catch (e: any) {
@@ -173,6 +193,7 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
   const [clockingOut, setClockingOut] = useState(false);
   const [error, setError] = useState<ClockBanner | null>(null);
   const [pulseGate, setPulseGate] = useState<PulseGate | null>(null);
+  const [desktopGate, setDesktopGate] = useState<DesktopGate | null>(null);
   // Synchronous re-entry guards. React state is async (set, then
   // re-render); a `useRef` flag flips immediately so the next onClick
   // in the same event loop tick is a no-op.
@@ -190,6 +211,7 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
     inFlightIn.current = true;
     setClockingIn(true);
     setError(null);
+    setDesktopGate(null);
     try {
       const geo = await captureClockInGeo();
       if (!geo.ok) {
@@ -205,8 +227,15 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
       });
       refreshAfter();
     } catch (e: any) {
-      const msg = e instanceof ClockApiError ? e.message : "Clock-in failed. Please try again.";
-      setError({ message: msg, severity: "error" });
+      // Mobile guard — surface a blocking modal so the user sees WHY the
+      // punch was refused (desktop-only unless On-Duty) instead of the
+      // click seeming to do nothing.
+      if (e instanceof ClockApiError && e.reason === "desktop_only") {
+        setDesktopGate({ message: e.message });
+      } else {
+        const msg = e instanceof ClockApiError ? e.message : "Clock-in failed. Please try again.";
+        setError({ message: msg, severity: "error" });
+      }
       console.warn("[clock-in] failed:", e);
     } finally {
       inFlightIn.current = false;
@@ -220,6 +249,7 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
     setClockingOut(true);
     setError(null);
     setPulseGate(null);
+    setDesktopGate(null);
     try {
       const data = await postWithRetry("/api/hr/attendance/clock-out");
       refreshAfter();
@@ -229,6 +259,11 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
       // generic banner so the user lands on the form in one click.
       if (e instanceof ClockApiError && e.reason === "pulse_required" && e.actionUrl) {
         setPulseGate({ message: e.message, pulseUrl: e.actionUrl });
+      } else if (e instanceof ClockApiError && e.reason === "desktop_only") {
+        // Mobile guard — same blocking-modal treatment so the refusal
+        // is visible (the generic banner isn't rendered in the
+        // clocked-in UI state, which made this fail silently before).
+        setDesktopGate({ message: e.message });
       } else {
         const msg = e instanceof ClockApiError ? e.message : "Clock-out failed. Please try again.";
         setError({ message: msg, severity: "error" });
@@ -242,6 +277,7 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
 
   const clearError = useCallback(() => setError(null), []);
   const dismissPulseGate = useCallback(() => setPulseGate(null), []);
+  const dismissDesktopGate = useCallback(() => setDesktopGate(null), []);
 
-  return { clockIn, clockOut, clockingIn, clockingOut, error, clearError, pulseGate, dismissPulseGate };
+  return { clockIn, clockOut, clockingIn, clockingOut, error, clearError, pulseGate, dismissPulseGate, desktopGate, dismissDesktopGate };
 }
