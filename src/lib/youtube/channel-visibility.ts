@@ -79,7 +79,14 @@ export async function filterVisibleChannels<T extends { channelId: string }>(
     // Resolve viewer's own + direct managers' teamCapsule labels in
     // a single query. user.id is the User PK (ClientUser carries it
     // via NextAuth session).
-    const userIdRaw = (user as { id?: number | string }).id;
+    // Under our credentials login `session.user.id` is undefined — the DB
+    // user id lives on `session.user.dbId` (set by the auth session
+    // callback + ensured by requireAuth). Reading `.id` left `userId` null,
+    // so this fell into the fail-closed branch below and returned ZERO
+    // capsule-gated channels for everyone except isHRAdmin — i.e. team
+    // members saw an EMPTY targets tile. Prefer dbId, fall back to id.
+    const ids = user as { dbId?: number | string; id?: number | string };
+    const userIdRaw = ids.dbId ?? ids.id;
     const userId = typeof userIdRaw === "number"
         ? userIdRaw
         : typeof userIdRaw === "string" && /^\d+$/.test(userIdRaw)
