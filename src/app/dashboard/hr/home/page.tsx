@@ -1,8 +1,9 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
+import ChannelViewsTargetsPanel from "@/components/hr/ChannelViewsTargetsPanel";
 import { fetcher } from "@/lib/swr";
 import SelectField from "@/components/ui/SelectField";
 import { useSession } from "next-auth/react";
@@ -11,6 +12,8 @@ import { parseAttLoc } from "@/lib/attendance-location";
 import { isHRAdmin, canApplyRestrictedLeave, canViewAllBrands } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
+import PulseGateModal from "@/components/hr/PulseGateModal";
+import DesktopGateModal from "@/components/hr/DesktopGateModal";
 import { isDesktopBypassActive } from "@/lib/desktop-bypass";
 import { PageShell } from "@/components/layout";
 import { DateField } from "@/components/ui/date-field";
@@ -54,6 +57,8 @@ import {
   PenTool,
   BarChart3 as BarChart3Icon,
   Rocket,
+  MoreVertical,
+  SmilePlus,
 } from "lucide-react";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -1239,6 +1244,57 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
   const isAuthor   = post.author?.id === sessionUserId;
   const canDelete  = isAuthor || isHRAdmin(sessionUser);
 
+  // Per-comment delete rule: comment author OR developer OR
+  // orgLevel="hr_manager" (covers HR Manager + HR tier).
+  const canDeleteComment = useCallback((c: any) => {
+    if (!c) return false;
+    if (c.author?.id === sessionUserId) return true;             // owner
+    if (sessionUser?.isDeveloper === true) return true;          // dev
+    if (sessionUser?.orgLevel === "hr_manager") return true;     // HR tier
+    return false;
+  }, [sessionUserId, sessionUser?.isDeveloper, sessionUser?.orgLevel]);
+
+  // Which comment's 3-dot menu is currently open (Instagram-style,
+  // one at a time). null = no menu open.
+  const [openCommentMenu, setOpenCommentMenu] = useState<number | null>(null);
+  // Per-comment "deleting" spinner state to disable double-click.
+  const [deletingComment, setDeletingComment] = useState<number | null>(null);
+
+  const deleteComment = async (commentId: number) => {
+    if (!confirm("Delete this comment? This can't be undone.")) return;
+    setDeletingComment(commentId);
+    setOpenCommentMenu(null);
+    try {
+      const res = await fetch(`/api/hr/engage/posts/${post.id}/comments/${commentId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || `Delete failed (${res.status})`);
+      }
+      // Bust both feed scopes so the comment disappears immediately.
+      mutate((k: any) => typeof k === "string" && k.startsWith("/api/hr/engage/posts"));
+    } catch (e: any) {
+      alert(e?.message || "Couldn't delete the comment.");
+    } finally {
+      setDeletingComment(null);
+    }
+  };
+
+  // "2h ago" / "3d ago" / "12 Mar" formatter for the timestamp
+  // beneath each comment — keeps the layout tight (Instagram-style).
+  const formatCommentTime = (iso: string | Date | undefined): string => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const diffSec = (Date.now() - d.getTime()) / 1000;
+    if (diffSec < 60)              return "just now";
+    if (diffSec < 3600)            return `${Math.floor(diffSec / 60)}m`;
+    if (diffSec < 86400)           return `${Math.floor(diffSec / 3600)}h`;
+    if (diffSec < 86400 * 7)       return `${Math.floor(diffSec / 86400)}d`;
+    return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  };
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos,  setMenuPos]  = useState<{ top: number; right: number } | null>(null);
   const [editing,  setEditing]  = useState(false);
@@ -1442,6 +1498,13 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
   // ascending-id is the closest proxy.
   const reactorNames: string[] = Array.isArray(post.reactions)
     ? post.reactions.map((r: any) => r.user?.name).filter(Boolean)
+    : [];
+  // Name + emoji pairs for the reactor popover, so HR can see WHO
+  // reacted with WHICH emoji (not just a list of names).
+  const reactors: Array<{ name: string; emoji: string }> = Array.isArray(post.reactions)
+    ? post.reactions
+        .filter((r: any) => r.user?.name)
+        .map((r: any) => ({ name: r.user.name as string, emoji: (r.emoji as string) || "👍" }))
     : [];
   // Distinct emojis used on this post, ordered by frequency desc
   // then most-recent. Drives the stacked-emoji chip in the summary
@@ -1661,7 +1724,7 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
               {myReactionEmoji ? (
                 <span className="text-[16px] leading-none">{myReactionEmoji}</span>
               ) : (
-                <ThumbsUp className="h-4 w-4" />
+                <SmilePlus className="h-4 w-4" />
               )}
               React
             </button>
@@ -1698,7 +1761,15 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
               showComments ? "text-[#008CFF]" : "text-[#5f7183]"
             }`}
           >
-            <MessageSquare className="h-4 w-4" />Comment
+            <MessageSquare className="h-4 w-4" />
+            {/* LinkedIn / Facebook pattern: prepend the count with
+                pluralised label. Cleaner than a separate badge pill —
+                reads as a single coherent phrase. */}
+            <span>
+              {commentCount === 0 && "Comment"}
+              {commentCount === 1 && "1 Comment"}
+              {commentCount > 1 && `${commentCount} Comments`}
+            </span>
           </button>
         </div>
         <div className="flex items-center gap-1.5 pr-2 text-[12px] text-[#8393a3]">
@@ -1732,9 +1803,9 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
               )}
             </span>
           )}
-          {commentCount > 0 && (
-            <span>{reactionCount > 0 ? "•" : ""} {commentCount} {commentCount === 1 ? "Comment" : "Comments"}</span>
-          )}
+          {/* Comment count moved to the Comment button itself — the
+              right-side aggregate now only carries the reactor names.
+              Drop the duplicate badge here. */}
         </div>
       </div>
 
@@ -1742,24 +1813,88 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
           composer, plus an emoji picker. Existing comments render
           above the composer. */}
       {showComments && (
-        <div className="border-t border-[#eef2f6] bg-[#f9fafc] px-3 sm:px-4 py-3 space-y-3">
+        <div className="border-t border-[#eef2f6] bg-white px-3 sm:px-4 py-3 space-y-3">
           {Array.isArray(post.comments) && post.comments.length > 0 && (
-            <div className="space-y-2">
-              {post.comments.map((c: any) => (
-                <div key={c.id} className="flex items-start gap-2.5">
-                  <Av name={c.author?.name || "User"} url={c.author?.profilePictureUrl} size={26} />
-                  <div className="flex-1 bg-white border border-[#eef2f6] rounded-xl px-3 py-1.5">
-                    <p className="text-[11.5px] font-semibold text-[#3b4a5a]">{c.author?.name || "Team member"}</p>
-                    <p className="text-[12px] text-[#52647a] whitespace-pre-wrap break-words mt-0.5">{c.content}</p>
+            <div className="space-y-3.5">
+              {post.comments.map((c: any) => {
+                const showDelete = canDeleteComment(c);
+                const isMenuOpen = openCommentMenu === c.id;
+                const isDeleting = deletingComment === c.id;
+                return (
+                  <div
+                    key={c.id}
+                    className={`group relative flex items-start gap-3 -mx-2 px-2 py-1.5 rounded-lg transition-all ${
+                      isDeleting ? "opacity-50" : "hover:bg-[#f7f9fc]"
+                    }`}
+                  >
+                    {/* Avatar — slightly smaller for tighter rhythm */}
+                    <div className="shrink-0 pt-0.5">
+                      <Av name={c.author?.name || "User"} url={c.author?.profilePictureUrl} size={30} />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-[12.5px] text-[#3b4a5a] leading-relaxed break-words min-w-0">
+                          <span className="font-semibold text-[#1e2a38] mr-1.5">{c.author?.name || "Team member"}</span>
+                          <span className="text-[#52647a] whitespace-pre-wrap">{c.content}</span>
+                        </p>
+
+                        {showDelete && (
+                          <div className="relative shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setOpenCommentMenu(isMenuOpen ? null : c.id)}
+                              disabled={isDeleting}
+                              aria-label="Comment options"
+                              className={`h-6 w-6 inline-flex items-center justify-center rounded-full text-[#8393a3] transition-all ${
+                                isMenuOpen
+                                  ? "bg-[#eef2f6] text-[#3b4a5a] opacity-100"
+                                  : "opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-[#eef2f6] hover:text-[#3b4a5a]"
+                              }`}
+                            >
+                              <MoreVertical className="h-3.5 w-3.5" />
+                            </button>
+                            {isMenuOpen && (
+                              <>
+                                <button
+                                  type="button"
+                                  aria-hidden="true"
+                                  tabIndex={-1}
+                                  onClick={() => setOpenCommentMenu(null)}
+                                  className="fixed inset-0 z-30 cursor-default"
+                                  style={{ background: "transparent" }}
+                                />
+                                <div className="absolute right-0 top-7 z-40 rounded-lg border border-[#e2e8f0] bg-white shadow-[0_8px_24px_-6px_rgba(15,23,42,0.18)] overflow-hidden py-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteComment(c.id)}
+                                    className="w-full px-3 py-1.5 text-left text-[12px] font-medium text-rose-600 hover:bg-rose-50 inline-flex items-center gap-2 whitespace-nowrap"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                                    <span>Delete comment</span>
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-0.5 text-[10.5px] font-medium text-[#97a4b3]">
+                        {formatCommentTime(c.createdAt)}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
-          <div className="flex items-start gap-2.5">
-            <Av name={sessionUser?.name || "You"} url={sessionUser?.profilePictureUrl} size={26} />
+          <div className={`flex items-center gap-3 ${Array.isArray(post.comments) && post.comments.length > 0 ? "pt-1" : ""}`}>
+            <div className="shrink-0">
+              <Av name={sessionUser?.name || "You"} url={sessionUser?.profilePictureUrl} size={30} />
+            </div>
             <div className="relative flex-1">
-              <div className="flex items-center gap-1.5 bg-white border border-[#dbe4ed] rounded-full px-3 py-1.5 focus-within:border-[#008CFF] transition-colors">
+              <div className="flex items-center gap-1 bg-[#f5f7fb] border border-transparent rounded-full pl-4 pr-1 py-1 focus-within:bg-white focus-within:border-[#008CFF] focus-within:shadow-[0_0_0_3px_rgba(0,140,255,0.08)] transition-all">
                 <input
                   ref={commentInputRef}
                   value={commentText}
@@ -1768,7 +1903,7 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
                     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); }
                   }}
                   placeholder="Write a comment…"
-                  className="flex-1 bg-transparent text-[12.5px] text-[#3b4a5a] placeholder-[#97a4b3] focus:outline-none"
+                  className="flex-1 bg-transparent text-[12.5px] text-[#1e2a38] placeholder-[#8393a3] focus:outline-none py-1.5"
                 />
                 <button
                   type="button"
@@ -1820,9 +1955,10 @@ function FeedPostCard({ post, sessionUser }: { post: any; sessionUser: any }) {
           className="rounded-lg border border-slate-200 bg-white shadow-[0_6px_18px_-4px_rgba(15,23,42,0.15)] animate-in fade-in duration-100"
         >
           <ul className="max-h-[220px] overflow-y-auto py-1.5">
-            {reactorNames.map((name, i) => (
-              <li key={i} className="flex items-center gap-2 px-3 py-1">
-                <span className="truncate text-[12px] text-slate-700">{name}</span>
+            {reactors.map((r, i) => (
+              <li key={i} className="flex items-center gap-2 px-3 py-1.5">
+                <span className="text-[15px] leading-none shrink-0">{r.emoji}</span>
+                <span className="truncate text-[12px] text-slate-700">{r.name}</span>
               </li>
             ))}
           </ul>
@@ -2049,6 +2185,7 @@ export default function HRHomePage() {
   const { data: session } = useSession();
   const user    = session?.user as any;
   const isAdmin = isHRAdmin(user);
+  const canCompose = isAdmin;
 
   const monthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
 
@@ -2549,7 +2686,7 @@ export default function HRHomePage() {
   // one automatic retry on transient failures, all of which were
   // silently dropped in the previous inline handlers (hence the
   // "click 3-4 times before it works" reports).
-  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError } = useClockActions({
+  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError, pulseGate, dismissPulseGate, desktopGate, dismissDesktopGate } = useClockActions({
     mutateKeys: [`/api/hr/attendance?month=${monthKey}`],
   });
   // Auto-collapse the Confirm/Cancel pair after 6s of idle.
@@ -2887,6 +3024,12 @@ export default function HRHomePage() {
                       </div>
                     ) : (
                       <div className="flex flex-col items-center gap-1">
+                        {clockError && (
+                          <div className="flex items-start gap-1 max-w-[340px] px-2 py-1 rounded bg-rose-500/20 border border-rose-500/40 text-rose-100 text-[10px] leading-tight">
+                            <span className="flex-1">{clockError.message}</span>
+                            <button onClick={clearClockError} className="shrink-0 text-rose-200 hover:text-white" aria-label="Dismiss">✕</button>
+                          </div>
+                        )}
                         <button
                           onClick={mobileBlocked ? undefined : () => setConfirmingClockOut(true)}
                           disabled={mobileBlocked}
@@ -3243,6 +3386,7 @@ export default function HRHomePage() {
 
           <div className="min-w-0 min-h-0 overflow-y-auto pr-1">
             <div className="max-w-[700px] space-y-3">
+              <ChannelViewsTargetsPanel />
               <div className={`${C.card} overflow-hidden`}>
                 <div className={`flex items-center border-b ${C.div} px-1`}>
                   {[["org", "Organization"], ["team", teamLabel]].map(([k, l]) => (
@@ -3258,6 +3402,7 @@ export default function HRHomePage() {
                   ))}
                 </div>
 
+                {canCompose && (
                 <div className="px-4 pt-3 pb-4">
                   {!composerOpen ? (
                     /* Collapsed prompt — clicking opens the full composer */
@@ -3699,8 +3844,10 @@ export default function HRHomePage() {
                     </div>
                   )}
                 </div>
+                )}
               </div>
 
+              {canCompose && (
               <div className={`${C.card} flex items-center justify-between px-4 py-3`}>
                 <div className="min-w-0">
                   <p className={`truncate text-[12.5px] ${C.t3}`}>
@@ -3716,6 +3863,7 @@ export default function HRHomePage() {
                   </Link>
                 ) : null}
               </div>
+              )}
 
               <EventsWidget bTab={bTab} setBTab={setBTab} C={C} />
 
@@ -3764,6 +3912,8 @@ export default function HRHomePage() {
           onClose={() => setShowHolidaysModal(false)}
         />
       )}
+      <PulseGateModal gate={pulseGate} onDismiss={dismissPulseGate} />
+      <DesktopGateModal gate={desktopGate} onDismiss={dismissDesktopGate} />
     </PageShell>
   );
 }

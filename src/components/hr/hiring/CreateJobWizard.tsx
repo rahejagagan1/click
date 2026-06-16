@@ -1736,7 +1736,11 @@ function Step4Questions({
 
   return (
     <div className="max-w-3xl mx-auto space-y-4 pb-12">
-      <SectionCard title="Application form questions" subtitle="Add custom questions candidates fill in alongside their resume. Optional — leave empty to use the default fields only.">
+      <SectionCard>
+        <SectionTitle>Application form questions</SectionTitle>
+        <p className="text-[12px] text-slate-500 -mt-3 mb-4">
+          Add custom questions candidates fill in alongside their resume. Optional — leave empty to use the default fields only.
+        </p>
         {questions.length === 0 ? (
           <button
             type="button"

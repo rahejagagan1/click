@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
@@ -220,6 +221,18 @@ export default function ProfilePage() {
     return { label: "NOT IN YET", cls: "bg-red-500/10 text-red-500 border-red-200 dark:border-red-500/20" };
   })();
   const [tab, setTab] = useState<ProfileTab>("ABOUT");
+
+  // Deep-link support: "Me → My Space → Documents" links here with
+  // ?tab=DOCUMENTS so it opens straight on the folder-based documents
+  // view. Reactive to query changes so it works even when already on
+  // this page (client-side nav doesn't remount).
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const t = searchParams.get("tab")?.toUpperCase();
+    if (t && (PROFILE_TABS as readonly string[]).includes(t)) {
+      setTab(t as ProfileTab);
+    }
+  }, [searchParams]);
 
   // Persist whether the user has ever opened the PROFILE tab so the red
   // "incomplete profile" dot can be cleared once acknowledged. Lives in
@@ -906,15 +919,16 @@ export default function ProfilePage() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Self-view Documents panel — fetches the logged-in user's own
-// documents from /api/hr/documents (the route defaults to caller-
-// scoped when no userId param is sent), lets them upload new files,
-// and lets them delete their own. Same API + auth model the HR-side
-// DocumentsPanel uses; only difference is this view never asks for
-// someone else's docs.
+// Self-view Documents panel — fetches the logged-in user's OWN
+// documents via /api/hr/documents?self=true. The `self=true` flag is
+// REQUIRED: without it an HR-admin (orgLevel=hr_manager / ceo) falls
+// through to the org-wide list and sees every employee's (incl.
+// other-brand) documents in their own profile. self=true forces the
+// server to scope to the caller regardless of admin status.
 // ─────────────────────────────────────────────────────────────────────
+const SELF_DOCS_KEY = "/api/hr/documents?self=true";
 function SelfDocumentsPanel() {
-  const { data: documents = [], isLoading } = useSWR<any[]>("/api/hr/documents", fetcher);
+  const { data: documents = [], isLoading } = useSWR<any[]>(SELF_DOCS_KEY, fetcher);
   const [folder, setFolder] = useState<string>("identity");
   const active = SELF_DOC_FOLDERS.find((f) => f.key === folder)!;
   const filesInFolder = documents.filter((d: any) => active.cats.includes((d.category || "").toLowerCase()));
@@ -966,7 +980,7 @@ function SelfDocumentsPanel() {
         setUploadError(j?.error || `Upload failed (${res.status})`);
         return;
       }
-      await mutate("/api/hr/documents");
+      await mutate(SELF_DOCS_KEY);
       setUploadOpen(false);
     } catch (e: any) {
       setUploadError(e?.message || "Upload failed");
