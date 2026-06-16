@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { isHRAdmin } from "@/lib/access";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 import { buildJobSlug } from "@/lib/hr/job-slug";
 
 export const dynamic = "force-dynamic";
@@ -28,8 +29,22 @@ export async function GET(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url);
-    const brand    = searchParams.get("brand")  || "";
     const statusQs = (searchParams.get("status") || "all").toLowerCase();
+
+    // Brand isolation — a single-brand HR Manager only sees their own
+    // brand's job openings (overrides any ?brand= param); developers /
+    // allowlisted honor the param (or see all). JobOpening.brand stores
+    // slugs ("nb_media" / "yt_labs"); getBrandScope returns the
+    // businessUnit display name ("NB Media" / "YT Labs") — map between.
+    const scope = getBrandScope(session!.user);
+    let brand = searchParams.get("brand") || "";
+    if (!scope.allBrands) {
+      const slug = scope.brand === "NB Media" ? "nb_media"
+                 : scope.brand === "YT Labs"  ? "yt_labs"
+                 : null;
+      if (!slug) return NextResponse.json([]); // fail closed (no brand)
+      brand = slug;
+    }
 
     let where = `1=1`;
     const params: any[] = [];

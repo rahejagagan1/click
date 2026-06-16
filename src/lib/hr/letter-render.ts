@@ -511,12 +511,24 @@ function resolveSalary(field: string, customFields: Record<string, string>): str
     case "PF":         return fmtRs(pf);
     case "Special":    return fmtRs(special);
     case "Total":      return fmtRs(monthlyR);
+    // ── Annual column = each monthly component × 12. The pay table
+    //    now shows MONTHLY (₹) and ANNUAL (₹) side by side; TotalAnnual
+    //    is the full annual package (monthly CTC × 12). ──────────────
+    case "BasicAnnual":      return fmtRs(basic   * 12);
+    case "HRAAnnual":        return fmtRs(hra     * 12);
+    case "DAAnnual":         return fmtRs(da      * 12);
+    case "ConveyanceAnnual": return fmtRs(conv    * 12);
+    case "MedicalAnnual":    return fmtRs(medical * 12);
+    case "PFAnnual":         return fmtRs(pf      * 12);
+    case "SpecialAnnual":    return fmtRs(special * 12);
+    case "TotalAnnual":      return fmtRs(monthlyR * 12);
     // Single placeholder that resolves to the entire PF row when
     // enabled, or empty when disabled. One template body covers
-    // both PF / no-PF cases without HR touching the HTML.
+    // both PF / no-PF cases without HR touching the HTML. Now 3
+    // columns: component | monthly | annual.
     case "PfRow":
       return enablePf
-        ? `<tr><td>Provident Fund (PF)</td><td>${fmtRs(pf)}</td><td>Fixed</td></tr>`
+        ? `<tr><td>Provident Fund (PF)</td><td>${fmtRs(pf)}</td><td>${fmtRs(pf * 12)}</td></tr>`
         : "";
     case "EnablePfText": return enablePf ? "with PF" : "without PF";
     default:           return "";
@@ -721,13 +733,19 @@ export async function wrapLetterPreviewHtml(
        them — fixes the "congested / words running together"
        feel users hit at the 0.5px default. Letter-spacing
        inherits 0.5px from body. */
-    p { font-size: 12pt; line-height: 1.5; margin: 2pt 0; text-align: left; word-spacing: 2px; }
-    p.signoff, p[data-role="signoff"] { text-align: left; margin: 2pt 0; }
+    /* margin-bottom 5pt (was 2pt) clearly separates consecutive
+       paragraphs so they no longer read as "congested", while
+       line-height stays at 1.5 — a moderate bump that de-clutters
+       WITHOUT pushing the short single-page letters (relieving, FnF,
+       internship, probation) onto a second page. orphans/widows:2
+       stop a single dangling line splitting across a page break. */
+    p { font-size: 12pt; line-height: 1.5; margin: 0 0 5pt; text-align: left; word-spacing: 2px; orphans: 2; widows: 2; }
+    p.signoff, p[data-role="signoff"] { text-align: left; margin: 0 0 5pt; }
     p.note { text-align: center; font-style: italic; font-weight: bold; font-size: 11pt; margin: 4pt 0 12pt; }
     h2 { font-size: 14pt; margin: 12pt 0 6pt; }
     h3 { font-size: 13pt; margin: 10pt 0 6pt; }
-    ol, ul { padding-left: 22pt; margin: 6pt 0; }
-    ol li, ul li { margin-bottom: 3pt; font-size: 12pt; line-height: 1.5; word-spacing: 2px; }
+    ol, ul { padding-left: 22pt; margin: 6pt 0 8pt; }
+    ol li, ul li { margin-bottom: 4pt; font-size: 12pt; line-height: 1.5; word-spacing: 2px; orphans: 2; widows: 2; }
     /* Keep the signature cluster (Regards / Name / Founder & CEO +
        cursive image) together — it has the cursive PNG and
        splitting it mid-block would look broken. We deliberately
@@ -757,7 +775,10 @@ export async function wrapLetterPreviewHtml(
        count. */
     table.pay-table td:nth-child(1), table.pay-table th:nth-child(1) { text-align: left; }
     table.pay-table td:nth-child(2), table.pay-table th:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; }
-    table.pay-table td:nth-child(3), table.pay-table th:nth-child(3) { text-align: center; }
+    /* 3rd column is now ANNUAL (₹) amounts — right-align + tabular
+       figures so the rupee digits line up by their right edge,
+       matching the monthly column. */
+    table.pay-table td:nth-child(3), table.pay-table th:nth-child(3) { text-align: right; font-variant-numeric: tabular-nums; }
     /* Total row reads as a footer — slightly tinted background +
        bold weight so the eye lands on it. */
     table.pay-table tr:last-child td { background: #f9fafb; font-weight: bold; }
@@ -773,7 +794,20 @@ export async function wrapLetterPreviewHtml(
     table.pay-table { page-break-inside: avoid; break-inside: avoid; }
     table.pay-table tr { page-break-inside: avoid; break-inside: avoid; }
     h2.section-title, h3 { page-break-after: avoid; break-after: avoid; }
-    .page-break { display: block; height: 22pt; border-top: 1pt dashed #cbd5e1; margin: 18pt 0; padding-top: 8pt; }
+    /* Keep the lead-in line ("FIXED MONTHLY PAY:") — and any element
+       immediately before a pay table — glued to that table, so it
+       never orphans at the bottom of a page while the table jumps to
+       the next one. :has() is honoured by the Chromium engine that
+       renders the PDF (and the live preview iframe). */
+    *:has(+ table.pay-table) { page-break-after: avoid; break-after: avoid; }
+    /* Clean forced page break between the major sections (Terms,
+       Annexure A, Annexure B) — each starts on a fresh page. The old
+       dashed rule + filler whitespace read as unfinished AND left
+       content spilling unevenly (a lone "Note:" line dangling on a
+       near-empty last page). A real page break gives each section its
+       own page, keeps the Annexure B list + its closing note together,
+       and removes the dashed line entirely. */
+    .page-break { display: block; break-before: page; page-break-before: always; height: 0; margin: 0; padding: 0; border: 0; }
   </style>
 </head>
 <body>

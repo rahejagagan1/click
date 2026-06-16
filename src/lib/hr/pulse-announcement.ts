@@ -30,9 +30,9 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
   const weekKey    = getWeekKey(now);
   const activeWeek = getActiveWeekNumber(now);
 
-  // Two question sets — shared (brand IS NULL) + each brand-specific.
-  // Each employee receives shared + their own brand's questions.
-  type Q = { id: number; order: number; text: string; type: string; brand: string | null };
+  // Strict brand separation — each brand has its own independent
+  // question bank. No shared layer.
+  type Q = { id: number; order: number; text: string; type: string; brand: string };
   const allQuestions = await prisma.$queryRawUnsafe<Q[]>(
     `SELECT id, "order", text, type, brand
        FROM "PulseQuestion"
@@ -40,14 +40,12 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
       ORDER BY "order" ASC`,
     activeWeek,
   );
-  const sharedQs = allQuestions.filter((q) => q.brand == null);
-  const nbQs     = allQuestions.filter((q) => q.brand === "NB Media");
-  const ytQs     = allQuestions.filter((q) => q.brand === "YT Labs");
-  const questionsForBrand = (brand: string | null): Q[] => {
-    if (brand === "NB Media") return [...sharedQs, ...nbQs];
-    if (brand === "YT Labs")  return [...sharedQs, ...ytQs];
-    return sharedQs;
-  };
+  const nbQs = allQuestions.filter((q) => q.brand === "NB Media");
+  const ytQs = allQuestions.filter((q) => q.brand === "YT Labs");
+  const questionsForBrand = (brand: string | null): Q[] =>
+    brand === "NB Media" ? nbQs :
+    brand === "YT Labs"  ? ytQs :
+    [];  // no brand → no questions (dev/sandbox accounts skip)
 
   // Every active employee with a real email + their businessUnit.
   // Devs skipped on envs where the isDeveloper column is present —
@@ -78,13 +76,50 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
     } else { throw e; }
   }
 
-  // Bail only if NO employees AND NO questions of any kind.
+  // Strict brand separation — employees without a businessUnit
+  // on their profile can't be served a question set. Skip them
+  // entirely so they don't get an email with no content. ALSO
+  // skip employees whose brand has 0 active questions this cycle —
+  // sending an empty <ol></ol> would look broken.
+  employees = employees.filter((e) =>
+    (e.businessUnit === "NB Media" && nbQs.length > 0) ||
+    (e.businessUnit === "YT Labs"  && ytQs.length > 0)
+  );
+
   if (employees.length === 0 || allQuestions.length === 0) {
     return {
       weekKey, activeWeek,
       recipients: employees.length, emailsSent: 0, emailsFailed: 0,
       notifications: 0, questions: allQuestions.length,
     };
+  }
+
+  // ── Idempotency guard ──────────────────────────────────────
+  // If a previous fanout for this weekKey already ran (e.g. a
+  // cron retry on transient network failure, or HR force-firing
+  // after the scheduled cron), don't double-send. Detect by
+  // looking for any pulse_weekly Notification row stamped with
+  // the active week's entityId in the last 36 hours — that
+  // covers same-day retries without false-positiving on a fresh
+  // weekly cycle next Friday.
+  try {
+    const recent = await prisma.$queryRawUnsafe<Array<{ n: number }>>(
+      `SELECT count(*)::int AS n FROM "Notification"
+        WHERE type = 'pulse_weekly'
+          AND "entityId" = $1
+          AND "createdAt" > now() - interval '36 hours'`,
+      activeWeek,
+    );
+    if ((recent[0]?.n ?? 0) > 0) {
+      console.warn(`[pulse-fanout] skipping — found ${recent[0].n} pulse_weekly notifications for week ${activeWeek} in last 36h (idempotent skip)`);
+      return {
+        weekKey, activeWeek,
+        recipients: employees.length, emailsSent: 0, emailsFailed: 0,
+        notifications: 0, questions: allQuestions.length,
+      };
+    }
+  } catch (e: any) {
+    console.warn("[pulse-fanout] idempotency check failed, proceeding anyway:", e?.message ?? e);
   }
 
   const pulseUrl    = `${APP_URL}/dashboard/hr/pulse`;
@@ -94,8 +129,10 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
   // ── In-app notifications — single bulk insert ──────────────
   let notifications = 0;
   try {
+    // 6 params per employee now — linkUrl makes the in-app
+    // notification clickable (opens the weekly pulse form).
     const values = employees
-      .map((_, i) => `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, NOW())`)
+      .map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6}, NOW())`)
       .join(",\n");
     const params: any[] = [];
     for (const e of employees) {
@@ -105,11 +142,12 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
         activeWeek,
         `Pulse: ${theme} — Week ${activeWeek}`,
         `Take 30 seconds to share how your week is going. ⚠ You won't be able to clock out today until this is submitted.`,
+        "/dashboard/hr/pulse",
       );
     }
     await prisma.$executeRawUnsafe(
       `INSERT INTO "Notification"
-         ("userId", "type", "entityId", "title", "message", "createdAt")
+         ("userId", "type", "entityId", "title", "body", "linkUrl", "createdAt")
        VALUES ${values}`,
       ...params,
     );
@@ -119,11 +157,10 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
   }
 
   // ── Emails — batched 25/wave with 250 ms gap ──────────────────
-  // Three precomputed HTML variants (shared-only / NB Media / YT Labs)
-  // so we don't re-render the template once per recipient. Each
+  // Two precomputed HTML variants (NB Media / YT Labs) — strict
+  // brand separation means no "shared" middle ground. Each
   // employee gets the variant matching their businessUnit.
   const variantBySlug = {
-    "shared":   buildEmailHtml({ activeWeek, theme, questions: questionsForBrand(null),       pulseUrl }),
     "NB Media": buildEmailHtml({ activeWeek, theme, questions: questionsForBrand("NB Media"), pulseUrl }),
     "YT Labs":  buildEmailHtml({ activeWeek, theme, questions: questionsForBrand("YT Labs"),  pulseUrl }),
   };
@@ -134,9 +171,9 @@ export async function fanoutWeeklyPulse(now: Date = new Date()): Promise<PulseFa
     const wave = employees.slice(i, i + BATCH_SIZE);
     await Promise.all(wave.map(async (emp) => {
       try {
-        const variant = emp.businessUnit === "NB Media" ? variantBySlug["NB Media"]
-                      : emp.businessUnit === "YT Labs"  ? variantBySlug["YT Labs"]
-                      : variantBySlug["shared"];
+        const variant = emp.businessUnit === "YT Labs"
+          ? variantBySlug["YT Labs"]
+          : variantBySlug["NB Media"];
         const personalised = variant.replace(/\{\{FirstName\}\}/g, firstNameOf(emp.name));
         const text = htmlToText(personalised);
         await sendEmail({

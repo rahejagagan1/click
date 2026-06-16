@@ -3,31 +3,58 @@
 // Floating social-platform badges — YouTube, Instagram, Spotify,
 // Facebook. On page load they "burst" outward from the center of the
 // hero to their final scattered positions, then settle into a gentle
-// float-bob. Used ONLY on the careers index hero.
+// float-bob.
+//
+// MOBILE strategy: the badges DO render on phones now, but at
+// roughly 55% of their desktop size and pinned to the four corners
+// of the section (far away from the title + subtitle text). That
+// gives mobile the same "fun, on-brand decoration" the desktop hero
+// has, without the badges crashing into the typography.
 
+import { useEffect, useRef } from "react";
 import { Play } from "lucide-react";
 
 type Platform = "youtube" | "facebook" | "instagram" | "spotify";
 
 type Badge = {
   platform: Platform;
+  /** Desktop size in px. Mobile size is computed via --badge-scale. */
   size:     number;
-  top:      string;
+  /** Desktop position. Mobile uses the same anchor side (left/right
+   *  + top/bottom) but at safer corner-hugging offsets to avoid
+   *  overlapping the title/CTA stack in the centre. */
+  top?:     string;
+  bottom?:  string;
   left?:    string;
   right?:   string;
+  /** Mobile-only position overrides — when present, replaces the
+   *  desktop positions on viewports < 640 px. */
+  mobile?:  { top?: string; bottom?: string; left?: string; right?: string };
   rotate:   number;
   /** Approximate offset from final position toward viewport center,
-   *  expressed in vw/vh. Used as the starting point of the spread
-   *  animation so badges appear to fly out from the hero centre. */
+   *  used as the starting point of the spread animation so badges
+   *  appear to fly out from the hero centre. */
   fromX:    string;
   fromY:    string;
 };
 
 const BADGES: Badge[] = [
-  { platform: "youtube",   size: 60, top: "12%", left:  "5%",  rotate: -10, fromX:  "40vw", fromY:  "30vh" },
-  { platform: "instagram", size: 64, top: "18%", right: "6%",  rotate:   6, fromX: "-40vw", fromY:  "28vh" },
-  { platform: "spotify",   size: 52, top: "62%", left:  "8%",  rotate:   8, fromX:  "38vw", fromY: "-22vh" },
-  { platform: "facebook",  size: 48, top: "70%", right: "12%", rotate: -12, fromX: "-36vw", fromY: "-28vh" },
+  // Top-left corner — YouTube
+  { platform: "youtube",   size: 60, top: "12%", left:  "5%",
+    mobile: { top: "5%",  left:  "4%"  },
+    rotate: -10, fromX:  "40vw", fromY:  "30vh" },
+  // Top-right corner — Instagram
+  { platform: "instagram", size: 64, top: "18%", right: "6%",
+    mobile: { top: "5%",  right: "4%"  },
+    rotate:   6, fromX: "-40vw", fromY:  "28vh" },
+  // Bottom-left corner — Spotify
+  { platform: "spotify",   size: 52, top: "62%", left:  "8%",
+    mobile: { bottom: "8%", left:  "4%" },
+    rotate:   8, fromX:  "38vw", fromY: "-22vh" },
+  // Bottom-right corner — Facebook
+  { platform: "facebook",  size: 48, top: "70%", right: "12%",
+    mobile: { bottom: "8%", right: "4%" },
+    rotate: -12, fromX: "-36vw", fromY: "-28vh" },
 ];
 
 const PLATFORM: Record<Platform, { bg: string; shadow: string }> = {
@@ -77,36 +104,133 @@ function SpotifyMark({ size }: { size: number }) {
   );
 }
 
+// Per-badge parallax depth — how far each badge drifts relative to
+// the cursor. Varied so the four badges move at different rates,
+// creating a layered 3D-depth feel rather than moving as one sheet.
+const PARALLAX_DEPTH: Record<Platform, number> = {
+  youtube:   1.4,
+  instagram: 1.7,
+  spotify:   0.9,
+  facebook:  1.2,
+};
+
 export default function PlayBadges() {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+
+  // Mouse-parallax. On pointer move we set --px/--py (cursor offset
+  // from viewport centre, in px, damped) on the host; each badge
+  // wrapper multiplies them by its own --depth. rAF-throttled and
+  // transform-only so it stays smooth. Skipped for touch / reduced
+  // motion (no hover pointer → nothing to react to).
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    if (typeof window === "undefined") return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.matchMedia?.("(hover: none)").matches) return;
+
+    let raf = 0;
+    let tx = 0, ty = 0;
+    const onMove = (e: MouseEvent) => {
+      // Offset from centre, normalised to roughly ±18px of travel.
+      const nx = (e.clientX / window.innerWidth - 0.5) * 2;   // -1..1
+      const ny = (e.clientY / window.innerHeight - 0.5) * 2;  // -1..1
+      tx = -nx * 18;
+      ty = -ny * 18;
+      if (!raf) raf = requestAnimationFrame(() => {
+        raf = 0;
+        host.style.setProperty("--px", `${tx}px`);
+        host.style.setProperty("--py", `${ty}px`);
+      });
+    };
+    window.addEventListener("mousemove", onMove, { passive: true });
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
   return (
     <>
       <style>{`
-        /* Spread-from-centre entrance: each badge starts at its
-           per-badge --from-x/--from-y (toward the hero centre) and
-           animates outward to translate(0,0). After this finishes
-           the float animation takes over with a matching delay. */
+        /* Theatrical reveal on page load — each badge whirls out from
+           the hero centre: starts tiny + blurred + spun back ~120°,
+           flies to its corner while sharpening, overshoots in scale +
+           rotation, then settles. Followed by the gentle float-bob.
+           The resting size is scale(var(--scale)) (0.55 mobile → 1
+           desktop) so both keyframes share the var. */
         @keyframes badgeSpread {
-          0%   { transform: translate(var(--fx), var(--fy)) rotate(var(--rot)) scale(0.4); opacity: 0; }
-          60%  { opacity: 1; }
-          100% { transform: translate(0, 0) rotate(var(--rot)) scale(1); opacity: 1; }
+          0% {
+            transform: translate(var(--fx), var(--fy))
+                       rotate(calc(var(--rot) - 120deg))
+                       scale(0);
+            opacity: 0;
+            filter: blur(7px);
+          }
+          45% { opacity: 1; filter: blur(0); }
+          72% {
+            transform: translate(0, 0)
+                       rotate(calc(var(--rot) + 7deg))
+                       scale(calc(var(--scale) * 1.16));
+            opacity: 1;
+            filter: blur(0);
+          }
+          100% {
+            transform: translate(0, 0) rotate(var(--rot)) scale(var(--scale));
+            opacity: 1;
+            filter: blur(0);
+          }
         }
         @keyframes badgeFloat {
-          0%, 100% { transform: translate3d(0, 0, 0) rotate(var(--rot)); }
-          50%      { transform: translate3d(8px, -12px, 0) rotate(calc(var(--rot) + 2deg)); }
+          0%, 100% { transform: translate3d(0, 0, 0) rotate(var(--rot)) scale(var(--scale)); }
+          50%      { transform: translate3d(6px, -10px, 0) rotate(calc(var(--rot) + 2deg)) scale(var(--scale)); }
         }
+        .badge-host {
+          /* Mobile: 55% scale, anchored to the four corners.
+             Tablet (sm:): 85% scale, hybrid positions.
+             Desktop (lg:): 100% scale, original loose layout. */
+          --scale: 0.55;
+        }
+        @media (min-width: 640px)  { .badge-host { --scale: 0.85; } }
+        @media (min-width: 1024px) { .badge-host { --scale: 1;    } }
+
         .badge {
           opacity: 0;
+          transform-origin: center;
+          /* Longer reveal (1500ms) + a springier curve so the
+             overshoot reads. Per-badge stagger (animationDelay below)
+             makes them whirl in one-after-another. */
           animation:
-            badgeSpread 1300ms cubic-bezier(0.18, 1.1, 0.32, 1) 200ms forwards,
-            badgeFloat  6000ms ease-in-out 1500ms infinite;
+            badgeSpread 1500ms cubic-bezier(0.22, 1.15, 0.34, 1) 200ms forwards,
+            badgeFloat  6000ms ease-in-out 2000ms infinite;
+        }
+
+        /* Parallax wrapper — drifts each badge by (cursor offset ×
+           its depth). Smoothed with a transition so motion eases
+           rather than snapping to the pointer. The inner .badge keeps
+           its own spread+float animation independently. */
+        .badge-host { --px: 0px; --py: 0px; }
+        .badge-parallax {
+          transition: transform 350ms cubic-bezier(0.22, 1, 0.36, 1);
+          transform: translate3d(
+            calc(var(--px) * var(--depth, 1)),
+            calc(var(--py) * var(--depth, 1)),
+            0
+          );
+          will-change: transform;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .badge-parallax { transform: none; }
+          /* Reduced-motion: skip the burst-in + perpetual float.
+             Badges just appear in place (opacity 1, no animation). */
+          .badge { animation: none !important; opacity: 1 !important; }
         }
       `}</style>
-      {/* Decorative-only — hidden on phones because the badges crash
-          into the breadcrumb + title + chip pills on narrow screens
-          and make the page look unfinished. The mobile hero leans on
-          gradient depth + premium typography instead of overlapping
-          floating elements. */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden hidden sm:block">
+      <div
+        ref={hostRef}
+        aria-hidden="true"
+        className="badge-host pointer-events-none absolute inset-0 overflow-hidden"
+      >
         {BADGES.map((b, i) => {
           const p = PLATFORM[b.platform];
           const isYouTube = b.platform === "youtube";
@@ -118,29 +242,73 @@ export default function PlayBadges() {
             isYouTube ? 14 :
             isSpotify ? "9999px" :
             Math.round(b.size * 0.26);
-          return (
-            <span
-              key={i}
-              className="badge absolute inline-flex items-center justify-center"
-              style={{
-                top:    b.top,
-                left:   b.left,
-                right:  b.right,
-                width,
-                height,
-                background:    p.bg,
-                boxShadow:     p.shadow,
-                borderRadius,
-                animationDelay: `${i * 80}ms, ${1500 + i * 80}ms`,
-                ["--rot" as any]: `${b.rotate}deg`,
-                ["--fx"  as any]: b.fromX,
-                ["--fy"  as any]: b.fromY,
-              }}
-            >
+
+          // Render twice — once positioned for desktop, once for
+          // mobile — using Tailwind responsive utilities to swap.
+          // It's cheaper than dynamically computing positions in JS
+          // and avoids a hydration mismatch from window.innerWidth
+          // checks. Both share the .badge animation + transform.
+          const baseStyle = {
+            width,
+            height,
+            background:     p.bg,
+            boxShadow:      p.shadow,
+            borderRadius,
+            // Stronger stagger (150ms) so the badges whirl in one
+            // after another as a clear reveal. Float starts only
+            // after each badge's 1500ms reveal completes.
+            animationDelay: `${i * 150}ms, ${1500 + i * 150}ms`,
+            ["--rot" as any]: `${b.rotate}deg`,
+            ["--fx"  as any]: b.fromX,
+            ["--fy"  as any]: b.fromY,
+          };
+          const inner = (
+            <>
               {b.platform === "youtube"   && <Play         size={iconSize} strokeWidth={0} className="fill-white" style={{ marginLeft: 2 }} />}
               {b.platform === "facebook"  && <FacebookMark  size={iconSize} />}
               {b.platform === "instagram" && <InstagramMark size={iconSize} />}
               {b.platform === "spotify"   && <SpotifyMark   size={iconSize} />}
+            </>
+          );
+          const depth = PARALLAX_DEPTH[b.platform];
+          return (
+            <span key={i} aria-hidden="true">
+              {/* Desktop placement — parallax wrapper (mouse drift) >
+                  badge (spread + float). Hidden on phones. */}
+              <span
+                className="badge-parallax absolute hidden sm:block"
+                style={{
+                  top: b.top, bottom: b.bottom, left: b.left, right: b.right,
+                  ["--depth" as any]: depth,
+                }}
+              >
+                <span
+                  className="badge inline-flex items-center justify-center"
+                  style={baseStyle}
+                >
+                  {inner}
+                </span>
+              </span>
+              {/* Mobile placement — corner-pinned, smaller via --scale.
+                  No parallax on touch (no hover pointer). */}
+              {b.mobile && (
+                <span
+                  className="absolute sm:hidden"
+                  style={{
+                    top:    b.mobile.top,
+                    bottom: b.mobile.bottom,
+                    left:   b.mobile.left,
+                    right:  b.mobile.right,
+                  }}
+                >
+                  <span
+                    className="badge inline-flex items-center justify-center"
+                    style={baseStyle}
+                  >
+                    {inner}
+                  </span>
+                </span>
+              )}
             </span>
           );
         })}

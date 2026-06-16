@@ -9,15 +9,20 @@ import { isMobileRequest } from "@/lib/is-mobile-device";
 import { hasDesktopBypassHeader } from "@/lib/desktop-bypass";
 import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
 import { isAfterSendTime, getWeekKey } from "@/lib/hr/pulse-week";
+import { resolveClientPunchAt } from "@/lib/hr/punch-time";
 
 // Same shape as the clock-in body. Optional here because legacy
 // callers (cron sweeper, integration tests, anyone POSTing an empty
 // body) still need to work — clock-out without location is allowed,
 // the field just stays NULL on the session row.
+// `clientPunchAt` is the moment the user actually clicked, sent by the
+// offline retry queue so a late-synced punch records at the real time
+// (bounded server-side by resolveClientPunchAt — see that helper).
 const ClockOutBody = z.object({
   lat: z.number().finite().min(-90).max(90),
   lng: z.number().finite().min(-180).max(180),
   address: z.string().trim().max(240).optional(),
+  clientPunchAt: z.string().max(40).optional(),
 }).partial();
 
 export async function POST(req: NextRequest) {
@@ -90,23 +95,28 @@ export async function POST(req: NextRequest) {
         { status: 403 },
       );
     }
-    const now = new Date();
+    const serverNow = new Date();
     const today = istTodayDateOnly();
 
     // Try to parse a location body. If absent / invalid we still
     // proceed with a NULL clockOutLocation rather than rejecting —
     // forcing geolocation on clock-out would strand users with an
     // open session if their browser permission lapsed mid-day.
+    // Also pull `clientPunchAt` (offline-queue original click time).
     let clockOutLocation: string | null = null;
+    let clientPunchAt: string | undefined;
     try {
       const parsed = await parseBody(req, ClockOutBody);
-      if (parsed.ok && parsed.data.lat != null && parsed.data.lng != null) {
-        clockOutLocation = stringifyAttLoc({
-          mode: null,
-          lat: parsed.data.lat,
-          lng: parsed.data.lng,
-          address: parsed.data.address,
-        });
+      if (parsed.ok) {
+        clientPunchAt = parsed.data.clientPunchAt;
+        if (parsed.data.lat != null && parsed.data.lng != null) {
+          clockOutLocation = stringifyAttLoc({
+            mode: null,
+            lat: parsed.data.lat,
+            lng: parsed.data.lng,
+            address: parsed.data.address,
+          });
+        }
       }
     } catch {
       // Empty body or non-JSON body — that's fine, just no location.
@@ -140,12 +150,21 @@ export async function POST(req: NextRequest) {
       }
       const openSession = open[0];
 
+      // Effective clock-out time. Normally serverNow; when the offline
+      // queue replays a punch it sends the ORIGINAL click time as
+      // clientPunchAt so a late sync doesn't inflate hours. Bounded to
+      // [clockIn, serverNow] within the same IST day (resolveClientPunchAt).
+      const { at: punchAt, usedClient } = resolveClientPunchAt(clientPunchAt, serverNow, { floor: existing.clockIn });
+      if (usedClient) {
+        console.log(`[clock-out] userId=${userId} used clientPunchAt=${punchAt.toISOString()} (serverNow=${serverNow.toISOString()})`);
+      }
+
       // Close the open session — also stamp clockOutLocation if the
       // client captured geolocation for this punch. Null is fine
       // (legacy clients / browsers without geo permission).
       await tx.$executeRawUnsafe(
         `UPDATE "AttendanceSession" SET "clockOut" = $1, "clockOutLocation" = $2 WHERE id = $3`,
-        now, clockOutLocation, openSession.id,
+        punchAt, clockOutLocation, openSession.id,
       );
 
       // Recompute total from ALL closed sessions (including the one we
@@ -171,7 +190,7 @@ export async function POST(req: NextRequest) {
       // (parent.clockOut null → still active or never closed).
       const updated = await tx.attendance.update({
         where: { id: existing.id },
-        data: { clockOut: now, totalMinutes, status, overtimeMinutes },
+        data: { clockOut: punchAt, totalMinutes, status, overtimeMinutes },
       });
       return { kind: "ok" as const, record: updated };
     });

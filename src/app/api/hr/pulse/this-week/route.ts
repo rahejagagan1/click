@@ -37,24 +37,27 @@ export async function GET() {
     const weekKey = getWeekKey();
     const activeWeek = getActiveWeekNumber();
 
-    // Look up the caller's brand so we hand them their brand's
-    // questions + shared questions. If they have no brand set on
-    // their profile, they only see shared questions (the safe
-    // default for users like dev / sandbox accounts).
+    // Look up the caller's brand. Strict brand separation —
+    // each employee receives ONLY their brand's questions; no
+    // shared/fallback layer. Employees without a businessUnit
+    // set on their profile (dev accounts, sandbox users) see
+    // an empty list.
     const profile = await prisma.employeeProfile.findUnique({
       where: { userId },
       select: { businessUnit: true },
     });
     const callerBrand = profile?.businessUnit ?? null;
 
-    const questions = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT id, "order", text, type, emojis
-         FROM "PulseQuestion"
-        WHERE "surveyType" = 'weekly' AND week = $1 AND "isActive" = true
-          AND (brand IS NULL OR brand = $2)
-        ORDER BY "order" ASC`,
-      activeWeek, callerBrand,
-    );
+    const questions = callerBrand
+      ? await prisma.$queryRawUnsafe<any[]>(
+          `SELECT id, "order", text, type, emojis
+             FROM "PulseQuestion"
+            WHERE "surveyType" = 'weekly' AND week = $1 AND "isActive" = true
+              AND brand = $2
+            ORDER BY "order" ASC`,
+          activeWeek, callerBrand,
+        )
+      : [];
 
     // Existence check — any row for (userId, weekKey) means submitted.
     const submission = (await prisma.$queryRawUnsafe<any[]>(
