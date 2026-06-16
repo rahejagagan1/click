@@ -199,8 +199,7 @@ export default function ChannelViewsTargetsPanel() {
           <div
             role="tablist"
             aria-label="Channels"
-            className="flex items-center gap-1 px-2 pt-2 border-b border-slate-100 overflow-x-auto"
-            style={{ scrollbarWidth: "thin" }}
+            className="no-scrollbar flex items-center gap-1 px-2 pt-2 border-b border-slate-100 overflow-x-auto"
           >
             {tabs.map((t) => {
               const isActive = active?.channelId === t.channelId;
