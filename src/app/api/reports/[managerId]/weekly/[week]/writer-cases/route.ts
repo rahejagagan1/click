@@ -4,7 +4,7 @@ import { requireAuth, serverError } from "@/lib/api-auth";
 import { calcBusinessDaysTat, formatTatDays } from "@/lib/utils";
 import { getWeeklyReportPeriod } from "@/lib/reports/weekly-period";
 import { isWriterFirstDraftMilestone } from "@/lib/clickup/subtask-milestones";
-import { resolveReportTeam } from "@/lib/reports/team-snapshot";
+import { resolveReportTeam, teamFunction } from "@/lib/reports/team-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
             return NextResponse.json({ error: "Manager not found" }, { status: 404 });
         }
         const team = await resolveReportTeam(managerId, { kind: "weekly", week, month, year });
-        const writers = team.filter((m) => m.role === "writer");
+        const writers = team.filter((m) => teamFunction(m) === "writer");
         const writerIds = writers.map((m) => m.id);
         if (writerIds.length === 0) {
             return NextResponse.json({ writerCases: [] });

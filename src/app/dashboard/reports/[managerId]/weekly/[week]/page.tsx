@@ -605,6 +605,10 @@ export default function WeeklyReportPage() {
     );
     const manager     = data?.manager;
     const teamMembers: any[] = data?.teamMembers ?? [];
+    // Effective report function: prefer the designation's scorecardFunction
+    // (RBAC source of truth), fall back to the legacy `role`. Mirrors
+    // teamFunction() on the server (team-snapshot.ts).
+    const memberFn = (u: any): string => String(u?.scorecardFunction || u?.role || "").toLowerCase();
 
 
     const periodLabel = `${monthName} (${manager?.name ?? "…"} C1)`;
@@ -649,7 +653,7 @@ export default function WeeklyReportPage() {
 
     /* Writers */
     const defaultWriters = useMemo((): WriterRow[] => {
-        const list = teamMembers.filter((u) => u.role === "writer");
+        const list = teamMembers.filter((u) => memberFn(u) === "writer");
         return list.length > 0
             ? list.map((w) => mkWriter(String(w.id), w.name))
             : [mkWriter("w-1"), mkWriter("w-2"), mkWriter("w-3")];
@@ -666,7 +670,7 @@ export default function WeeklyReportPage() {
 
     /* Editors */
     const defaultEditors = useMemo((): EditorRow[] => {
-        const list = teamMembers.filter((u) => u.role === "editor");
+        const list = teamMembers.filter((u) => memberFn(u) === "editor");
         return list.length > 0
             ? list.map((e) => mkEditor(String(e.id), e.name))
             : [mkEditor("e-1"), mkEditor("e-2"), mkEditor("e-3")];
@@ -690,7 +694,7 @@ export default function WeeklyReportPage() {
 
     /* Researchers (A3) */
     const defaultResearchers = useMemo((): ResearcherRow[] => {
-        const list = teamMembers.filter((u) => u.role === "researcher");
+        const list = teamMembers.filter((u) => memberFn(u) === "researcher");
         return list.length > 0
             ? list.map((r) => mkResearcher(String(r.id), r.name))
             : [mkResearcher("r-1"), mkResearcher("r-2"), mkResearcher("r-3")];
@@ -707,7 +711,7 @@ export default function WeeklyReportPage() {
 
     /* ClickUp (A2) */
     const defaultClickUp = useMemo((): ClickUpRow[] => {
-        const list = teamMembers.filter((u) => u.role === "editor");
+        const list = teamMembers.filter((u) => memberFn(u) === "editor");
         return list.length > 0
             ? list.map((e) => mkClickUp(String(e.id), e.name))
             : [mkClickUp("c-1"), mkClickUp("c-2"), mkClickUp("c-3")];
