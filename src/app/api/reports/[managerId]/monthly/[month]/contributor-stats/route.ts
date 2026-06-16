@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { getMonthlyReportWindow } from "@/lib/reports/monthly-window";
-import { resolveReportTeam } from "@/lib/reports/team-snapshot";
+import { resolveReportTeam, teamFunction } from "@/lib/reports/team-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -35,9 +35,9 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
             return NextResponse.json({ error: "Manager not found" }, { status: 404 });
         }
         const team = await resolveReportTeam(managerId, { kind: "monthly", month: monthIndex, year });
-        const editorWriters = team.filter((m) => m.role === "editor" || m.role === "writer");
-        const editorIds = editorWriters.filter((m) => m.role === "editor").map((m) => m.id);
-        const writerIds = editorWriters.filter((m) => m.role === "writer").map((m) => m.id);
+        const editorWriters = team.filter((m) => teamFunction(m) === "editor" || teamFunction(m) === "writer");
+        const editorIds = editorWriters.filter((m) => teamFunction(m) === "editor").map((m) => m.id);
+        const writerIds = editorWriters.filter((m) => teamFunction(m) === "writer").map((m) => m.id);
 
         if (editorIds.length === 0 && writerIds.length === 0) {
             return NextResponse.json({
