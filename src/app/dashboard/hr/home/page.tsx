@@ -2926,7 +2926,7 @@ export default function HRHomePage() {
             </div>
           </section>
 
-          <div className="space-y-3 min-h-0 overflow-y-auto pr-1">
+          <div className="no-scrollbar space-y-3 min-h-0 overflow-y-auto pr-1">
             <p className={`pb-0.5 pt-1 text-[13px] font-semibold leading-none ${C.t1}`}>
               Quick Access
             </p>
@@ -3214,31 +3214,17 @@ export default function HRHomePage() {
                               </p>
                             </div>
 
-                            {/* Countdown — moved into the top-right blank space. */}
-                            <div className="flex flex-shrink-0 flex-col items-center gap-0.5">
-                              {days != null && days === 0 ? (
-                                <span className="flex h-[44px] w-[44px] items-center justify-center rounded-xl text-[10px] font-extrabold uppercase tracking-wide shadow-sm" style={{ background: typeColor, color: "#ffffff" }}>Today</span>
-                              ) : (
-                                <>
-                                  {/* blue tile so the countdown number reads white */}
-                                  <div className="relative flex items-center justify-center overflow-hidden rounded-xl p-1 shadow-sm" style={{ background: typeColor }}>
-                                    <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/20 to-transparent" />
-                                    <HolidayRing days={days ?? 0} color="#ffffff" numberColor="#ffffff" trackColor="rgba(255,255,255,0.3)" size={40} />
-                                  </div>
-                                  <span className="text-[9px] font-semibold uppercase tracking-[0.06em] text-slate-400">{days === 1 ? "Day To Go" : "Days To Go"}</span>
-                                </>
-                              )}
-                              {upcoming.length > 1 && (
-                                <div className="mt-0.5 flex items-center gap-1.5">
-                                  <button type="button" onClick={() => setHolidayIdx((i) => Math.max(0, i - 1))} disabled={!canPrevHoliday} aria-label="Previous holiday" className="flex h-6 w-6 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent">
-                                    <ChevronLeft className="h-3.5 w-3.5" />
-                                  </button>
-                                  <button type="button" onClick={() => setHolidayIdx((i) => Math.min(upcoming.length - 1, i + 1))} disabled={!canNextHoliday} aria-label="Next holiday" className="flex h-6 w-6 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent">
-                                    <ChevronRight className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                              )}
-                            </div>
+                            {/* Browse arrows (the countdown number was removed per request) */}
+                            {upcoming.length > 1 && (
+                              <div className="flex flex-shrink-0 items-center gap-1.5 self-center">
+                                <button type="button" onClick={() => setHolidayIdx((i) => Math.max(0, i - 1))} disabled={!canPrevHoliday} aria-label="Previous holiday" className="flex h-6 w-6 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent">
+                                  <ChevronLeft className="h-4 w-4" />
+                                </button>
+                                <button type="button" onClick={() => setHolidayIdx((i) => Math.min(upcoming.length - 1, i + 1))} disabled={!canNextHoliday} aria-label="Next holiday" className="flex h-6 w-6 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent">
+                                  <ChevronRight className="h-4 w-4" />
+                                </button>
+                              </div>
+                            )}
                           </div>
 
                           {/* Badges */}
@@ -3385,7 +3371,7 @@ export default function HRHomePage() {
             <QuickLinksCard />
           </div>
 
-          <div className="min-w-0 min-h-0 overflow-y-auto pr-1">
+          <div className="no-scrollbar min-w-0 min-h-0 overflow-y-auto pr-1">
             <div className="max-w-[700px] space-y-3">
               <ChannelViewsTargetsPanel />
               <div className={`${C.card} overflow-hidden`}>
