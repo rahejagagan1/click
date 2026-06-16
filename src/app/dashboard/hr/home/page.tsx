@@ -59,6 +59,9 @@ import {
   Rocket,
   MoreVertical,
   SmilePlus,
+  Globe,
+  Building2,
+  CalendarDays,
 } from "lucide-react";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -121,6 +124,28 @@ function BalanceRing({ avail, total, color, size = 70 }: { avail: number; total:
       <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
         <span className="font-bold" style={{ color, fontSize: numFs }}>{avail}</span>
         <span className="mt-0.5 text-[#94a3b8] dark:text-[#4e5e72]" style={{ fontSize: lblFs }}>days</span>
+      </div>
+    </div>
+  );
+}
+
+// Countdown ring for the Holidays card. Draining gauge: full when the
+// holiday is 90+ days out, emptying as the day nears — a "time remaining"
+// read with the day count centred. The "Days To Go" label sits below it.
+function HolidayRing({ days, color, numberColor, trackColor, size = 92 }: { days: number; color: string; numberColor?: string; trackColor?: string; size?: number }) {
+  const frac   = Math.max(0, Math.min(1, days / 90));
+  const stroke = Math.max(5, Math.round(size * 0.075));
+  const r      = (size / 2) - stroke;
+  const circum = 2 * Math.PI * r;
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg viewBox={`0 0 ${size} ${size}`} className="h-full w-full -rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} className={trackColor ? undefined : "stroke-slate-200"} style={trackColor ? { stroke: trackColor } : undefined} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+          strokeLinecap="round" strokeDasharray={circum} strokeDashoffset={circum * (1 - frac)} />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="font-extrabold leading-none tabular-nums" style={{ color: numberColor ?? color, fontSize: Math.round(size * 0.34) }}>{days}</span>
       </div>
     </div>
   );
@@ -198,6 +223,46 @@ const HOLIDAY_TYPE_LABEL: Record<string, string> = {
   company:    "COMPANY HOLIDAY",
   optional:   "FLOATER HOLIDAY",
 };
+
+// One-line flavour text for the Holidays card. Curated for the common
+// Indian-calendar holidays; anything not listed falls back to a sensible
+// type-based line so the card never shows a blank description.
+const HOLIDAY_DESCRIPTION: Record<string, string> = {
+  "independence day":  "A national celebration of freedom and heritage.",
+  "republic day":      "Marks the day the Constitution of India came into force.",
+  "gandhi jayanti":    "Honouring the birth of Mahatma Gandhi.",
+  "diwali":            "The festival of lights.",
+  "deepavali":         "The festival of lights.",
+  "holi":              "The festival of colours.",
+  "raksha bandhan":    "Celebrating the bond between siblings.",
+  "dussehra":          "Marking the triumph of good over evil.",
+  "vijayadashami":     "Marking the triumph of good over evil.",
+  "navratri":          "Nine nights honouring the divine feminine.",
+  "janmashtami":       "Celebrating the birth of Lord Krishna.",
+  "ganesh chaturthi":  "Honouring Lord Ganesha.",
+  "christmas":         "Celebrating the birth of Jesus Christ.",
+  "good friday":       "A solemn day in the Christian calendar.",
+  "eid":               "Marking a joyous occasion in the Islamic calendar.",
+  "eid al-fitr":       "Marking the end of Ramadan.",
+  "eid ul-fitr":       "Marking the end of Ramadan.",
+  "eid al-adha":       "The festival of sacrifice.",
+  "bakrid":            "The festival of sacrifice.",
+  "guru nanak jayanti":"Honouring the birth of Guru Nanak.",
+  "baisakhi":          "Marking the harvest and the founding of the Khalsa.",
+  "lohri":             "A Punjabi harvest festival of bonfires.",
+  "makar sankranti":   "Welcoming the harvest and longer days.",
+  "pongal":            "A South Indian harvest festival.",
+  "onam":              "Kerala's harvest festival of homecoming.",
+  "new year":          "Ringing in the new year.",
+  "new year's day":    "Ringing in the new year.",
+};
+function holidayDescription(name: string, type: string): string {
+  const hit = HOLIDAY_DESCRIPTION[name.trim().toLowerCase()];
+  if (hit) return hit;
+  if (type === "optional") return "An optional floater holiday you can choose to take.";
+  if (type === "company")  return "A company holiday — our offices stay closed.";
+  return "A public holiday — our offices stay closed.";
+}
 const isoDay = (d: Date) =>
   new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" })
     .formatToParts(d)
@@ -3105,74 +3170,90 @@ export default function HRHomePage() {
               </div>
             </div>
 
-            {/* Holidays card — polished but clean: a filled, type-coloured
-                date chip + a soft identity glow give it character, while the
-                white surface keeps it light. No festival illustration. */}
-            <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_2px_12px_-2px_rgba(15,23,42,0.08)]">
+            {/* Holidays card — vertical layout matching the approved design:
+                a type-coloured date chip + full date, a one-line description,
+                NATIONAL / OFFICE-CLOSED badges, and a draining countdown ring
+                with a gift accent + arrows to browse upcoming holidays. */}
+            <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-white to-slate-50 shadow-[0_2px_12px_-2px_rgba(15,23,42,0.08)]">
               {(() => {
                 const d = activeHoliday ? new Date(activeHoliday.date) : null;
                 const today = new Date(); today.setHours(0, 0, 0, 0);
                 const days = d ? Math.round((d.getTime() - today.getTime()) / 86_400_000) : null;
                 const typeColor = activeHoliday ? (HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#008CFF") : "#008CFF";
+                const officeClosed = activeHoliday ? activeHoliday.type !== "optional" : false;
                 return (
                   <>
                     {/* soft identity glow in the holiday-type colour */}
-                    <span aria-hidden="true" className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full" style={{ background: `radial-gradient(closest-side, ${typeColor}1f, transparent)` }} />
+                    <span aria-hidden="true" className="pointer-events-none absolute -right-12 -top-14 h-36 w-36 rounded-full" style={{ background: `radial-gradient(closest-side, ${typeColor}26, transparent)` }} />
 
-                    <div className="relative p-4">
-                      <div className="mb-3 flex items-center justify-between">
-                        <span className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${C.t3}`}>Holidays</span>
-                        <button type="button" onClick={() => setShowHolidaysModal(true)} className="text-[11px] font-medium text-[#008CFF] underline-offset-2 transition hover:underline">View all</button>
+                    <div className="relative p-3">
+                      {/* Header */}
+                      <div className="mb-2.5 flex items-center justify-between">
+                        <span className="text-[12.5px] font-bold uppercase tracking-[0.14em]" style={{ color: typeColor }}>Holidays</span>
+                        <button type="button" onClick={() => setShowHolidaysModal(true)} className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-slate-500 transition hover:text-slate-800">
+                          View all Holidays
+                          <CalendarDays className="h-3.5 w-3.5" />
+                        </button>
                       </div>
 
                       {activeHoliday && d ? (
-                        <div className="flex items-center gap-3">
-                          {upcoming.length > 1 && (
-                            <button type="button" onClick={() => setHolidayIdx((i) => Math.max(0, i - 1))} disabled={!canPrevHoliday} aria-label="Previous holiday" className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent">
-                              <ChevronLeft className="h-4 w-4" />
-                            </button>
-                          )}
+                        <div className="space-y-2">
+                          {/* Top row: date chip + name/date, with the countdown
+                              ring tucked into the right-hand blank space. */}
+                          <div className="flex items-start gap-3">
+                            <div className="relative flex h-[62px] w-[58px] flex-shrink-0 flex-col items-center justify-center overflow-hidden rounded-2xl shadow-sm" style={{ background: typeColor }}>
+                              <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/25 to-transparent" />
+                              <span className="relative text-[21px] font-bold leading-none" style={{ color: "#ffffff" }}>{d.toLocaleDateString("en-IN", { day: "2-digit", timeZone: "UTC" })}</span>
+                              <span className="relative mt-0.5 text-[9px] font-bold uppercase tracking-[0.14em]" style={{ color: "rgba(255,255,255,0.92)" }}>{d.toLocaleDateString("en-IN", { month: "short", timeZone: "UTC" })}</span>
+                              <span className="relative text-[8px] font-semibold tracking-wide" style={{ color: "rgba(255,255,255,0.78)" }}>{d.toLocaleDateString("en-IN", { year: "numeric", timeZone: "UTC" })}</span>
+                            </div>
+                            <div className="min-w-0 flex-1 pt-0.5">
+                              <p className="text-[15.5px] font-bold leading-tight text-slate-800" title={activeHoliday.name}>{activeHoliday.name}</p>
+                              <p className="mt-1 text-[12px] text-slate-500">
+                                {d.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })}
+                              </p>
+                            </div>
 
-                          {/* Filled, type-coloured date chip with a soft top sheen. */}
-                          <div className="relative flex h-[54px] w-[54px] flex-shrink-0 flex-col items-center justify-center overflow-hidden rounded-xl shadow-sm" style={{ background: typeColor }}>
-                            <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/25 to-transparent" />
-                            <span className="relative text-[20px] font-bold leading-none text-white">{d.toLocaleDateString("en-IN", { day: "2-digit", timeZone: "UTC" })}</span>
-                            <span className="relative mt-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-white/85">{d.toLocaleDateString("en-IN", { month: "short", timeZone: "UTC" })}</span>
+                            {/* Countdown — moved into the top-right blank space. */}
+                            <div className="flex flex-shrink-0 flex-col items-center gap-0.5">
+                              {days != null && days === 0 ? (
+                                <span className="flex h-[44px] w-[44px] items-center justify-center rounded-xl text-[10px] font-extrabold uppercase tracking-wide shadow-sm" style={{ background: typeColor, color: "#ffffff" }}>Today</span>
+                              ) : (
+                                <>
+                                  {/* blue tile so the countdown number reads white */}
+                                  <div className="relative flex items-center justify-center overflow-hidden rounded-xl p-1 shadow-sm" style={{ background: typeColor }}>
+                                    <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/20 to-transparent" />
+                                    <HolidayRing days={days ?? 0} color="#ffffff" numberColor="#ffffff" trackColor="rgba(255,255,255,0.3)" size={40} />
+                                  </div>
+                                  <span className="text-[9px] font-semibold uppercase tracking-[0.06em] text-slate-400">{days === 1 ? "Day To Go" : "Days To Go"}</span>
+                                </>
+                              )}
+                              {upcoming.length > 1 && (
+                                <div className="mt-0.5 flex items-center gap-1.5">
+                                  <button type="button" onClick={() => setHolidayIdx((i) => Math.max(0, i - 1))} disabled={!canPrevHoliday} aria-label="Previous holiday" className="flex h-6 w-6 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent">
+                                    <ChevronLeft className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button type="button" onClick={() => setHolidayIdx((i) => Math.min(upcoming.length - 1, i + 1))} disabled={!canNextHoliday} aria-label="Next holiday" className="flex h-6 w-6 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent">
+                                    <ChevronRight className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
 
-                          {/* Name + day/year + type badge. */}
-                          <div className="min-w-0 flex-1">
-                            <p className={`truncate text-[14.5px] font-semibold leading-tight ${C.t1}`} title={activeHoliday.name}>{activeHoliday.name}</p>
-                            <p className={`mt-0.5 text-[12px] ${C.t3}`}>
-                              {d.toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" })}
-                              <span className="mx-1 opacity-50">·</span>
-                              {d.toLocaleDateString("en-IN", { year: "numeric", timeZone: "UTC" })}
-                            </p>
-                            <span className="mt-1.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.08em]" style={{ background: `${typeColor}14`, color: typeColor }}>
-                              <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: typeColor }} />
+                          {/* Badges */}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.06em]" style={{ background: `${typeColor}14`, color: typeColor }}>
+                              <Globe className="h-3 w-3" />
                               {HOLIDAY_TYPE_LABEL[activeHoliday.type] ?? "PUBLIC HOLIDAY"}
                             </span>
+                            {officeClosed && (
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
+                                <Building2 className="h-3 w-3" />
+                                Corporate office closed
+                              </span>
+                            )}
                           </div>
-
-                          {/* Countdown — framed soft tile so it reads as a stat. */}
-                          {days != null && days >= 0 && (
-                            days === 0 ? (
-                              <div className="flex-shrink-0 rounded-xl px-3 py-2 text-center" style={{ background: `${typeColor}14` }}>
-                                <span className="text-[13px] font-bold" style={{ color: typeColor }}>Today</span>
-                              </div>
-                            ) : (
-                              <div className="flex-shrink-0 rounded-xl bg-slate-50 px-3 py-1.5 text-center ring-1 ring-slate-100">
-                                <p className={`text-[20px] font-bold leading-none tabular-nums ${C.t1}`}>{days}</p>
-                                <p className="mt-0.5 text-[8.5px] font-semibold uppercase tracking-[0.08em] text-slate-400">{days === 1 ? "day to go" : "days to go"}</p>
-                              </div>
-                            )
-                          )}
-
-                          {upcoming.length > 1 && (
-                            <button type="button" onClick={() => setHolidayIdx((i) => Math.min(upcoming.length - 1, i + 1))} disabled={!canNextHoliday} aria-label="Next holiday" className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent">
-                              <ChevronRight className="h-4 w-4" />
-                            </button>
-                          )}
                         </div>
                       ) : (
                         <p className={`text-[13px] ${C.t3}`}>No upcoming holidays on file.</p>

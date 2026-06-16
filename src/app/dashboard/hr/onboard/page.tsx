@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import { useRouter, useSearchParams } from "next/navigation";
-import { User as UserIcon, Briefcase, Settings as SettingsIcon, IndianRupee, Check, X } from "lucide-react";
+import { User as UserIcon, Briefcase, Settings as SettingsIcon, IndianRupee, Check, X, ClipboardCheck } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
 import { JOB_TITLES } from "@/lib/job-titles";
 import { DEPARTMENTS } from "@/lib/departments";
@@ -17,6 +17,7 @@ import SelectField from "@/components/ui/SelectField";
 import PopupPanel from "@/components/ui/PopupPanel";
 import KekaImportModal from "@/components/hr/KekaImportModal";
 import TeamWelcomeModal from "@/components/hr/TeamWelcomeModal";
+import { teamWelcomeEmail } from "@/lib/email/hr-templates";
 import type { KekaRow, KekaFormPatch } from "@/lib/keka-import";
 import { Upload as UploadIcon } from "lucide-react";
 
@@ -196,7 +197,7 @@ const EMPTY: Form = {
 export default function OnboardEmployeePage() {
   const router = useRouter();
   const search = useSearchParams();
-  const [step, setStep]       = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [step, setStep]       = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
   // Brand auto-fill — when HR opens onboarding from the YT Labs HR
   // Dashboard flyout the link carries `?brand=yt-labs`, so the form
   // should land pre-set to the YT Labs Number Series (which cascades
@@ -227,7 +228,7 @@ export default function OnboardEmployeePage() {
   const [welcomeFor, setWelcomeFor] = useState<{
     fullName: string; firstName: string; jobRole: string;
     workEmail: string; homeCity?: string; managerName?: string; officeLocation?: string;
-    phone?: string;
+    phone?: string; pronoun?: "he" | "she" | "they"; managerId?: number; priorRole?: string;
   } | null>(null);
   // Banner shown when the form was prefilled from a hiring candidate
   // via ?fromCandidate=<id>. Stays put until HR dismisses it. Carries
@@ -587,8 +588,8 @@ export default function OnboardEmployeePage() {
           }
           setForm(restored);
         }
-        if (parsed?.step && parsed.step >= 1 && parsed.step <= 4) {
-          setStep(parsed.step as 1 | 2 | 3 | 4 | 5);
+        if (parsed?.step && parsed.step >= 1 && parsed.step <= 6) {
+          setStep(parsed.step as 1 | 2 | 3 | 4 | 5 | 6);
         }
         if (parsed?.displayTouched) setDisplayTouched(true);
         if (parsed?.savedAt) {
@@ -642,6 +643,37 @@ export default function OnboardEmployeePage() {
     if (step === 2) return !!(form.joiningDate && form.jobTitle);
     return true;
   }, [step, form]);
+
+  // ── Review step (6) helpers ─────────────────────────────────────────
+  // Derived, display-only values for the summary + the welcome-email
+  // preview. We build the email from the SAME mapping the submit handler
+  // uses for setWelcomeFor, so what HR reviews here is exactly what the
+  // post-create Team Welcome composer pre-loads (minus prior role, which
+  // onboarding doesn't collect). Pronoun is derived from gender so the
+  // copy reads naturally instead of always defaulting to "they".
+  const reviewFullName = [form.firstName, form.middleName, form.lastName].filter(Boolean).join(" ").trim();
+  const reviewManagerName = managers.find((m: any) => String(m.id) === String(form.reportingManagerId))?.name || "";
+  const reviewShift = shifts.find((s: any) => String(s.id) === String(form.shiftId));
+  const reviewShiftName = reviewShift ? `${reviewShift.name} (${reviewShift.startTime}–${reviewShift.endTime})` : "";
+  const reviewMobile = form.mobileNumber ? `${form.mobileCountry} ${form.mobileNumber}` : "";
+  const fmtAddress = (l1: string, l2: string, city: string, state: string, pin: string, country: string) =>
+    [l1, l2, [city, state].filter(Boolean).join(", "), [pin, country].filter(Boolean).join(", ")]
+      .map((s) => s.trim()).filter(Boolean).join("\n");
+  const reviewCurrentAddr = fmtAddress(form.addressLine1, form.addressLine2, form.city, form.state, form.addressPincode, form.addressCountry);
+  const reviewPermanentAddr = fmtAddress(form.permanentLine1, form.permanentLine2, form.permanentCity, form.permanentState, form.permanentPincode, form.permanentCountry);
+
+  const welcomePreview = useMemo(() => teamWelcomeEmail({
+    newJoinerName:  reviewFullName || "New joiner",
+    firstName:      form.firstName || reviewFullName.split(" ")[0] || "the new joiner",
+    homeCity:       form.city || undefined,
+    priorRole:      undefined, // not collected during onboarding — clause is dropped, not left as {{}}
+    jobRole:        form.jobTitle || form.role || "Team member",
+    managerName:    reviewManagerName || undefined,
+    officeLocation: form.location || undefined,
+    phone:          reviewMobile || undefined,
+    workEmail:      form.workEmail || "",
+    pronoun:        form.gender === "female" ? "she" : form.gender === "male" ? "he" : "they",
+  }), [reviewFullName, form.firstName, form.city, form.jobTitle, form.role, reviewManagerName, form.location, reviewMobile, form.workEmail, form.gender]);
 
   // ── Submit ──────────────────────────────────────────────────────────
   const submit = async () => {
@@ -787,8 +819,10 @@ export default function OnboardEmployeePage() {
         workEmail: form.workEmail,
         homeCity:  form.city || undefined,
         managerName: managers.find((m: any) => String(m.id) === String(form.reportingManagerId))?.name || undefined,
+        managerId: form.reportingManagerId ? Number(form.reportingManagerId) : undefined,
         officeLocation: form.location || undefined,
         phone: form.mobileNumber ? `${form.mobileCountry} ${form.mobileNumber}` : undefined,
+        pronoun: form.gender === "female" ? "she" : form.gender === "male" ? "he" : "they",
       });
     } catch (e: any) {
       setError(e?.message || "Failed to onboard");
@@ -804,6 +838,7 @@ export default function OnboardEmployeePage() {
     { n: 3, label: "Work Details",    Icon: SettingsIcon },
     { n: 4, label: "Compensation",    Icon: IndianRupee },
     { n: 5, label: "Address & IDs",   Icon: UserIcon },
+    { n: 6, label: "Review",          Icon: ClipboardCheck },
   ] as const;
 
   return (
@@ -851,12 +886,12 @@ export default function OnboardEmployeePage() {
                 className="h-9 px-5 text-[13px] font-semibold text-[#008CFF] border border-[#008CFF]/40 rounded-lg hover:bg-[#008CFF]/5"
               >Back</button>
             )}
-            {step < 5 ? (
+            {step < 6 ? (
               <button
                 onClick={() => stepValid && setStep(s => (s + 1) as any)}
                 disabled={!stepValid}
                 className="h-9 px-6 bg-[#008CFF] hover:bg-[#0070cc] disabled:opacity-40 text-white rounded-lg text-[13px] font-semibold"
-              >Continue</button>
+              >{step === 5 ? "Review" : "Continue"}</button>
             ) : (
               <button
                 onClick={submit}
@@ -1610,6 +1645,122 @@ export default function OnboardEmployeePage() {
             </StepCard>
           </>
         )}
+
+        {step === 6 && (
+          <div className="space-y-5">
+            {/* Intro banner */}
+            <div className="rounded-2xl border border-[#008CFF]/20 bg-[#008CFF]/[0.04] px-5 py-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#008CFF]/10 text-[#008CFF]">
+                  <ClipboardCheck size={17} />
+                </div>
+                <div>
+                  <p className="text-[13.5px] font-semibold text-slate-800 dark:text-white">Review &amp; confirm</p>
+                  <p className="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Check every detail below before you finish. Hit <strong>Back</strong> to fix anything. After you click
+                    {" "}<strong>Finish</strong> the welcome email opens so you can edit it, attach a photo and send it to the team.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Details summary */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <StepCard title="Basic Details">
+                <div>
+                  <ReviewRow label="Full name"        value={reviewFullName} />
+                  <ReviewRow label="Display name"     value={form.displayName} />
+                  <ReviewRow label="Gender"           value={form.gender} />
+                  <ReviewRow label="Date of birth"    value={form.dateOfBirth} />
+                  <ReviewRow label="Work email"       value={form.workEmail} />
+                  <ReviewRow label="Personal email"   value={form.personalEmail} />
+                  <ReviewRow label="Mobile"           value={reviewMobile} />
+                  <ReviewRow label="Employee number"  value={form.employeeNumber} />
+                  <ReviewRow label="Number series"    value={form.numberSeries} />
+                </div>
+              </StepCard>
+
+              <StepCard title="Job Details">
+                <div>
+                  <ReviewRow label="Job title"         value={form.jobTitle} />
+                  <ReviewRow label="Department"        value={form.department} />
+                  <ReviewRow label="Joining date"     value={form.joiningDate} />
+                  <ReviewRow label="Reporting manager" value={reviewManagerName} />
+                  <ReviewRow label="Worker type"      value={form.workerType} />
+                  <ReviewRow label="Time type"        value={form.timeType} />
+                  <ReviewRow label="Location"         value={form.location} />
+                  <ReviewRow label="Legal entity"     value={form.legalEntity} />
+                  <ReviewRow label="Business unit"    value={form.businessUnit} />
+                </div>
+              </StepCard>
+
+              <StepCard title="Work Details">
+                <div>
+                  <ReviewRow label="Role · org level"   value={`${form.role} · ${form.orgLevel}`} />
+                  <ReviewRow label="Invite to login"    value={form.inviteToLogin ? "Yes" : "No"} />
+                  <ReviewRow label="Enable onboarding"  value={form.enableOnboarding ? "Yes" : "No"} />
+                  <ReviewRow label="Shift"              value={reviewShiftName} />
+                  <ReviewRow label="Weekly off"         value={form.weeklyOff} />
+                  <ReviewRow label="Attendance scheme"  value={form.attendanceCaptureScheme} />
+                  <ReviewRow label="Cost center"        value={form.costCenter} />
+                  <ReviewRow label="Notice period"      value={form.noticePeriodDays ? `${form.noticePeriodDays} days` : ""} />
+                </div>
+              </StepCard>
+
+              <StepCard title="Compensation">
+                <div>
+                  <ReviewRow label="Salary type" value={form.salaryType} />
+                  {form.salaryType === "Intern" ? (
+                    <ReviewRow label="Monthly basic" value={form.basicPay ? `₹${form.basicPay}` : ""} />
+                  ) : (
+                    <>
+                      <ReviewRow label="Annual CTC"     value={form.annualSalary ? `₹${form.annualSalary}` : ""} />
+                      <ReviewRow label="Pay group"      value={form.payGroup} />
+                      <ReviewRow label="Bonus included" value={form.bonusIncluded ? "Yes" : "No"} />
+                      <ReviewRow label="PF eligible"    value={form.pfEligible ? "Yes" : "No"} />
+                      <ReviewRow label="Tax regime"     value={form.taxRegime} />
+                    </>
+                  )}
+                </div>
+              </StepCard>
+            </div>
+
+            <StepCard title="Address & Government IDs">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8">
+                <div>
+                  <ReviewRow label="Current address"   value={reviewCurrentAddr} />
+                  <ReviewRow label="Permanent address" value={reviewPermanentAddr} />
+                </div>
+                <div>
+                  <ReviewRow label="PAN"          value={form.panNumber} />
+                  <ReviewRow label="Aadhaar"      value={form.aadhaarNumber} />
+                  <ReviewRow label="PF / UAN"     value={[form.pfNumber, form.uanNumber].filter(Boolean).join(" / ")} />
+                  <ReviewRow label="Biometric ID" value={form.biometricId} />
+                </div>
+              </div>
+            </StepCard>
+
+            {/* Welcome email preview */}
+            <StepCard title="Welcome email preview">
+              <p className="-mt-2 text-[11.5px] text-slate-500 dark:text-slate-400">
+                Sent to the whole team as an announcement. This is a preview — you can edit the wording and attach
+                {" "}{form.firstName || "the new joiner"}&apos;s photo in the next step, after you click Finish.
+              </p>
+              <div className="rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden">
+                <div className="px-4 py-2.5 bg-slate-50 dark:bg-white/[0.03] border-b border-slate-200 dark:border-white/10">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Subject</p>
+                  <p className="text-[13px] font-semibold text-slate-800 dark:text-white mt-0.5">{welcomePreview.subject}</p>
+                </div>
+                <div className="px-4 py-4 max-h-[380px] overflow-y-auto bg-white dark:bg-[#0a1526]">
+                  <pre
+                    className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-slate-700 dark:text-slate-200 m-0"
+                    style={{ fontFamily: '"Times New Roman", Times, serif' }}
+                  >{welcomePreview.body}</pre>
+                </div>
+              </div>
+            </StepCard>
+          </div>
+        )}
       </div>
 
       <KekaImportModal
@@ -1656,6 +1807,20 @@ function StepCard({ title, children }: { title: string; children: React.ReactNod
     <div className={`${C.card} rounded-2xl p-6 space-y-5`}>
       <h2 className={C.section}>{title}</h2>
       {children}
+    </div>
+  );
+}
+// One label/value line in the Review step. Empty values render as a muted
+// "Not set" so HR can spot gaps at a glance. `whitespace-pre-line` lets the
+// multi-line address strings wrap on their own newlines.
+function ReviewRow({ label, value }: { label: string; value?: React.ReactNode }) {
+  const empty = value === undefined || value === null || value === "";
+  return (
+    <div className="flex items-start justify-between gap-4 py-2 border-b border-slate-100 dark:border-white/[0.05] last:border-0">
+      <span className="text-[12px] font-medium text-slate-500 dark:text-slate-400 shrink-0">{label}</span>
+      <span className={`text-[13px] text-right whitespace-pre-line ${empty ? "text-slate-300 dark:text-slate-600 italic" : "text-slate-800 dark:text-white font-medium"}`}>
+        {empty ? "Not set" : value}
+      </span>
     </div>
   );
 }
