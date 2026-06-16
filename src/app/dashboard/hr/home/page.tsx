@@ -3105,158 +3105,105 @@ export default function HRHomePage() {
               </div>
             </div>
 
-            {/* Holidays card — colourful themed gradient with a
-                festival-specific illustration along the bottom. Each
-                holiday gets its own background palette and scene
-                (mosque + crescent for Eid, tricolor flag for
-                Independence, rakhi + gift for Raksha Bandhan, lotus
-                for Buddha Purnima, etc.) so the template visibly
-                changes from one festival to the next. */}
-            {(() => {
-              const theme = pickHolidayTheme(activeHoliday?.name);
-              return (
-            <div
-              className="relative min-h-[150px] overflow-hidden rounded-2xl border text-white shadow-[0_10px_30px_-10px_rgba(15,23,42,0.40)] transition-colors"
-              style={{ background: theme.bg, borderColor: theme.border }}
-            >
-              {/* Bottom illustration — switches per festival. */}
-              {theme.scene}
-              {/* Soft top sheen that gives the card a polished, lit feel. */}
-              <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/15 to-transparent" />
-              {/* Subtle radial highlight in the top-right corner. */}
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full"
-                style={{ background: "radial-gradient(closest-side, rgba(255,255,255,0.22), rgba(255,255,255,0))" }}
-              />
-              {/* Readability scrim — darkens the lower area so the name,
-                  date, and badge stay crisp over the festival scene
-                  (fixes the colour band bleeding through the badge). */}
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-0"
-                style={{ background: "linear-gradient(to top, rgba(2,6,23,0.42) 0%, rgba(2,6,23,0.12) 38%, rgba(2,6,23,0) 70%)" }}
-              />
+            {/* Holidays card — clean + minimal, consistent with the other
+                dashboard cards. No festival gradient/illustration: a soft
+                date tile, the holiday name, a small type badge, and a
+                quiet "days to go" countdown. */}
+            <div className={C.card}>
+              {(() => {
+                const d = activeHoliday ? new Date(activeHoliday.date) : null;
+                const today = new Date(); today.setHours(0, 0, 0, 0);
+                const days = d ? Math.round((d.getTime() - today.getTime()) / 86_400_000) : null;
+                const typeColor = activeHoliday ? (HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#008CFF") : "#008CFF";
+                return (
+                  <div className="p-4">
+                    {/* Header */}
+                    <div className="mb-3 flex items-center justify-between">
+                      <span className={`text-[11px] font-semibold uppercase tracking-[0.1em] ${C.t3}`}>Holidays</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowHolidaysModal(true)}
+                        className="text-[11px] font-medium text-[#008CFF] underline-offset-2 transition hover:underline"
+                      >
+                        View all
+                      </button>
+                    </div>
 
-              {/* Prev/next pagination chevrons — fully transparent so the
-                  arrows feel like a part of the gradient itself. Only the
-                  glyph carries colour; a faint white tint shows up on
-                  hover for affordance. */}
-              {upcoming.length > 1 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setHolidayIdx((i) => Math.max(0, i - 1))}
-                    disabled={!canPrevHoliday}
-                    aria-label="Previous holiday"
-                    className="group absolute left-1 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-transparent text-white/85 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-25"
-                  >
-                    <ChevronLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHolidayIdx((i) => Math.min(upcoming.length - 1, i + 1))}
-                    disabled={!canNextHoliday}
-                    aria-label="Next holiday"
-                    className="group absolute right-1 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-transparent text-white/85 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-25"
-                  >
-                    <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-                  </button>
-                </>
-              )}
-
-              <div className={`relative z-10 flex items-start justify-between p-4 pb-2 ${upcoming.length > 1 ? "px-10" : ""}`}>
-                <span
-                  className="text-[10px] font-bold uppercase tracking-[0.16em]"
-                  style={{ color: "rgba(255,255,255,0.92)", WebkitTextFillColor: "rgba(255,255,255,0.92)" }}
-                >
-                  Holidays
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowHolidaysModal(true)}
-                  className="text-[11px] font-medium underline-offset-2 transition hover:underline"
-                  style={{ color: "rgba(255,255,255,0.92)", WebkitTextFillColor: "rgba(255,255,255,0.92)" }}
-                >
-                  View All
-                </button>
-              </div>
-
-              {activeHoliday ? (
-                <div className={`relative z-10 pb-4 ${upcoming.length > 1 ? "px-10" : "px-4"}`}>
-                  {(() => {
-                    const d = new Date(activeHoliday.date);
-                    const today = new Date(); today.setHours(0, 0, 0, 0);
-                    const days = Math.round((d.getTime() - today.getTime()) / 86_400_000);
-                    return (
+                    {activeHoliday && d ? (
                       <div className="flex items-center gap-3">
-                        {/* Date tile — frosted glass over the themed gradient. */}
-                        <div className="flex h-[58px] w-[58px] flex-shrink-0 flex-col items-center justify-center rounded-2xl bg-white/[0.18] ring-1 ring-inset ring-white/30 shadow-[0_2px_10px_rgba(0,0,0,0.14)] backdrop-blur-md">
-                          <span className="text-[23px] font-extrabold leading-none" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>
+                        {upcoming.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setHolidayIdx((i) => Math.max(0, i - 1))}
+                            disabled={!canPrevHoliday}
+                            aria-label="Previous holiday"
+                            className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent"
+                          >
+                            <ChevronLeft className="h-4 w-4" />
+                          </button>
+                        )}
+
+                        {/* Date tile — soft brand-blue tint. */}
+                        <div className="flex h-[52px] w-[52px] flex-shrink-0 flex-col items-center justify-center rounded-xl bg-[#008CFF]/[0.08] ring-1 ring-inset ring-[#008CFF]/15">
+                          <span className="text-[20px] font-bold leading-none text-[#0f6ecd]">
                             {d.toLocaleDateString("en-IN", { day: "2-digit", timeZone: "UTC" })}
                           </span>
-                          <span className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.16em]" style={{ color: "rgba(255,255,255,0.9)", WebkitTextFillColor: "rgba(255,255,255,0.9)" }}>
+                          <span className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-[#0f6ecd]/70">
                             {d.toLocaleDateString("en-IN", { month: "short", timeZone: "UTC" })}
                           </span>
                         </div>
 
-                        {/* Name + day-of-week + type badge. */}
+                        {/* Name + day/year + type badge. */}
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-[16px] font-bold leading-tight tracking-[-0.01em]" title={activeHoliday.name} style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>
+                          <p className={`truncate text-[14.5px] font-semibold leading-tight ${C.t1}`} title={activeHoliday.name}>
                             {activeHoliday.name}
                           </p>
-                          <p className="mt-0.5 text-[11.5px] font-medium" style={{ color: "rgba(255,255,255,0.85)", WebkitTextFillColor: "rgba(255,255,255,0.85)" }}>
+                          <p className={`mt-0.5 text-[12px] ${C.t3}`}>
                             {d.toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" })}
-                            <span className="mx-1.5" style={{ color: "rgba(255,255,255,0.55)", WebkitTextFillColor: "rgba(255,255,255,0.55)" }}>·</span>
+                            <span className="mx-1 opacity-50">·</span>
                             {d.toLocaleDateString("en-IN", { year: "numeric", timeZone: "UTC" })}
                           </p>
-                          <span
-                            className="mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.12em] ring-1 ring-inset ring-white/25"
-                            style={{ background: "rgba(255,255,255,0.20)", color: "#ffffff", WebkitTextFillColor: "#ffffff", backdropFilter: "blur(3px)" }}
-                          >
-                            <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: theme.badge ?? HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#ffffff" }} />
+                          <span className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-slate-600">
+                            <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: typeColor }} />
                             {HOLIDAY_TYPE_LABEL[activeHoliday.type] ?? "PUBLIC HOLIDAY"}
                           </span>
                         </div>
 
-                        {/* Countdown — the emotional hook, its own frosted tile. */}
-                        {days >= 0 && (
-                          <div className="flex h-[58px] min-w-[54px] flex-shrink-0 flex-col items-center justify-center rounded-2xl bg-white/[0.13] px-2 ring-1 ring-inset ring-white/25 backdrop-blur-md">
+                        {/* Countdown — quiet, right-aligned. */}
+                        {days != null && days >= 0 && (
+                          <div className="flex-shrink-0 pr-0.5 text-right">
                             {days === 0 ? (
-                              <span className="text-[12.5px] font-extrabold uppercase tracking-wide" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Today</span>
+                              <span className="text-[13px] font-bold text-[#008CFF]">Today</span>
                             ) : (
                               <>
-                                <span className="text-[22px] font-extrabold leading-none" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>{days}</span>
-                                <span className="mt-0.5 text-center text-[8px] font-bold uppercase leading-tight tracking-[0.1em]" style={{ color: "rgba(255,255,255,0.85)", WebkitTextFillColor: "rgba(255,255,255,0.85)" }}>
+                                <p className={`text-[20px] font-bold leading-none tabular-nums ${C.t1}`}>{days}</p>
+                                <p className={`mt-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] ${C.t3}`}>
                                   {days === 1 ? "day to go" : "days to go"}
-                                </span>
+                                </p>
                               </>
                             )}
                           </div>
                         )}
+
+                        {upcoming.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setHolidayIdx((i) => Math.min(upcoming.length - 1, i + 1))}
+                            disabled={!canNextHoliday}
+                            aria-label="Next holiday"
+                            className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent"
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
-                    );
-                  })()}
-                </div>
-              ) : (
-                <div className="relative z-10 px-4 pb-4">
-                  <p
-                    className="text-[15px] font-semibold"
-                    style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
-                  >
-                    No event today
-                  </p>
-                  <p
-                    className="mt-1 text-[11px]"
-                    style={{ color: "rgba(255,255,255,0.88)", WebkitTextFillColor: "rgba(255,255,255,0.88)" }}
-                  >
-                    No upcoming holidays on file.
-                  </p>
-                </div>
-              )}
+                    ) : (
+                      <p className={`text-[13px] ${C.t3}`}>No upcoming holidays on file.</p>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
-              );
-            })()}
 
             <div className={`${C.card} p-3.5`}>
               <p className={`mb-3 text-[13px] font-semibold ${C.t1}`}>
