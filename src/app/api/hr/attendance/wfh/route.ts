@@ -129,23 +129,52 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Monthly WFH cap ────────────────────────────────────────────────
-    // Each employee can WFH at most twice per IST calendar month (the cap
-    // doesn't carry over). Pending and approved requests both count
-    // against the limit so users can't queue up more than 2 in flight.
-    if (!isHRGrant) {
-      const { start: monthStart, end: monthEnd } = istMonthRange(fromIst);
-      const usedThisMonth = await prisma.wFHRequest.count({
-        where: {
-          userId: subjectUserId,
-          status: { in: ["pending", "approved"] },
-          date:   { gte: monthStart, lte: monthEnd },
-        },
-      });
-      if (usedThisMonth >= 2) {
-        const monthLabel = monthStart.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
-        return NextResponse.json({
-          error: `WFH limit reached: 2 of 2 already used for ${monthLabel}.`,
-        }, { status: 400 });
+    // Per-brand quota driven by the WfhPolicy singleton (NB Media = 2,
+    // YT Labs = 3 by default; HR can edit + flip the limit off entirely
+    // from the admin Leave Policies panel). Pending + approved + the
+    // partially_approved interim state ALL count against the cap so
+    // users can't queue more than `quota` in flight at once.
+    //
+    // BYPASS for HR-admins: CEO / developers / HR managers / admin /
+    // special_access (callerIsHRAdmin) are never capped — they can grant
+    // unlimited WFH to ANY user, and their own WFH isn't limited either.
+    // The cap only constrains a regular employee self-applying. (Previously
+    // the bypass needed an explicit forceGrant on-behalf grant; broadened
+    // here so HR/dev never hit "WFH limit reached".)
+    if (!isHRGrant && !callerIsHRAdmin) {
+      const { getWfhPolicy, quotaForBrand, wfhDayWeight } = await import("@/lib/hr/wfh-balance");
+      const policy = await getWfhPolicy();
+      if (policy.limitEnabled) {
+        const subjProfile = await prisma.employeeProfile.findUnique({
+          where: { userId: subjectUserId },
+          select: { businessUnit: true },
+        });
+        const subjectBrand = subjProfile?.businessUnit ?? null;
+        const quota = quotaForBrand(policy, subjectBrand);
+
+        const { start: monthStart, end: monthEnd } = istMonthRange(fromIst);
+        // Half-day WFH counts as 0.5, not a full day. wfhDayWeight()
+        // (shared with the balance display) reads the [First Half] /
+        // [Second Half] / [Half Day] reason marker. SUM the day-weights
+        // of the in-flight requests instead of counting rows, and block
+        // only if adding THIS request's weight would exceed the quota.
+        const inFlight = await prisma.wFHRequest.findMany({
+          where: {
+            userId: subjectUserId,
+            status: { in: ["pending", "partially_approved", "approved"] },
+            date:   { gte: monthStart, lte: monthEnd },
+          },
+          select: { reason: true },
+        });
+        const usedDays  = inFlight.reduce((sum, r) => sum + wfhDayWeight(r.reason), 0);
+        const newWeight = wfhDayWeight(reason); // self-apply cap is always a single day
+        if (usedDays + newWeight > quota) {
+          const monthLabel = monthStart.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
+          const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+          return NextResponse.json({
+            error: `WFH limit reached: you've used ${fmt(usedDays)} of ${quota} WFH day(s) for ${monthLabel}. This ${newWeight === 0.5 ? "half-day" : "full-day"} request would exceed the limit.`,
+          }, { status: 400 });
+        }
       }
     }
 

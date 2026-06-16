@@ -103,6 +103,10 @@ export default function LeavePoliciesPanel() {
         </button>
       </header>
 
+      {/* WFH monthly quota lives on /admin → Attendance Policies
+          (alongside Regularization 2-day window). One control surface
+          for every org-wide attendance toggle. */}
+
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="w-full min-w-[700px]">
           <thead>
@@ -344,3 +348,4 @@ function PolicyEditor({
     </div>
   );
 }
+

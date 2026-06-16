@@ -5,9 +5,10 @@ import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import SelectField from "@/components/ui/SelectField";
-import { ThumbsUp, MessageSquare, Send, BarChart2, Award, MoreHorizontal, X, ChevronDown, Pencil, Trash2, Link2, Check } from "lucide-react";
+import { ThumbsUp, MessageSquare, Send, BarChart2, Award, MoreHorizontal, X, ChevronDown, Pencil, Trash2, Link2, Check, SmilePlus } from "lucide-react";
 import Link from "next/link";
 import { isHRAdmin, isLeadershipOrHR } from "@/lib/access";
+import ChannelViewsTargetsPanel from "@/components/hr/ChannelViewsTargetsPanel";
 import { PageShell, PageHeader, PageContainer } from "@/components/layout";
 
 function Avatar({ name, url, size = 36 }: { name: string; url?: string | null; size?: number }) {
@@ -114,6 +115,48 @@ function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: an
   const canModerate = isLeadershipOrHR(sessionUser);
   const canEdit    = isAuthor || canModerate;
   const canDelete  = isAuthor || canModerate;
+
+  // Per-comment delete — comment owner OR developer OR
+  // orgLevel="hr_manager" (covers HR Manager + HR tier).
+  const canDeleteComment = (c: any) => {
+    if (!c) return false;
+    if (c.author?.id === sessionUserId) return true;
+    if (sessionUser?.isDeveloper === true) return true;
+    if (sessionUser?.orgLevel === "hr_manager") return true;
+    return false;
+  };
+  const [openCommentMenu, setOpenCommentMenu] = useState<number | null>(null);
+  const [deletingComment, setDeletingComment] = useState<number | null>(null);
+
+  const deleteComment = async (commentId: number) => {
+    if (!confirm("Delete this comment? This can't be undone.")) return;
+    setDeletingComment(commentId);
+    setOpenCommentMenu(null);
+    try {
+      const res = await fetch(`/api/hr/engage/posts/${post.id}/comments/${commentId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || `Delete failed (${res.status})`);
+      }
+      mutate((k: any) => typeof k === "string" && k.startsWith("/api/hr/engage/posts"));
+    } catch (e: any) {
+      alert(e?.message || "Couldn't delete the comment.");
+    } finally {
+      setDeletingComment(null);
+    }
+  };
+
+  const formatCommentTime = (iso: string | Date | undefined): string => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const diffSec = (Date.now() - d.getTime()) / 1000;
+    if (diffSec < 60)          return "just now";
+    if (diffSec < 3600)        return `${Math.floor(diffSec / 60)}m`;
+    if (diffSec < 86400)       return `${Math.floor(diffSec / 3600)}h`;
+    if (diffSec < 86400 * 7)   return `${Math.floor(diffSec / 86400)}d`;
+    return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  };
   const [menuOpen, setMenuOpen]   = useState(false);
   const [editing,  setEditing]    = useState(false);
   const [draft,    setDraft]      = useState(post.content);
@@ -260,6 +303,12 @@ function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: an
   // click +N opens an anchored popover (matches the home feed).
   const reactorNames: string[] = Array.isArray(post.reactions)
     ? post.reactions.map((r: any) => r.user?.name).filter(Boolean)
+    : [];
+  // Name + emoji pairs for the reactor popover (who reacted with what).
+  const reactors: Array<{ name: string; emoji: string }> = Array.isArray(post.reactions)
+    ? post.reactions
+        .filter((r: any) => r.user?.name)
+        .map((r: any) => ({ name: r.user.name as string, emoji: (r.emoji as string) || "👍" }))
     : [];
   // Distinct emojis used on this post, top 3 by count — feeds the
   // stacked-emoji chip in the summary.
@@ -461,7 +510,7 @@ function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: an
               {myReactionEmoji ? (
                 <span className="text-[16px] leading-none">{myReactionEmoji}</span>
               ) : (
-                <ThumbsUp className="w-4 h-4" />
+                <SmilePlus className="w-4 h-4" />
               )}
               React
             </button>
@@ -489,8 +538,15 @@ function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: an
             )}
           </div>
           <button onClick={() => setShowComments(p => !p)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors">
-            <MessageSquare className="w-4 h-4" />Comment
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-medium hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors ${
+              showComments ? "text-[#008CFF]" : "text-slate-500 dark:text-slate-400"
+            }`}>
+            <MessageSquare className="w-4 h-4" />
+            <span>
+              {post.comments.length === 0 && "Comment"}
+              {post.comments.length === 1 && "1 Comment"}
+              {post.comments.length > 1 && `${post.comments.length} Comments`}
+            </span>
           </button>
         </div>
         <div className="flex items-center gap-1.5 pr-2 text-[12px] text-slate-500 dark:text-slate-400">
@@ -523,35 +579,100 @@ function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: an
               )}
             </span>
           )}
-          {post.comments.length > 0 && (
-            <span>{reactionCount > 0 ? "•" : ""} {post.comments.length} {post.comments.length === 1 ? "Comment" : "Comments"}</span>
-          )}
+          {/* Comment count moved onto the Comment button itself. */}
         </div>
       </div>
 
       {/* Comments section */}
       {showComments && (
-        <div className="border-t border-slate-100 dark:border-white/[0.04] px-5 py-3 space-y-3 bg-slate-50/50 dark:bg-white/[0.01]">
-          {post.comments.map((c: any) => (
-            <div key={c.id} className="flex items-start gap-2.5">
-              <Avatar name={c.author.name} url={c.author.profilePictureUrl} size={28} />
-              <div className="flex-1 bg-white dark:bg-[#0d1b2a] border border-slate-100 dark:border-white/[0.06] rounded-xl px-3 py-2">
-                <p className="text-[12px] font-semibold text-slate-800 dark:text-white">{c.author.name}</p>
-                <p className="text-[12px] text-slate-600 dark:text-slate-300 mt-0.5">{renderWithMentions(c.content, employees)}</p>
+        <div className="border-t border-slate-100 dark:border-white/[0.04] px-5 py-3 space-y-3.5 bg-white dark:bg-[#0d1b2a]">
+          {post.comments.map((c: any) => {
+            const showDelete = canDeleteComment(c);
+            const isMenuOpen = openCommentMenu === c.id;
+            const isDeleting = deletingComment === c.id;
+            return (
+              <div
+                key={c.id}
+                className={`group relative flex items-start gap-3 -mx-2 px-2 py-1.5 rounded-lg transition-all ${
+                  isDeleting ? "opacity-50" : "hover:bg-slate-50 dark:hover:bg-white/[0.02]"
+                }`}
+              >
+                <div className="shrink-0 pt-0.5">
+                  <Avatar name={c.author.name} url={c.author.profilePictureUrl} size={30} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-[12.5px] leading-relaxed break-words min-w-0 text-slate-800 dark:text-slate-200">
+                      <span className="font-semibold text-slate-900 dark:text-white mr-1.5">{c.author.name}</span>
+                      <span className="text-slate-600 dark:text-slate-300 whitespace-pre-wrap">
+                        {renderWithMentions(c.content, employees)}
+                      </span>
+                    </p>
+                    {showDelete && (
+                      <div className="relative shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setOpenCommentMenu(isMenuOpen ? null : c.id)}
+                          disabled={isDeleting}
+                          aria-label="Comment options"
+                          className={`h-6 w-6 inline-flex items-center justify-center rounded-full text-slate-400 transition-all ${
+                            isMenuOpen
+                              ? "bg-slate-200 dark:bg-white/10 text-slate-700 dark:text-slate-200 opacity-100"
+                              : "opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-slate-200 dark:hover:bg-white/10 hover:text-slate-700"
+                          }`}
+                        >
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </button>
+                        {isMenuOpen && (
+                          <>
+                            <button
+                              type="button"
+                              aria-hidden="true"
+                              tabIndex={-1}
+                              onClick={() => setOpenCommentMenu(null)}
+                              className="fixed inset-0 z-30 cursor-default"
+                              style={{ background: "transparent" }}
+                            />
+                            <div className="absolute right-0 top-7 z-40 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0d1b2a] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.18)] overflow-hidden py-1">
+                              <button
+                                type="button"
+                                onClick={() => deleteComment(c.id)}
+                                className="w-full px-3 py-1.5 text-left text-[12px] font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 inline-flex items-center gap-2 whitespace-nowrap"
+                              >
+                                <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                                <span>Delete comment</span>
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-0.5 text-[10.5px] font-medium text-slate-400 dark:text-slate-500">
+                    {formatCommentTime(c.createdAt)}
+                  </div>
+                </div>
               </div>
+            );
+          })}
+          <div className={`flex items-center gap-3 ${post.comments.length > 0 ? "pt-1" : ""}`}>
+            <div className="shrink-0">
+              <Avatar name="You" size={30} />
             </div>
-          ))}
-          <div className="flex items-center gap-2.5">
-            <Avatar name="You" size={28} />
-            <div className="flex-1 flex items-center gap-2 bg-white dark:bg-[#0d1b2a] border border-slate-200 dark:border-white/10 rounded-xl px-3 py-1.5">
+            <div className="flex-1 flex items-center gap-1 bg-slate-100 dark:bg-white/[0.04] border border-transparent rounded-full pl-4 pr-1 py-1 focus-within:bg-white dark:focus-within:bg-[#0d1b2a] focus-within:border-[#008CFF] focus-within:shadow-[0_0_0_3px_rgba(0,140,255,0.08)] transition-all">
               <input
                 value={commentText}
                 onChange={e => setCommentText(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && submitComment()}
                 placeholder="Write a comment…"
-                className="flex-1 bg-transparent text-[12px] text-slate-700 dark:text-slate-300 placeholder-slate-400 focus:outline-none"
+                className="flex-1 bg-transparent text-[12.5px] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none py-1.5"
               />
-              <button onClick={submitComment} className="text-[#008CFF] hover:text-[#0077dd]">
+              <button
+                onClick={submitComment}
+                disabled={!commentText.trim()}
+                title="Send"
+                className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full text-[#008CFF] hover:bg-[#008CFF]/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
                 <Send className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -570,9 +691,10 @@ function PostCard({ post, sessionUser, employees }: { post: any; sessionUser: an
           className="rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0d1b2a] shadow-[0_6px_18px_-4px_rgba(15,23,42,0.2)] animate-in fade-in duration-100"
         >
           <ul className="max-h-[220px] overflow-y-auto py-1.5">
-            {reactorNames.map((name, i) => (
-              <li key={i} className="flex items-center gap-2 px-3 py-1">
-                <span className="truncate text-[12px] text-slate-700 dark:text-slate-200">{name}</span>
+            {reactors.map((r, i) => (
+              <li key={i} className="flex items-center gap-2 px-3 py-1.5">
+                <span className="text-[15px] leading-none shrink-0">{r.emoji}</span>
+                <span className="truncate text-[12px] text-slate-700 dark:text-slate-200">{r.name}</span>
               </li>
             ))}
           </ul>
@@ -606,7 +728,11 @@ export default function EngagePage() {
   // general workforce. content text serves as the caption.
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
-  const canCompose = isLeadershipOrHR(user);
+  // Wider HR-admin tier so role=admin + special_access also see the
+  // composer, matching the rest of the dashboard's gate. Everyone
+  // else (regular employees) sees the per-channel YouTube view
+  // targets panel in the same slot below.
+  const canCompose = isHRAdmin(user);
 
   const pickImage = (file: File | null) => {
     setMediaError(null);
@@ -655,6 +781,7 @@ export default function EngagePage() {
             developer). Regular employees still see the feed but
             can't create new posts. Matches the moderation tier
             used for Edit / Delete on individual posts. */}
+        <ChannelViewsTargetsPanel />
         {canCompose && (
         <div className="bg-white dark:bg-[#0d1b2a] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
           {/* Scope tabs */}

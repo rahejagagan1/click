@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 import { canApplyRestrictedLeave } from "@/lib/access";
 import { notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
 import { countWorkingDays } from "@/lib/hr/working-days";
@@ -47,6 +48,20 @@ export async function GET(req: NextRequest) {
     }
     const status = searchParams.get("status");
     if (status) where.status = status;
+
+    // Brand isolation — a single-brand HR Manager only sees their own
+    // brand's applications; developers / allowlisted (canViewAllBrands)
+    // see all. Applied ONLY to the admin multi-user paths: the self
+    // (view=my) and non-admin team paths are already user-scoped, and
+    // an employee with no businessUnit must still see their own leaves,
+    // so we must not fail-closed there.
+    if (isAdmin) {
+      const scope = getBrandScope(self);
+      if (!scope.allBrands) {
+        if (!scope.brand) return NextResponse.json([]); // fail closed
+        where.user = { ...(where.user ?? {}), employeeProfile: { businessUnit: scope.brand } };
+      }
+    }
 
     const applications = await prisma.leaveApplication.findMany({
       where, include: {

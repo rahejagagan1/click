@@ -6,6 +6,7 @@
 import { useState } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
+import { DateField } from "@/components/ui/date-field";
 import { TrendingUp, Users, Briefcase, Clock } from "lucide-react";
 
 const STAGE_COLORS: Record<string, string> = {
@@ -34,15 +35,9 @@ export default function ReportsTab() {
       {/* Date filter */}
       <div className="flex items-center gap-3 flex-wrap">
         <span className="text-[11.5px] text-slate-500">Date range:</span>
-        <input
-          type="date" value={from} onChange={(e) => setFrom(e.target.value)}
-          className="h-9 rounded-lg border border-slate-200 px-3 text-[12px]"
-        />
+        <DateField value={from} onChange={setFrom} placeholder="From" />
         <span className="text-slate-400">to</span>
-        <input
-          type="date" value={to} onChange={(e) => setTo(e.target.value)}
-          className="h-9 rounded-lg border border-slate-200 px-3 text-[12px]"
-        />
+        <DateField value={to} onChange={setTo} placeholder="To" />
         {(from || to) && (
           <button onClick={() => { setFrom(""); setTo(""); }} className="text-[11.5px] text-slate-500 hover:text-[#008CFF]">Clear</button>
         )}
