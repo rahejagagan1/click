@@ -74,6 +74,9 @@ export default function EmailComposer({
   // Where this composer lives — affects only the submit button label.
   context = "email",
   submitLabel,
+  // Show an always-visible rendered preview under the editor (used by the
+  // Team Welcome flow so HR can cross-check the email live while editing).
+  livePreview = false,
   onCancel,
   onSend,
 }: {
@@ -90,6 +93,7 @@ export default function EmailComposer({
   initialAttachments?: ComposerAttachment[];
   context?: "email" | "assessment" | "archive" | "interview" | "team_welcome";
   submitLabel?: string;
+  livePreview?: boolean;
   onCancel: () => void;
   onSend: (payload: EmailComposerPayload) => Promise<void>;
 }) {
@@ -303,6 +307,32 @@ export default function EmailComposer({
           )}
         </div>
       </Field>
+
+      {livePreview && (
+        <Field label="Live preview — exactly what the team receives">
+          <div className="rounded-lg border border-slate-200 bg-white p-4" style={{ fontFamily: '"Times New Roman", Georgia, serif' }}>
+            <p className="mb-2 border-b border-slate-100 pb-2 text-[13.5px] font-semibold text-slate-900">{subject || "(no subject)"}</p>
+            <div className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-slate-700">{body || "(empty body)"}</div>
+            {files.some((f) => f.contentType?.startsWith("image/")) && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {files.filter((f) => f.contentType?.startsWith("image/")).map((f, i) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img key={i} src={`data:${f.contentType};base64,${f.contentBase64}`} alt={f.filename} className="h-20 w-20 rounded-lg object-cover ring-1 ring-slate-200" />
+                ))}
+              </div>
+            )}
+            {files.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-100 pt-2.5">
+                {files.map((f, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[10.5px] text-slate-600">
+                    <Paperclip size={10} /> {f.filename}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </Field>
+      )}
 
       {error && (
         <p className="text-[12px] text-rose-600">{error}</p>
