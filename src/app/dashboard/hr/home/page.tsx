@@ -3116,7 +3116,7 @@ export default function HRHomePage() {
               const theme = pickHolidayTheme(activeHoliday?.name);
               return (
             <div
-              className="relative min-h-[140px] overflow-hidden rounded-xl border text-white shadow-[0_8px_24px_rgba(15,23,42,0.10)] transition-colors"
+              className="relative min-h-[150px] overflow-hidden rounded-2xl border text-white shadow-[0_10px_30px_-10px_rgba(15,23,42,0.40)] transition-colors"
               style={{ background: theme.bg, borderColor: theme.border }}
             >
               {/* Bottom illustration — switches per festival. */}
@@ -3128,6 +3128,14 @@ export default function HRHomePage() {
                 aria-hidden="true"
                 className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full"
                 style={{ background: "radial-gradient(closest-side, rgba(255,255,255,0.22), rgba(255,255,255,0))" }}
+              />
+              {/* Readability scrim — darkens the lower area so the name,
+                  date, and badge stay crisp over the festival scene
+                  (fixes the colour band bleeding through the badge). */}
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0"
+                style={{ background: "linear-gradient(to top, rgba(2,6,23,0.42) 0%, rgba(2,6,23,0.12) 38%, rgba(2,6,23,0) 70%)" }}
               />
 
               {/* Prev/next pagination chevrons — fully transparent so the
@@ -3175,73 +3183,60 @@ export default function HRHomePage() {
               </div>
 
               {activeHoliday ? (
-                <div className={`relative z-10 px-4 pb-4 ${upcoming.length > 1 ? "px-10" : ""}`}>
-                  <div className="flex items-start gap-4">
-                    {/* Date tile — translucent white over the themed bg
-                        for a frosted-glass feel. */}
-                    <div className="flex h-[60px] w-[60px] flex-shrink-0 flex-col items-center justify-center rounded-lg bg-white/15 ring-1 ring-inset ring-white/25 backdrop-blur-sm">
-                      <span
-                        className="text-[22px] font-bold leading-none"
-                        style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
-                      >
-                        {new Date(activeHoliday.date).toLocaleDateString("en-IN", { day: "2-digit", timeZone: "UTC" })}
-                      </span>
-                      <span
-                        className="mt-1 text-[9.5px] font-bold uppercase tracking-[0.16em]"
-                        style={{ color: "rgba(255,255,255,0.92)", WebkitTextFillColor: "rgba(255,255,255,0.92)" }}
-                      >
-                        {new Date(activeHoliday.date).toLocaleDateString("en-IN", { month: "short", timeZone: "UTC" })}
-                      </span>
-                    </div>
+                <div className={`relative z-10 pb-4 ${upcoming.length > 1 ? "px-10" : "px-4"}`}>
+                  {(() => {
+                    const d = new Date(activeHoliday.date);
+                    const today = new Date(); today.setHours(0, 0, 0, 0);
+                    const days = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+                    return (
+                      <div className="flex items-center gap-3">
+                        {/* Date tile — frosted glass over the themed gradient. */}
+                        <div className="flex h-[58px] w-[58px] flex-shrink-0 flex-col items-center justify-center rounded-2xl bg-white/[0.18] ring-1 ring-inset ring-white/30 shadow-[0_2px_10px_rgba(0,0,0,0.14)] backdrop-blur-md">
+                          <span className="text-[23px] font-extrabold leading-none" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>
+                            {d.toLocaleDateString("en-IN", { day: "2-digit", timeZone: "UTC" })}
+                          </span>
+                          <span className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.16em]" style={{ color: "rgba(255,255,255,0.9)", WebkitTextFillColor: "rgba(255,255,255,0.9)" }}>
+                            {d.toLocaleDateString("en-IN", { month: "short", timeZone: "UTC" })}
+                          </span>
+                        </div>
 
-                    <div className="min-w-0 flex-1">
-                      <p
-                        className="max-w-full truncate text-[15.5px] font-semibold leading-tight tracking-[-0.005em]"
-                        title={activeHoliday.name}
-                        style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}
-                      >
-                        {activeHoliday.name}
-                      </p>
-                      <p
-                        className="mt-1 text-[11.5px] font-medium"
-                        style={{ color: "rgba(255,255,255,0.85)", WebkitTextFillColor: "rgba(255,255,255,0.85)" }}
-                      >
-                        {new Date(activeHoliday.date).toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" })}
-                        <span style={{ color: "rgba(255,255,255,0.6)", WebkitTextFillColor: "rgba(255,255,255,0.6)" }} className="mx-1.5">·</span>
-                        {new Date(activeHoliday.date).toLocaleDateString("en-IN", { year: "numeric", timeZone: "UTC" })}
-                        {(() => {
-                          const today = new Date(); today.setHours(0, 0, 0, 0);
-                          const target = new Date(activeHoliday.date);
-                          const days = Math.round((target.getTime() - today.getTime()) / 86_400_000);
-                          if (days < 0)  return null;
-                          if (days === 0) return <span className="ml-1.5 font-semibold" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>· today</span>;
-                          return (
-                            <>
-                              <span className="mx-1.5" style={{ color: "rgba(255,255,255,0.6)", WebkitTextFillColor: "rgba(255,255,255,0.6)" }}>·</span>
-                              <span className="font-semibold" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>
-                                {days === 1 ? "tomorrow" : `in ${days} days`}
-                              </span>
-                            </>
-                          );
-                        })()}
-                      </p>
-                      <span
-                        className="mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.12em] ring-1 ring-inset ring-white/20"
-                        style={{
-                          background: "rgba(255,255,255,0.18)",
-                          color: "#ffffff",
-                          WebkitTextFillColor: "#ffffff",
-                          backdropFilter: "blur(2px)",
-                        }}
-                      >
-                        <span
-                          className="inline-block h-1.5 w-1.5 rounded-full"
-                          style={{ background: theme.badge ?? HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#ffffff" }}
-                        />
-                        {HOLIDAY_TYPE_LABEL[activeHoliday.type] ?? "PUBLIC HOLIDAY"}
-                      </span>
-                    </div>
-                  </div>
+                        {/* Name + day-of-week + type badge. */}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[16px] font-bold leading-tight tracking-[-0.01em]" title={activeHoliday.name} style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>
+                            {activeHoliday.name}
+                          </p>
+                          <p className="mt-0.5 text-[11.5px] font-medium" style={{ color: "rgba(255,255,255,0.85)", WebkitTextFillColor: "rgba(255,255,255,0.85)" }}>
+                            {d.toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" })}
+                            <span className="mx-1.5" style={{ color: "rgba(255,255,255,0.55)", WebkitTextFillColor: "rgba(255,255,255,0.55)" }}>·</span>
+                            {d.toLocaleDateString("en-IN", { year: "numeric", timeZone: "UTC" })}
+                          </p>
+                          <span
+                            className="mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.12em] ring-1 ring-inset ring-white/25"
+                            style={{ background: "rgba(255,255,255,0.20)", color: "#ffffff", WebkitTextFillColor: "#ffffff", backdropFilter: "blur(3px)" }}
+                          >
+                            <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: theme.badge ?? HOLIDAY_TYPE_COLOR[activeHoliday.type] ?? "#ffffff" }} />
+                            {HOLIDAY_TYPE_LABEL[activeHoliday.type] ?? "PUBLIC HOLIDAY"}
+                          </span>
+                        </div>
+
+                        {/* Countdown — the emotional hook, its own frosted tile. */}
+                        {days >= 0 && (
+                          <div className="flex h-[58px] min-w-[54px] flex-shrink-0 flex-col items-center justify-center rounded-2xl bg-white/[0.13] px-2 ring-1 ring-inset ring-white/25 backdrop-blur-md">
+                            {days === 0 ? (
+                              <span className="text-[12.5px] font-extrabold uppercase tracking-wide" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>Today</span>
+                            ) : (
+                              <>
+                                <span className="text-[22px] font-extrabold leading-none" style={{ color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>{days}</span>
+                                <span className="mt-0.5 text-center text-[8px] font-bold uppercase leading-tight tracking-[0.1em]" style={{ color: "rgba(255,255,255,0.85)", WebkitTextFillColor: "rgba(255,255,255,0.85)" }}>
+                                  {days === 1 ? "day to go" : "days to go"}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div className="relative z-10 px-4 pb-4">
