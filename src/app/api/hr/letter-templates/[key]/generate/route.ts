@@ -14,6 +14,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, isLeadershipOrHR, resolveUserId, serverError } from "@/lib/api-auth";
 import { renderLetterHtml, wrapLetterPreviewHtml } from "@/lib/hr/letter-render";
 import { htmlToPdf } from "@/lib/hr/html-to-pdf";
+import { savePendingDocument } from "@/lib/hr/pending-documents";
 
 export const dynamic = "force-dynamic";
 export const runtime  = "nodejs";
@@ -29,9 +30,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
     const body = await req.json().catch(() => ({}));
     const action: "preview" | "pdf" = body.action === "pdf" ? "pdf" : "preview";
 
+    // Two modes: existing employee (employeeId) OR new joiner (manual
+    // typed-in fields — the person isn't in the DB yet).
+    const manual = body.manual && typeof body.manual === "object" ? {
+      name:              String(body.manual.name ?? "").trim(),
+      email:             String(body.manual.email ?? "").trim(),
+      designation:       String(body.manual.designation ?? "").trim(),
+      department:        String(body.manual.department ?? "").trim(),
+      employeeNumber:    String(body.manual.employeeNumber ?? "").trim(),
+      joiningDate:       String(body.manual.joiningDate ?? "").trim(),
+      probationEndDate:  String(body.manual.probationEndDate ?? "").trim(),
+      internshipEndDate: String(body.manual.internshipEndDate ?? "").trim(),
+      gender:            String(body.manual.gender ?? "").trim(),
+      brand:             body.manual.brand === "YT Labs" ? "YT Labs" : "NB Media",
+    } : null;
+    const isManual = !!manual;
+
     const employeeId = Number(body.employeeId);
-    if (!Number.isInteger(employeeId) || employeeId <= 0) {
-      return NextResponse.json({ error: "employeeId is required" }, { status: 400 });
+    if (!isManual && (!Number.isInteger(employeeId) || employeeId <= 0)) {
+      return NextResponse.json({ error: "employeeId or a manual recipient is required" }, { status: 400 });
+    }
+    // A new-joiner PDF MUST carry an email — that's how the parked
+    // document later finds the person once they're added to the system.
+    if (isManual && action === "pdf" && !manual!.email) {
+      return NextResponse.json({ error: "Email is required to save a new-joiner document." }, { status: 400 });
     }
     const customFields: Record<string, string> = body.customFields && typeof body.customFields === "object"
       ? Object.fromEntries(Object.entries(body.customFields).map(([k, v]) => [k, String(v ?? "")]))
@@ -41,14 +63,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
     // matching template variant. NULL businessUnit on the
     // EmployeeProfile defaults to "NB Media" (the parent brand).
     let employeeBrand: string = "NB Media";
-    try {
-      const brandRows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT COALESCE(p."businessUnit", 'NB Media') AS bu
-           FROM "EmployeeProfile" p WHERE p."userId" = $1 LIMIT 1`,
-        employeeId,
-      );
-      if (brandRows[0]?.bu) employeeBrand = brandRows[0].bu;
-    } catch { /* keep default */ }
+    if (isManual) {
+      employeeBrand = manual!.brand;
+    } else {
+      try {
+        const brandRows = await prisma.$queryRawUnsafe<any[]>(
+          `SELECT COALESCE(p."businessUnit", 'NB Media') AS bu
+             FROM "EmployeeProfile" p WHERE p."userId" = $1 LIMIT 1`,
+          employeeId,
+        );
+        if (brandRows[0]?.bu) employeeBrand = brandRows[0].bu;
+      } catch { /* keep default */ }
+    }
 
     // Picker: prefer the brand-specific row; fall back to a NULL-
     // tagged "universal" row. ORDER BY puts the brand-specific
@@ -72,7 +98,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
     }
     const tpl = rows[0];
 
-    const { html, missing } = await renderLetterHtml(tpl.bodyHtml, { employeeId, customFields });
+    const { html, missing } = await renderLetterHtml(
+      tpl.bodyHtml,
+      isManual ? { manual: manual!, customFields } : { employeeId, customFields },
+    );
 
     if (action === "preview") {
       // Wrap the body in a full A4-shaped preview HTML doc. The
@@ -144,28 +173,48 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
       });
     }
 
-    // Persist as an EmployeeDocument so it auto-shows under the
-    // employee's Documents tab.
+    // Persist the generated PDF.
+    //   • Existing employee → EmployeeDocument (shows in Documents now).
+    //   • New joiner        → PendingDocument, parked by email until the
+    //                         person is added to the system, then
+    //                         auto-attached to their Documents tab.
     const myId = await resolveUserId(session);
-    const fileName = `${tpl.title.replace(/[^A-Za-z0-9]+/g, "-")}-${employeeId}.pdf`;
-    try {
-      const inserted = await prisma.$queryRawUnsafe<any[]>(
-        `INSERT INTO "EmployeeDocument"
-           ("userId","category","fileName","fileUrl","fileBlob","fileMime",
-            "uploadedById","isVerified","createdAt")
-         VALUES ($1,$2,$3,'',$4::bytea,$5,$6,false,NOW())
-         RETURNING id`,
-        employeeId, "employee_letter", fileName, pdfBytes, "application/pdf", myId ?? null,
-      );
-      const docId = inserted[0]?.id;
-      if (docId) {
-        await prisma.$executeRawUnsafe(
-          `UPDATE "EmployeeDocument" SET "fileUrl" = $1 WHERE id = $2`,
-          `/api/hr/documents/${docId}/file`, docId,
+    const recipientSlug = isManual
+      ? (manual!.name || manual!.email || "new-joiner").replace(/[^A-Za-z0-9]+/g, "-")
+      : String(employeeId);
+    const fileName = `${tpl.title.replace(/[^A-Za-z0-9]+/g, "-")}-${recipientSlug}.pdf`;
+    if (isManual) {
+      await savePendingDocument({
+        email:       manual!.email,
+        fullName:    manual!.name || null,
+        category:    "employee_letter",
+        templateKey: key,
+        fileName,
+        fileBlob:    pdfBytes,
+        fileMime:    "application/pdf",
+        brand:       employeeBrand,
+        createdById: myId ?? null,
+      });
+    } else {
+      try {
+        const inserted = await prisma.$queryRawUnsafe<any[]>(
+          `INSERT INTO "EmployeeDocument"
+             ("userId","category","fileName","fileUrl","fileBlob","fileMime",
+              "uploadedById","isVerified","createdAt")
+           VALUES ($1,$2,$3,'',$4::bytea,$5,$6,false,NOW())
+           RETURNING id`,
+          employeeId, "employee_letter", fileName, pdfBytes, "application/pdf", myId ?? null,
         );
+        const docId = inserted[0]?.id;
+        if (docId) {
+          await prisma.$executeRawUnsafe(
+            `UPDATE "EmployeeDocument" SET "fileUrl" = $1 WHERE id = $2`,
+            `/api/hr/documents/${docId}/file`, docId,
+          );
+        }
+      } catch (e) {
+        console.warn("[letter generate] document persist failed:", (e as any)?.message);
       }
-    } catch (e) {
-      console.warn("[letter generate] document persist failed:", (e as any)?.message);
     }
 
     return new NextResponse(new Uint8Array(pdfBytes), {
