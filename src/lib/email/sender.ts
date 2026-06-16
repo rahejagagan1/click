@@ -35,6 +35,10 @@ export type UserAttachment = {
   filename: string;
   contentType?: string;
   contentBase64: string;
+  // When set, the attachment is embedded inline and can be referenced
+  // from the HTML body via <img src="cid:THIS_VALUE">. Same mechanism the
+  // logo uses (cid:logo). Omit for a normal downloadable attachment.
+  cid?: string;
 };
 
 export async function sendEmail(args: {
@@ -65,6 +69,7 @@ export async function sendEmail(args: {
     filename:    a.filename,
     content:     Buffer.from(a.contentBase64, "base64"),
     contentType: a.contentType,
+    ...(a.cid ? { cid: a.cid } : {}),   // inline image when a cid is given
   }));
 
   try {
