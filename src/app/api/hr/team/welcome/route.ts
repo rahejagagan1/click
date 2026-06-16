@@ -46,6 +46,16 @@ export async function POST(req: NextRequest) {
     const html    = String(body?.body ?? "").trim();
     if (!subject) return NextResponse.json({ error: "Subject required" }, { status: 400 });
     if (!html)    return NextResponse.json({ error: "Body required" },    { status: 400 });
+    // Safety net: never ship an email that still has unfilled
+    // {{placeholders}} (e.g. {{Home City}}) — they slip through when HR
+    // sends without editing the template. Block + tell HR what to fix.
+    const leftover = (subject + " " + html).match(/\{\{[^}]{0,60}\}\}/);
+    if (leftover) {
+      return NextResponse.json(
+        { error: `The email still has an unfilled placeholder: ${leftover[0]}. Please fill it in before sending.` },
+        { status: 400 },
+      );
+    }
 
     // Pull every active employee. BCC so we don't leak the team list
     // to each recipient. To = the sender (a single visible address).

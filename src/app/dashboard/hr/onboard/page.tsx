@@ -226,7 +226,7 @@ export default function OnboardEmployeePage() {
   // when HR closes / skips / completes the welcome dialog.
   const [welcomeFor, setWelcomeFor] = useState<{
     fullName: string; firstName: string; jobRole: string;
-    workEmail: string; managerName?: string; officeLocation?: string;
+    workEmail: string; homeCity?: string; managerName?: string; officeLocation?: string;
     phone?: string;
   } | null>(null);
   // Banner shown when the form was prefilled from a hiring candidate
@@ -776,13 +776,17 @@ export default function OnboardEmployeePage() {
       // Open the Team Welcome composer so HR can preview + send the
       // "Introducing X" announcement to the whole team. HR can skip it
       // (the modal's X / Cancel) and we redirect on close either way.
-      // Manager name stays as the {{Manager Name}} placeholder — HR
-      // edits it inline before sending if needed.
+      // Auto-fill home city + manager from the form so the email reads
+      // complete out of the box; the template gracefully drops any clause
+      // we still don't have (e.g. prior role isn't collected here) instead
+      // of printing a {{placeholder}}.
       setWelcomeFor({
         fullName:  data.name,
         firstName: form.firstName || data.name.split(" ")[0] || data.name,
         jobRole:   form.jobTitle || form.role || "Team member",
         workEmail: form.workEmail,
+        homeCity:  form.city || undefined,
+        managerName: managers.find((m: any) => String(m.id) === String(form.reportingManagerId))?.name || undefined,
         officeLocation: form.location || undefined,
         phone: form.mobileNumber ? `${form.mobileCountry} ${form.mobileNumber}` : undefined,
       });

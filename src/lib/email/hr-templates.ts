@@ -372,22 +372,48 @@ ${candidateSign}`,
 export function teamWelcomeEmail(args: {
   newJoinerName: string;
   firstName: string;
-  homeCity: string;
-  priorRole: string;
+  homeCity?: string;
+  priorRole?: string;
   jobRole: string;
-  managerName: string;
-  officeLocation: string;
-  phone: string;
+  managerName?: string;
+  officeLocation?: string;
+  phone?: string;
   workEmail: string;
   pronoun?: "he" | "she" | "they";
 }): HRTemplate {
-  const {
-    newJoinerName, firstName, homeCity, priorRole, jobRole, managerName,
-    officeLocation, phone, workEmail, pronoun = "they",
-  } = args;
+  const { newJoinerName, firstName, jobRole, workEmail, pronoun = "they" } = args;
+  // Optional bits — render the sentence gracefully when a value is
+  // missing instead of emitting a raw {{placeholder}} into the email.
+  const homeCity       = (args.homeCity || "").trim();
+  const priorRole      = (args.priorRole || "").trim();
+  const managerName    = (args.managerName || "").trim();
+  const officeLocation = (args.officeLocation || "").trim();
+  const phone          = (args.phone || "").trim();
   const subj = { he: "He",   she: "She",  they: "They" }[pronoun];
   const obj  = { he: "him",  she: "her",  they: "them" }[pronoun];
   const poss = { he: "his",  she: "her",  they: "their" }[pronoun];
+
+  // Background clause — only include the parts we actually have.
+  let background = "";
+  if (homeCity && priorRole) background = `${firstName} hails from ${homeCity} and has worked as a ${priorRole}. `;
+  else if (homeCity)         background = `${firstName} hails from ${homeCity}. `;
+  else if (priorRole)        background = `${firstName} has worked as a ${priorRole}. `;
+  // "They have joined" vs "He/She has joined"; standalone uses the name.
+  const joinSubject = background ? subj : firstName;
+  const joinAux     = background && pronoun === "they" ? "have" : "has";
+  const para2 = `${background}${joinSubject} ${joinAux} joined us as a "${jobRole}" and we are highly enthusiastic about witnessing ${obj} apply ${poss} experience and educational background to contribute to the growth of our business.`;
+
+  // Reporting + how-to-reach. Drop the manager / office clauses cleanly
+  // when unknown so the prose still reads naturally.
+  const reportClause = managerName
+    ? `${firstName} will report to ${managerName} and collaborate closely with ${obj}. `
+    : `${firstName} will collaborate closely with the team. `;
+  const reach = [phone, workEmail].filter(Boolean).join(" and ");
+  const reachSentence = officeLocation
+    ? `${subj} shall be working from the ${officeLocation} office and you can reach ${obj} at ${reach} so be sure to drop by and say hello and take a moment to introduce yourselves to ${obj}.`
+    : `You can reach ${obj} at ${reach} so be sure to drop by and say hello and take a moment to introduce yourselves to ${obj}.`;
+  const para3 = `${reportClause}${reachSentence} A warm and friendly welcome can go a long way in making someone feel at home.`;
+
   return {
     subject: `Cheers to New Faces! Introducing ${newJoinerName} to the Team NB Media`,
     body:
@@ -395,9 +421,9 @@ export function teamWelcomeEmail(args: {
 
 I am thrilled to announce that we have a new addition to our NB Media Team and I am sure you will join me in extending a warm welcome to ${newJoinerName}.
 
-${firstName} hails from ${homeCity} and has worked as a ${priorRole}. ${subj} has joined us as a "${jobRole}" and we are highly enthusiastic about witnessing ${obj} apply ${poss} experience and educational background to contribute to the growth of our business.
+${para2}
 
-${firstName} will report to ${managerName} and collaborate closely with ${obj}. ${firstName} shall be working from the ${officeLocation} office and you can reach ${obj} at ${phone} and ${workEmail} so be sure to drop by and say hello and take a moment to introduce yourselves to ${obj}. A warm and friendly welcome can go a long way in making someone feel at home.
+${para3}
 
 Once again, welcome @${firstName}. We are delighted to have you with us and look forward to achieving great things together.
 
