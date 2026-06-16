@@ -28,41 +28,87 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
   const monthKey   = getMonthKey(now);
   const monthLabel = prettyMonth(monthKey);
 
-  const questions = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT id, "order", text, type
+  // Strict brand separation — split questions by brand. Each
+  // employee receives ONLY their brand's questions.
+  type Q = { id: number; order: number; text: string; type: string; brand: string };
+  const allQuestions = await prisma.$queryRawUnsafe<Q[]>(
+    `SELECT id, "order", text, type, brand
        FROM "PulseQuestion"
       WHERE "surveyType" = 'monthly' AND "isActive" = true
       ORDER BY "order" ASC`,
   );
+  const nbQs = allQuestions.filter((q) => q.brand === "NB Media");
+  const ytQs = allQuestions.filter((q) => q.brand === "YT Labs");
+  const questionsForBrand = (brand: string | null): Q[] =>
+    brand === "NB Media" ? nbQs :
+    brand === "YT Labs"  ? ytQs :
+    [];
 
-  // Active employees with real emails. Tolerant of envs without
-  // the isDeveloper column.
-  let employees: Array<{ id: number; name: string; email: string }>;
+  // Active employees with real emails + their businessUnit.
+  let employees: Array<{ id: number; name: string; email: string; businessUnit: string | null }>;
   try {
     employees = await prisma.$queryRawUnsafe(
-      `SELECT id, name, email FROM "User"
-        WHERE "isActive" = true AND email IS NOT NULL AND email <> ''
-          AND COALESCE("isDeveloper", false) = false
-        ORDER BY id ASC`,
+      `SELECT u.id, u.name, u.email, ep."businessUnit"
+         FROM "User" u
+         LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
+        WHERE u."isActive" = true AND u.email IS NOT NULL AND u.email <> ''
+          AND COALESCE(u."isDeveloper", false) = false
+        ORDER BY u.id ASC`,
     );
   } catch (e: any) {
     const code = e?.meta?.code || e?.code;
     if (code === "42703" || /isDeveloper/.test(String(e?.message ?? ""))) {
       employees = await prisma.$queryRawUnsafe(
-        `SELECT id, name, email FROM "User"
-          WHERE "isActive" = true AND email IS NOT NULL AND email <> ''
-          ORDER BY id ASC`,
+        `SELECT u.id, u.name, u.email, ep."businessUnit"
+           FROM "User" u
+           LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
+          WHERE u."isActive" = true AND u.email IS NOT NULL AND u.email <> ''
+          ORDER BY u.id ASC`,
       );
     } else { throw e; }
   }
 
-  if (employees.length === 0 || questions.length === 0) {
+  // Strict brand separation — skip users with no businessUnit
+  // AND skip users whose brand has 0 active questions this cycle.
+  employees = employees.filter((e) =>
+    (e.businessUnit === "NB Media" && nbQs.length > 0) ||
+    (e.businessUnit === "YT Labs"  && ytQs.length > 0)
+  );
+
+  if (employees.length === 0 || allQuestions.length === 0) {
     return {
       monthKey, monthLabel,
       recipients: employees.length,
       emailsSent: 0, emailsFailed: 0, notifications: 0,
-      questions: questions.length,
+      questions: allQuestions.length,
     };
+  }
+
+  // ── Idempotency guard ──────────────────────────────────────
+  // The cron line `0 5 1-7 * 1` (Vixie OR semantics) fires ~10
+  // times in the first week of every month. isFirstMondayOfMonth
+  // in the route handler catches 9 of those. But cron retries or
+  // a force-fire after the scheduled one could still trigger
+  // a double fanout. Cheap defence: look for any pulse_monthly
+  // notification stamped in the last 48 hours — if any exists
+  // for this entityId=0 (monthly entityId), skip.
+  try {
+    const recent = await prisma.$queryRawUnsafe<Array<{ n: number }>>(
+      `SELECT count(*)::int AS n FROM "Notification"
+        WHERE type = 'pulse_monthly'
+          AND "createdAt" > now() - interval '48 hours'`,
+    );
+    if ((recent[0]?.n ?? 0) > 0) {
+      console.warn(`[monthly-pulse-fanout] skipping — found ${recent[0].n} pulse_monthly notifications in last 48h (idempotent skip)`);
+      return {
+        monthKey, monthLabel,
+        recipients: employees.length,
+        emailsSent: 0, emailsFailed: 0, notifications: 0,
+        questions: allQuestions.length,
+      };
+    }
+  } catch (e: any) {
+    console.warn("[monthly-pulse-fanout] idempotency check failed, proceeding anyway:", e?.message ?? e);
   }
 
   const surveyUrl = `${APP_URL}/dashboard/hr/pulse/monthly`;
@@ -71,8 +117,10 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
   // ── In-app notifications ──────────────────────────────────────
   let notifications = 0;
   try {
+    // 6 params per employee now — linkUrl makes the in-app
+    // notification clickable (opens the monthly survey form).
     const values = employees
-      .map((_, i) => `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5}, NOW())`)
+      .map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6}, NOW())`)
       .join(",\n");
     const params: any[] = [];
     for (const e of employees) {
@@ -82,11 +130,12 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
         0,
         `${monthLabel} Engagement Survey`,
         `Help us improve — 6 quick questions, fully anonymous, ~3 minutes. (Clock-out is NOT blocked for this one.)`,
+        "/dashboard/hr/pulse/monthly",
       );
     }
     await prisma.$executeRawUnsafe(
       `INSERT INTO "Notification"
-         ("userId", "type", "entityId", "title", "message", "createdAt")
+         ("userId", "type", "entityId", "title", "body", "linkUrl", "createdAt")
        VALUES ${values}`,
       ...params,
     );
@@ -96,8 +145,11 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
   }
 
   // ── Emails ─────────────────────────────────────────────────────
-  const html = buildEmailHtml({ monthLabel, questions, surveyUrl });
-  const text = html.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  // Two precomputed HTML variants — strict brand separation.
+  const variantBySlug = {
+    "NB Media": buildEmailHtml({ monthLabel, questions: questionsForBrand("NB Media"), surveyUrl }),
+    "YT Labs":  buildEmailHtml({ monthLabel, questions: questionsForBrand("YT Labs"),  surveyUrl }),
+  };
   let emailsSent = 0, emailsFailed = 0;
   const BATCH_SIZE = 25;
   const PAUSE_MS   = 250;
@@ -105,8 +157,11 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
     const wave = employees.slice(i, i + BATCH_SIZE);
     await Promise.all(wave.map(async (emp) => {
       try {
-        const personalised = html.replace(/\{\{FirstName\}\}/g, firstNameOf(emp.name));
-        const personalText = text.replace(/\{\{FirstName\}\}/g, firstNameOf(emp.name));
+        const variant = emp.businessUnit === "YT Labs"
+          ? variantBySlug["YT Labs"]
+          : variantBySlug["NB Media"];
+        const personalised = variant.replace(/\{\{FirstName\}\}/g, firstNameOf(emp.name));
+        const personalText = personalised.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
         await sendEmail({
           to: emp.email,
           content: { subject, html: personalised, text: personalText } as any,
@@ -126,7 +181,7 @@ export async function fanoutMonthlySurvey(now: Date = new Date()): Promise<Month
     monthKey, monthLabel,
     recipients: employees.length,
     emailsSent, emailsFailed, notifications,
-    questions: questions.length,
+    questions: allQuestions.length,
   };
 }
 
