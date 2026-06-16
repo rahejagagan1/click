@@ -19,7 +19,7 @@
 // or backend actions. Callers pass `onSend` and decide which API to
 // hit (sendEmail / sendAssessment / archive / team-welcome).
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Eye, Paperclip, Send, X, FileText } from "lucide-react";
 import {
   HR_TEMPLATE_OPTIONS,
@@ -68,6 +68,9 @@ export default function EmailComposer({
   // round-specific body in here).
   initialSubject,
   initialBody,
+  // Pre-seeded attachments (e.g. the Team Welcome new-joiner photo).
+  // Merged into the attachment list; HR can still add/remove more.
+  initialAttachments,
   // Where this composer lives — affects only the submit button label.
   context = "email",
   submitLabel,
@@ -84,6 +87,7 @@ export default function EmailComposer({
   defaultBcc?: string;
   initialSubject?: string;
   initialBody?: string;
+  initialAttachments?: ComposerAttachment[];
   context?: "email" | "assessment" | "archive" | "interview" | "team_welcome";
   submitLabel?: string;
   onCancel: () => void;
@@ -100,7 +104,7 @@ export default function EmailComposer({
   const [showBcc,   setShowBcc]   = useState(!!defaultBcc);
   const [subject,   setSubject]   = useState(initialSubject ?? initialTpl.subject);
   const [body,      setBody]      = useState(initialBody ?? initialTpl.body);
-  const [files,     setFiles]     = useState<ComposerAttachment[]>([]);
+  const [files,     setFiles]     = useState<ComposerAttachment[]>(initialAttachments ?? []);
   const [preview,   setPreview]   = useState(false);
   const [sending,   setSending]   = useState(false);
   const [error,     setError]     = useState<string | null>(null);
@@ -148,6 +152,17 @@ export default function EmailComposer({
   };
 
   const removeFile = (idx: number) => setFiles((prev) => prev.filter((_, i) => i !== idx));
+
+  // Merge externally-provided attachments (e.g. the Team Welcome new-joiner
+  // photo, chosen after mount) without clobbering files HR added manually.
+  useEffect(() => {
+    if (!initialAttachments?.length) return;
+    setFiles((prev) => {
+      const have = new Set(prev.map((f) => `${f.filename}:${f.size}`));
+      const add = initialAttachments.filter((a) => !have.has(`${a.filename}:${a.size}`));
+      return add.length ? [...prev, ...add] : prev;
+    });
+  }, [initialAttachments]);
 
   const tryPreview = () => {
     setError(null);
