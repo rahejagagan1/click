@@ -38,12 +38,12 @@ export default function TeamWelcomeModal({
   const tpl = teamWelcomeEmail({
     newJoinerName: newJoiner.fullName,
     firstName:     newJoiner.firstName,
-    homeCity:      newJoiner.homeCity      ?? "{{Home City}}",
-    priorRole:     newJoiner.priorRole     ?? "{{Prior Role}}",
+    homeCity:      newJoiner.homeCity      || undefined,
+    priorRole:     newJoiner.priorRole     || undefined,
     jobRole:       newJoiner.jobRole,
-    managerName:   newJoiner.managerName   ?? "{{Manager Name}}",
-    officeLocation: newJoiner.officeLocation ?? "{{Office Location}}",
-    phone:         newJoiner.phone         ?? "{{Phone}}",
+    managerName:   newJoiner.managerName   || undefined,
+    officeLocation: newJoiner.officeLocation || undefined,
+    phone:         newJoiner.phone         || undefined,
     workEmail:     newJoiner.workEmail,
     pronoun:       newJoiner.pronoun ?? "they",
   });
