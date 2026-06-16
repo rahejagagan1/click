@@ -135,6 +135,7 @@ export default function TeamWelcomeModal({
             initialSubject={tpl.subject}
             initialBody={tpl.body}
             initialAttachments={initialAttachments}
+            livePreview
             showTemplatePicker={false}
             recipientEditable={false}
             context="team_welcome"
