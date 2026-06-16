@@ -354,6 +354,18 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
   height: 0;
 }
 
+/* Utility: fully hide a scrollbar while keeping the element scrollable.
+   Used on the home dashboard targets/feed column so no track shows. */
+.no-scrollbar {
+  scrollbar-width: none;        /* Firefox */
+  -ms-overflow-style: none;     /* old Edge / IE */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;                /* Chromium / WebKit */
+  width: 0;
+  height: 0;
+}
+
 /* ═══════════════════════════════════════════════
    DARK MODE — lighten hardcoded near-black colours
    ═══════════════════════════════════════════════ */
