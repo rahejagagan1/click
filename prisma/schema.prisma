@@ -1723,6 +1723,31 @@ model EmployeeDocument {
   @@index([category])
 }
 
+/// Letter/document generated for a NEW JOINER not yet in the DB
+/// (manual-entry mode in the letter generator). Parked here keyed by
+/// email; when a User with that email is created, attachPendingDocuments
+/// copies it into EmployeeDocument (their Documents tab). Accessed via
+/// raw SQL (the typed client lags), so this model is the source of truth
+/// for migrations.
+model PendingDocument {
+  id             Int       @id @default(autoincrement())
+  email          String // match key (compared case-insensitively)
+  fullName       String?
+  category       String    @default("employee_letter")
+  templateKey    String?
+  fileName       String
+  fileBlob       Bytes
+  fileMime       String    @default("application/pdf")
+  brand          String?
+  createdById    Int?
+  createdAt      DateTime  @default(now())
+  attachedUserId Int?
+  attachedAt     DateTime?
+
+  @@index([email])
+  @@index([attachedUserId])
+}
+
 // ═══════════════════════════════════════════════════════
 // HR MODULE — Helpdesk / HR Tickets
 // ═══════════════════════════════════════════════════════

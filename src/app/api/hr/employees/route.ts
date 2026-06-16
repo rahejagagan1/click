@@ -190,6 +190,13 @@ export async function POST(req: NextRequest) {
       return { user, profile };
     });
 
+    // The joiner now exists — auto-attach any documents (offer letter,
+    // etc.) generated for their email while they were still off-system.
+    try {
+      const { attachPendingDocuments } = await import("@/lib/hr/pending-documents");
+      await attachPendingDocuments(result.user.id, email);
+    } catch { /* never block employee creation on a parked-doc attach */ }
+
     return NextResponse.json(serializeBigInt(result));
   } catch (e: any) {
     if (e?.code === "P2002") {
