@@ -16,6 +16,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { isLeadershipOrHR } from "@/lib/access";
 import { DateField } from "@/components/ui/date-field";
+import { JOB_TITLES } from "@/lib/job-titles";
 import { Search, Save, FileText, RefreshCw } from "lucide-react";
 
 // Reuse the same Quill build the JD editor uses so HR gets a
@@ -130,6 +131,13 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
   // checkbox for interns (interns don't have PF). Set in the
   // auto-fill effect below.
   const [employeeSalaryType, setEmployeeSalaryType] = useState<string | null>(null);
+  // Editable designation for the picked employee. Lets HR correct the job
+  // title right here — it PUTs to the profile, and since the letter reads
+  // designation from the profile server-side, the change flows straight
+  // into the document. Saves a trip to the Edit Profile page.
+  const [designationDraft, setDesignationDraft]       = useState("");
+  const [savingDesignation, setSavingDesignation]     = useState(false);
+  const [designationSaved, setDesignationSaved]       = useState(false);
 
   // Auto-fill custom fields from the picked employee's profile +
   // salary structure so HR doesn't retype data we already have.
@@ -213,6 +221,13 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
     })();
     return () => { cancelled = true; };
   }, [employee?.id]);
+
+  // Keep the editable designation in sync with whoever is picked.
+  useEffect(() => {
+    setDesignationDraft(employee?.employeeProfile?.designation ?? "");
+    setDesignationSaved(false);
+  }, [employee?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [preview, setPreview] = useState<{ html: string; missing: string[] } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -263,6 +278,32 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
       setPreview({ html: j.html, missing: j.missing ?? [] });
     } finally {
       setPreviewing(false);
+    }
+  };
+
+  // Persist a designation edit to the picked employee's profile, then
+  // mirror it locally so the preview / generated letter pick it up.
+  const saveDesignation = async () => {
+    if (!employee?.id) return;
+    const next = designationDraft.trim();
+    setSavingDesignation(true);
+    try {
+      const res = await fetch(`/api/hr/people/${employee.id}`, {
+        method:  "PUT",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ designation: next }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Couldn't update designation");
+      }
+      setEmployee((e) => e ? { ...e, employeeProfile: { ...(e.employeeProfile ?? {}), designation: next } } : e);
+      setPreview(null);             // force a fresh preview with the new title
+      setDesignationSaved(true);
+    } catch (err: any) {
+      alert(err?.message || "Couldn't update designation");
+    } finally {
+      setSavingDesignation(false);
     }
   };
 
@@ -382,15 +423,54 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
             </div>
 
             {mode === "employee" ? (
-              <div>
-                <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Employee</label>
-                {/* brand drives the picker filter so HR never picks a
-                    cross-brand employee for a brand-specific letter. */}
-                <EmployeePicker
-                  value={employee}
-                  onChange={(v) => { setEmployee(v); setPreview(null); }}
-                  brand={activeBrand}
-                />
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Employee</label>
+                  {/* brand drives the picker filter so HR never picks a
+                      cross-brand employee for a brand-specific letter. */}
+                  <EmployeePicker
+                    value={employee}
+                    onChange={(v) => { setEmployee(v); setPreview(null); }}
+                    brand={activeBrand}
+                  />
+                </div>
+                {/* Inline designation editor — change the job title here and
+                    it saves straight to the profile (the letter uses it). */}
+                {employee && (
+                  <div>
+                    <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Designation / Job title</label>
+                    <div className="mt-1 flex items-center gap-2">
+                      <select
+                        value={designationDraft}
+                        onChange={(e) => { setDesignationDraft(e.target.value); setDesignationSaved(false); }}
+                        className="flex-1 h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]"
+                      >
+                        <option value="">— Select designation —</option>
+                        {/* Keep the current title selectable even if it's not in
+                            the canonical list, so we never silently change it. */}
+                        {designationDraft && !JOB_TITLES.includes(designationDraft) && (
+                          <option value={designationDraft}>{designationDraft}</option>
+                        )}
+                        {JOB_TITLES.map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={saveDesignation}
+                        disabled={savingDesignation || designationDraft.trim() === (employee.employeeProfile?.designation ?? "").trim()}
+                        className="h-9 px-4 rounded-lg bg-[#008CFF] text-white text-[12px] font-semibold transition-colors hover:bg-[#0070cc] disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {savingDesignation ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {designationSaved
+                        ? <span className="font-medium text-emerald-600">Saved — updated on the profile and this letter.</span>
+                        : "Changes the employee's designation directly — no need to open Edit Profile."}
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
