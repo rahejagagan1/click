@@ -79,13 +79,14 @@ function Avatar({ name, url, size = 36 }: { name: string; url?: string | null; s
   );
 }
 
-export default function PerformancePlanApprovalsCard({ standalone = false }: { standalone?: boolean }) {
+export default function PerformancePlanApprovalsCard({ standalone = false, brand = null }: { standalone?: boolean; brand?: string | null }) {
+  const brandQs = brand === "NB Media" || brand === "YT Labs" ? `&brand=${encodeURIComponent(brand)}` : "";
   const [tab, setTab] = useState<"onpip" | "pending" | "history">("onpip");
-  const { data, mutate } = useSWR<{ reviews: HrReview[] }>("/api/hr/pip-reviews?scope=hr", fetcher, { refreshInterval: 60_000 });
+  const { data, mutate } = useSWR<{ reviews: HrReview[] }>(`/api/hr/pip-reviews?scope=hr${brandQs}`, fetcher, { refreshInterval: 60_000 });
   const reviews = data?.reviews ?? [];
-  const { data: histData } = useSWR<{ reviews: HrHistory[] }>(standalone && tab === "history" ? "/api/hr/pip-reviews?scope=hr-history" : null, fetcher);
+  const { data: histData } = useSWR<{ reviews: HrHistory[] }>(standalone && tab === "history" ? `/api/hr/pip-reviews?scope=hr-history${brandQs}` : null, fetcher);
   const history = histData?.reviews ?? [];
-  const { data: onPipData } = useSWR<{ employees: OnPip[] }>(standalone && tab === "onpip" ? "/api/hr/pip-reviews?scope=on-pip" : null, fetcher);
+  const { data: onPipData } = useSWR<{ employees: OnPip[] }>(standalone && tab === "onpip" ? `/api/hr/pip-reviews?scope=on-pip${brandQs}` : null, fetcher);
   const onPip = onPipData?.employees ?? [];
   const [busy, setBusy] = useState<number | null>(null);
 
