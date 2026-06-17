@@ -24,10 +24,11 @@ export async function GET(req: NextRequest) {
   if (errorResponse) return errorResponse;
   try {
     const scope = req.nextUrl.searchParams.get("scope") || "manager";
+    const brand = req.nextUrl.searchParams.get("brand"); // "NB Media" | "YT Labs" | null(all)
     if (scope === "hr" || scope === "hr-history" || scope === "on-pip") {
       if (!isLeadershipOrHR(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      if (scope === "on-pip") return NextResponse.json({ employees: await listOnPipEmployees() });
-      return NextResponse.json({ reviews: scope === "hr-history" ? await listHrPipHistory() : await listPendingHrPipReviews() });
+      if (scope === "on-pip") return NextResponse.json({ employees: await listOnPipEmployees(brand) });
+      return NextResponse.json({ reviews: scope === "hr-history" ? await listHrPipHistory(brand) : await listPendingHrPipReviews(brand) });
     }
     const me = await resolveUserId(session);
     if (!me) return NextResponse.json({ error: "No user" }, { status: 400 });
