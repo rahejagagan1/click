@@ -226,10 +226,12 @@ export default function HRAdminPage() {
 
   // Pending probation recommendations awaiting HR — feeds the badge on the
   // "Probation Reviews" rail item + the panel below.
-  const { data: probationHr } = useSWR<{ reviews: any[] }>(`/api/hr/probation-reviews?scope=hr`, fetcher, { refreshInterval: 60_000 });
+  // Brand scope for the Reviews badges (NB Media / YT Labs sub-dashboards).
+  const reviewsBrandQs = initialBrand === "NB Media" || initialBrand === "YT Labs" ? `&brand=${encodeURIComponent(initialBrand)}` : "";
+  const { data: probationHr } = useSWR<{ reviews: any[] }>(`/api/hr/probation-reviews?scope=hr${reviewsBrandQs}`, fetcher, { refreshInterval: 60_000 });
   const probationTotal = probationHr?.reviews?.length ?? 0;
   // Pending PIP recommendations awaiting HR — badge on the "PIP Reviews" rail item.
-  const { data: pipHr } = useSWR<{ reviews: any[] }>(`/api/hr/pip-reviews?scope=hr`, fetcher, { refreshInterval: 60_000 });
+  const { data: pipHr } = useSWR<{ reviews: any[] }>(`/api/hr/pip-reviews?scope=hr${reviewsBrandQs}`, fetcher, { refreshInterval: 60_000 });
   const pipTotal = pipHr?.reviews?.length ?? 0;
   const [reviewsSub, setReviewsSub] = useState<"probation" | "pip">("probation");
 
@@ -754,7 +756,7 @@ export default function HRAdminPage() {
                 <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">{reviewsSub === "pip" ? "PIP Reviews" : "Probation Reviews"}</h2>
                 <p className="text-[12px] text-slate-500">Manager recommendations awaiting you. Approve to apply, or send back. Switch between Probation and PIP from the Reviews menu on the left.</p>
               </div>
-              {reviewsSub === "probation" ? <ProbationApprovalsCard standalone /> : <PerformancePlanApprovalsCard standalone />}
+              {reviewsSub === "probation" ? <ProbationApprovalsCard standalone brand={initialBrand} /> : <PerformancePlanApprovalsCard standalone brand={initialBrand} />}
             </div>
           )}
 
