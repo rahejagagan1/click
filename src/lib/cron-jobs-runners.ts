@@ -9,6 +9,7 @@ import { calculateMonthlyRatings } from "@/lib/ratings/calculator";
 import { runYoutubeDashboardSync } from "@/lib/youtube/yt-dashboard-sync";
 import { sendViolationInProgressReminders, sendViolationFollowUpReminders } from "@/lib/hr/violation-reminders";
 import { sendProbationEndingReminders } from "@/lib/hr/probation-reminders";
+import { sweepProbationManagerNotifications } from "@/lib/hr/probation-review";
 import { sendMissingDocReminders } from "@/lib/hr/doc-compliance";
 import { runAutoLOP } from "@/lib/hr/auto-lop";
 import { applyDueManagerChanges } from "@/lib/hr/manager-changes";
@@ -41,7 +42,14 @@ export const CRON_JOB_RUNNERS: Record<CronJobId, () => Promise<void>> = {
     await sendViolationInProgressReminders();
     await sendViolationFollowUpReminders();
   },
-  probation_reminders: async () => { await sendProbationEndingReminders(); },
+  probation_reminders: async () => {
+    // Isolate the two halves — both are independently idempotent, so an
+    // email-side failure shouldn't gate the in-app manager-review nudge.
+    try { await sendProbationEndingReminders(); }
+    catch (e) { console.error("[probation] email reminders failed", e); }
+    try { await sweepProbationManagerNotifications(); } // in-app nudge to reporting managers
+    catch (e) { console.error("[probation] manager sweep failed", e); }
+  },
   doc_compliance:      async () => { await sendMissingDocReminders(); },
   auto_lop:            async () => { await runAutoLOP(); },
   // Apply effective-dated reporting-manager changes whose date arrived.
