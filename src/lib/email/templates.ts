@@ -1312,6 +1312,78 @@ export function probationEndingReminderEmail(args: {
   return { subject, html: SHELL(subject, body), text };
 }
 
+// ── PIP (Performance Improvement Plan) ending reminder ─────────────────
+// 7-day heads-up to brand HR + the employee's reporting manager that a
+// performance plan's review date is approaching. CTA → My Team → PIP Reviews.
+export function pipEndingReminderEmail(args: {
+  recipientName?: string | null;
+  employeeName: string;
+  employeeId?: string | null;
+  pipStartedAt?: Date | null;
+  pipEndDate: Date;
+  daysRemaining: number;
+  managerName?: string | null;
+  department?: string | null;
+  reason?: string | null;
+  employeeUserId: number;
+}): EmailContent {
+  const fmt = (d: Date | null | undefined) =>
+    d ? d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
+  const subject = `Performance plan review due · ${args.employeeName} (${args.daysRemaining} day${args.daysRemaining === 1 ? "" : "s"})`;
+
+  const reviewLink = `${appUrl()}/dashboard/hr/my-team/pip`;
+  const peopleLink = `${appUrl()}/dashboard/hr/people/${args.employeeUserId}`;
+
+  const callout = `
+    <div style="margin:0 0 16px;padding:16px;background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;text-align:center">
+      <p style="margin:0;font-size:10.5px;color:#9f1239;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Plan review due in</p>
+      <p style="margin:6px 0 0;font-size:32px;font-weight:700;color:#9f1239;line-height:1">${args.daysRemaining}<span style="font-size:14px;font-weight:600;margin-left:4px">day${args.daysRemaining === 1 ? "" : "s"}</span></p>
+      <p style="margin:6px 0 0;font-size:11.5px;color:#9f1239">${escape(args.employeeName)} · review by ${fmt(args.pipEndDate)}</p>
+    </div>`;
+
+  const rows: string[] = [];
+  rows.push(vRow("Employee", escape(args.employeeName)));
+  if (args.employeeId)  rows.push(vRow("HRM No.", escape(args.employeeId)));
+  if (args.department)  rows.push(vRow("Department", escape(args.department)));
+  if (args.managerName) rows.push(vRow("Reporting Manager", escape(args.managerName)));
+  if (args.pipStartedAt) rows.push(vRow("Plan started", fmt(args.pipStartedAt)));
+  rows.push(vRow("Review date", fmt(args.pipEndDate)));
+  if (args.reason) rows.push(vRow("Concern", escape(args.reason)));
+
+  const body = `
+    <p style="margin:0 0 12px;font-size:14px;color:#1f2937;line-height:1.6">
+      ${args.recipientName ? `Hi ${escape(args.recipientName)},` : "Hi,"}
+    </p>
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      ${escape(args.employeeName)}'s performance improvement plan is approaching its review date. The reporting manager should review it and recommend an outcome — extend, mark as passed, or end employment — for HR approval.
+    </p>
+    ${callout}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      ${rows.join("")}
+    </table>
+    ${ctaButton("Review in My Team → PIP Reviews", reviewLink)}
+    <p style="margin:14px 0 0;font-size:12px;color:#94a3b8;line-height:1.55">
+      Or open the employee's profile: <a href="${peopleLink}" style="color:#9f1239">${peopleLink}</a>
+    </p>
+  `;
+
+  const text = [
+    args.recipientName ? `Hi ${args.recipientName},` : "Hi,",
+    `${args.employeeName}'s performance plan review is due in ${args.daysRemaining} day${args.daysRemaining === 1 ? "" : "s"} (${fmt(args.pipEndDate)}).`,
+    ``,
+    `Employee: ${args.employeeName}`,
+    args.employeeId  ? `HRM No.: ${args.employeeId}` : null,
+    args.managerName ? `Reporting Manager: ${args.managerName}` : null,
+    args.reason      ? `Concern: ${args.reason}` : null,
+    `Review date: ${fmt(args.pipEndDate)}`,
+    ``,
+    `Review: ${reviewLink}`,
+    `Profile: ${peopleLink}`,
+  ].filter(Boolean).join("\n");
+
+  return { subject, html: SHELL(subject, body), text };
+}
+
 // ── Reporting-manager change applied ───────────────────────────────────
 // Sent when a scheduled (effective-dated) reporting-manager change takes
 // effect. Goes to the employee, their new manager, and brand HR.
