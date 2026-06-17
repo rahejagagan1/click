@@ -9,12 +9,11 @@ import SelectField from "@/components/ui/SelectField";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { parseAttLoc } from "@/lib/attendance-location";
-import { isHRAdmin, isLeadershipOrHR, canApplyRestrictedLeave, canViewAllBrands } from "@/lib/access";
+import { isHRAdmin, canApplyRestrictedLeave, canViewAllBrands } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
 import PulseGateModal from "@/components/hr/PulseGateModal";
 import DesktopGateModal from "@/components/hr/DesktopGateModal";
-import ProbationApprovalsCard from "@/components/hr/ProbationApprovalsCard";
 import { isDesktopBypassActive } from "@/lib/desktop-bypass";
 import { PageShell } from "@/components/layout";
 import { DateField } from "@/components/ui/date-field";
@@ -2270,6 +2269,11 @@ export default function HRHomePage() {
     r.status === "approved" && typeof r.date === "string" && r.date.slice(0, 10) === todayKey
   );
   const isRemoteMode = workLoc === "remote" || workLoc === "hybrid" || hasWfhToday;
+  // Clock button label flips to "WFH …" when the user is working from home
+  // today (a remote/hybrid worker, or an approved WFH for today).
+  const clockInLabel         = isRemoteMode ? "WFH Clock-In"  : "Web Clock-In";
+  const clockOutLabel        = isRemoteMode ? "WFH Clock-Out" : "Web Clock-Out";
+  const confirmClockOutLabel = isRemoteMode ? "Confirm WFH Clock-Out" : "Confirm Web Clock-Out";
 
   const [hh, setHh] = useState("--");
   const [mm, setMm] = useState("--");
@@ -3043,7 +3047,7 @@ export default function HRHomePage() {
                           boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
                         }}
                       >
-                        {clockingIn ? "Getting location…" : "Web Clock-In"}
+                        {clockingIn ? "Getting location…" : clockInLabel}
                       </button>
                       {mobileBlocked && (
                         <span className="text-center text-[9.5px] leading-tight text-white/70">
@@ -3074,7 +3078,7 @@ export default function HRHomePage() {
                             boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
                           }}
                         >
-                          {clockingOut ? "Clocking out…" : "Confirm Web Clock-Out"}
+                          {clockingOut ? "Clocking out…" : confirmClockOutLabel}
                         </button>
                         <button
                           onClick={() => setConfirmingClockOut(false)}
@@ -3105,7 +3109,7 @@ export default function HRHomePage() {
                             boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
                           }}
                         >
-                          Web Clock-Out
+                          {clockOutLabel}
                         </button>
                         {mobileBlocked && (
                           <span className="text-center text-[9.5px] leading-tight text-white/70">
@@ -3139,7 +3143,7 @@ export default function HRHomePage() {
                           boxShadow:  "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
                         }}
                       >
-                        {clockingIn ? "Getting location…" : "Web Clock-In"}
+                        {clockingIn ? "Getting location…" : clockInLabel}
                       </button>
                       {mobileBlocked && (
                         <span className="text-center text-[9.5px] leading-tight text-white/70">
@@ -3170,11 +3174,6 @@ export default function HRHomePage() {
                 </div>
               </div>
             </div>
-
-            {/* HR: pending probation recommendations awaiting approval. Gated
-                with the SAME predicate the API enforces (isLeadershipOrHR) so
-                the card never mounts for someone the API will 403. */}
-            {isLeadershipOrHR(user) && <ProbationApprovalsCard />}
 
             {/* Holidays card — vertical layout matching the approved design:
                 a type-coloured date chip + full date, a one-line description,

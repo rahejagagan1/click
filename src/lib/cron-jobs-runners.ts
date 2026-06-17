@@ -10,6 +10,8 @@ import { runYoutubeDashboardSync } from "@/lib/youtube/yt-dashboard-sync";
 import { sendViolationInProgressReminders, sendViolationFollowUpReminders } from "@/lib/hr/violation-reminders";
 import { sendProbationEndingReminders } from "@/lib/hr/probation-reminders";
 import { sweepProbationManagerNotifications } from "@/lib/hr/probation-review";
+import { sendPipEndingReminders } from "@/lib/hr/pip-reminders";
+import { sweepPipManagerNotifications } from "@/lib/hr/performance-plan-review";
 import { sendMissingDocReminders } from "@/lib/hr/doc-compliance";
 import { runAutoLOP } from "@/lib/hr/auto-lop";
 import { applyDueManagerChanges } from "@/lib/hr/manager-changes";
@@ -49,6 +51,14 @@ export const CRON_JOB_RUNNERS: Record<CronJobId, () => Promise<void>> = {
     catch (e) { console.error("[probation] email reminders failed", e); }
     try { await sweepProbationManagerNotifications(); } // in-app nudge to reporting managers
     catch (e) { console.error("[probation] manager sweep failed", e); }
+  },
+  pip_reminders: async () => {
+    // Same split as probation: email reminder + in-app manager nudge,
+    // each isolated so one failing doesn't gate the other.
+    try { await sendPipEndingReminders(); }
+    catch (e) { console.error("[pip] email reminders failed", e); }
+    try { await sweepPipManagerNotifications(); }
+    catch (e) { console.error("[pip] manager sweep failed", e); }
   },
   doc_compliance:      async () => { await sendMissingDocReminders(); },
   auto_lop:            async () => { await runAutoLOP(); },

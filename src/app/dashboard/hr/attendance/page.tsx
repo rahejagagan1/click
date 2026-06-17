@@ -710,6 +710,17 @@ export default function AttendancePage() {
   // it for them; office-based folks still see it.
   const myWorkLocation = String((profileData as any)?.employeeProfile?.workLocation ?? "office").toLowerCase();
   const canApplyWfh = myWorkLocation !== "remote" && myWorkLocation !== "hybrid";
+  // Clock button label flips to "WFH …" when working from home today — a
+  // remote/hybrid worker, or an approved WFH for today.
+  const myWfhTodayKey = new Date().toISOString().slice(0, 10);
+  const { data: myWfhList = [] } = useSWR("/api/hr/attendance/wfh?view=my", fetcher);
+  const hasWfhToday = Array.isArray(myWfhList) && myWfhList.some((r: any) =>
+    r.status === "approved" && typeof r.date === "string" && r.date.slice(0, 10) === myWfhTodayKey
+  );
+  const isRemoteMode = myWorkLocation === "remote" || myWorkLocation === "hybrid" || hasWfhToday;
+  const clockInLabel         = isRemoteMode ? "WFH Clock-In"  : "Web Clock-In";
+  const clockOutLabel        = isRemoteMode ? "WFH Clock-Out" : "Web Clock-Out";
+  const confirmClockOutLabel = isRemoteMode ? "Confirm WFH Clock-Out" : "Confirm Web Clock-Out";
   // Drop balance-only types (legacy `applicable=false` buckets) and
   // restricted-admin types (`adminOnly`) when the viewer isn't CEO /
   // HR Manager / developer. Server enforces the same gate so a
@@ -1245,7 +1256,7 @@ export default function AttendancePage() {
                       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
                     }}
                     className="h-8 px-4 bg-green-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
-                    {clockingIn ? "Getting location…" : "Web Clock-In"}
+                    {clockingIn ? "Getting location…" : clockInLabel}
                   </button>
                   {mobileBlocked && (
                     <span className="text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
@@ -1278,7 +1289,7 @@ export default function AttendancePage() {
                       }}
                       className="h-8 px-4 bg-red-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0"
                     >
-                      {clockingOut ? "Clocking out…" : "Confirm Web Clock-Out"}
+                      {clockingOut ? "Clocking out…" : confirmClockOutLabel}
                     </button>
                     <button
                       onClick={() => setConfirmingClockOut(false)}
@@ -1310,7 +1321,7 @@ export default function AttendancePage() {
                         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(239,68,68,0.55), 0 1px 2px rgba(0,0,0,0.08)",
                       }}
                       className="h-8 px-4 bg-red-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-not-allowed">
-                      Web Clock-Out
+                      {clockOutLabel}
                     </button>
                     {mobileBlocked && (
                       <span className="text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
@@ -1344,7 +1355,7 @@ export default function AttendancePage() {
                       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 14px -4px rgba(34,197,94,0.55), 0 1px 2px rgba(0,0,0,0.08)",
                     }}
                     className="h-8 px-4 bg-green-600 text-white rounded-lg text-[12.5px] font-semibold whitespace-nowrap w-fit transition-all duration-150 hover:brightness-110 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait disabled:hover:translate-y-0">
-                    {clockingIn ? "Getting location…" : "Web Clock-In"}
+                    {clockingIn ? "Getting location…" : clockInLabel}
                   </button>
                   {mobileBlocked && (
                     <span className="text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
