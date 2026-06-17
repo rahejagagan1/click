@@ -15,12 +15,13 @@ import {
 import {
   Mail, Phone, MapPin, Briefcase, Calendar, Building2, IdCard, FileText, Laptop,
   Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
-  MoreVertical, UserMinus, TreePine, Coffee,
+  MoreVertical, UserMinus, TreePine, Coffee, ClipboardList,
   CheckCircle2, AlertCircle, Circle, Upload as UploadIcon, Eye, Trash2, RefreshCw,
   Clock,
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
+import PerformancePlanModal from "@/components/hr/PerformancePlanModal";
 import { isHRAdmin as canViewAsHRAdmin, canViewSalary, canViewEmployeeDocuments, canViewExitBadge } from "@/lib/access";
 import { can } from "@/lib/permissions/can";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
@@ -375,6 +376,7 @@ export default function EmployeeDetailPage() {
   // duplicate the form here.
   const router = useRouter();
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [pipOpen, setPipOpen] = useState(false);
   // Which PROFILE-tab section is currently being edited. null = closed.
   // Each section opens its own focused modal with just that card's fields.
   const [editSection, setEditSection] = useState<null | "primary" | "contact" | "family" | "address" | "identity" | "job" | "time" | "other" | "org" | "bios" | "education">(null);
@@ -460,6 +462,20 @@ export default function EmployeeDetailPage() {
 
   return (
     <div className="-mx-6 -mt-6 min-h-screen bg-[#f4f7fb]">
+      <PerformancePlanModal
+        open={pipOpen}
+        onClose={() => setPipOpen(false)}
+        employee={{
+          id: userId,
+          name: user.name,
+          designation: user.designationLabel || p.designation || null,
+          employeeCode: p.employeeId || null,
+          managerName: user.manager?.name || null,
+        }}
+        brand={p.businessUnit === "YT Labs" ? "YT Labs" : "NB Media"}
+        defaultReportedById={me?.dbId != null ? Number(me.dbId) : null}
+        onSaved={() => mutate(`/api/hr/people/${id}`)}
+      />
       {/* ── Identity card — banner + avatar + identity + contact + dept + tabs all in one rounded card ── */}
       <div className="px-6 pt-6">
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.06)]">
@@ -512,7 +528,10 @@ export default function EmployeeDetailPage() {
                       probationConfirmedAt may be undefined until the prisma
                       client is regenerated — the `!` check is future-proof. */}
                   {(() => {
-                    const ep = user.employeeProfile as any;
+                    // The API returns the profile under `profile` (employeeProfile
+                    // is destructured + re-keyed), so read it from there — not
+                    // user.employeeProfile, which is always undefined here.
+                    const ep = (user.profile ?? {}) as any;
                     if (!ep?.probationEndDate || ep.probationConfirmedAt) return null;
                     if (!isActive || user.activeExit) return null;
                     const endMs = new Date(`${String(ep.probationEndDate).slice(0, 10)}T00:00:00Z`).getTime();
@@ -525,6 +544,28 @@ export default function EmployeeDetailPage() {
                       >
                         <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500" />
                         On Probation
+                      </span>
+                    );
+                  })()}
+                  {/* PIP badge (rose) — shown while the employee is on a
+                      performance plan: pipStartedAt set, plan not ended
+                      (pipEndDate today-or-future, or null = open-ended),
+                      active, not exiting. */}
+                  {(() => {
+                    const ep = (user.profile ?? {}) as any;
+                    if (!ep?.pipStartedAt) return null;
+                    if (!isActive || user.activeExit) return null;
+                    if (ep.pipEndDate) {
+                      const endMs = new Date(`${String(ep.pipEndDate).slice(0, 10)}T00:00:00Z`).getTime();
+                      if (!(endMs >= Date.now() - 86_400_000)) return null;
+                    }
+                    return (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-700 ring-1 ring-inset ring-rose-200"
+                        title="On Performance Improvement Plan"
+                      >
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-500" />
+                        On PIP
                       </span>
                     );
                   })()}
@@ -631,6 +672,19 @@ export default function EmployeeDetailPage() {
                           <TreePine className="h-4 w-4 text-violet-500" />
                           Apply Leave
                         </button>
+                        {isActive && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setHeaderMenuOpen(false);
+                              setPipOpen(true);
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-slate-700 hover:bg-slate-50"
+                          >
+                            <ClipboardList className="h-4 w-4 text-amber-500" />
+                            Place on Performance Plan
+                          </button>
+                        )}
                         {isActive && (
                           <button
                             type="button"
