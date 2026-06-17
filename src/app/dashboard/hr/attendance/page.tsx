@@ -715,7 +715,7 @@ export default function AttendancePage() {
   const myWfhTodayKey = new Date().toISOString().slice(0, 10);
   const { data: myWfhList = [] } = useSWR("/api/hr/attendance/wfh?view=my", fetcher);
   const hasWfhToday = Array.isArray(myWfhList) && myWfhList.some((r: any) =>
-    r.status === "approved" && typeof r.date === "string" && r.date.slice(0, 10) === myWfhTodayKey
+    (r.status === "approved" || r.status === "pending") && typeof r.date === "string" && r.date.slice(0, 10) === myWfhTodayKey
   );
   const isRemoteMode = myWorkLocation === "remote" || myWorkLocation === "hybrid" || hasWfhToday;
   const clockInLabel         = isRemoteMode ? "WFH Clock-In"  : "Web Clock-In";
