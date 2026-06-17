@@ -58,10 +58,18 @@ function initials(name: string): string {
 }
 
 export default function KanbanBoard({ jobId }: { jobId: number }) {
+  // Cards mid-move. Declared above the fetch so we can PAUSE polling
+  // during a drag — otherwise an in-flight poll could revert the
+  // optimistic move before its PATCH commits.
+  const [moving, setMoving] = useState<Set<number>>(new Set());
   const { data: stagesData } = useSWR<{ stages: Stage[] }>("/api/hr/hiring/stages", fetcher);
   const { data: candidatesData, isLoading } = useSWR<{ candidates: Candidate[] }>(
     `/api/hr/hiring/candidates?openingId=${jobId}`,
     fetcher,
+    // Auto-refresh so moves made in the List view, the candidate drawer,
+    // or by another HR user surface here without a reload. Paused mid-move;
+    // SWR also revalidates on tab focus.
+    { refreshInterval: moving.size > 0 ? 0 : 8000 },
   );
   const stages = stagesData?.stages ?? [];
   const candidates = candidatesData?.candidates ?? [];
@@ -101,8 +109,6 @@ export default function KanbanBoard({ jobId }: { jobId: number }) {
     window.addEventListener("nb:candidateDrawer:navigate", onNav as any);
     return () => window.removeEventListener("nb:candidateDrawer:navigate", onNav as any);
   }, [setSelectedId]);
-
-  const [moving, setMoving] = useState<Set<number>>(new Set());
 
   const onDrop = async (stageId: number, e: React.DragEvent) => {
     e.preventDefault();
