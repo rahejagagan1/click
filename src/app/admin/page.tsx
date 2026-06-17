@@ -1596,8 +1596,8 @@ export default function AdminPage() {
                                         <div className="px-6 py-5 space-y-5">
                                             <div className="flex items-start justify-between gap-4">
                                                 <div className="min-w-0">
-                                                    <p className="text-[13px] font-semibold text-slate-800">Auto-fetch on interval</p>
-                                                    <p className="mt-0.5 text-[11.5px] text-slate-500">Runs automatically while the Node scheduler is on.</p>
+                                                    <p className="text-[13px] font-semibold text-slate-800">Auto-run daily</p>
+                                                    <p className="mt-0.5 text-[11.5px] text-slate-500">Runs once a day at 9:00 AM IST while the Node scheduler is on.</p>
                                                 </div>
                                                 <button
                                                     type="button"
@@ -1637,17 +1637,10 @@ export default function AdminPage() {
                                             )}
 
                                             <div>
-                                                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Run every</label>
-                                                <div className="flex items-center gap-2">
-                                                    <input
-                                                        type="number"
-                                                        min={1}
-                                                        max={168}
-                                                        value={draft.hours}
-                                                        onChange={(e) => setDraft({ hours: e.target.value })}
-                                                        className="w-24 h-9 px-3 border border-slate-200 rounded-lg text-[13px] text-slate-800 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 tabular-nums"
-                                                    />
-                                                    <span className="text-[12.5px] text-slate-500">hours · between 1 and 168</span>
+                                                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Schedule</label>
+                                                <div className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-slate-50 border border-slate-200 text-[12.5px] text-slate-600">
+                                                    <Clock size={13} className="text-slate-400" />
+                                                    Runs daily at <span className="font-semibold text-slate-800">9:00 AM IST</span>
                                                 </div>
                                             </div>
                                         </div>
