@@ -1289,6 +1289,15 @@ model EmployeeProfile {
   /// reporting manager (parallel to probationReminderSentAt). Cleared
   /// when probationEndDate changes so it re-arms on an extension.
   probationManagerNotifiedAt DateTime?
+  /// ── Performance Improvement Plan (PIP) ──
+  /// Set when HR places the employee on a performance plan from the
+  /// profile ⋯ menu. The "ON PIP" badge (profile / directory / search)
+  /// shows while pipStartedAt is set and pipEndDate is today-or-future
+  /// (null end = open-ended). Clearing pipStartedAt removes the badge.
+  pipStartedAt            DateTime?
+  pipEndDate              DateTime?
+  pipReason               String?
+  pipReportedById         Int?
   /// Structured education history. Array of
   /// { degree, institution, startOfCourse, endOfCourse, branch?, location? }
   /// matching the JobApplication.educationDetails shape used by the
