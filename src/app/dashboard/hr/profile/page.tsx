@@ -934,7 +934,7 @@ function SelfDocumentsPanel() {
   const filesInFolder = documents.filter((d: any) => active.cats.includes((d.category || "").toLowerCase()));
 
   const [uploadOpen, setUploadOpen]   = useState(false);
-  const [uploadFile, setUploadFile]   = useState<File | null>(null);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadName, setUploadName]   = useState<string>("");
   const [uploadCategory, setUploadCategory] = useState<string>("pan_card");
   const [uploading, setUploading]     = useState(false);
@@ -950,7 +950,7 @@ function SelfDocumentsPanel() {
   : "other";
 
   const openUpload = () => {
-    setUploadFile(null);
+    setUploadFiles([]);
     setUploadName("");
     setUploadCategory(defaultCategoryFor(folder));
     setUploadError(null);
@@ -958,30 +958,52 @@ function SelfDocumentsPanel() {
   };
   const closeUpload = () => { if (!uploading) setUploadOpen(false); };
 
-  const pickFile = (f: File) => {
+  // Add one or more files (drop / picker). Skips anything over 10 MB and
+  // reports how many were skipped. Default display name only auto-fills
+  // when exactly one file is queued.
+  const addFiles = (list: FileList | File[]) => {
     setUploadError(null);
-    if (f.size > 10 * 1024 * 1024) { setUploadError("File is larger than the 10 MB limit."); return; }
-    setUploadFile(f);
-    if (!uploadName.trim()) setUploadName(f.name);
+    const picked = Array.from(list);
+    const ok = picked.filter((f) => f.size <= 10 * 1024 * 1024);
+    const skipped = picked.length - ok.length;
+    if (skipped > 0) setUploadError(`${skipped} file${skipped === 1 ? "" : "s"} over the 10 MB limit ${skipped === 1 ? "was" : "were"} skipped.`);
+    if (ok.length) {
+      setUploadFiles((prev) => {
+        const next = [...prev, ...ok];
+        if (next.length === 1 && !uploadName.trim()) setUploadName(next[0].name);
+        return next;
+      });
+    }
   };
+  const removeFile = (idx: number) => setUploadFiles((prev) => prev.filter((_, i) => i !== idx));
 
   const submitUpload = async () => {
-    if (!uploadFile) { setUploadError("Pick a file first."); return; }
+    if (uploadFiles.length === 0) { setUploadError("Pick at least one file."); return; }
     setUploading(true);
     setUploadError(null);
     try {
-      const fd = new FormData();
-      fd.append("file", uploadFile);
-      fd.append("category", uploadCategory);
-      if (uploadName.trim()) fd.append("fileName", uploadName.trim());
-      const res = await fetch("/api/hr/documents", { method: "POST", body: fd });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setUploadError(j?.error || `Upload failed (${res.status})`);
-        return;
+      const single = uploadFiles.length === 1;
+      const failures: string[] = [];
+      for (const file of uploadFiles) {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("category", uploadCategory);
+        // Manual display name applies only to a single-file upload; multi
+        // uploads keep each file's own name.
+        fd.append("fileName", single && uploadName.trim() ? uploadName.trim() : file.name);
+        const res = await fetch("/api/hr/documents", { method: "POST", body: fd });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          failures.push(`${file.name} (${j?.error || res.status})`);
+        }
       }
       await mutate(SELF_DOCS_KEY);
-      setUploadOpen(false);
+      if (failures.length) {
+        setUploadFiles([]);
+        setUploadError(`Some uploads failed: ${failures.join("; ")}`);
+      } else {
+        setUploadOpen(false);
+      }
     } catch (e: any) {
       setUploadError(e?.message || "Upload failed");
     } finally {
@@ -1002,8 +1024,7 @@ function SelfDocumentsPanel() {
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) pickFile(file);
+    if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
   };
 
   const categoryOptions = active.cats.map((c: string) => ({
@@ -1182,31 +1203,45 @@ function SelfDocumentsPanel() {
                 className={`rounded-xl border-2 border-dashed py-8 px-4 text-center cursor-pointer transition-colors ${
                   dragOver
                     ? "border-[#008CFF] bg-[#008CFF]/[0.04]"
-                    : "border-slate-200 hover:border-slate-300 bg-white"
+                    : "border-slate-200 hover:border-slate-300 bg-white dark:border-white/10 dark:hover:border-white/20 dark:bg-white/5"
                 }`}
               >
                 <FileText size={28} className="mx-auto text-slate-300 mb-2" strokeWidth={1.5} />
-                {uploadFile ? (
+                {uploadFiles.length > 0 ? (
                   <>
-                    <p className="text-[13px] font-semibold text-slate-800">{uploadFile.name}</p>
-                    <p className="mt-0.5 text-[11.5px] text-slate-500">{(uploadFile.size / 1024).toFixed(1)} KB · click to replace</p>
+                    <p className="text-[13px] font-semibold text-slate-800 dark:text-slate-100">{uploadFiles.length} file{uploadFiles.length === 1 ? "" : "s"} selected</p>
+                    <p className="mt-0.5 text-[11.5px] text-slate-500">click to add more</p>
                   </>
                 ) : (
                   <>
-                    <p className="text-[13px] font-semibold text-slate-700">Drop a file here or click to pick</p>
-                    <p className="mt-0.5 text-[11.5px] text-slate-500">PDF, image, or DOCX up to 10 MB</p>
+                    <p className="text-[13px] font-semibold text-slate-700 dark:text-slate-200">Drop files here or click to pick</p>
+                    <p className="mt-0.5 text-[11.5px] text-slate-500">PDF, image, or DOCX up to 10 MB each</p>
                   </>
                 )}
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
                   className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) pickFile(f);
-                  }}
+                  onChange={(e) => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ""; }}
                 />
               </div>
+              {uploadFiles.length > 0 && (
+                <ul className="space-y-1.5">
+                  {uploadFiles.map((f, i) => (
+                    <li key={`${f.name}-${f.size}-${i}`} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 px-2.5 py-1.5">
+                      <span className="flex min-w-0 items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200">
+                        <FileText size={13} className="shrink-0 text-slate-400" />
+                        <span className="truncate">{f.name}</span>
+                        <span className="shrink-0 text-[11px] text-slate-400">{(f.size / 1024).toFixed(0)} KB</span>
+                      </span>
+                      <button type="button" onClick={(ev) => { ev.stopPropagation(); removeFile(i); }} aria-label={`Remove ${f.name}`} className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10 hover:text-rose-600">
+                        <X size={14} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <div>
                 <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Category</label>
                 <SelectField
@@ -1216,15 +1251,19 @@ function SelfDocumentsPanel() {
                   className={F}
                 />
               </div>
-              <div>
-                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Display name <span className="text-slate-400 font-normal normal-case tracking-normal">(optional)</span></label>
-                <input
-                  value={uploadName}
-                  onChange={(e) => setUploadName(e.target.value)}
-                  placeholder={uploadFile?.name || "Defaults to the file name"}
-                  className={F}
-                />
-              </div>
+              {uploadFiles.length > 1 ? (
+                <p className="text-[11.5px] text-slate-500">Each file is saved under its own name in <strong className="text-slate-700 dark:text-slate-200">{active.label}</strong>.</p>
+              ) : (
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Display name <span className="text-slate-400 font-normal normal-case tracking-normal">(optional)</span></label>
+                  <input
+                    value={uploadName}
+                    onChange={(e) => setUploadName(e.target.value)}
+                    placeholder={uploadFiles[0]?.name || "Defaults to the file name"}
+                    className={F}
+                  />
+                </div>
+              )}
               {uploadError && (
                 <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[12.5px] text-rose-700">{uploadError}</div>
               )}
@@ -1233,9 +1272,9 @@ function SelfDocumentsPanel() {
               <button onClick={closeUpload} disabled={uploading} className="h-9 px-5 text-[13px] text-slate-500 hover:text-slate-800 rounded-lg disabled:opacity-50">Cancel</button>
               <button
                 onClick={submitUpload}
-                disabled={uploading || !uploadFile}
+                disabled={uploading || uploadFiles.length === 0}
                 className="h-9 px-5 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[13px] font-semibold disabled:opacity-60 disabled:cursor-wait"
-              >{uploading ? "Uploading…" : "Upload"}</button>
+              >{uploading ? "Uploading…" : uploadFiles.length > 1 ? `Upload ${uploadFiles.length} files` : "Upload"}</button>
             </div>
           </div>
         </>
