@@ -90,7 +90,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     try {
       const erows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
         `SELECT "secondaryJobTitle", "legalEntity", "jobLocation",
-                "probationPolicy", "probationEndDate", "probationReminderSentAt",
+                "probationPolicy", "probationEndDate", "probationReminderSentAt", "probationConfirmedAt",
                 "educationDetails",
                 "internshipEndDate",
                 "leavePlan", "holidayList", "weeklyOff",
@@ -112,6 +112,21 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       extended = erows[0] ?? {};
     } catch (e) {
       console.warn("[people GET] extended fields lookup failed:", e);
+    }
+
+    // PIP fields in a SEPARATE query so a missing column (e.g. before the
+    // performance_plan migration has applied) can't take down the rest of
+    // the extended profile fields above.
+    let pip: Record<string, unknown> = {};
+    try {
+      const prows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+        `SELECT "pipStartedAt", "pipEndDate", "pipReason", "pipReportedById"
+           FROM "EmployeeProfile" WHERE "userId" = $1`,
+        id,
+      );
+      pip = prows[0] ?? {};
+    } catch (e) {
+      console.warn("[people GET] pip fields lookup failed:", e);
     }
 
     // Today's attendance + any currently-open session — drives the "IN /
@@ -191,7 +206,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const docsAllowed = isSelfRequest || isDocViewer;
     const payload = {
       ...rest,
-      profile:       employeeProfile ? { ...employeeProfile, ...extended } : null,
+      profile:       employeeProfile ? { ...employeeProfile, ...extended, ...pip } : null,
       documents:     docsAllowed ? ownedDocuments : [],
       assets:        heldAssets.map((a) => ({ ...a.asset, assignedAt: a.assignedAt })),
       directReports: teamMembers,
