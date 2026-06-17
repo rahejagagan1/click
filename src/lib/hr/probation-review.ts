@@ -225,6 +225,33 @@ export async function listHrHistory(): Promise<any[]> {
   }));
 }
 
+// ── Full roster of everyone currently on probation (HR visibility) ──
+export async function listOnProbationEmployees(): Promise<any[]> {
+  const rows = await prisma.$queryRawUnsafe<any[]>(
+    `SELECT u.id AS "userId", u.name, u.email,
+            ep.designation, COALESCE(ep."businessUnit", 'NB Media') AS "businessUnit",
+            ep."joiningDate", ep."probationEndDate",
+            m.name AS "managerName",
+            (SELECT pr.status FROM "ProbationReview" pr WHERE pr."employeeUserId" = u.id ORDER BY pr.id DESC LIMIT 1) AS "lastReviewStatus"
+       FROM "EmployeeProfile" ep
+       JOIN "User" u ON u.id = ep."userId"
+       LEFT JOIN "User" m ON m.id = u."managerId"
+      WHERE u."isActive" = true
+        AND ep."probationEndDate" IS NOT NULL
+        AND ep."probationConfirmedAt" IS NULL
+        AND ep."probationEndDate" >= CURRENT_DATE
+      ORDER BY ep."probationEndDate" ASC`);
+  return rows.map((r) => ({
+    userId: r.userId, name: r.name, email: r.email,
+    designation: r.designation ?? null, businessUnit: r.businessUnit,
+    managerName: r.managerName ?? null,
+    joiningDate: r.joiningDate ? new Date(r.joiningDate).toISOString() : null,
+    probationEndDate: r.probationEndDate ? new Date(r.probationEndDate).toISOString() : null,
+    daysRemaining: daysUntil(r.probationEndDate),
+    lastReviewStatus: r.lastReviewStatus ?? null,
+  }));
+}
+
 // ── HR reverts an employee back to probation (un-confirm / un-end) ───
 export async function revertToProbation(params: { employeeUserId: number; hrUserId: number; newEndDate: string }): Promise<{ ok: true }> {
   const { employeeUserId, newEndDate } = params;
