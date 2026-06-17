@@ -68,6 +68,7 @@ export async function sendProbationEndingReminders(): Promise<number> {
        LEFT JOIN "User" m ON m.id = u."managerId"
       WHERE u."isActive" = true
         AND ep."probationEndDate" IS NOT NULL
+        AND ep."probationConfirmedAt" IS NULL
         AND ep."probationEndDate" >= NOW()
         AND ep."probationEndDate" <= $1
         AND ep."probationReminderSentAt" IS NULL
