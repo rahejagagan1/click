@@ -84,13 +84,15 @@ function Avatar({ name, url, size = 36 }: { name: string; url?: string | null; s
   );
 }
 
-export default function ProbationApprovalsCard({ standalone = false }: { standalone?: boolean }) {
+export default function ProbationApprovalsCard({ standalone = false, brand = null }: { standalone?: boolean; brand?: string | null }) {
+  // Brand scope for the per-brand HR sub-dashboards (NB Media / YT Labs).
+  const brandQs = brand === "NB Media" || brand === "YT Labs" ? `&brand=${encodeURIComponent(brand)}` : "";
   const [tab, setTab] = useState<"onprob" | "pending" | "history">("onprob");
-  const { data, mutate } = useSWR<{ reviews: HrReview[] }>("/api/hr/probation-reviews?scope=hr", fetcher, { refreshInterval: 60_000 });
+  const { data, mutate } = useSWR<{ reviews: HrReview[] }>(`/api/hr/probation-reviews?scope=hr${brandQs}`, fetcher, { refreshInterval: 60_000 });
   const reviews = data?.reviews ?? [];
-  const { data: histData, mutate: mutateHist } = useSWR<{ reviews: HrHistory[] }>(standalone && tab === "history" ? "/api/hr/probation-reviews?scope=hr-history" : null, fetcher);
+  const { data: histData, mutate: mutateHist } = useSWR<{ reviews: HrHistory[] }>(standalone && tab === "history" ? `/api/hr/probation-reviews?scope=hr-history${brandQs}` : null, fetcher);
   const history = histData?.reviews ?? [];
-  const { data: onProbData } = useSWR<{ employees: OnProb[] }>(standalone && tab === "onprob" ? "/api/hr/probation-reviews?scope=on-probation" : null, fetcher);
+  const { data: onProbData } = useSWR<{ employees: OnProb[] }>(standalone && tab === "onprob" ? `/api/hr/probation-reviews?scope=on-probation${brandQs}` : null, fetcher);
   const onProb = onProbData?.employees ?? [];
   const [busy, setBusy] = useState<number | null>(null);
   const [revertFor, setRevertFor] = useState<number | null>(null);
