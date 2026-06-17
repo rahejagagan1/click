@@ -234,6 +234,26 @@ export default function PeoplePage() {
                             </span>
                           );
                         })()}
+                        {/* PIP badge (rose) — on a performance plan: started,
+                            not ended (or open-ended), active, not exiting. */}
+                        {(() => {
+                          const ep = emp.employeeProfile as any;
+                          if (!ep?.pipStartedAt) return null;
+                          if (emp.isActive === false || emp.employeeExit) return null;
+                          if (ep.pipEndDate) {
+                            const endMs = new Date(`${String(ep.pipEndDate).slice(0, 10)}T00:00:00Z`).getTime();
+                            if (!(endMs >= Date.now() - 86_400_000)) return null;
+                          }
+                          return (
+                            <span
+                              className="inline-flex items-center gap-0.5 rounded-full bg-rose-50 px-1.5 py-px text-[8.5px] font-bold uppercase tracking-wider text-rose-700 ring-1 ring-inset ring-rose-200"
+                              title="On Performance Improvement Plan"
+                            >
+                              <span className="inline-block h-1 w-1 rounded-full bg-rose-500" />
+                              On PIP
+                            </span>
+                          );
+                        })()}
                         <span className="text-slate-600 text-sm cursor-pointer ml-auto">⋯</span>
                       </div>
                       <p className="text-[12px] text-slate-500 dark:text-slate-400 truncate">{emp.employeeProfile?.designation || getUserRoleLabel(emp.role)}</p>
