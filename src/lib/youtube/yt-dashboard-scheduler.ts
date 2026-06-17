@@ -9,9 +9,16 @@ import {
   sendHrLateClockInSummary,
 } from "@/lib/hr/missed-attendance-emails";
 import { maybeRunMonthlyLeaveAccrual } from "@/lib/leave-accrual";
+import { istTodayDateOnly, istDateOnlyFrom } from "@/lib/ist-date";
 
 const TICK_MS    = 60_000;
 const HOUR_MS    = 60 * 60 * 1000;
+
+// Every configurable cron job (CRON_JOB_IDS) auto-runs once per day, at
+// the first scheduler tick at/after this IST time. Replaces the old
+// per-job rolling `intervalHours` so HR gets one predictable daily run.
+const DAILY_RUN_HOUR_IST = 9;
+const DAILY_RUN_MIN_IST  = 0;
 
 // Trigger windows for the daily attendance reminder emails (IST).
 //   • Employee  Clock-IN  reminder fires at 09:50 IST — gives everyone
@@ -45,6 +52,11 @@ const CLOCK_OUT_MIN  = 0;
 
 let schedulerStarted    = false;
 let lastMissedCloseRun  = 0;
+// Guards against overlapping runs: the 60s tick can fire again while a
+// slow job (e.g. ClickUp full sync) from the previous tick is still
+// running. Without this the second tick would read the not-yet-stamped
+// config and re-run the same jobs.
+let cronRunInFlight     = false;
 
 // Track when we last logged a DB-unreachable error so a brief outage
 // doesn't paper the console with stack traces every 60s. Logs once,
@@ -125,32 +137,47 @@ function istClock(): { day: string; hour: number; minute: number } {
 }
 
 /**
- * Generic per-job auto-runner. Iterates through every registered cron
- * job, runs the ones whose interval has elapsed, and stamps
- * `lastAutoRunAt` on success. Errors in one job don't block others.
+ * Generic per-job auto-runner. Every enabled cron job runs ONCE PER DAY,
+ * at the first tick at/after 09:00 IST. A job that hasn't run yet on the
+ * current IST calendar day fires as soon as we're past 09:00 — so a
+ * server that was down at 9am still catches up later the same day rather
+ * than skipping it. `lastAutoRunAt` is persisted after each job so an
+ * overlapping tick or a mid-batch crash never re-runs a job that already
+ * fired today. Errors in one job don't block others.
  */
 export async function maybeRunDueCronJobs(): Promise<void> {
-    const cfg = await getCronJobsConfig();
-    let dirty = false;
-    for (const id of CRON_JOB_IDS) {
-        const job = cfg[id];
-        if (!job?.enabled) continue;
-        const intervalMs = job.intervalHours * 60 * 60 * 1000;
-        const last = job.lastAutoRunAt ? new Date(job.lastAutoRunAt).getTime() : 0;
-        const due = last === 0 || Date.now() - last >= intervalMs;
-        if (!due) continue;
-        try {
-            await CRON_JOB_RUNNERS[id]();
-            cfg[id] = { ...job, lastAutoRunAt: new Date().toISOString() };
-            dirty = true;
-            console.log(`[CronScheduler] auto-ran job=${id}`);
-        } catch (e) {
-            console.error(`[CronScheduler] job=${id} failed:`, e);
+    if (cronRunInFlight) return;
+
+    const t = istClock();
+    const past9 =
+        t.hour > DAILY_RUN_HOUR_IST ||
+        (t.hour === DAILY_RUN_HOUR_IST && t.minute >= DAILY_RUN_MIN_IST);
+    if (!past9) return;
+
+    cronRunInFlight = true;
+    try {
+        const cfg = await getCronJobsConfig();
+        const todayIst = istTodayDateOnly().getTime();
+        for (const id of CRON_JOB_IDS) {
+            const job = cfg[id];
+            if (!job?.enabled) continue;
+            // One run per IST calendar day — skip if already run today.
+            const ranToday =
+                !!job.lastAutoRunAt &&
+                istDateOnlyFrom(new Date(job.lastAutoRunAt)).getTime() === todayIst;
+            if (ranToday) continue;
+            try {
+                await CRON_JOB_RUNNERS[id]();
+                cfg[id] = { ...job, lastAutoRunAt: new Date().toISOString() };
+                try { await saveCronJobsConfig(cfg); }
+                catch (e) { console.error("[CronScheduler] failed to persist last-run:", e); }
+                console.log(`[CronScheduler] auto-ran job=${id} (daily ${DAILY_RUN_HOUR_IST}:00 IST)`);
+            } catch (e) {
+                console.error(`[CronScheduler] job=${id} failed:`, e);
+            }
         }
-    }
-    if (dirty) {
-        try { await saveCronJobsConfig(cfg); }
-        catch (e) { console.error("[CronScheduler] failed to persist last-run:", e); }
+    } finally {
+        cronRunInFlight = false;
     }
 }
 
