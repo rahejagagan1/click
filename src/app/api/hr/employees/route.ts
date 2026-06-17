@@ -87,6 +87,28 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // PIP fields aren't in the typed client yet — pull them via raw SQL and
+    // merge onto each employeeProfile so the ON PIP badge can render in the
+    // directory + search the same way the probation badge does.
+    try {
+      const ids = (users as any[]).map((u) => u.id).filter((n) => Number.isInteger(n));
+      if (ids.length > 0) {
+        const pipRows = await prisma.$queryRawUnsafe<Array<{ userId: number; pipStartedAt: Date | null; pipEndDate: Date | null }>>(
+          `SELECT "userId", "pipStartedAt", "pipEndDate" FROM "EmployeeProfile" WHERE "userId" IN (${ids.join(",")})`,
+        );
+        const byUser = new Map(pipRows.map((r) => [r.userId, r]));
+        for (const u of users as any[]) {
+          const r = byUser.get(u.id);
+          if (r && u.employeeProfile) {
+            u.employeeProfile.pipStartedAt = r.pipStartedAt;
+            u.employeeProfile.pipEndDate = r.pipEndDate;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[employees GET] pip fields merge failed:", e);
+    }
+
     return NextResponse.json(serializeBigInt(users));
   } catch (e) {
     return serverError(e, "GET /api/hr/employees");

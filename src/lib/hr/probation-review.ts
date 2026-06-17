@@ -150,7 +150,7 @@ export async function listPendingHrReviews(): Promise<any[]> {
   const rows = await prisma.$queryRawUnsafe<any[]>(
     `SELECT pr.id, pr."employeeUserId", pr."managerId", pr.recommendation,
             pr."extendMonths", pr."proposedEndDate", pr.feedback, pr."createdAt",
-            e.name AS "employeeName", ep."employeeId", ep.designation, ep."probationEndDate",
+            e.name AS "employeeName", e."profilePictureUrl", ep."employeeId", ep.designation, ep."probationEndDate",
             m.name AS "managerName"
        FROM "ProbationReview" pr
        JOIN "User" e ON e.id = pr."employeeUserId"
@@ -163,6 +163,7 @@ export async function listPendingHrReviews(): Promise<any[]> {
     id:               r.id,
     employeeUserId:   r.employeeUserId,
     employeeName:     r.employeeName,
+    profilePictureUrl: r.profilePictureUrl ?? null,
     employeeId:       r.employeeId ?? null,
     designation:      r.designation ?? null,
     managerId:        r.managerId,
