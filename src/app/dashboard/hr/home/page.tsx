@@ -3352,9 +3352,10 @@ export default function HRHomePage() {
                   <div className={`mt-2 border-t ${C.div} pt-3`}>
                     <Link
                       href="/dashboard/hr/leaves"
-                      className="inline-flex w-full items-center justify-center rounded-md bg-[#06b6d4] px-3 py-2.5 text-[12.5px] font-bold !text-white shadow-[0_1px_2px_rgba(6,182,212,0.3)] transition-colors hover:bg-[#0891b2]"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-600 px-3 py-2.5 text-[12.5px] font-semibold text-white shadow-[0_2px_8px_-2px_rgba(8,145,178,0.5)] transition-all hover:-translate-y-px hover:bg-cyan-700 hover:shadow-[0_5px_14px_-3px_rgba(8,145,178,0.6)]"
                     >
-                      Request Leave →
+                      <CalendarDays className="h-3.5 w-3.5 opacity-90" />
+                      Request Leave
                     </Link>
                   </div>
                 </>
