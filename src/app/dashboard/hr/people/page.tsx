@@ -215,6 +215,25 @@ export default function PeoplePage() {
                             </span>
                           );
                         })()}
+                        {/* Probation badge (blue) — within the probation window,
+                            not confirmed, active, and not exiting. */}
+                        {(() => {
+                          const ep = emp.employeeProfile as any;
+                          if (!ep?.probationEndDate || ep.probationConfirmedAt) return null;
+                          if (emp.isActive === false || emp.employeeExit) return null;
+                          const endMs = new Date(`${String(ep.probationEndDate).slice(0, 10)}T00:00:00Z`).getTime();
+                          if (!(endMs >= Date.now() - 86_400_000)) return null;
+                          const endLabel = new Date(endMs).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+                          return (
+                            <span
+                              className="inline-flex items-center gap-0.5 rounded-full bg-blue-50 px-1.5 py-px text-[8.5px] font-bold uppercase tracking-wider text-blue-700 ring-1 ring-inset ring-blue-200"
+                              title={`Probation ends ${endLabel}`}
+                            >
+                              <span className="inline-block h-1 w-1 rounded-full bg-blue-500" />
+                              On Probation
+                            </span>
+                          );
+                        })()}
                         <span className="text-slate-600 text-sm cursor-pointer ml-auto">⋯</span>
                       </div>
                       <p className="text-[12px] text-slate-500 dark:text-slate-400 truncate">{emp.employeeProfile?.designation || getUserRoleLabel(emp.role)}</p>
