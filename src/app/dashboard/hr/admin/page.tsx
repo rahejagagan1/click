@@ -686,7 +686,7 @@ export default function HRAdminPage() {
             <div className="max-w-3xl">
               <div className="mb-3">
                 <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">Probation Reviews</h2>
-                <p className="text-[12px] text-slate-500">Recommendations from reporting managers. Approve to apply (extend / confirm + letter / end), or send back.</p>
+                <p className="text-[12px] text-slate-500">Everyone currently on probation, plus manager recommendations awaiting you. Approve to apply (extend / confirm + letter / end), or send back.</p>
               </div>
               <ProbationApprovalsCard standalone />
             </div>

@@ -81,10 +81,18 @@ const STAGE_TONE: Record<string, { chip: string; dot: string; ring: string }> = 
 };
 
 export default function JobApplicantList({ jobId, jobTitle = "this job" }: { jobId: number; jobTitle?: string }) {
+  // Candidates mid-move. Declared above the fetch so we can PAUSE polling
+  // during a move — otherwise an in-flight poll could revert the
+  // optimistic stage change before its PATCH commits.
+  const [moving, setMoving] = useState<Set<number>>(new Set());
   const { data: stagesData } = useSWR<{ stages: Stage[] }>("/api/hr/hiring/stages", fetcher);
   const { data: candidatesData, isLoading } = useSWR<{ candidates: Candidate[] }>(
     `/api/hr/hiring/candidates?openingId=${jobId}`,
     fetcher,
+    // Auto-refresh so stage moves made elsewhere (Kanban view, the
+    // candidate drawer, or another HR user) surface here without a manual
+    // reload. Paused mid-move; SWR also revalidates on tab focus.
+    { refreshInterval: moving.size > 0 ? 0 : 8000 },
   );
   const stages     = stagesData?.stages ?? [];
   const candidates = candidatesData?.candidates ?? [];
@@ -117,8 +125,6 @@ export default function JobApplicantList({ jobId, jobTitle = "this job" }: { job
     window.addEventListener("nb:candidateDrawer:navigate", onNav as any);
     return () => window.removeEventListener("nb:candidateDrawer:navigate", onNav as any);
   }, [setSelectedId]);
-
-  const [moving, setMoving]         = useState<Set<number>>(new Set());
 
   // Tab filter — lets HR slice the candidate list by lifecycle
   // bucket without scrolling/searching. Buckets:
