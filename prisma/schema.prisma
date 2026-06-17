@@ -1280,6 +1280,15 @@ model EmployeeProfile {
   /// twice for the same probation window. HR clearing or extending
   /// probationEndDate re-arms the reminder on the next eligible day.
   probationReminderSentAt DateTime?
+  /// Set when probation is confirmed (Hire as Full-time, approved by HR).
+  /// Non-null = probation complete; the reminder sweep skips these.
+  probationConfirmedAt    DateTime?
+  /// HR user who approved the confirmation.
+  probationConfirmedById  Int?
+  /// Dedupe stamp for the in-app "probation review" nudge to the
+  /// reporting manager (parallel to probationReminderSentAt). Cleared
+  /// when probationEndDate changes so it re-arms on an extension.
+  probationManagerNotifiedAt DateTime?
   /// Structured education history. Array of
   /// { degree, institution, startOfCourse, endOfCourse, branch?, location? }
   /// matching the JobApplication.educationDetails shape used by the
@@ -1746,6 +1755,32 @@ model PendingDocument {
 
   @@index([email])
   @@index([attachedUserId])
+}
+
+/// Reporting-manager's probation review at the end of an employee's
+/// probation. The manager records a recommendation (extend / confirm as
+/// full-time / end employment) + required feedback from My Team →
+/// Probation Reviews; HR approves or rejects it from the dashboard, and
+/// the approval applies the action. Raw-SQL accessed (the typed client
+/// lags), so this model is the migration source of truth.
+model ProbationReview {
+  id              Int       @id @default(autoincrement())
+  employeeUserId  Int
+  managerId       Int
+  recommendation  String // extend | confirm | end
+  extendMonths    Int? // 1 | 3 | 6 (extend only; null = custom date)
+  proposedEndDate DateTime? // custom extend target
+  feedback        String    @db.Text
+  status          String    @default("pending") // pending | approved | rejected
+  hrNote          String?   @db.Text
+  decidedById     Int?
+  decidedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status])
+  @@index([employeeUserId])
+  @@index([managerId])
 }
 
 // ═══════════════════════════════════════════════════════
