@@ -536,10 +536,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (probationEndToWrite !== undefined) {
         setParts.push(`"probationEndDate" = $${i++}`);
         args.push(probationEndToWrite);
-        // Re-arm the reminder whenever probationEndDate is rewritten —
-        // covers both "cleared" (no reminder needed) and "extended" (a
-        // fresh end date deserves a fresh reminder window).
+        // Re-arm BOTH probation reminder channels whenever probationEndDate is
+        // rewritten — covers "cleared" (no reminder needed) and "extended" (a
+        // fresh end date deserves a fresh window). Both dedupe stamps must
+        // clear together: probationReminderSentAt gates the email reminder,
+        // probationManagerNotifiedAt gates the in-app manager-review nudge.
         setParts.push(`"probationReminderSentAt" = $${i++}`);
+        args.push(null);
+        setParts.push(`"probationManagerNotifiedAt" = $${i++}`);
         args.push(null);
       }
       if (internshipEndDate  !== undefined) {

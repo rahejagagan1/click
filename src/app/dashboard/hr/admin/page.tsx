@@ -7,12 +7,13 @@ import { brandFromSlug, slugForBrand, type CompanyBrand } from "@/lib/hr-brand-s
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
-import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote, ClipboardCheck, FileSpreadsheet, FileText, HeartPulse, Home } from "lucide-react";
+import { Settings, Calendar, Clock, Users, Plus, Pencil, X, CheckCircle2, AlertCircle, Palmtree, Trash2, LayoutDashboard, CalendarDays, Package, CheckSquare, UserPlus, ShieldCheck, Briefcase, UserMinus, BarChart3, Banknote, ClipboardCheck, FileSpreadsheet, FileText, HeartPulse, Home, UserCheck } from "lucide-react";
 import AttendanceDashboardPanel from "@/components/hr/AttendanceDashboardPanel";
 import { DEPARTMENTS } from "@/lib/departments";
 import { DEPARTMENTS_YT_LABS } from "@/lib/departments-yt-labs";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
+import ProbationApprovalsCard from "@/components/hr/ProbationApprovalsCard";
 import LeavesAdminPanel from "@/components/hr/LeavesAdminPanel";
 import LeavePoliciesPanel from "@/components/hr/LeavePoliciesPanel";
 import PayrollAdminPanel from "@/components/hr/PayrollAdminPanel";
@@ -44,6 +45,7 @@ type AdminTabDef = {
 const ADMIN_TABS: Array<AdminTabDef & { permKey: string }> = [
   { key: "attendance-dashboard", label: "Attendance Dashboard", icon: LayoutDashboard, permKey: "hr_admin_attendance"     },
   { key: "approvals",            label: "Approvals",            icon: CheckSquare,     permKey: "hr_admin_approvals"      },
+  { key: "probation-reviews",    label: "Probation Reviews",    icon: UserCheck,       permKey: "hr_admin_approvals"      },
   { key: "regularize-balance",   label: "Regularization Balance", icon: ClipboardCheck, permKey: "hr_admin_regularize_balance" },
   { key: "wfh-balances",         label: "WFH Balances",         icon: Home,            permKey: "hr_admin_wfh_balances"   },
   { key: "leaves",               label: "Leave Balances",       icon: Calendar,        permKey: "hr_admin_leaves"         },
@@ -205,6 +207,11 @@ export default function HRAdminPage() {
     { refreshInterval: 60_000 }
   );
   const approvalsTotal = approvalsSummary?.total ?? 0;
+
+  // Pending probation recommendations awaiting HR — feeds the badge on the
+  // "Probation Reviews" rail item + the panel below.
+  const { data: probationHr } = useSWR<{ reviews: any[] }>(`/api/hr/probation-reviews?scope=hr`, fetcher, { refreshInterval: 60_000 });
+  const probationTotal = probationHr?.reviews?.length ?? 0;
 
   const [showHolidayForm, setShowHolidayForm] = useState(false);
   // editingHolidayId !== null means the modal is in edit mode (PUT to
@@ -487,8 +494,11 @@ export default function HRAdminPage() {
                 ? "bg-[#008CFF]/10 text-[#008CFF]"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
             }`;
-            // Only the Approvals item carries a count badge (for now).
-            const badge = t.key === "approvals" && approvalsTotal > 0 ? approvalsTotal : null;
+            // Approvals + Probation Reviews carry count badges.
+            const badge =
+              t.key === "approvals" && approvalsTotal > 0 ? approvalsTotal
+              : t.key === "probation-reviews" && probationTotal > 0 ? probationTotal
+              : null;
             return (
               <button key={t.key} onClick={() => setTab(t.key)} className={base}>
                 <t.icon className="w-4 h-4" />
@@ -670,6 +680,17 @@ export default function HRAdminPage() {
 
           {/* ── Approvals — full multi-tab panel (Leave / Comp Offs / WFH / …) ── */}
           {tab === "approvals" && <ApprovalsPanel embedded initialBrand={initialBrand} />}
+
+          {/* ── Probation Reviews — HR approves/rejects manager recommendations ── */}
+          {tab === "probation-reviews" && (
+            <div className="max-w-3xl">
+              <div className="mb-3">
+                <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">Probation Reviews</h2>
+                <p className="text-[12px] text-slate-500">Recommendations from reporting managers. Approve to apply (extend / confirm + letter / end), or send back.</p>
+              </div>
+              <ProbationApprovalsCard standalone />
+            </div>
+          )}
 
           {/* ── Regularization Balance — per-user monthly quota usage ── */}
           {tab === "regularize-balance" && <RegularizationBalancePanel initialBrand={initialBrand} />}
