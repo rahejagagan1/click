@@ -9,11 +9,12 @@ import SelectField from "@/components/ui/SelectField";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { parseAttLoc } from "@/lib/attendance-location";
-import { isHRAdmin, canApplyRestrictedLeave, canViewAllBrands } from "@/lib/access";
+import { isHRAdmin, isLeadershipOrHR, canApplyRestrictedLeave, canViewAllBrands } from "@/lib/access";
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
 import PulseGateModal from "@/components/hr/PulseGateModal";
 import DesktopGateModal from "@/components/hr/DesktopGateModal";
+import ProbationApprovalsCard from "@/components/hr/ProbationApprovalsCard";
 import { isDesktopBypassActive } from "@/lib/desktop-bypass";
 import { PageShell } from "@/components/layout";
 import { DateField } from "@/components/ui/date-field";
@@ -3169,6 +3170,11 @@ export default function HRHomePage() {
                 </div>
               </div>
             </div>
+
+            {/* HR: pending probation recommendations awaiting approval. Gated
+                with the SAME predicate the API enforces (isLeadershipOrHR) so
+                the card never mounts for someone the API will 403. */}
+            {isLeadershipOrHR(user) && <ProbationApprovalsCard />}
 
             {/* Holidays card — vertical layout matching the approved design:
                 a type-coloured date chip + full date, a one-line description,
