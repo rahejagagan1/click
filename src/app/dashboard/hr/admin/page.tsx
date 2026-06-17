@@ -14,6 +14,7 @@ import { DEPARTMENTS_YT_LABS } from "@/lib/departments-yt-labs";
 import AssetsPanel from "@/components/hr/AssetsPanel";
 import ApprovalsPanel from "@/components/hr/ApprovalsPanel";
 import ProbationApprovalsCard from "@/components/hr/ProbationApprovalsCard";
+import PerformancePlanApprovalsCard from "@/components/hr/PerformancePlanApprovalsCard";
 import LeavesAdminPanel from "@/components/hr/LeavesAdminPanel";
 import LeavePoliciesPanel from "@/components/hr/LeavePoliciesPanel";
 import PayrollAdminPanel from "@/components/hr/PayrollAdminPanel";
@@ -45,7 +46,7 @@ type AdminTabDef = {
 const ADMIN_TABS: Array<AdminTabDef & { permKey: string }> = [
   { key: "attendance-dashboard", label: "Attendance Dashboard", icon: LayoutDashboard, permKey: "hr_admin_attendance"     },
   { key: "approvals",            label: "Approvals",            icon: CheckSquare,     permKey: "hr_admin_approvals"      },
-  { key: "probation-reviews",    label: "Probation Reviews",    icon: UserCheck,       permKey: "hr_admin_approvals"      },
+  { key: "reviews",              label: "PIP & Probation",      icon: UserCheck,       permKey: "hr_admin_approvals"      },
   { key: "regularize-balance",   label: "Regularization Balance", icon: ClipboardCheck, permKey: "hr_admin_regularize_balance" },
   { key: "wfh-balances",         label: "WFH Balances",         icon: Home,            permKey: "hr_admin_wfh_balances"   },
   { key: "leaves",               label: "Leave Balances",       icon: Calendar,        permKey: "hr_admin_leaves"         },
@@ -82,6 +83,21 @@ export default function HRAdminPage() {
   };
   useEffect(() => () => {
     if (permsCloseTimer.current) clearTimeout(permsCloseTimer.current);
+  }, []);
+  // Same hover-flyout pattern for the "Reviews" rail item → Probation / PIP.
+  const [reviewsRailOpen, setReviewsRailOpen] = useState(false);
+  const reviewsCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reviewsHandlers = {
+    onMouseEnter: () => {
+      if (reviewsCloseTimer.current) { clearTimeout(reviewsCloseTimer.current); reviewsCloseTimer.current = null; }
+      setReviewsRailOpen(true);
+    },
+    onMouseLeave: () => {
+      reviewsCloseTimer.current = setTimeout(() => setReviewsRailOpen(false), 200);
+    },
+  };
+  useEffect(() => () => {
+    if (reviewsCloseTimer.current) clearTimeout(reviewsCloseTimer.current);
   }, []);
   // Includes ceo / developer / special_access / role=admin / hr_manager —
   // all of whom should see the HR Dashboard. Full admins see every tab;
@@ -212,6 +228,10 @@ export default function HRAdminPage() {
   // "Probation Reviews" rail item + the panel below.
   const { data: probationHr } = useSWR<{ reviews: any[] }>(`/api/hr/probation-reviews?scope=hr`, fetcher, { refreshInterval: 60_000 });
   const probationTotal = probationHr?.reviews?.length ?? 0;
+  // Pending PIP recommendations awaiting HR — badge on the "PIP Reviews" rail item.
+  const { data: pipHr } = useSWR<{ reviews: any[] }>(`/api/hr/pip-reviews?scope=hr`, fetcher, { refreshInterval: 60_000 });
+  const pipTotal = pipHr?.reviews?.length ?? 0;
+  const [reviewsSub, setReviewsSub] = useState<"probation" | "pip">("probation");
 
   const [showHolidayForm, setShowHolidayForm] = useState(false);
   // editingHolidayId !== null means the modal is in edit mode (PUT to
@@ -497,8 +517,54 @@ export default function HRAdminPage() {
             // Approvals + Probation Reviews carry count badges.
             const badge =
               t.key === "approvals" && approvalsTotal > 0 ? approvalsTotal
-              : t.key === "probation-reviews" && probationTotal > 0 ? probationTotal
+              : t.key === "reviews" && (probationTotal + pipTotal) > 0 ? (probationTotal + pipTotal)
               : null;
+            // Reviews — hover-flyout with Probation / PIP children (same
+            // pattern as the Permissions rail item). Each child selects the
+            // sub-tab; the parent stays highlighted while on the Reviews tab.
+            if (t.key === "reviews") {
+              const childBase = (sel: boolean) =>
+                `w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[12.5px] font-medium transition-colors text-left ${
+                  sel ? "bg-[#008CFF]/10 text-[#008CFF]" : "text-slate-600 dark:text-slate-400 hover:bg-[#008CFF]/10 hover:text-[#008CFF]"
+                }`;
+              return (
+                <div key={t.key} {...reviewsHandlers}>
+                  <button
+                    type="button"
+                    onClick={() => { setTab("reviews"); setReviewsRailOpen((v) => !v); }}
+                    aria-expanded={reviewsRailOpen}
+                    className={`${base} !gap-2`}
+                  >
+                    <t.icon className="w-4 h-4 shrink-0" />
+                    <span className="flex-1 whitespace-nowrap">{t.label}</span>
+                    {badge !== null && (
+                      <span className={`inline-flex shrink-0 items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-bold tabular-nums leading-none ${
+                        active ? "bg-[#008CFF] text-white" : "bg-[#008CFF]/15 text-[#008CFF]"
+                      }`}>
+                        {badge > 99 ? "99+" : badge}
+                      </span>
+                    )}
+                    <svg className={`w-3.5 h-3.5 shrink-0 opacity-60 transition-transform ${reviewsRailOpen ? "rotate-90" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                  {reviewsRailOpen && (
+                    <div className="ml-3 mt-0.5 pl-3 border-l border-slate-200 dark:border-white/[0.06] space-y-0.5">
+                      <button type="button" onClick={() => { setTab("reviews"); setReviewsSub("probation"); }} className={childBase(active && reviewsSub === "probation")}>
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-400" />
+                        <span className="flex-1">Probation</span>
+                        {probationTotal > 0 && <span className="text-[10px] font-bold tabular-nums">{probationTotal > 99 ? "99+" : probationTotal}</span>}
+                      </button>
+                      <button type="button" onClick={() => { setTab("reviews"); setReviewsSub("pip"); }} className={childBase(active && reviewsSub === "pip")}>
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-400" />
+                        <span className="flex-1">PIP</span>
+                        {pipTotal > 0 && <span className="text-[10px] font-bold tabular-nums">{pipTotal > 99 ? "99+" : pipTotal}</span>}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            }
             return (
               <button key={t.key} onClick={() => setTab(t.key)} className={base}>
                 <t.icon className="w-4 h-4" />
@@ -681,14 +747,14 @@ export default function HRAdminPage() {
           {/* ── Approvals — full multi-tab panel (Leave / Comp Offs / WFH / …) ── */}
           {tab === "approvals" && <ApprovalsPanel embedded initialBrand={initialBrand} />}
 
-          {/* ── Probation Reviews — HR approves/rejects manager recommendations ── */}
-          {tab === "probation-reviews" && (
+          {/* ── Reviews — Probation + PIP approvals as sub-tabs ── */}
+          {tab === "reviews" && (
             <div className="max-w-3xl">
               <div className="mb-3">
-                <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">Probation Reviews</h2>
-                <p className="text-[12px] text-slate-500">Everyone currently on probation, plus manager recommendations awaiting you. Approve to apply (extend / confirm + letter / end), or send back.</p>
+                <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">{reviewsSub === "pip" ? "PIP Reviews" : "Probation Reviews"}</h2>
+                <p className="text-[12px] text-slate-500">Manager recommendations awaiting you. Approve to apply, or send back. Switch between Probation and PIP from the Reviews menu on the left.</p>
               </div>
-              <ProbationApprovalsCard standalone />
+              {reviewsSub === "probation" ? <ProbationApprovalsCard standalone /> : <PerformancePlanApprovalsCard standalone />}
             </div>
           )}
 
