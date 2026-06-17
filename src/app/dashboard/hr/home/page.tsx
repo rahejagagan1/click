@@ -2266,7 +2266,7 @@ export default function HRHomePage() {
   const workLoc  = (profile?.employeeProfile?.workLocation || "office").toLowerCase();
   const todayKey = new Date().toISOString().slice(0, 10);
   const hasWfhToday = Array.isArray(myWfh) && myWfh.some((r: any) =>
-    r.status === "approved" && typeof r.date === "string" && r.date.slice(0, 10) === todayKey
+    (r.status === "approved" || r.status === "pending") && typeof r.date === "string" && r.date.slice(0, 10) === todayKey
   );
   const isRemoteMode = workLoc === "remote" || workLoc === "hybrid" || hasWfhToday;
   // Clock button label flips to "WFH …" when the user is working from home
