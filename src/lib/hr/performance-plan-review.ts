@@ -25,6 +25,15 @@ function daysUntil(d: Date | string | null): number | null {
   return Math.ceil((new Date(d).getTime() - Date.now()) / 86_400_000);
 }
 
+// Brand scope for the HR dashboard's per-brand sub-views (mirrors the
+// probation lib). "YT Labs" exact; "NB Media" = not-YT-Labs (incl. null);
+// all/none = no filter. Fixed literals only — safe to inline.
+function brandFilterSql(brand: string | null | undefined, ep = "ep"): string {
+  if (brand === "YT Labs") return ` AND ${ep}."businessUnit" = 'YT Labs'`;
+  if (brand === "NB Media") return ` AND (${ep}."businessUnit" IS DISTINCT FROM 'YT Labs')`;
+  return "";
+}
+
 async function hrRecipientIds(): Promise<number[]> {
   const rows = await prisma.$queryRawUnsafe<{ id: number }[]>(
     `SELECT id FROM "User"
@@ -117,7 +126,7 @@ export async function pendingManagerPipCount(managerId: number): Promise<number>
 }
 
 // ── HR view: pending recommendations awaiting approval ───────────────
-export async function listPendingHrPipReviews(): Promise<any[]> {
+export async function listPendingHrPipReviews(brand?: string | null): Promise<any[]> {
   const rows = await prisma.$queryRawUnsafe<any[]>(
     `SELECT pr.id, pr."employeeUserId", pr."managerId", pr.recommendation,
             pr."extendMonths", pr."proposedEndDate", pr.feedback, pr."createdAt",
@@ -127,7 +136,7 @@ export async function listPendingHrPipReviews(): Promise<any[]> {
        JOIN "User" e ON e.id = pr."employeeUserId"
        LEFT JOIN "EmployeeProfile" ep ON ep."userId" = pr."employeeUserId"
        LEFT JOIN "User" m ON m.id = pr."managerId"
-      WHERE pr.status = 'pending'
+      WHERE pr.status = 'pending'${brandFilterSql(brand)}
       ORDER BY pr."createdAt" ASC`,
   );
   return rows.map((r) => ({
@@ -169,7 +178,7 @@ export async function listManagerPipHistory(managerId: number): Promise<any[]> {
   }));
 }
 
-export async function listHrPipHistory(): Promise<any[]> {
+export async function listHrPipHistory(brand?: string | null): Promise<any[]> {
   const rows = await prisma.$queryRawUnsafe<any[]>(
     `SELECT pr.id, pr."employeeUserId", pr.recommendation, pr."extendMonths", pr."proposedEndDate",
             pr.feedback, pr.status, pr."hrNote", pr."decidedAt",
@@ -181,7 +190,7 @@ export async function listHrPipHistory(): Promise<any[]> {
        LEFT JOIN "EmployeeProfile" ep ON ep."userId" = pr."employeeUserId"
        LEFT JOIN "User" m ON m.id = pr."managerId"
        LEFT JOIN "User" d ON d.id = pr."decidedById"
-      WHERE pr.status IN ('approved','rejected')
+      WHERE pr.status IN ('approved','rejected')${brandFilterSql(brand)}
       ORDER BY COALESCE(pr."decidedAt", pr."createdAt") DESC LIMIT 100`);
   return rows.map((r) => ({
     id: r.id, employeeUserId: r.employeeUserId, employeeName: r.employeeName,
@@ -196,7 +205,7 @@ export async function listHrPipHistory(): Promise<any[]> {
 }
 
 // ── Full roster of everyone currently on a PIP (HR visibility) ──────
-export async function listOnPipEmployees(): Promise<any[]> {
+export async function listOnPipEmployees(brand?: string | null): Promise<any[]> {
   const rows = await prisma.$queryRawUnsafe<any[]>(
     `SELECT u.id AS "userId", u.name,
             ep.designation, COALESCE(ep."businessUnit", 'NB Media') AS "businessUnit",
@@ -209,7 +218,7 @@ export async function listOnPipEmployees(): Promise<any[]> {
        LEFT JOIN "User" rb ON rb.id = ep."pipReportedById"
       WHERE u."isActive" = true
         AND ep."pipStartedAt" IS NOT NULL
-        AND (ep."pipEndDate" IS NULL OR ep."pipEndDate" >= CURRENT_DATE)
+        AND (ep."pipEndDate" IS NULL OR ep."pipEndDate" >= CURRENT_DATE)${brandFilterSql(brand)}
       ORDER BY ep."pipEndDate" ASC NULLS LAST`);
   return rows.map((r) => ({
     userId: r.userId, name: r.name,
