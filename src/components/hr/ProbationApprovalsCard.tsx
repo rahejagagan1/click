@@ -29,6 +29,17 @@ type HrReview = {
   feedback: string;
 };
 type HrHistory = HrReview & { status: "approved" | "rejected"; decidedAt: string | null; deciderName: string | null; isConfirmed: boolean; employeeActive: boolean; hrNote: string | null };
+type OnProb = {
+  userId: number;
+  name: string;
+  designation: string | null;
+  businessUnit: string;
+  managerName: string | null;
+  joiningDate: string | null;
+  probationEndDate: string | null;
+  daysRemaining: number | null;
+  lastReviewStatus: "pending" | "approved" | "rejected" | null;
+};
 
 const fmtDate = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
@@ -45,11 +56,13 @@ function recBadge(r: HrReview) {
 }
 
 export default function ProbationApprovalsCard({ standalone = false }: { standalone?: boolean }) {
-  const [tab, setTab] = useState<"pending" | "history">("pending");
+  const [tab, setTab] = useState<"onprob" | "pending" | "history">("onprob");
   const { data, mutate } = useSWR<{ reviews: HrReview[] }>("/api/hr/probation-reviews?scope=hr", fetcher, { refreshInterval: 60_000 });
   const reviews = data?.reviews ?? [];
   const { data: histData, mutate: mutateHist } = useSWR<{ reviews: HrHistory[] }>(standalone && tab === "history" ? "/api/hr/probation-reviews?scope=hr-history" : null, fetcher);
   const history = histData?.reviews ?? [];
+  const { data: onProbData } = useSWR<{ employees: OnProb[] }>(standalone && tab === "onprob" ? "/api/hr/probation-reviews?scope=on-probation" : null, fetcher);
+  const onProb = onProbData?.employees ?? [];
   const [busy, setBusy] = useState<number | null>(null);
   const [revertFor, setRevertFor] = useState<number | null>(null);
   const [revertDate, setRevertDate] = useState("");
@@ -147,15 +160,47 @@ export default function ProbationApprovalsCard({ standalone = false }: { standal
     </div>
   );
 
-  // Admin tab — Pending / History tabs.
+  const daysPill = (d: number | null) => {
+    if (d == null) return "bg-slate-100 text-slate-600 ring-slate-200";
+    if (d <= 7) return "bg-rose-50 text-rose-700 ring-rose-200";
+    if (d <= 21) return "bg-amber-50 text-amber-700 ring-amber-200";
+    return "bg-slate-100 text-slate-600 ring-slate-200";
+  };
+  const onProbList = onProb.length === 0 ? (
+    <p className="rounded-lg bg-slate-50 px-3 py-6 text-center text-[12.5px] text-slate-500 ring-1 ring-slate-100">No one is on probation right now.</p>
+  ) : (
+    <div className="space-y-2">
+      {onProb.map((e) => (
+        <div key={e.userId} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 bg-white px-3 py-2.5">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <Link href={`/dashboard/hr/people/${e.userId}`} className="truncate text-[12.5px] font-semibold text-slate-800 hover:text-[#008CFF] hover:underline">{e.name}</Link>
+              <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-slate-500">{e.businessUnit}</span>
+              {e.lastReviewStatus === "pending" && <span className="shrink-0 rounded-full bg-[#008CFF]/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-[#008CFF]">review pending</span>}
+            </div>
+            <p className="truncate text-[11px] text-slate-500">{e.designation || "—"} · mgr {e.managerName || "—"}</p>
+          </div>
+          <div className="shrink-0 text-right">
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold ring-1 ${daysPill(e.daysRemaining)}`}>
+              {e.daysRemaining != null && e.daysRemaining >= 0 ? `${e.daysRemaining} day${e.daysRemaining === 1 ? "" : "s"} left` : "ended"}
+            </span>
+            <p className="mt-0.5 text-[10.5px] text-slate-400">ends {fmtDate(e.probationEndDate)}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  // Admin tab — On Probation / Pending / History tabs.
   if (standalone) {
     return (
       <div>
         <div className="mb-3 inline-flex rounded-lg bg-slate-100 p-0.5 text-[12px] font-medium">
+          <button type="button" onClick={() => setTab("onprob")} className={`rounded-md px-3.5 py-1.5 transition-colors ${tab === "onprob" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>On Probation{onProb.length ? ` (${onProb.length})` : ""}</button>
           <button type="button" onClick={() => setTab("pending")} className={`rounded-md px-3.5 py-1.5 transition-colors ${tab === "pending" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>Pending{reviews.length ? ` (${reviews.length})` : ""}</button>
           <button type="button" onClick={() => setTab("history")} className={`rounded-md px-3.5 py-1.5 transition-colors ${tab === "history" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>History</button>
         </div>
-        {tab === "pending" ? pendingList : historyList}
+        {tab === "onprob" ? onProbList : tab === "pending" ? pendingList : historyList}
       </div>
     );
   }
