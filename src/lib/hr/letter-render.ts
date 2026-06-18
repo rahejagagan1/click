@@ -172,6 +172,13 @@ export type RenderContext = {
   /** New-joiner mode: render purely from typed-in fields (no DB row). */
   manual?: ManualRecipient;
   customFields: Record<string, string>;
+  /**
+   * Optional override for the letter-issue date — drives every
+   * `{{*.ShortDate}}` placeholder. Accepts a YYYY-MM-DD string or a
+   * Date. When omitted, today's date in the server's locale is used
+   * (legacy behaviour). HR sets this to backdate letters.
+   */
+  letterDate?: string | Date | null;
 };
 
 /** Build a placeholder resolver bound to one employee + custom
@@ -211,7 +218,11 @@ export async function buildPlaceholderResolver(ctx: RenderContext): Promise<{
   } catch { /* columns may be missing on older deploys */ }
 
   const profile = { ...(user.employeeProfile ?? {}), ...extended };
-  const renderCtx = { user, profile, exit, customFields: ctx.customFields ?? {} };
+  const renderCtx = {
+    user, profile, exit,
+    customFields: ctx.customFields ?? {},
+    letterDate: ctx.letterDate ?? null,
+  };
   return {
     resolve: (key: string) => resolvePlaceholder(key, renderCtx),
     user, profile, exit,
@@ -238,6 +249,18 @@ const fmtShortDate = (d: Date | null | undefined): string => {
 // Resolves a placeholder against the employee row + custom inputs.
 // Returns the substituted string or null if the placeholder isn't
 // known.
+/**
+ * Resolves the effective "issue date" for the letter. Honors the
+ * caller-supplied override (HR can backdate via the UI) and falls
+ * back to today. Anything unparseable also falls back to today so a
+ * typo'd date never produces an empty/Invalid Date in the letter.
+ */
+function resolveLetterDate(raw: string | Date | null | undefined): Date {
+  if (raw == null || raw === "") return new Date();
+  const d = raw instanceof Date ? raw : new Date(raw);
+  return Number.isNaN(d.getTime()) ? new Date() : d;
+}
+
 function resolvePlaceholder(
   fullKey: string,
   ctx: {
@@ -245,6 +268,7 @@ function resolvePlaceholder(
     profile: any;
     exit: any | null;
     customFields: Record<string, string>;
+    letterDate?: string | Date | null;
   },
 ): string | null {
   const [section, field] = fullKey.split(".");
@@ -252,6 +276,8 @@ function resolvePlaceholder(
   const u = ctx.user;
   const p = ctx.profile;
   const ex = ctx.exit;
+  // Effective letter date — caller override or today.
+  const letterDate = resolveLetterDate(ctx.letterDate);
 
   switch (section) {
     case "EmployeeBasicInfo":
@@ -260,7 +286,7 @@ function resolvePlaceholder(
       break;
     case "EmployeeBasicHeaderInfo":
       if (field === "EmployeeNumber") return p?.employeeId || "";
-      if (field === "ShortDate")      return fmtShortDate(new Date());
+      if (field === "ShortDate")      return fmtShortDate(letterDate);
       break;
     case "EmployeeJobInfo":
       if (field === "JobTitle")        return p?.designation || u?.role || "";
@@ -274,7 +300,7 @@ function resolvePlaceholder(
       if (field === "InternshipEndDate") return fmtDate(p?.internshipEndDate);
       break;
     case "DocumentFilterInfo":
-      if (field === "ShortDate") return fmtShortDate(new Date());
+      if (field === "ShortDate") return fmtShortDate(letterDate);
       // Pronouns return lowercase by default because every existing
       // template uses them MID-SENTENCE ("Arpit fulfilled his roles",
       // "we wish him good luck") — capitalized would read as a
@@ -623,6 +649,7 @@ export async function renderLetterHtml(
     profile,
     exit,
     customFields: ctx.customFields ?? {},
+    letterDate: ctx.letterDate ?? null,
   };
 
   const missing: string[] = [];
