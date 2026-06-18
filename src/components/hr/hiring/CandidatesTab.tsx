@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import CandidateDrawer from "./CandidateDrawer";
 import CandidateActionModal, { type CandidateAction } from "./CandidateActionModal";
+import ArchiveCandidateModal from "./ArchiveCandidateModal";
 
 type Stage = { id: number; key: string; label: string; color: string; kind: string; sortOrder?: number };
 type Candidate = {
@@ -115,6 +116,11 @@ export default function CandidatesTab() {
   const [availableIn, setAvailableIn] = useState("");
   const [selected, setSelected]       = useState<Set<number>>(new Set());
   const [activeId, setActiveId]       = useState<number | null>(null);
+  // Candidate being archived via the row menu's "Move to → Rejected"
+  // submenu. Same modal/flow as the drawer Archive button + Kanban drag
+  // into the Rejected column — keeps the reason + email enforcement
+  // consistent across every entry point.
+  const [archivingCandidate, setArchivingCandidate] = useState<Candidate | null>(null);
   // The drawer emits a CustomEvent when the user clicks its prev/next
   // pipeline-nav arrows. We listen here so we can swap activeId
   // without unmounting the drawer.
@@ -591,6 +597,10 @@ export default function CandidatesTab() {
             setTagPopFor({ id: rowMenuFor.id, x: rowMenuFor.x, y: rowMenuFor.y });
             setRowMenuFor(null);
           }}
+          onArchive={(cand) => {
+            setArchivingCandidate(cand);
+            setRowMenuFor(null);
+          }}
         />
       )}
 
@@ -614,6 +624,19 @@ export default function CandidatesTab() {
           />
         );
       })()}
+
+      {archivingCandidate && (
+        <ArchiveCandidateModal
+          candidate={{
+            id: archivingCandidate.id,
+            fullName: archivingCandidate.fullName,
+            email: archivingCandidate.email,
+            roleTitle: archivingCandidate.roleTitle,
+          }}
+          onClose={() => setArchivingCandidate(null)}
+          onDone={() => mutateCandidates()}
+        />
+      )}
     </div>
   );
 }
@@ -928,7 +951,7 @@ function RowActionButton({
 //   • or fires a side-effect like WhatsApp deep-link
 function RowActionsMenu({
   candidate, stages, archiveStage, x, y,
-  onClose, onMutated, onOpenDrawer, onOpenAction, onOpenTagPopover,
+  onClose, onMutated, onOpenDrawer, onOpenAction, onOpenTagPopover, onArchive,
 }: {
   candidate: Candidate | null;
   stages: Stage[];
@@ -940,6 +963,12 @@ function RowActionsMenu({
   onOpenDrawer: () => void;
   onOpenAction: (action: CandidateAction) => void;
   onOpenTagPopover: () => void;
+  /**
+   * Called when HR picks the Rejected stage from the Move-to submenu.
+   * Parent opens the ArchiveCandidateModal so HR captures a reason +
+   * sends the closing email instead of a silent stage flip.
+   */
+  onArchive: (candidate: Candidate) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [moveOpen, setMoveOpen] = useState(false);
@@ -1014,6 +1043,13 @@ function RowActionsMenu({
   };
 
   const moveTo = async (stage: Stage) => {
+    // Funnel "Move to Rejected" through the Archive modal so HR captures
+    // a reason + sends a closing email — same gate as the drawer
+    // dropdown and the Kanban drag-into-Rejected path.
+    if (stage.kind === "rejected" && candidate) {
+      onArchive(candidate);
+      return;
+    }
     try {
       const res = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
         method: "PATCH",
