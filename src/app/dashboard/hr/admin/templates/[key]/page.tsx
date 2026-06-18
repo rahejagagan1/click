@@ -315,8 +315,14 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
         throw new Error(j?.error || "Couldn't update designation");
       }
       setEmployee((e) => e ? { ...e, employeeProfile: { ...(e.employeeProfile ?? {}), designation: next } } : e);
-      setPreview(null);             // force a fresh preview with the new title
+      setPreview(null);
       setDesignationSaved(true);
+      // Auto-re-render the letter so HR sees the new title applied
+      // without a second click. Previously we only cleared the
+      // preview; the user had to manually click "Preview" again to
+      // see the change, which looked like the save hadn't worked.
+      // Fire-and-forget — refreshPreview owns its own busy/error UI.
+      void refreshPreview();
     } catch (err: any) {
       alert(err?.message || "Couldn't update designation");
     } finally {
