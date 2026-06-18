@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import CandidateDrawer from "./CandidateDrawer";
 import AddApplicantModal from "./AddApplicantModal";
+import ArchiveCandidateModal from "./ArchiveCandidateModal";
 
 type Stage = { id: number; key: string; label: string; sortOrder: number; kind: string; color: string };
 type Candidate = {
@@ -85,6 +86,10 @@ export default function JobApplicantList({ jobId, jobTitle = "this job" }: { job
   // during a move — otherwise an in-flight poll could revert the
   // optimistic stage change before its PATCH commits.
   const [moving, setMoving] = useState<Set<number>>(new Set());
+  // Candidate being archived via the per-row stage dropdown. When set,
+  // the ArchiveCandidateModal renders so HR picks a reason + closing
+  // email — same flow as the drawer dropdown / Kanban drop / row menu.
+  const [archivingCandidate, setArchivingCandidate] = useState<Candidate | null>(null);
   const { data: stagesData } = useSWR<{ stages: Stage[] }>("/api/hr/hiring/stages", fetcher);
   const { data: candidatesData, isLoading } = useSWR<{ candidates: Candidate[] }>(
     `/api/hr/hiring/candidates?openingId=${jobId}`,
@@ -168,6 +173,14 @@ export default function JobApplicantList({ jobId, jobTitle = "this job" }: { job
   const moveStage = async (candidateId: number, stageId: number) => {
     const curr = candidates.find((c) => c.id === candidateId);
     if (!curr || curr.currentStage?.id === stageId) return;
+    // Stage → Rejected funnels through the Archive modal (reason + closing
+    // email) instead of a silent stage flip. Matches the same gate on the
+    // drawer dropdown / Kanban drop / row context-menu.
+    const target = stages.find((s) => s.id === stageId);
+    if (target?.kind === "rejected") {
+      setArchivingCandidate(curr);
+      return;
+    }
     setMoving((p) => new Set(p).add(candidateId));
     const targetStage = stages.find((s) => s.id === stageId) ?? null;
     // Optimistic patch.
@@ -472,6 +485,19 @@ export default function JobApplicantList({ jobId, jobTitle = "this job" }: { job
             // education/skills if needed.
             if (id) setSelectedId(id);
           }}
+        />
+      )}
+
+      {archivingCandidate && (
+        <ArchiveCandidateModal
+          candidate={{
+            id: archivingCandidate.id,
+            fullName: archivingCandidate.fullName,
+            email: archivingCandidate.email,
+            roleTitle: archivingCandidate.roleTitle,
+          }}
+          onClose={() => setArchivingCandidate(null)}
+          onDone={() => globalMutate(`/api/hr/hiring/candidates?openingId=${jobId}`)}
         />
       )}
     </>
