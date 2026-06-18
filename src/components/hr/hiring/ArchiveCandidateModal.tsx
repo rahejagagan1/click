@@ -14,7 +14,7 @@ import { useEffect, useState } from "react";
 import { mutate as globalMutate } from "swr";
 import { showToast } from "@/components/ui/Toast";
 import { X, ChevronDown, AlertCircle } from "lucide-react";
-import { rejectionEmail } from "@/lib/email/hr-templates";
+import { rejectionEmail, overQualifiedEmail, underQualifiedEmail } from "@/lib/email/hr-templates";
 import EmailComposer, { type EmailComposerPayload } from "./EmailComposer";
 
 interface Candidate {
@@ -65,12 +65,21 @@ export default function ArchiveCandidateModal({
   }, [onClose]);
 
   const role = candidate.roleTitle ?? "the role";
-  const tpl  = rejectionEmail({ candidateName: candidate.fullName, jobRole: role });
 
   const [reason, setReason]   = useState(ARCHIVE_REASONS[4]); // Not Fit
   const [note,   setNote]     = useState("");
   const [sendEmail, setSendEmail] = useState(true);
   const [saving, setSaving]   = useState(false);
+
+  // Reason-specific email body. "Over Qualified" / "Under Qualified" get
+  // tailored wording HR provided 2026-06-18; everything else falls back
+  // to the generic rejection template.
+  const tpl = (() => {
+    const args = { candidateName: candidate.fullName, jobRole: role };
+    if (reason === "Over Qualified")  return overQualifiedEmail(args);
+    if (reason === "Under Qualified") return underQualifiedEmail(args);
+    return rejectionEmail(args);
+  })();
 
   // "Archive without email" path — runs when HR unchecks the closing
   // email checkbox. Single backend hit, no email.
@@ -175,7 +184,13 @@ export default function ArchiveCandidateModal({
 
           {sendEmail ? (
             <div className="rounded-xl border border-slate-200 p-4">
+              {/* key={reason} remounts the composer when HR changes the
+                  archive reason, so the new reason-specific body is
+                  picked up (initialSubject/initialBody are only read on
+                  mount). Without this, switching from "Not Fit" to
+                  "Over Qualified" would keep the old body. */}
               <EmailComposer
+                key={reason}
                 candidateName={candidate.fullName}
                 jobRole={role}
                 defaultTo={candidate.email}
