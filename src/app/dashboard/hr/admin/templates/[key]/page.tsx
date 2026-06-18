@@ -16,7 +16,12 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { isLeadershipOrHR } from "@/lib/access";
 import { DateField } from "@/components/ui/date-field";
-import { JOB_TITLES } from "@/lib/job-titles";
+// NOTE: previously imported JOB_TITLES from @/lib/job-titles — a stale
+// 28-entry hardcoded list that was missing 40+ designations HR had added
+// via Admin → RBAC → Designations (CEO, COO, Manager, Lead, Channel
+// Manager, etc.) and still showed 13 designations that no longer exist
+// in the DB. Now reads the same /api/designations source Edit Profile
+// uses, so the picker stays in sync without code changes.
 import { Search, Save, FileText, RefreshCw } from "lucide-react";
 
 // Reuse the same Quill build the JD editor uses so HR gets a
@@ -138,6 +143,18 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
   const [designationDraft, setDesignationDraft]       = useState("");
   const [savingDesignation, setSavingDesignation]     = useState(false);
   const [designationSaved, setDesignationSaved]       = useState(false);
+
+  // Live designation list — same source as Edit Profile so HR sees the
+  // full set (CEO, COO, Manager, Lead, every brand-scoped role) instead
+  // of the stale 28-entry hardcoded list this page used previously.
+  const { data: desigData } = useSWR<{ designations: { label: string }[] }>(
+    "/api/designations",
+    fetcher,
+  );
+  const designationOptions: string[] = useMemo(() => {
+    const labels = (desigData?.designations ?? []).map((d) => d.label).filter(Boolean);
+    return Array.from(new Set(labels)).sort((a, b) => a.localeCompare(b));
+  }, [desigData]);
 
   // Auto-fill custom fields from the picked employee's profile +
   // salary structure so HR doesn't retype data we already have.
@@ -448,10 +465,10 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
                         <option value="">— Select designation —</option>
                         {/* Keep the current title selectable even if it's not in
                             the canonical list, so we never silently change it. */}
-                        {designationDraft && !JOB_TITLES.includes(designationDraft) && (
+                        {designationDraft && !designationOptions.includes(designationDraft) && (
                           <option value={designationDraft}>{designationDraft}</option>
                         )}
-                        {JOB_TITLES.map((t) => (
+                        {designationOptions.map((t) => (
                           <option key={t} value={t}>{t}</option>
                         ))}
                       </select>
