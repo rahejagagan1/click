@@ -352,7 +352,22 @@ export default function CandidateDrawer({
                     dark/khaki option highlight (Chromium on Linux). */}
                 <SelectField
                   value={c.currentStage?.id != null ? String(c.currentStage.id) : ""}
-                  onChange={(v) => patchStage(Number(v))}
+                  onChange={(v) => {
+                    // Picking the "Rejected" stage from the dropdown
+                    // funnels HR into the Archive modal instead of an
+                    // immediate stage change — the modal collects a
+                    // reason + closing email and then moves the
+                    // candidate to the rejected stage as part of its
+                    // own backend call (action="archive"). Without this
+                    // intercept, HR would be able to drop someone into
+                    // the rejected bucket with no reason recorded.
+                    const picked = stages.find((s) => String(s.id) === v);
+                    if (picked?.kind === "rejected") {
+                      setArchiveOpen(true);
+                      return;
+                    }
+                    patchStage(Number(v));
+                  }}
                   options={stages.map((s) => ({ value: String(s.id), label: s.label }))}
                   disabled={busy}
                   className="h-9 pl-3.5 pr-3 rounded-lg border border-slate-200 bg-white text-[12.5px] font-semibold text-slate-800 hover:border-slate-300 focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 flex items-center justify-between gap-2 min-w-[160px]"
