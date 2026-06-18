@@ -72,6 +72,52 @@ ${candidateSign}`,
   };
 }
 
+// ── 1a. Over-qualified rejection ─────────────────────────────────────
+// Softer rejection for candidates whose experience EXCEEDS the role's
+// scope. Used when ArchiveCandidateModal's reason = "Over Qualified".
+// Wording from HR (Vanshika, 2026-06-18).
+export function overQualifiedEmail(args: { candidateName: string; jobRole: string }): HRTemplate {
+  const { candidateName, jobRole } = args;
+  return {
+    subject: `Your application for the ${jobRole} at NB Media`,
+    body:
+`Dear ${candidateName},
+
+Thank you for taking the time to apply for the ${jobRole} role at NB Media and for sharing your experience with us. We truly appreciate your interest in being part of our team.
+
+After reviewing your profile, we feel that your level of experience exceeds the current requirements for this position.
+
+Please know that this decision is based solely on the role's present scope and not a reflection of your skills or accomplishments. We will, however, retain your profile for any future openings that better align with your experience.
+
+Wishing you continued success in your professional journey.
+
+${candidateSign}`,
+  };
+}
+
+// ── 1b. Under-qualified rejection ────────────────────────────────────
+// Counterpart to overQualifiedEmail — for candidates whose experience
+// FALLS SHORT of the role's requirements. Wording from HR (Vanshika,
+// 2026-06-18).
+export function underQualifiedEmail(args: { candidateName: string; jobRole: string }): HRTemplate {
+  const { candidateName, jobRole } = args;
+  return {
+    subject: `Your application for the ${jobRole} at NB Media`,
+    body:
+`Dear ${candidateName},
+
+Thank you for taking the time to apply for the ${jobRole} at NB Media and for sharing your experience with us. We truly appreciate your interest in being part of our team.
+
+After carefully reviewing your profile, we feel that your current experience level does not fully align with the requirements of this position. At present, we are seeking candidates with a broader range of experience that closely matches the scope and responsibilities of the role.
+
+Please know that this decision is based solely on the current requirements of the position and is not a reflection of your potential, skills, or achievements. We will retain your profile in our database and may reach out should a suitable opportunity arise in the future that better matches your experience and background.
+
+We sincerely appreciate your interest in NB Media and wish you all the best in your professional journey.
+
+${candidateSign}`,
+  };
+}
+
 // ── 2. Portfolio Required ────────────────────────────────────────────
 export function portfolioRequestEmail(args: {
   candidateName: string; jobRole: string; deadline?: string;
