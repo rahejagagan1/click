@@ -131,6 +131,11 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
 
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [customValues, setCustomValues] = useState<Record<string, string>>({});
+  // Letter-issue date — drives every {{*.ShortDate}} placeholder. Empty
+  // string means "today" (legacy behaviour). HR sets this when they
+  // need to backdate a letter or post-date one. Stored as YYYY-MM-DD
+  // to match the DateField component's value shape.
+  const [letterDate, setLetterDate] = useState<string>("");
   // Salary type of the picked employee — "intern" or "regular".
   // Used by the Exit Statement template to hide the EnablePf
   // checkbox for interns (interns don't have PF). Set in the
@@ -276,10 +281,12 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
     ? !!employee
     : !!(manualFields.name.trim() && manualFields.email.trim());
 
-  const buildBody = (action: "preview" | "pdf") =>
-    mode === "manual"
-      ? { manual: { ...manualFields, brand: activeBrand }, customFields: customValues, action }
-      : { employeeId: employee?.id, customFields: customValues, action };
+  const buildBody = (action: "preview" | "pdf") => {
+    const base = { customFields: customValues, action, letterDate: letterDate || null };
+    return mode === "manual"
+      ? { ...base, manual: { ...manualFields, brand: activeBrand } }
+      : { ...base, employeeId: employee?.id };
+  };
 
   const refreshPreview = async () => {
     if (!ready) { setPreview(null); return; }
@@ -494,6 +501,32 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
                     </p>
                   </div>
                 )}
+                {/* Letter date override — the {{*.ShortDate}} placeholder
+                    defaults to today's date. HR sets this to backdate a
+                    letter or post-date one. The "Reset to today" button
+                    clears the override. */}
+                <div>
+                  <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Letter date</label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <DateField
+                      value={letterDate}
+                      onChange={(v) => { setLetterDate(v); setPreview(null); }}
+                      className="flex-1"
+                    />
+                    {letterDate && (
+                      <button
+                        type="button"
+                        onClick={() => { setLetterDate(""); setPreview(null); }}
+                        className="h-9 px-3 rounded-lg border border-slate-200 text-[12px] text-slate-600 hover:bg-slate-50"
+                      >
+                        Today
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Leave blank to use today's date. Pick a date to back/post-date the letter.
+                  </p>
+                </div>
               </div>
             ) : (
               <div className="space-y-3">
@@ -508,6 +541,12 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
                   <div>
                     <label className="text-[11.5px] text-slate-600 mb-1 block">Joining date</label>
                     <DateField value={manualFields.joiningDate} onChange={(v) => setManualFields((s) => ({ ...s, joiningDate: v }))} className="w-full" />
+                  </div>
+                  <div>
+                    <label className="text-[11.5px] text-slate-600 mb-1 block">
+                      Letter date <span className="text-slate-400">(blank = today)</span>
+                    </label>
+                    <DateField value={letterDate} onChange={(v) => { setLetterDate(v); setPreview(null); }} className="w-full" />
                   </div>
                   <div>
                     <label className="text-[11.5px] text-slate-600 mb-1 block">Gender</label>
