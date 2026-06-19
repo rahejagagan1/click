@@ -276,6 +276,23 @@ function HeaderSearchInner() {
                                 Exited
                               </span>
                             )}
+                            {/* On Probation (blue) — within the probation window,
+                                not yet confirmed, active, and not on notice/exited. */}
+                            {exitState === null && u.isActive !== false && (() => {
+                              const ep = u.employeeProfile;
+                              if (!ep?.probationEndDate || ep.probationConfirmedAt) return null;
+                              const endMs = new Date(`${String(ep.probationEndDate).slice(0, 10)}T00:00:00Z`).getTime();
+                              if (!(endMs >= Date.now() - 86_400_000)) return null;
+                              return (
+                                <span
+                                  className="inline-flex items-center gap-0.5 rounded-full bg-blue-50 px-1.5 py-px text-[8.5px] font-bold uppercase tracking-wider text-blue-700 ring-1 ring-inset ring-blue-200 shrink-0"
+                                  title="On probation"
+                                >
+                                  <span className="inline-block h-1 w-1 rounded-full bg-blue-500" />
+                                  On Probation
+                                </span>
+                              );
+                            })()}
                             {/* Fallback for anyone deactivated without an exit
                                 record (or when the exit badge is hidden) so
                                 inactive employees are clearly marked. */}

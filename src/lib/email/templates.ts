@@ -1312,6 +1312,59 @@ export function probationEndingReminderEmail(args: {
   return { subject, html: SHELL(subject, body), text };
 }
 
+// ── Reporting-manager change applied ───────────────────────────────────
+// Sent when a scheduled (effective-dated) reporting-manager change takes
+// effect. Goes to the employee, their new manager, and brand HR.
+export function managerChangeAppliedEmail(args: {
+  recipientName?: string | null;
+  employeeName: string;
+  employeeId?: string | null;
+  oldManagerName?: string | null;
+  newManagerName: string;
+  effectiveDate: string | Date;
+  employeeUserId: number;
+}): EmailContent {
+  const eff = fmtDate(args.effectiveDate);
+  const subject = `Reporting manager updated · ${args.employeeName} → ${args.newManagerName}`;
+  const peopleLink = `${appUrl()}/dashboard/hr/people/${args.employeeUserId}`;
+
+  const rows = [
+    vRow("Employee", escape(args.employeeName)),
+    args.employeeId ? vRow("HRM No.", escape(args.employeeId)) : "",
+    args.oldManagerName ? vRow("Previous Manager", escape(args.oldManagerName)) : "",
+    vRow("New Reporting Manager", escape(args.newManagerName)),
+    vRow("Effective", escape(eff)),
+  ].join("");
+
+  const body = `
+    <p style="margin:0 0 12px;font-size:14px;color:#1f2937;line-height:1.6">
+      ${args.recipientName ? `Hi ${escape(args.recipientName)},` : "Hi,"}
+    </p>
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      A scheduled reporting-line change has taken effect. <strong>${escape(args.employeeName)}</strong> now reports to <strong>${escape(args.newManagerName)}</strong>.
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      ${rows}
+    </table>
+    ${ctaButton("Open employee profile", peopleLink)}
+  `;
+
+  const text = [
+    args.recipientName ? `Hi ${args.recipientName},` : "Hi,",
+    `${args.employeeName} now reports to ${args.newManagerName} (effective ${eff}).`,
+    ``,
+    `Employee: ${args.employeeName}`,
+    args.employeeId ? `HRM No.: ${args.employeeId}` : null,
+    args.oldManagerName ? `Previous Manager: ${args.oldManagerName}` : null,
+    `New Reporting Manager: ${args.newManagerName}`,
+    `Effective: ${eff}`,
+    ``,
+    `Open profile: ${peopleLink}`,
+  ].filter(Boolean).join("\n");
+
+  return { subject, html: SHELL(subject, body), text };
+}
+
 // ── POC assignment ────────────────────────────────────────────────────
 // Sent to the employee picked as "POC in Absence" on any leave-style
 // request (Leave / WFH / On Duty / Half Day / Comp Off). Heads-up that

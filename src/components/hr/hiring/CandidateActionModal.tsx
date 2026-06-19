@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
+import { showToast } from "@/components/ui/Toast";
 import { fetcher } from "@/lib/swr";
 import { X, Search, Mail, Calendar, ClipboardList, UserCog, Send, UserCircle2, Save, ChevronDown } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
@@ -194,10 +195,10 @@ function InterviewForm({
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    if (!title.trim()) return alert("Title required");
-    if (!date || !time) return alert("Date and time required");
+    if (!title.trim()) return showToast("Title required", "error");
+    if (!date || !time) return showToast("Date and time required", "error");
     const scheduledAt = new Date(`${date}T${time}`);
-    if (isNaN(scheduledAt.getTime())) return alert("Invalid date/time");
+    if (isNaN(scheduledAt.getTime())) return showToast("Invalid date/time", "error");
     setSaving(true);
     const res = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
       method: "PATCH",
@@ -214,7 +215,7 @@ function InterviewForm({
     setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      alert(j?.error || "Couldn't schedule interview");
+      showToast(j?.error || "Couldn't schedule interview", "error");
       return;
     }
     globalMutate("/api/hr/hiring/candidates");
@@ -322,7 +323,7 @@ function OwnerPicker({
     setSaving(null);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      alert(j?.error || "Couldn't update owner");
+      showToast(j?.error || "Couldn't update owner", "error");
       return;
     }
     globalMutate("/api/hr/hiring/candidates");
@@ -420,9 +421,9 @@ function EditProfileForm({
   const [saving,   setSaving]   = useState(false);
 
   const save = async () => {
-    if (!fullName.trim()) return alert("Name is required");
+    if (!fullName.trim()) return showToast("Name is required", "error");
     if (!email.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
-      return alert("Valid email is required");
+      return showToast("Valid email is required", "error");
     }
     setSaving(true);
     const res = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
@@ -438,7 +439,7 @@ function EditProfileForm({
     setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      alert(j?.error || "Couldn't save profile");
+      showToast(j?.error || "Couldn't save profile", "error");
       return;
     }
     globalMutate(`/api/hr/hiring/candidates/${candidate.id}`);

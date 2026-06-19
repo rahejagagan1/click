@@ -27,6 +27,7 @@ import useSWR, { mutate as globalMutate } from "swr";
 import { useSession } from "next-auth/react";
 import { isHRAdmin } from "@/lib/access";
 import { fetcher } from "@/lib/swr";
+import { showToast } from "@/components/ui/Toast";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import {
   X, Mail, Phone, ExternalLink, FileText, Calendar, ChevronDown,
@@ -225,13 +226,19 @@ export default function CandidateDrawer({
   const patchStage = async (stageId: number) => {
     setBusy(true);
     try {
-      await fetch(url, {
+      const res = await fetch(url, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "moveStage", stageId }),
       });
+      if (!res.ok) showToast("Couldn't update the stage — reverting.", "error");
+      // Re-fetch truth either way: confirms on success, reverts the
+      // dropdown to the real stage on failure (instead of showing stale).
       mutate();
       globalMutate("/api/hr/hiring/candidates");
+    } catch {
+      showToast("Couldn't update the stage — reverting.", "error");
+      mutate();
     } finally {
       setBusy(false);
     }
@@ -385,7 +392,7 @@ export default function CandidateDrawer({
                 </IconButton>
                 <IconButton title="Message on WhatsApp" onClick={() => {
                   const phone = (c.phone ?? "").replace(/\D/g, "");
-                  if (!phone) return alert("No phone number on file.");
+                  if (!phone) { showToast("No phone number on file.", "error"); return; }
                   window.open(`https://wa.me/${phone}`, "_blank", "noopener,noreferrer");
                 }}>
                   <MessageCircle size={14} />
@@ -568,7 +575,7 @@ function ProfileTab({ c }: { c: Candidate }) {
     setSavingNote(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      alert(j?.error || "Couldn't save note");
+      showToast(j?.error || "Couldn't save note", "error");
       return;
     }
     setNote("");

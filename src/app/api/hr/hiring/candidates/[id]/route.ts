@@ -199,6 +199,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const row = appRows[0];
     if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+    // The drawer renders from resumeUrl, never the raw bytes — so drop the
+    // resumeBlob (up to ~8MB) from the response. Shipping it ballooned the
+    // JSON on every drawer open. Capture a flag first for the backfill gate.
+    const hasResumeBlob = row.resumeBlob != null;
+    delete row.resumeBlob;
+
     // ── Auto-backfill from the resume (FIRE-AND-FORGET) ────────────
     // The apply route fires an eager background extraction right
     // after submission, so most rows will already be populated by
@@ -220,7 +226,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // refetches, and the next drawer open picks up the parsed
     // values. Trade-off is acceptable — most candidates already
     // have complete data; this only affects a handful of rows.
-    if (row.resumeBlob && needsBackfill(row)) {
+    if (hasResumeBlob && needsBackfill(row)) {
       runResumeBackfill(id).catch(() => { /* logged inside helper */ });
     }
 
