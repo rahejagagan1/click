@@ -204,9 +204,36 @@ model User {
   // ── Legacy candidate-stage history (restored 2026-06-12) ──
   candidateStageMoves CandidateStage[] @relation("CandidateStageMover")
 
+  // ── Scheduled (effective-dated) reporting-manager changes ──
+  managerChangesAsEmployee   ManagerChangeSchedule[] @relation("MgrChangeEmployee")
+  managerChangesAsNewManager ManagerChangeSchedule[] @relation("MgrChangeNewManager")
+
   @@index([managerId])
   @@index([inlineManagerId])
   @@index([designationId])
+}
+
+// Effective-dated reporting-manager change. HR schedules a future
+// manager for an employee; the `reporting_manager_changes` daily cron
+// flips User.managerId on/after effectiveDate and marks the row applied.
+// Accessed via raw SQL in the API + cron (the typed client lags on the
+// dev/VPS box), so this model is the source of truth for migrations.
+model ManagerChangeSchedule {
+  id            Int       @id @default(autoincrement())
+  userId        Int       // employee whose reporting manager changes
+  newManagerId  Int       // the incoming reporting manager
+  effectiveDate DateTime  @db.Date // IST calendar day the change applies
+  status        String    @default("pending") // pending | applied | cancelled
+  note          String?
+  createdBy     Int? // HR/admin who scheduled it
+  createdAt     DateTime  @default(now())
+  appliedAt     DateTime?
+
+  user       User @relation("MgrChangeEmployee",  fields: [userId],       references: [id], onDelete: Cascade)
+  newManager User @relation("MgrChangeNewManager", fields: [newManagerId], references: [id], onDelete: Cascade)
+
+  @@index([status, effectiveDate])
+  @@index([userId])
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1253,6 +1280,15 @@ model EmployeeProfile {
   /// twice for the same probation window. HR clearing or extending
   /// probationEndDate re-arms the reminder on the next eligible day.
   probationReminderSentAt DateTime?
+  /// Set when probation is confirmed (Hire as Full-time, approved by HR).
+  /// Non-null = probation complete; the reminder sweep skips these.
+  probationConfirmedAt    DateTime?
+  /// HR user who approved the confirmation.
+  probationConfirmedById  Int?
+  /// Dedupe stamp for the in-app "probation review" nudge to the
+  /// reporting manager (parallel to probationReminderSentAt). Cleared
+  /// when probationEndDate changes so it re-arms on an extension.
+  probationManagerNotifiedAt DateTime?
   /// Structured education history. Array of
   /// { degree, institution, startOfCourse, endOfCourse, branch?, location? }
   /// matching the JobApplication.educationDetails shape used by the
@@ -1328,6 +1364,10 @@ model Shift {
   //                 (ceil(dayOfMonth/7) ∈ 1..5; e.g. [1,3] = 1st & 3rd).
   saturdayPolicy String   @default("all")
   saturdayWeeks  Int[]    @default([])
+  /// Brand scope ("NB Media" | "YT Labs" | null). Restored 2026-06-15 —
+  /// written via raw SQL but dropped from the DB by a past `prisma db
+  /// push`; re-added additively to match the live DB.
+  brand          String?
   createdAt      DateTime @default(now())
 
   userShifts UserShift[]
@@ -1690,6 +1730,57 @@ model EmployeeDocument {
 
   @@index([userId])
   @@index([category])
+}
+
+/// Letter/document generated for a NEW JOINER not yet in the DB
+/// (manual-entry mode in the letter generator). Parked here keyed by
+/// email; when a User with that email is created, attachPendingDocuments
+/// copies it into EmployeeDocument (their Documents tab). Accessed via
+/// raw SQL (the typed client lags), so this model is the source of truth
+/// for migrations.
+model PendingDocument {
+  id             Int       @id @default(autoincrement())
+  email          String // match key (compared case-insensitively)
+  fullName       String?
+  category       String    @default("employee_letter")
+  templateKey    String?
+  fileName       String
+  fileBlob       Bytes
+  fileMime       String    @default("application/pdf")
+  brand          String?
+  createdById    Int?
+  createdAt      DateTime  @default(now())
+  attachedUserId Int?
+  attachedAt     DateTime?
+
+  @@index([email])
+  @@index([attachedUserId])
+}
+
+/// Reporting-manager's probation review at the end of an employee's
+/// probation. The manager records a recommendation (extend / confirm as
+/// full-time / end employment) + required feedback from My Team →
+/// Probation Reviews; HR approves or rejects it from the dashboard, and
+/// the approval applies the action. Raw-SQL accessed (the typed client
+/// lags), so this model is the migration source of truth.
+model ProbationReview {
+  id              Int       @id @default(autoincrement())
+  employeeUserId  Int
+  managerId       Int
+  recommendation  String // extend | confirm | end
+  extendMonths    Int? // 1 | 3 | 6 (extend only; null = custom date)
+  proposedEndDate DateTime? // custom extend target
+  feedback        String    @db.Text
+  status          String    @default("pending") // pending | approved | rejected
+  hrNote          String?   @db.Text
+  decidedById     Int?
+  decidedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status])
+  @@index([employeeUserId])
+  @@index([managerId])
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2415,7 +2506,10 @@ model JobOpening {
   /// status = 'published').
   isOpen      Boolean  @default(true)
   createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  // @default(now()) mirrors the DB default — the hiring create handler
+  // writes JobOpening via raw SQL (bypassing Prisma's @updatedAt), so the
+  // column needs a DB-level default or that INSERT hits a NOT NULL error.
+  updatedAt   DateTime @default(now()) @updatedAt
 
   // ── Keka-parity additions ────────────────────────────────────────
   /// nb_media | yt_labs — which brand this opening belongs to. Drives
@@ -2469,6 +2563,26 @@ model JobOpening {
   /// edited copy lands here. Independent of jdFileUrl so the
   /// original file remains downloadable too.
   jdText     String? @db.Text
+
+  // ── Compensation + hiring-config (restored 2026-06-15) ──
+  // Dropped from the DB by a past `prisma db push`; re-added to match the
+  // live schema. The create handler (POST /api/hr/hiring/jobs) writes all
+  // of these, so their absence broke every draft/publish. Defaults mirror
+  // that handler.
+  currency                      String   @default("INR")
+  salaryMin                     Int?
+  salaryMax                     Int?
+  salaryUnit                    String   @default("lpa")
+  allowReapplyDays              Int      @default(0)
+  archiveAfterFilled            Boolean  @default(false)
+  inboundOwnerStrategy          String   @default("none")
+  inboundOwnerUserId            Int?
+  interviewFeedbackVisibility   String   @default("open")
+  recruitersAccessOwnOnly       Boolean  @default(false)
+  interviewersAccessOwnOnly     Boolean  @default(false)
+  notifyRecruiterOnNewCandidate Boolean  @default(true)
+  notifyHiringMgrOnNewCandidate Boolean  @default(true)
+  publishChannels               String[] @default(["career_site"])
 
   // Hiring team — who is responsible for this requisition.
   recruiterId     Int?
@@ -2588,6 +2702,13 @@ model JobApplication {
   /// once the kanban migration runs. New code should read currentStage.
   status  String  @default("new")
   hrNotes String? @db.Text
+
+  /// Recruiter who "owns" this candidate (the assign-owner action).
+  /// Restored 2026-06-15 — written via raw SQL but dropped from the DB by
+  /// a past `prisma db push`; re-added additively to match the live DB.
+  recruiterOwnerId Int?
+  /// Free-form candidate tags (add/remove-tag action) — TEXT[] in PG.
+  tags             String[] @default([])
 
   // ── Keka-parity additions ────────────────────────────────────────
   /// Current stage in the kanban pipeline (FK to HiringStage). Null

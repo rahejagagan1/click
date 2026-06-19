@@ -29,6 +29,8 @@ import { JOB_TITLES_YT_LABS }   from "@/lib/job-titles-yt-labs";
 import { DEPARTMENTS }          from "@/lib/departments";
 import { DEPARTMENTS_YT_LABS }  from "@/lib/departments-yt-labs";
 import { DateField }            from "@/components/ui/date-field";
+import { stripLeadingCompanyContent, looksLikeKnownTitle } from "@/lib/hr/jd-format";
+import { showToast } from "@/components/ui/Toast";
 import dynamic from "next/dynamic";
 import "react-quill-new/dist/quill.snow.css";
 
@@ -87,17 +89,30 @@ const JD_SECTION_HEADINGS = new Set([
   "about us", "about the company", "about nb media",
   "how to apply", "application process", "next steps",
   "education", "experience", "key skills",
+  // "Who We are Looking For"-style headers + common JD section names
+  // that were missing — so the editor promotes them to headings the
+  // same way the PDF does (keeps the preview WYSIWYG).
+  "who we are looking for", "who we're looking for",
+  "what we are looking for", "what we're looking for",
+  "who you are", "the ideal candidate", "ideal candidate",
+  "the role", "about the role", "role overview", "your role",
+  "what you'll bring", "what you will bring", "what you bring",
+  "what success looks like", "day to day", "day-to-day",
+  "responsibilities & duties", "duties", "your responsibilities",
 ]);
 
-function plainTextToQuillHtml(input: string): string {
+function plainTextToQuillHtml(input: string, knownTitle?: string): string {
   if (!input) return "";
   const trimmed = input.trim();
   if (trimmed.startsWith("<")) return input;
-  const lines = input.replace(/\r\n/g, "\n").split("\n");
+  // Drop a pasted company letterhead from the top so it can't double the
+  // .docx template's own letterhead (and drag in a typo'd email).
+  const lines = stripLeadingCompanyContent(input).replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];
   let bulletBuf: string[] = [];
   let numberedBuf: string[] = [];
-  let sawTitle = false; // only promote the FIRST job-title line
+  let sawTitle = false;   // only handle the FIRST job-title line
+  let sawContent = false; // true once the first real body line is emitted
   const escape = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const flushB = () => {
@@ -114,7 +129,12 @@ function plainTextToQuillHtml(input: string): string {
   };
   const flushAll = () => { flushB(); flushN(); };
   const isSectionHeading = (line: string): boolean => {
-    const norm = line.replace(/[:\s]+$/, "").trim().toLowerCase();
+    const norm = line.replace(/[:\s]+$/, "").trim().toLowerCase()
+      // Normalise curly/smart apostrophes (’ ‘ ʼ) to a straight ' so PDF
+      // extractor output like "What You’ll Do" matches the set entry
+      // "what you'll do" — otherwise that heading rendered as plain text
+      // in the editor while the PDF bolded it.
+      .replace(/[‘’ʼ]/g, "'");
     return JD_SECTION_HEADINGS.has(norm);
   };
   for (const raw of lines) {
@@ -139,12 +159,21 @@ function plainTextToQuillHtml(input: string): string {
     //    emitted the right HTML.
     if (!sawTitle) {
       const titleMatch = line.match(/^(?:Job\s+Description|Job\s+Title)\s*[-–—:]\s*(.+)$/i);
-      if (titleMatch) {
-        out.push(`<h2 class="ql-align-center">${escape(titleMatch[0])}</h2>`);
-        sawTitle = true;
-        continue;
-      }
+      // The .docx template already prints "Job Description - {{JobTitle}}",
+      // so DROP this line rather than promoting it — promoting it (the old
+      // behaviour) rendered the title twice (regression from b6d2471).
+      if (titleMatch) { sawTitle = true; continue; }
+      // Bare title (no "Job Description -" label): the template's
+      // {{JobTitle}}, the careers <h1>, and the preview header all print
+      // the title from the Title FIELD — so drop a leading body line that
+      // IS that title. Anchored to the known title (not line shape), so a
+      // real opening sentence is never eaten.
+      if (!sawContent && knownTitle && looksLikeKnownTitle(line, knownTitle)) { sawTitle = true; continue; }
     }
+    // Past the title checks → real body content. Gate the bare-title
+    // strip above to the FIRST content line only, so a role name that
+    // recurs mid-body is never silently deleted.
+    sawContent = true;
     // ── Known section heading anywhere in the document.
     if (isSectionHeading(line)) {
       out.push(`<h3>${escape(line.replace(/[:\s]+$/, ""))}</h3>`);
@@ -165,6 +194,21 @@ function plainTextToQuillHtml(input: string): string {
   }
   flushAll();
   return out.join("");
+}
+
+// First real content line of an extracted JD = its title. Used to seed
+// the Job Title field when HR hasn't typed one, so the preview header,
+// the body-strip, and the PDF/careers <h1> all show the title from one
+// source. Mirrors the title detection in plainTextToQuillHtml.
+function extractJdTitle(text: string): string {
+  if (!text) return "";
+  for (const raw of stripLeadingCompanyContent(text).replace(/\r\n/g, "\n").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^(?:Job\s+Description|Job\s+Title)\s*[-–—:]\s*(.+)$/i);
+    return (m ? m[1] : line).trim();
+  }
+  return "";
 }
 
 const LOCATIONS = ["Mohali", "Remote"];
@@ -507,11 +551,12 @@ export default function CreateJobWizard({
       // already saved and HR can add questions later via the per-job
       // Application Form panel.
       if (id && form.questions.length > 0) {
+        let failedQuestions = 0;
         for (const q of form.questions) {
           const text = q.text.trim();
           if (!text) continue;
           try {
-            await fetch(`/api/hr/hiring/jobs/${id}/questions`, {
+            const qRes = await fetch(`/api/hr/hiring/jobs/${id}/questions`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -523,7 +568,16 @@ export default function CreateJobWizard({
                   : undefined,
               }),
             });
-          } catch { /* non-fatal — job is already saved */ }
+            if (!qRes.ok) failedQuestions++;
+          } catch { failedQuestions++; }
+        }
+        // Non-fatal (the job is saved), but tell HR instead of silently
+        // dropping screening questions.
+        if (failedQuestions > 0) {
+          showToast(
+            `Job saved, but ${failedQuestions} screening question${failedQuestions === 1 ? "" : "s"} couldn't be saved — add them from the job's Application Form.`,
+            "error",
+          );
         }
       }
       // Successful create — wipe the saved draft so the next time
@@ -735,7 +789,13 @@ function Step1Description({
           (mammoth/pdf-parse on the server) and HR can tweak any line
           before publishing. The edited copy lands in JobOpening.jdText. */}
       {jdFile && (
-        <JdPreviewEditor file={jdFile} value={jdText} onChange={setJdText} jobTitle={form.title} />
+        <JdPreviewEditor
+          file={jdFile}
+          value={jdText}
+          onChange={setJdText}
+          jobTitle={form.title}
+          onTitleExtract={(t) => setField("title", t)}
+        />
       )}
     </SectionCard>
   );
@@ -747,12 +807,14 @@ function Step1Description({
 // fingerprint). Manual edits stay sticky — once HR types into the
 // textarea, we don't auto-overwrite on the next extraction.
 function JdPreviewEditor({
-  file, value, onChange, jobTitle,
+  file, value, onChange, jobTitle, onTitleExtract,
 }: {
   file: File;
   value: string;
   onChange: (v: string) => void;
   jobTitle: string;
+  /// Seed the Job Title field from the JD's first line when it's blank.
+  onTitleExtract?: (title: string) => void;
 }) {
   const [extracting, setExtracting] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
@@ -773,12 +835,29 @@ function JdPreviewEditor({
   // skip when the file object identity changes for unrelated reasons.
   const fp = `${file.name}-${file.size}-${file.lastModified}`;
   const dirtied = useRef<boolean>(false);
+  // Last raw extracted plain text — kept so we can re-derive (and re-strip
+  // the title from) the body if the Job Title arrives AFTER extraction.
+  const rawTextRef = useRef<string>("");
   const hasUnsavedChanges = value.trim() !== savedValue.trim();
   // canSave needs the body to be non-empty AFTER tag-stripping —
   // Quill emits "<p><br></p>" for an "empty" editor, which is
   // non-empty by string length but visually blank to the user.
   const stripped = value.replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;/g, " ").trim();
   const canSave  = !extracting && stripped.length > 0 && hasUnsavedChanges;
+
+  // The Job Title field + the JD uploader share this wizard step with no
+  // ordering, so HR may upload BEFORE typing the title. When the title
+  // arrives (or changes), re-derive the body from the raw extract so the
+  // now-known title gets stripped — but only while HR hasn't hand-edited.
+  // Without this the title renders in BOTH the header and the body (and
+  // persists into jdText → doubles on the PDF + careers too).
+  useEffect(() => {
+    if (!rawTextRef.current || dirtied.current) return;
+    const html = plainTextToQuillHtml(rawTextRef.current, jobTitle);
+    onChange(html);
+    setSavedValue(html);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobTitle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -802,11 +881,17 @@ function JdPreviewEditor({
         if (cancelled) return;
         if (!res.ok) throw new Error(j?.error || `Couldn't read the file (HTTP ${res.status})`);
         const text = String(j?.text ?? "").trim();
+        rawTextRef.current = text;
+        // Seed the Job Title from the JD's first line when HR hasn't
+        // typed one — so the preview header, the body-strip, and the
+        // PDF/careers <h1> all read the title from a single source.
+        const derivedTitle = extractJdTitle(text);
+        if (derivedTitle && !jobTitle.trim()) onTitleExtract?.(derivedTitle);
         // Convert plain-text extractor output → Quill HTML so the
         // editor opens with light auto-formatting (headings + lists)
         // that HR can refine via the toolbar. Already-HTML values
         // pass through untouched.
-        const html = plainTextToQuillHtml(text);
+        const html = plainTextToQuillHtml(text, jobTitle.trim() || derivedTitle);
         // Don't clobber HR's manual edits. Only auto-fill when the
         // editor is empty / untouched for the current file.
         if (!dirtied.current || !value.trim()) {
@@ -904,6 +989,19 @@ function JdPreviewEditor({
         className={`jd-quill-wrap bg-white ${expanded ? "flex-1 overflow-auto" : ""} ${extracting ? "opacity-60 pointer-events-none" : ""}`}
         style={{ fontFamily: '"Times New Roman", Georgia, serif' }}
       >
+        {/* Non-editable title header — mirrors the .docx {{JobTitle}} +
+            careers <h1> (big, centered) so the preview matches the PDF.
+            Lives OUTSIDE ReactQuill so it never leaks into value/onChange;
+            the matching title line is stripped from the body above. */}
+        {jobTitle && jobTitle.trim() ? (
+          <div
+            contentEditable={false}
+            aria-hidden="true"
+            style={{ fontSize: "20px", fontWeight: 700, textAlign: "center", margin: "18px 20px 14px", color: "#0f172a" }}
+          >
+            {jobTitle}
+          </div>
+        ) : null}
         <ReactQuill
           theme="snow"
           value={value}
@@ -1067,8 +1165,8 @@ function JdUploader({ file, setFile }: { file: File | null; setFile: (f: File | 
   const pick = (f: File | null) => {
     if (!f) { setFile(null); return; }
     const ext = f.name.toLowerCase().slice(f.name.lastIndexOf("."));
-    if (!ALLOWED.includes(ext)) return alert("Allowed: PDF, DOC, DOCX, RTF, TXT");
-    if (f.size > MAX)            return alert("Max 5 MB");
+    if (!ALLOWED.includes(ext)) return showToast("Allowed: PDF, DOC, DOCX, RTF, TXT", "error");
+    if (f.size > MAX)            return showToast("Max 5 MB", "error");
     setFile(f);
   };
   return (

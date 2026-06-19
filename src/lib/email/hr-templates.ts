@@ -372,22 +372,48 @@ ${candidateSign}`,
 export function teamWelcomeEmail(args: {
   newJoinerName: string;
   firstName: string;
-  homeCity: string;
-  priorRole: string;
+  homeCity?: string;
+  priorRole?: string;
   jobRole: string;
-  managerName: string;
-  officeLocation: string;
-  phone: string;
+  managerName?: string;
+  officeLocation?: string;
+  phone?: string;
   workEmail: string;
   pronoun?: "he" | "she" | "they";
 }): HRTemplate {
-  const {
-    newJoinerName, firstName, homeCity, priorRole, jobRole, managerName,
-    officeLocation, phone, workEmail, pronoun = "they",
-  } = args;
+  const { newJoinerName, firstName, jobRole, workEmail, pronoun = "they" } = args;
+  // Optional bits — render the sentence gracefully when a value is
+  // missing instead of emitting a raw {{placeholder}} into the email.
+  const homeCity       = (args.homeCity || "").trim();
+  const priorRole      = (args.priorRole || "").trim();
+  const managerName    = (args.managerName || "").trim();
+  const officeLocation = (args.officeLocation || "").trim();
+  const phone          = (args.phone || "").trim();
   const subj = { he: "He",   she: "She",  they: "They" }[pronoun];
   const obj  = { he: "him",  she: "her",  they: "them" }[pronoun];
   const poss = { he: "his",  she: "her",  they: "their" }[pronoun];
+
+  // Background clause — only include the parts we actually have.
+  let background = "";
+  if (homeCity && priorRole) background = `${firstName} hails from ${homeCity} and has worked as a ${priorRole}. `;
+  else if (homeCity)         background = `${firstName} hails from ${homeCity}. `;
+  else if (priorRole)        background = `${firstName} has worked as a ${priorRole}. `;
+  // "They have joined" vs "He/She has joined"; standalone uses the name.
+  const joinSubject = background ? subj : firstName;
+  const joinAux     = background && pronoun === "they" ? "have" : "has";
+  const para2 = `${background}${joinSubject} ${joinAux} joined us as a "${jobRole}" and we are highly enthusiastic about witnessing ${obj} apply ${poss} experience and educational background to contribute to the growth of our business.`;
+
+  // Reporting + how-to-reach. Drop the manager / office clauses cleanly
+  // when unknown so the prose still reads naturally.
+  const reportClause = managerName
+    ? `${firstName} will report to ${managerName} and collaborate closely with ${obj}. `
+    : `${firstName} will collaborate closely with the team. `;
+  const reach = [phone, workEmail].filter(Boolean).join(" and ");
+  const reachSentence = officeLocation
+    ? `${subj} shall be working from the ${officeLocation} office and you can reach ${obj} at ${reach} so be sure to drop by and say hello and take a moment to introduce yourselves to ${obj}.`
+    : `You can reach ${obj} at ${reach} so be sure to drop by and say hello and take a moment to introduce yourselves to ${obj}.`;
+  const para3 = `${reportClause}${reachSentence} A warm and friendly welcome can go a long way in making someone feel at home.`;
+
   return {
     subject: `Cheers to New Faces! Introducing ${newJoinerName} to the Team NB Media`,
     body:
@@ -395,13 +421,111 @@ export function teamWelcomeEmail(args: {
 
 I am thrilled to announce that we have a new addition to our NB Media Team and I am sure you will join me in extending a warm welcome to ${newJoinerName}.
 
-${firstName} hails from ${homeCity} and has worked as a ${priorRole}. ${subj} has joined us as a "${jobRole}" and we are highly enthusiastic about witnessing ${obj} apply ${poss} experience and educational background to contribute to the growth of our business.
+${para2}
 
-${firstName} will report to ${managerName} and collaborate closely with ${obj}. ${firstName} shall be working from the ${officeLocation} office and you can reach ${obj} at ${phone} and ${workEmail} so be sure to drop by and say hello and take a moment to introduce yourselves to ${obj}. A warm and friendly welcome can go a long way in making someone feel at home.
+${para3}
 
 Once again, welcome @${firstName}. We are delighted to have you with us and look forward to achieving great things together.
 
 ${sign}`,
+  };
+}
+
+// ── 10b. Team Welcome — rich HTML version ────────────────────────────
+// Same copy as teamWelcomeEmail() above (kept verbatim with the approved
+// doc), but rendered as the centered, formatted announcement HR actually
+// sends: every paragraph centered, key terms bold, the work email a
+// mailto link, and the new joiner's photo embedded inline + centered
+// between the intro and the reporting paragraphs. The photo rides the
+// existing inline-CID pipeline (sender.ts already does this for the logo)
+// — pass `photoSrc: "cid:joinerPhoto"` for a real send, or a data: URI
+// for an in-app preview. Title ("Ms." / "Mr.") is derived from gender by
+// the caller. Sign-off stays the generic "HR Department / NB-Media".
+function escHtml(s: string): string {
+  return String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+export function teamWelcomeEmailHtml(args: {
+  newJoinerName: string;
+  firstName: string;
+  homeCity?: string;
+  priorRole?: string;
+  jobRole: string;
+  managerName?: string;
+  officeLocation?: string;
+  phone?: string;
+  workEmail: string;
+  pronoun?: "he" | "she" | "they";
+  managerPronoun?: "he" | "she" | "they"; // for "collaborate closely with him/her/them"
+  title?: string;       // "Ms." | "Mr." | "" — caller derives from gender
+  photoSrc?: string;    // "cid:joinerPhoto" (send) or a data: URI (preview)
+}): { subject: string; html: string } {
+  const { newJoinerName, firstName, jobRole, workEmail, pronoun = "they", title = "" } = args;
+  const homeCity       = (args.homeCity || "").trim();
+  const priorRole      = (args.priorRole || "").trim();
+  const managerName    = (args.managerName || "").trim();
+  const officeLocation = (args.officeLocation || "").trim();
+  const phone          = (args.phone || "").trim();
+  const subj = { he: "He",  she: "She",  they: "They" }[pronoun];
+  const obj  = { he: "him", she: "her",  they: "them" }[pronoun];
+  const poss = { he: "his", she: "her",  they: "their" }[pronoun];
+
+  const nameBold = `<strong>${escHtml((title ? `${title} ` : "") + newJoinerName)}</strong>`;
+  const fName    = escHtml(firstName);
+
+  // Para 1
+  const p1 = `I am thrilled to announce that we have a new addition to our <strong>NB Media</strong> Team and I am sure you will join me in extending a warm welcome to ${nameBold}.`;
+
+  // Para 2 — background + role (graceful drop, same logic as plain version)
+  let background = "";
+  if (homeCity && priorRole) background = `${fName} hails from ${escHtml(homeCity)} and has worked as a ${escHtml(priorRole)}. `;
+  else if (homeCity)         background = `${fName} hails from ${escHtml(homeCity)}. `;
+  else if (priorRole)        background = `${fName} has worked as a ${escHtml(priorRole)}. `;
+  const joinSubject = background ? subj : fName;
+  const joinAux     = background && pronoun === "they" ? "have" : "has";
+  const p2 = `${background}${joinSubject} ${joinAux} joined us as a <strong>"${escHtml(jobRole)}"</strong> and we are highly enthusiastic about witnessing ${obj} apply ${poss} experience and educational background to contribute to the growth of our business.`;
+
+  // Inline, centered photo — only when one is supplied.
+  const photoBlock = args.photoSrc
+    ? `<div style="text-align:center;margin:24px 0;"><img src="${args.photoSrc}" alt="${escHtml(newJoinerName)}" style="max-width:360px;width:80%;height:auto;border-radius:4px;" /></div>`
+    : "";
+
+  // Para 3 — reporting + how to reach (email as a mailto link). The
+  // "collaborate closely with X" refers to the MANAGER, so it uses the
+  // manager's pronoun (defaults to gender-neutral "them" when unknown),
+  // not the joiner's.
+  const mgrObj = args.managerPronoun
+    ? { he: "him", she: "her", they: "them" }[args.managerPronoun]
+    : "them";
+  const reportClause = managerName
+    ? `${fName} will report to ${escHtml(managerName)} and collaborate closely with ${mgrObj}. `
+    : `${fName} will collaborate closely with the team. `;
+  const emailLink = workEmail ? `<a href="mailto:${escHtml(workEmail)}" style="color:#1155cc;">${escHtml(workEmail)}</a>` : "";
+  const reach = [phone ? `<strong>${escHtml(phone)}</strong>` : "", emailLink].filter(Boolean).join(" and ");
+  const reachTail = `you can reach ${obj} at ${reach} so be sure to drop by and say hello and take a moment to introduce yourselves to ${obj}.`;
+  const reachSentence = officeLocation
+    ? `${subj} shall be working from the <strong>${escHtml(officeLocation)} office</strong> and ${reachTail}`
+    : `${reachTail.charAt(0).toUpperCase()}${reachTail.slice(1)}`;
+  const p3 = `${reportClause}${reachSentence} A warm and friendly welcome can go a long way in making someone feel at home.`;
+
+  const closing = `Once again, welcome @${fName}. We are delighted to have you with us and look forward to achieving great things together.`;
+
+  const C = (inner: string) => `<div style="text-align:center;margin:0 0 16px;">${inner}</div>`;
+  const html =
+`<div style="font-family:'Times New Roman',Times,serif;font-size:15px;line-height:1.6;color:#1a1a1a;max-width:680px;margin:0 auto;">
+${C("Dear Team,")}
+${C(p1)}
+${C(p2)}
+${photoBlock}
+${C(p3)}
+${C(closing)}
+<div style="text-align:left;margin-top:8px;">Warms Regards,<br/>HR Department<br/><strong>NB-Media</strong></div>
+</div>`;
+
+  return {
+    subject: `Cheers to New Faces! Introducing ${newJoinerName} to the Team NB Media`,
+    html,
   };
 }
 
