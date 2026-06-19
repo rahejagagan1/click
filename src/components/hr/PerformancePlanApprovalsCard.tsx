@@ -173,7 +173,7 @@ export default function PerformancePlanApprovalsCard({ standalone = false, brand
   ) : (
     <div className="space-y-2">
       {onPip.map((e) => (
-        <div key={e.userId} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 bg-white px-3 py-2.5">
+        <div key={e.userId} className="flex items-start justify-between gap-3 rounded-lg border border-slate-100 bg-white px-3 py-2.5">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               <Link href={`/dashboard/hr/people/${e.userId}`} className="truncate text-[12.5px] font-semibold text-slate-800 hover:text-[#008CFF] hover:underline">{e.name}</Link>
@@ -181,6 +181,11 @@ export default function PerformancePlanApprovalsCard({ standalone = false, brand
               {e.lastReviewStatus === "pending" && <span className="shrink-0 rounded-full bg-[#008CFF]/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-[#008CFF]">review pending</span>}
             </div>
             <p className="truncate text-[11px] text-slate-500">{e.designation || "—"} · mgr {e.managerName || "—"}</p>
+            {e.pipReason && (
+              <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-slate-600" title={e.pipReason}>
+                <span className="font-medium text-slate-400">Reason:</span> {e.pipReason}
+              </p>
+            )}
           </div>
           <div className="shrink-0 text-right">
             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold ring-1 ${daysPill(e.daysRemaining)}`}>
