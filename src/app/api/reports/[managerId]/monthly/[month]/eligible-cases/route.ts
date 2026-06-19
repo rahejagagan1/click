@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { getMonthlyReportWindow } from "@/lib/reports/monthly-window";
-import { resolveReportTeam } from "@/lib/reports/team-snapshot";
+import { resolveReportTeam, teamFunction } from "@/lib/reports/team-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -48,8 +48,8 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         // later switched managers. Falls back to live `User.managerId`
         // for drafts and for legacy locked rows that pre-date snapshots.
         const team = await resolveReportTeam(managerId, { kind: "monthly", month: monthIndex, year });
-        const editorIds = team.filter((m) => m.role === "editor").map((m) => m.id);
-        const writerIds = team.filter((m) => m.role === "writer").map((m) => m.id);
+        const editorIds = team.filter((m) => teamFunction(m) === "editor").map((m) => m.id);
+        const writerIds = team.filter((m) => teamFunction(m) === "writer").map((m) => m.id);
 
         // Resolve the team's caseIds via the relevant subtask kind done in window.
         const [editingSubtasks, scriptingSubtasks] = await Promise.all([
