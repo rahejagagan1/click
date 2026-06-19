@@ -669,11 +669,10 @@ export default function ApprovalsPanel({
 
       <div className={embedded ? "py-5" : "px-6 py-5"}>
         {/* ── Page header card ──────────────────────────────────────
-            Title + brand scope subtitle on the left, a total chip and
-            inline search on the right. Replaces the bare h1 + scattered
-            controls layout — single horizontal lane keeps the eye in
-            one place. */}
-        <div className="mb-4 rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/60 px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            Title + brand scope subtitle, with the inline search grouped
+            right beside it on the LEFT (no justify-between) so HR can
+            search without reaching to the far-right corner. */}
+        <div className="mb-4 rounded-xl border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#001529]/60 px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-5">
           <div className="min-w-0">
             <h1 className="text-[17px] font-semibold text-slate-800 dark:text-white">
               {tab === "leave"      ? "Leave approvals"             :
