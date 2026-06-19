@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
-import { resolveReportTeam } from "@/lib/reports/team-snapshot";
+import { resolveReportTeam, teamFunction } from "@/lib/reports/team-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
         // snapshot so a researcher who later moved managers still shows
         // up under the period when they were on this manager's team.
         const team = await resolveReportTeam(managerId, { kind: "monthly", month, year });
-        const researchers = team.filter((m) => m.role === "researcher");
+        const researchers = team.filter((m) => teamFunction(m) === "researcher");
 
         if (researchers.length === 0) {
             return NextResponse.json({ stats: [] });

@@ -23,9 +23,45 @@ export type TeamMember = {
   id: number;
   name: string;
   role: string;
+  // The member's report function ("editor" | "writer" | "researcher" | "qa"),
+  // resolved LIVE from their current designation (Designation.scorecardFunction).
+  // This is the source of truth post-RBAC-migration: a user's job now lives on
+  // their designation, while legacy `role` is increasingly just "member". null
+  // when the user has no designation (then callers fall back to `role`).
+  scorecardFunction: string | null;
   orgLevel: string | null;
   profilePictureUrl: string | null;
 };
+
+/**
+ * The effective report function for a team member: prefer the designation's
+ * scorecardFunction (RBAC source of truth), fall back to the legacy `role`.
+ * Use this everywhere the report engine partitions a team into
+ * editors / writers / researchers / qa.
+ */
+export function teamFunction(m: TeamMember): string {
+  return (m.scorecardFunction || m.role || "").toLowerCase();
+}
+
+/** Resolve current designation scorecardFunction for a set of user ids. */
+async function scorecardByIds(ids: number[]): Promise<Map<number, string | null>> {
+  const map = new Map<number, string | null>();
+  if (ids.length === 0) return map;
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ id: number; scorecardFunction: string | null }>>(
+      `SELECT u."id", d."scorecardFunction"
+         FROM "User" u
+         LEFT JOIN "Designation" d ON d."id" = u."designationId"
+        WHERE u."id" = ANY($1::int[])`,
+      ids,
+    );
+    for (const r of rows) map.set(r.id, r.scorecardFunction ?? null);
+  } catch (e) {
+    // Column/relation missing (pre-migrate) — callers fall back to legacy role.
+    console.warn(`[team-snapshot] scorecard resolve failed:`, e);
+  }
+  return map;
+}
 
 // `template` is optional for back-compat: when present the snapshot read/write
 // targets the specific (manager, template, period) report row; when absent it
@@ -84,10 +120,12 @@ export async function liveTeam(managerId: number): Promise<TeamMember[]> {
     },
     orderBy: { name: "asc" },
   });
+  const fn = await scorecardByIds(rows.map((r) => r.id));
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
     role: String(r.role),
+    scorecardFunction: fn.get(r.id) ?? null,
     orgLevel: r.orgLevel ?? null,
     profilePictureUrl: r.profilePictureUrl ?? null,
   }));
@@ -149,15 +187,22 @@ async function readSnapshot(
     // in case the underlying driver hands back a string.
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (!Array.isArray(parsed)) return null;
-    return parsed
+    const members = parsed
       .filter((u: any) => u && typeof u.id === "number" && typeof u.name === "string")
       .map((u: any) => ({
-        id: u.id,
-        name: u.name,
+        id: u.id as number,
+        name: u.name as string,
         role: String(u.role ?? "member"),
+        scorecardFunction: null as string | null,
         orgLevel: u.orgLevel ?? null,
         profilePictureUrl: u.profilePictureUrl ?? null,
       }));
+    // The snapshot froze the legacy `role`, which is now stale post-RBAC-migration.
+    // Resolve the report function live from each member's current designation so
+    // editors/writers are partitioned correctly regardless of when the report locked.
+    const fn = await scorecardByIds(members.map((m) => m.id));
+    for (const m of members) m.scorecardFunction = fn.get(m.id) ?? null;
+    return members;
   } catch (e) {
     // Column missing (pre-migrate) — treat as "no snapshot, fall back to live".
     console.warn(`[team-snapshot] read failed for managerId=${managerId}:`, e);

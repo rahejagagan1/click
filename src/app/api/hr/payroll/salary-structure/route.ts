@@ -126,6 +126,86 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // ── Auto-arrears for a retroactive revision ──────────────────────────
+    // When this revision's effectiveFrom lands in a PAST (already-paid) month,
+    // top up the shortfall: for every already-generated payslip from the
+    // effective month up to last month, pay (new base × that month's paid
+    // factor − what was actually paid as base) as an "arrears" Adhoc Payment
+    // in the CURRENT month. It lands as a reviewable line in Run Payroll →
+    // Adhoc Payments (not paid silently). Best-effort + idempotent: the
+    // current-month arrears line for this user is rebuilt on every save, and
+    // finalised/locked payroll runs are never re-paid (the run lock guards
+    // re-generation).
+    try {
+      const uid = parseInt(userId);
+      const eff = new Date(effectiveFrom);
+      const effM = eff.getUTCMonth(), effY = eff.getUTCFullYear();
+      const istNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const curM = istNow.getMonth(), curY = istNow.getFullYear();
+      const ymIndex = (m: number, y: number) => y * 12 + m;
+      const num = (v: any) => parseFloat(String(v ?? 0)) || 0;
+      const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+      // Only a retroactive revision (effective strictly before the current
+      // month) can produce arrears.
+      if (ymIndex(effM, effY) < ymIndex(curM, curY)) {
+        // New structure's monthly base earnings (same components generate uses;
+        // the regular-split components sum to CTC, so this is CTC / 12).
+        const newMonthlyBase = (num(data.basic) + num(data.hra) + num(data.dearnessAllowance)
+          + num(data.conveyanceAllowance) + num(data.medicalAllowance) + num(data.specialAllowance)
+          + num(data.pfEmployee)) / 12;
+
+        // The already-paid months in [effective month .. last month).
+        const range: { month: number; year: number }[] = [];
+        for (let i = ymIndex(effM, effY); i < ymIndex(curM, curY); i++) {
+          range.push({ month: ((i % 12) + 12) % 12, year: Math.floor(i / 12) });
+        }
+        const slips = range.length === 0 ? [] : await prisma.payslip.findMany({
+          where: { userId: uid, OR: range.map((r) => ({ month: r.month, year: r.year })) },
+          select: { month: true, year: true, workingDays: true, presentDays: true, grossEarnings: true, bonus: true },
+        });
+
+        if (slips.length > 0) {
+          // Adhoc payments already in those months, so we compare the BASE pay
+          // (excluding bonus + any prior adhoc/arrears).
+          const adhoc = await prisma.$queryRawUnsafe<{ month: number; year: number; amt: string }[]>(
+            `SELECT month, year, COALESCE(SUM(amount),0)::text AS amt
+               FROM "AdhocLineItem"
+              WHERE "userId" = $1 AND kind = 'payment'
+              GROUP BY month, year`, uid);
+          const adhocByYm = new Map(adhoc.map((a) => [ymIndex(a.month, a.year), num(a.amt)]));
+
+          let total = 0;
+          const parts: string[] = [];
+          for (const p of slips) {
+            const wd = num(p.workingDays) || 1;
+            const factor = num(p.presentDays) / wd;          // = that month's lopFactor
+            const correctBase = newMonthlyBase * factor;
+            const paidBase = num(p.grossEarnings) - num(p.bonus) - (adhocByYm.get(ymIndex(p.month, p.year)) || 0);
+            const diff = Math.round((correctBase - paidBase) * 100) / 100;
+            if (diff > 0) { total += diff; parts.push(`${MONTHS[p.month]} ${p.year}: +₹${Math.round(diff)}`); }
+          }
+          total = Math.round(total * 100) / 100;
+
+          // Rebuild this user's current-month arrears line (idempotent).
+          await prisma.$executeRawUnsafe(
+            `DELETE FROM "AdhocLineItem" WHERE "userId" = $1 AND month = $2 AND year = $3 AND kind = 'payment' AND type = 'arrears'`,
+            uid, curM, curY);
+          if (total > 0) {
+            await prisma.$executeRawUnsafe(
+              `INSERT INTO "AdhocLineItem" ("userId", month, year, kind, type, amount, comment, "createdBy")
+               VALUES ($1, $2, $3, 'payment', 'arrears', $4, $5, $6)`,
+              uid, curM, curY, total.toFixed(2),
+              `Salary arrears (auto): ${parts.join("; ")} — revised to CTC ₹${Math.round(num(data.ctc))} effective ${MONTHS[effM]} ${effY}`,
+              user.dbId ?? null);
+          }
+        }
+      }
+    } catch (arrErr) {
+      // Arrears is best-effort — the structure save itself already succeeded.
+      console.error("[salary-structure] auto-arrears failed (structure still saved):", arrErr);
+    }
+
     return NextResponse.json(structure, { status: 201 });
   } catch (e) { return serverError(e, "POST /api/hr/payroll/salary-structure"); }
 }
