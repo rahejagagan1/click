@@ -793,19 +793,24 @@ export default function MonthlyReportPage() {
         if (Array.isArray(eligibleData?.writerCases)) setWriterEligibleCases(eligibleData.writerCases);
     }, [eligibleData]);
 
+    // Effective report function: prefer the designation's scorecardFunction
+    // (RBAC source of truth), fall back to the legacy `role`. Mirrors
+    // teamFunction() on the server (team-snapshot.ts).
+    const memberFn = (u: any): string => String(u?.scorecardFunction || u?.role || "").toLowerCase();
+
     const editors = useMemo(() => {
         if (!data?.teamMembers) return [];
-        return data.teamMembers.filter((u: any) => u.role === "editor");
+        return data.teamMembers.filter((u: any) => memberFn(u) === "editor");
     }, [data]);
 
     const writers = useMemo(() => {
         if (!data?.teamMembers) return [];
-        return data.teamMembers.filter((u: any) => u.role === "writer");
+        return data.teamMembers.filter((u: any) => memberFn(u) === "writer");
     }, [data]);
 
     const researchers = useMemo(() => {
         if (!data?.teamMembers) return [];
-        return data.teamMembers.filter((u: any) => u.role === "researcher");
+        return data.teamMembers.filter((u: any) => memberFn(u) === "researcher");
     }, [data]);
 
     // ── Editable state for all manager fields ──────────────

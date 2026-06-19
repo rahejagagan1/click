@@ -112,7 +112,31 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         data.status = newStatusRaw;
       }
 
-      await prisma.leaveApplication.update({ where: { id: appId }, data });
+      // When the leave TYPE changes on a leave that currently holds a balance
+      // debit (approved → usedDays, pending/partially → pendingDays), move that
+      // debit from the old type's balance to the new type's, so the buckets
+      // stay correct. Upsert the new-type row if the employee has none yet.
+      const typeChanging = Number.isInteger(newTypeIdRaw) && newTypeIdRaw !== application.leaveTypeId;
+      const debitDays = parseFloat(application.totalDays.toString()) || 0;
+      const isApproved = application.status === "approved";
+      const isPending  = application.status === "pending" || application.status === "partially_approved";
+
+      await prisma.$transaction(async (tx) => {
+        if (typeChanging && debitDays > 0 && (isApproved || isPending)) {
+          const dec = isApproved ? { usedDays: { decrement: debitDays } } : { pendingDays: { decrement: debitDays } };
+          const inc = isApproved ? { usedDays: { increment: debitDays } } : { pendingDays: { increment: debitDays } };
+          await tx.leaveBalance.updateMany({
+            where: { userId: application.userId, leaveTypeId: application.leaveTypeId, year },
+            data:  dec,
+          });
+          await tx.leaveBalance.upsert({
+            where:  { userId_leaveTypeId_year: { userId: application.userId, leaveTypeId: newTypeIdRaw, year } },
+            create: { userId: application.userId, leaveTypeId: newTypeIdRaw, year, totalDays: 0, usedDays: isApproved ? debitDays : 0, pendingDays: isPending ? debitDays : 0 },
+            update: inc,
+          });
+        }
+        await tx.leaveApplication.update({ where: { id: appId }, data });
+      });
       return NextResponse.json({ success: true });
     }
 
