@@ -16,6 +16,7 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { isLeadershipOrHR } from "@/lib/access";
 import { DateField } from "@/components/ui/date-field";
+import { JOB_TITLES } from "@/lib/job-titles";
 import { Search, Save, FileText, RefreshCw } from "lucide-react";
 
 // Reuse the same Quill build the JD editor uses so HR gets a
@@ -106,6 +107,23 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
     `/api/hr/letter-templates/${key}${brandQs}`, fetcher,
   );
 
+  // Active brand for this session — URL brand wins, else the template's,
+  // else the viewer's. Drives both the employee-picker filter AND the
+  // new-joiner brand (template variant + letterhead chrome).
+  const activeBrand: "NB Media" | "YT Labs" =
+    brandSlug === "yt-labs" ? "YT Labs"
+    : brandSlug === "nb-media" ? "NB Media"
+    : (((tpl?.businessUnit as any) || (me?.businessUnit as any) || "NB Media") as "NB Media" | "YT Labs");
+
+  // "employee" = pick someone already in the system; "manual" = a new
+  // joiner not in the DB yet (the letter is parked + auto-attached when
+  // they're onboarded, matched by email).
+  const [mode, setMode] = useState<"employee" | "manual">("employee");
+  const [manualFields, setManualFields] = useState({
+    name: "", email: "", designation: "", department: "",
+    joiningDate: "", gender: "", employeeNumber: "",
+  });
+
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [customValues, setCustomValues] = useState<Record<string, string>>({});
   // Salary type of the picked employee — "intern" or "regular".
@@ -113,6 +131,13 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
   // checkbox for interns (interns don't have PF). Set in the
   // auto-fill effect below.
   const [employeeSalaryType, setEmployeeSalaryType] = useState<string | null>(null);
+  // Editable designation for the picked employee. Lets HR correct the job
+  // title right here — it PUTs to the profile, and since the letter reads
+  // designation from the profile server-side, the change flows straight
+  // into the document. Saves a trip to the Edit Profile page.
+  const [designationDraft, setDesignationDraft]       = useState("");
+  const [savingDesignation, setSavingDesignation]     = useState(false);
+  const [designationSaved, setDesignationSaved]       = useState(false);
 
   // Auto-fill custom fields from the picked employee's profile +
   // salary structure so HR doesn't retype data we already have.
@@ -196,6 +221,13 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
     })();
     return () => { cancelled = true; };
   }, [employee?.id]);
+
+  // Keep the editable designation in sync with whoever is picked.
+  useEffect(() => {
+    setDesignationDraft(employee?.employeeProfile?.designation ?? "");
+    setDesignationSaved(false);
+  }, [employee?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [preview, setPreview] = useState<{ html: string; missing: string[] } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -221,18 +253,25 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
 
   const cats = Array.isArray(tpl.customFields) ? tpl.customFields : [];
 
+  // Ready to preview/generate? Employee mode needs a pick; manual mode
+  // needs at least a name + email (email is the later match key).
+  const ready = mode === "employee"
+    ? !!employee
+    : !!(manualFields.name.trim() && manualFields.email.trim());
+
+  const buildBody = (action: "preview" | "pdf") =>
+    mode === "manual"
+      ? { manual: { ...manualFields, brand: activeBrand }, customFields: customValues, action }
+      : { employeeId: employee?.id, customFields: customValues, action };
+
   const refreshPreview = async () => {
-    if (!employee) { setPreview(null); return; }
+    if (!ready) { setPreview(null); return; }
     setPreviewing(true);
     try {
       const res = await fetch(`/api/hr/letter-templates/${tpl.key}/generate`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          employeeId:   employee.id,
-          customFields: customValues,
-          action:       "preview",
-        }),
+        body:    JSON.stringify(buildBody("preview")),
       });
       if (!res.ok) { alert("Preview failed"); return; }
       const j = await res.json();
@@ -242,18 +281,43 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
     }
   };
 
+  // Persist a designation edit to the picked employee's profile, then
+  // mirror it locally so the preview / generated letter pick it up.
+  const saveDesignation = async () => {
+    if (!employee?.id) return;
+    const next = designationDraft.trim();
+    setSavingDesignation(true);
+    try {
+      const res = await fetch(`/api/hr/people/${employee.id}`, {
+        method:  "PUT",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ designation: next }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Couldn't update designation");
+      }
+      setEmployee((e) => e ? { ...e, employeeProfile: { ...(e.employeeProfile ?? {}), designation: next } } : e);
+      setPreview(null);             // force a fresh preview with the new title
+      setDesignationSaved(true);
+    } catch (err: any) {
+      alert(err?.message || "Couldn't update designation");
+    } finally {
+      setSavingDesignation(false);
+    }
+  };
+
   const generatePdf = async () => {
-    if (!employee) { alert("Pick an employee first."); return; }
+    if (!ready) {
+      alert(mode === "manual" ? "Enter at least a name and email for the new joiner." : "Pick an employee first.");
+      return;
+    }
     setGenerating(true);
     try {
       const res = await fetch(`/api/hr/letter-templates/${tpl.key}/generate`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          employeeId:   employee.id,
-          customFields: customValues,
-          action:       "pdf",
-        }),
+        body:    JSON.stringify(buildBody("pdf")),
       });
       if (!res.ok) {
         // Try to surface the server's error message; fall back to
@@ -282,7 +346,8 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
       const isPdf = ct.includes("application/pdf");
       const ext = isPdf ? "pdf" : "html";
       const safeName = tpl.title.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "") || "letter";
-      const filename = `${safeName}-${employee.name.replace(/[^A-Za-z0-9]+/g, "-")}.${ext}`;
+      const who = (mode === "manual" ? manualFields.name : employee?.name) || "recipient";
+      const filename = `${safeName}-${who.replace(/[^A-Za-z0-9]+/g, "-")}.${ext}`;
       const a = document.createElement("a");
       a.href = url;
       a.download = filename;
@@ -297,7 +362,9 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
       // start the download.
       setTimeout(() => URL.revokeObjectURL(url), 5000);
 
-      if (!isPdf) {
+      if (mode === "manual" && isPdf) {
+        alert(`Saved. This document is parked for ${manualFields.email} and will auto-attach to their Documents once they're added to the system.`);
+      } else if (!isPdf) {
         alert(
           "LibreOffice isn't available on the server, so a print-ready HTML was downloaded instead. " +
           "Open the file and use the browser's Print → Save as PDF to convert it.",
@@ -342,21 +409,97 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-5">
         {/* ── Left: form ─────────────────────────────────────────── */}
         <div className="space-y-4">
-          <section className="rounded-xl border border-slate-200 bg-white p-5">
-            <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Employee</label>
-            <EmployeePicker
-              value={employee}
-              onChange={(v) => { setEmployee(v); setPreview(null); }}
-              // Prefer the URL brand (set by the HR-Dashboard
-              // brand-switcher) over the viewer's session brand so
-              // a developer navigating into the YT Labs FnF
-              // template sees only YT Labs employees in the picker.
-              brand={
-                brandSlug === "yt-labs" ? "YT Labs"
-                : brandSlug === "nb-media" ? "NB Media"
-                : (tpl?.businessUnit ?? me?.businessUnit ?? "NB Media")
-              }
-            />
+          <section className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
+            {/* Recipient mode — existing employee vs new joiner */}
+            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+              <button type="button" onClick={() => { setMode("employee"); setPreview(null); }}
+                className={`px-3 py-1.5 rounded-md text-[12px] font-semibold transition-colors ${mode === "employee" ? "bg-white text-[#008CFF] shadow-sm" : "text-slate-600 hover:text-slate-900"}`}>
+                Existing employee
+              </button>
+              <button type="button" onClick={() => { setMode("manual"); setEmployee(null); setPreview(null); }}
+                className={`px-3 py-1.5 rounded-md text-[12px] font-semibold transition-colors ${mode === "manual" ? "bg-white text-[#008CFF] shadow-sm" : "text-slate-600 hover:text-slate-900"}`}>
+                New joiner (not in system)
+              </button>
+            </div>
+
+            {mode === "employee" ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Employee</label>
+                  {/* brand drives the picker filter so HR never picks a
+                      cross-brand employee for a brand-specific letter. */}
+                  <EmployeePicker
+                    value={employee}
+                    onChange={(v) => { setEmployee(v); setPreview(null); }}
+                    brand={activeBrand}
+                  />
+                </div>
+                {/* Inline designation editor — change the job title here and
+                    it saves straight to the profile (the letter uses it). */}
+                {employee && (
+                  <div>
+                    <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Designation / Job title</label>
+                    <div className="mt-1 flex items-center gap-2">
+                      <select
+                        value={designationDraft}
+                        onChange={(e) => { setDesignationDraft(e.target.value); setDesignationSaved(false); }}
+                        className="flex-1 h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]"
+                      >
+                        <option value="">— Select designation —</option>
+                        {/* Keep the current title selectable even if it's not in
+                            the canonical list, so we never silently change it. */}
+                        {designationDraft && !JOB_TITLES.includes(designationDraft) && (
+                          <option value={designationDraft}>{designationDraft}</option>
+                        )}
+                        {JOB_TITLES.map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={saveDesignation}
+                        disabled={savingDesignation || designationDraft.trim() === (employee.employeeProfile?.designation ?? "").trim()}
+                        className="h-9 px-4 rounded-lg bg-[#008CFF] text-white text-[12px] font-semibold transition-colors hover:bg-[#0070cc] disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {savingDesignation ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {designationSaved
+                        ? <span className="font-medium text-emerald-600">Saved — updated on the profile and this letter.</span>
+                        : "Changes the employee's designation directly — no need to open Edit Profile."}
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="rounded-md bg-blue-50/70 border border-blue-200 px-3 py-2 text-[11.5px] text-blue-900 leading-snug">
+                  This person isn't in the system yet. The document is <strong>parked by email</strong> (brand: {activeBrand}) and auto-attaches to their Documents tab once they're onboarded.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <ManualInput label="Full name" required value={manualFields.name} onChange={(v) => { setManualFields((s) => ({ ...s, name: v })); setPreview(null); }} placeholder="e.g. Priya Sharma" />
+                  <ManualInput label="Email" required value={manualFields.email} onChange={(v) => { setManualFields((s) => ({ ...s, email: v })); setPreview(null); }} placeholder="priya@example.com" />
+                  <ManualInput label="Designation / Job title" value={manualFields.designation} onChange={(v) => setManualFields((s) => ({ ...s, designation: v }))} placeholder="e.g. Content Writer" />
+                  <ManualInput label="Department" value={manualFields.department} onChange={(v) => setManualFields((s) => ({ ...s, department: v }))} placeholder="e.g. Content" />
+                  <div>
+                    <label className="text-[11.5px] text-slate-600 mb-1 block">Joining date</label>
+                    <DateField value={manualFields.joiningDate} onChange={(v) => setManualFields((s) => ({ ...s, joiningDate: v }))} className="w-full" />
+                  </div>
+                  <div>
+                    <label className="text-[11.5px] text-slate-600 mb-1 block">Gender</label>
+                    <select value={manualFields.gender} onChange={(e) => setManualFields((s) => ({ ...s, gender: e.target.value }))}
+                      className="w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]">
+                      <option value="">—</option>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <ManualInput label="HRM / Employee no. (optional)" value={manualFields.employeeNumber} onChange={(v) => setManualFields((s) => ({ ...s, employeeNumber: v }))} placeholder="auto-assigned on join if blank" />
+                </div>
+              </div>
+            )}
           </section>
 
           {cats.length > 0 && (
@@ -461,7 +604,7 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
             <button
               type="button"
               onClick={refreshPreview}
-              disabled={!employee || previewing}
+              disabled={!ready || previewing}
               className="inline-flex items-center gap-1.5 h-9 px-4 border border-slate-200 hover:border-slate-300 rounded-lg text-[12.5px] font-semibold text-slate-700 hover:text-slate-900 disabled:opacity-50"
             >
               <RefreshCw size={13} className={previewing ? "animate-spin" : ""} />
@@ -470,7 +613,7 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
             <button
               type="button"
               onClick={generatePdf}
-              disabled={!employee || generating}
+              disabled={!ready || generating}
               className="inline-flex items-center gap-1.5 h-9 px-4 bg-[#008CFF] hover:bg-[#0070cc] text-white rounded-lg text-[12.5px] font-semibold disabled:opacity-60"
             >
               <FileText size={13} />
@@ -492,13 +635,13 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
         <div className="rounded-xl border border-slate-200 bg-white overflow-hidden min-h-[500px]">
           <div className="px-5 py-2.5 border-b border-slate-100 text-[11px] uppercase tracking-wider font-semibold text-slate-500 flex items-center justify-between">
             <span>Preview</span>
-            {employee && (
-              <span className="text-slate-500 normal-case tracking-normal">for <span className="text-slate-700 font-semibold">{employee.name}</span></span>
+            {ready && (
+              <span className="text-slate-500 normal-case tracking-normal">for <span className="text-slate-700 font-semibold">{mode === "manual" ? (manualFields.name || "new joiner") : employee?.name}</span></span>
             )}
           </div>
           <div className="p-6">
-            {!employee ? (
-              <p className="text-[13px] text-slate-400 italic text-center py-12">Pick an employee to see a preview.</p>
+            {!ready ? (
+              <p className="text-[13px] text-slate-400 italic text-center py-12">{mode === "manual" ? "Enter the new joiner's name + email to preview." : "Pick an employee to see a preview."}</p>
             ) : !preview ? (
               <p className="text-[13px] text-slate-400 italic text-center py-12">Click "Preview" to render the letter.</p>
             ) : (
@@ -604,6 +747,25 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
           min-height: 400px;
         }
       `}</style>
+    </div>
+  );
+}
+
+// Plain labelled text input for the new-joiner manual form.
+function ManualInput({
+  label, value, onChange, placeholder, required,
+}: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; required?: boolean }) {
+  return (
+    <div>
+      <label className="text-[11.5px] text-slate-600 mb-1 inline-flex items-center gap-1">
+        {label}{required && <span className="text-rose-500">*</span>}
+      </label>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]"
+      />
     </div>
   );
 }

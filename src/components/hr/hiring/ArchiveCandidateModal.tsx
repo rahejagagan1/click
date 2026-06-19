@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from "react";
 import { mutate as globalMutate } from "swr";
+import { showToast } from "@/components/ui/Toast";
 import { X, ChevronDown, AlertCircle } from "lucide-react";
 import { rejectionEmail } from "@/lib/email/hr-templates";
 import EmailComposer, { type EmailComposerPayload } from "./EmailComposer";
@@ -74,7 +75,7 @@ export default function ArchiveCandidateModal({
   // "Archive without email" path — runs when HR unchecks the closing
   // email checkbox. Single backend hit, no email.
   const archiveOnly = async () => {
-    if (!reason) return alert("Pick a reason");
+    if (!reason) return showToast("Pick a reason", "error");
     setSaving(true);
     const res = await fetch(`/api/hr/hiring/candidates/${candidate.id}`, {
       method: "PATCH",
@@ -88,7 +89,7 @@ export default function ArchiveCandidateModal({
     setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      alert(j?.error || "Couldn't archive candidate");
+      showToast(j?.error || "Couldn't archive candidate", "error");
       return;
     }
     globalMutate("/api/hr/hiring/candidates");

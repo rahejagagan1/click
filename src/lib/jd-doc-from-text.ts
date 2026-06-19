@@ -316,6 +316,11 @@ function htmlToBodyXml(html: string): string {
       out.push(paraBlank());
       continue;
     }
+    // Page-break artefacts ("Page 1 of 2", "— 1 of 2 —") that PDF
+    // extractors emit. buildBodyXml's plain-text path filters these via
+    // PAGE_MARKER_RE; the Quill HTML path (added in 20415b2) regressed by
+    // skipping it — re-apply here so they don't render in generated PDFs.
+    if (PAGE_MARKER_RE.test(stripped.replace(/<[^>]+>/g, "").trim())) continue;
 
     if (tag === "h1") {
       out.push(
@@ -363,6 +368,7 @@ function buildBodyXml(text: string): string {
   if (isHtmlBody(text)) return htmlToBodyXml(text);
 
   // Plain text (legacy JDs) — original per-line classifier.
+  let sawTitle = false; // drop ONE leading "Job Description - X" title line
   return text
     .replace(/\r\n/g, "\n")
     .split("\n")
@@ -370,6 +376,11 @@ function buildBodyXml(text: string): string {
       const line = raw.trimEnd();
       if (!line.trim()) return paraBlank();
       if (PAGE_MARKER_RE.test(line.trim())) return "";
+      // The template prints {{JobTitle}} itself, so a legacy plain-text
+      // body that still carries a "Job Description - X" / "Job Title: X"
+      // line would double the title — drop it once.
+      const titleMatch = line.trim().match(/^(?:Job\s+Description|Job\s+Title)\s*[-–—:]\s*(.+)$/i);
+      if (!sawTitle && titleMatch) { sawTitle = true; return ""; }
       const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
       if (bullet) return paraBullet(bullet[1]);
       const num = line.match(/^\s*(\d+)[.)]\s+(.*)$/);

@@ -506,6 +506,28 @@ export default function EmployeeDetailPage() {
                       </span>
                     );
                   })()}
+                  {/* Probation badge (blue) — shown while the new hire is
+                      still inside their probation window (probationEndDate
+                      today-or-future, not yet confirmed, active, not exiting).
+                      probationConfirmedAt may be undefined until the prisma
+                      client is regenerated — the `!` check is future-proof. */}
+                  {(() => {
+                    const ep = user.employeeProfile as any;
+                    if (!ep?.probationEndDate || ep.probationConfirmedAt) return null;
+                    if (!isActive || user.activeExit) return null;
+                    const endMs = new Date(`${String(ep.probationEndDate).slice(0, 10)}T00:00:00Z`).getTime();
+                    if (!(endMs >= Date.now() - 86_400_000)) return null; // window already passed
+                    const endLabel = new Date(endMs).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+                    return (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-700 ring-1 ring-inset ring-blue-200"
+                        title={`Probation ends ${endLabel}`}
+                      >
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500" />
+                        On Probation
+                      </span>
+                    );
+                  })()}
                   {/* Exit-lifecycle badge — "On Notice Period"
                       (amber) while the employee is still serving
                       notice; "Exited" (slate) once HR finalises the
