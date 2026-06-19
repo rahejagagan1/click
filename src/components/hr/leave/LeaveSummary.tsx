@@ -1,5 +1,6 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
 // Shared, Keka-style leave summary. Rendered by BOTH the self-service leave
 // page (/dashboard/hr/leaves) and the read-only employee-profile leave view
@@ -21,6 +22,13 @@ export type LeaveSummaryProps = {
   compOffHistoryHref?: string;
   policyHref?: string;
   onCancel?: (id: number) => void;   // cancel a pending request (self page)
+  // HR-admin row actions (employee-profile view): a ⋮ menu per leave with
+  // "Change leave type" + "Cancel leave". Independent of readOnly so HR can
+  // act while the rest of the panel stays read-only.
+  manageActions?: boolean;
+  leaveTypes?: { id: number; name: string }[];
+  onCancelLeave?: (id: number) => void;
+  onChangeType?: (id: number, leaveTypeId: number) => void;
 };
 
 const COLORS = ["#22d3ee", "#a78bfa", "#f472b6", "#34d399", "#fbbf24", "#f87171", "#008CFF", "#6366f1"];
@@ -79,7 +87,37 @@ export default function LeaveSummary({
   balances, applications, year, years, onYearChange,
   readOnly = false, subjectName, onRequestLeave, onCompOff,
   compOffHistoryHref, policyHref, onCancel,
+  manageActions = false, leaveTypes = [], onCancelLeave, onChangeType,
 }: LeaveSummaryProps) {
+  // Per-row HR action menu (⋮). Portalled to <body> at the button's screen
+  // position so it escapes the table's overflow clipping ("outside the box").
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const [menuRect, setMenuRect]     = useState<DOMRect | null>(null);
+  const [typeListOpen, setTypeListOpen] = useState(false);   // "Change leave type" expanded?
+  const typeMenuTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeRowMenu = () => { setOpenMenuId(null); setMenuRect(null); setTypeListOpen(false); };
+  // Available balance per leave type (total − used − pending) for the picker.
+  const balByType = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const b of (Array.isArray(balances) ? balances : [])) {
+      const id = b.leaveTypeId ?? b.leaveType?.id;
+      if (id == null) continue;
+      m.set(id, num(b.totalDays) - num(b.usedDays) - num(b.pendingDays));
+    }
+    return m;
+  }, [balances]);
+  // Close the portalled row menu on scroll / resize so it never drifts away
+  // from its row (the menu is fixed-positioned from a one-time button rect).
+  useEffect(() => {
+    if (openMenuId == null) return;
+    const close = () => closeRowMenu();
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [openMenuId]);
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -406,7 +444,92 @@ export default function LeaveSummary({
                     <td className="px-4 py-3 text-[12.5px] text-slate-500 max-w-[220px]"><span className="line-clamp-2">{cleanNote(a.reason) || "—"}</span></td>
                     <td className="px-4 py-3 text-[12.5px] text-slate-500 max-w-[180px]"><span className="line-clamp-2">{rejectReason}</span></td>
                     <td className="px-4 py-3">
-                      {!readOnly && a.status === "pending" && onCancel ? (
+                      {manageActions ? (() => {
+                        const cancellable = ["pending", "partially_approved", "approved"].includes(a.status);
+                        const open = openMenuId === a.id;
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                if (open) { closeRowMenu(); return; }
+                                setMenuRect(e.currentTarget.getBoundingClientRect());
+                                setTypeListOpen(false);   // start collapsed
+                                setOpenMenuId(a.id);
+                              }}
+                              className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                              aria-label="Leave actions"
+                            >⋮</button>
+                            {open && menuRect && typeof document !== "undefined" && createPortal(
+                              <>
+                                <div className="fixed inset-0 z-[90]" onClick={closeRowMenu} />
+                                <div
+                                  className="fixed z-[100] w-60 rounded-lg border border-slate-200 bg-white py-1 shadow-xl"
+                                  style={(() => {
+                                    const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+                                    const left = Math.max(8, menuRect.right - 240);
+                                    // Open upward when the button sits in the lower part of the
+                                    // viewport so the menu never spills below the fold.
+                                    return menuRect.bottom > vh * 0.6
+                                      ? { bottom: vh - menuRect.top + 4, left }
+                                      : { top: menuRect.bottom + 4, left };
+                                  })()}
+                                >
+                                  <div
+                                    className="relative"
+                                    onMouseEnter={() => { if (typeMenuTimer.current) clearTimeout(typeMenuTimer.current); setTypeListOpen(true); }}
+                                    onMouseLeave={() => { typeMenuTimer.current = setTimeout(() => setTypeListOpen(false), 180); }}
+                                  >
+                                  <button
+                                    type="button"
+                                    onClick={() => setTypeListOpen((v) => !v)}
+                                    className="flex w-full items-center justify-between px-3 py-2 text-[12.5px] font-medium text-slate-700 hover:bg-slate-50"
+                                  >
+                                    Change leave type
+                                    <span className="text-slate-400">›</span>
+                                  </button>
+                                  {typeListOpen && (
+                                  <div className="absolute left-full top-0 ml-1 w-56 max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
+                                    {leaveTypes.length === 0 ? (
+                                      <p className="px-3 py-2 text-[11.5px] text-slate-400">No leave types.</p>
+                                    ) : leaveTypes.map((t) => {
+                                      const isCurrent = t.id === a.leaveTypeId;
+                                      const avail = balByType.get(t.id);
+                                      return (
+                                        <button
+                                          key={t.id}
+                                          type="button"
+                                          disabled={isCurrent}
+                                          onClick={() => { onChangeType?.(a.id, t.id); closeRowMenu(); }}
+                                          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-[12.5px] hover:bg-sky-50 disabled:cursor-default disabled:bg-transparent"
+                                        >
+                                          <span className={isCurrent ? "text-slate-400" : "text-slate-700"}>{t.name}</span>
+                                          <span className={`shrink-0 text-[11px] ${isCurrent ? "text-slate-400" : (avail ?? 0) > 0 ? "text-emerald-600" : "text-slate-400"}`}>
+                                            {isCurrent ? "current" : avail != null ? `${fmt(avail)} left` : "—"}
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                  )}
+                                  </div>
+                                  {cancellable && (
+                                    <>
+                                      <div className="my-1 border-t border-slate-100" />
+                                      <button
+                                        type="button"
+                                        onClick={() => { onCancelLeave?.(a.id); closeRowMenu(); }}
+                                        className="flex w-full items-center px-3 py-2 text-[12.5px] font-medium text-red-600 hover:bg-red-50"
+                                      >Cancel leave</button>
+                                    </>
+                                  )}
+                                </div>
+                              </>,
+                              document.body,
+                            )}
+                          </>
+                        );
+                      })() : !readOnly && a.status === "pending" && onCancel ? (
                         <button onClick={() => onCancel(a.id)} className="text-[11px] font-medium text-red-500 hover:underline">Cancel</button>
                       ) : <span className="text-slate-300">⋯</span>}
                     </td>
