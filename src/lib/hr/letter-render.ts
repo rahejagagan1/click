@@ -149,8 +149,28 @@ async function injectSignatureBeforeRegards(bodyHtml: string, businessUnit?: str
   return bodyHtml;
 }
 
+/** New-joiner manual inputs — used when the recipient isn't in the DB
+ *  yet. Mirrors the employee-derived placeholder fields the resolver
+ *  reads (everything else — salary, custom attributes — already comes
+ *  from customFields). */
+export type ManualRecipient = {
+  name?: string;
+  email?: string;
+  designation?: string;
+  department?: string;
+  employeeNumber?: string;
+  joiningDate?: string;       // YYYY-MM-DD
+  probationEndDate?: string;  // YYYY-MM-DD
+  internshipEndDate?: string; // YYYY-MM-DD
+  gender?: string;            // male | female | other
+  brand?: string;             // "NB Media" | "YT Labs"
+};
+
 export type RenderContext = {
-  employeeId: number;
+  /** Existing-employee mode: pull data from the DB by this id. */
+  employeeId?: number;
+  /** New-joiner mode: render purely from typed-in fields (no DB row). */
+  manual?: ManualRecipient;
   customFields: Record<string, string>;
 };
 
@@ -547,39 +567,57 @@ export async function renderLetterHtml(
 ): Promise<RenderResult> {
   // Pull employee + profile + exit in one query so the renderer is
   // O(1) DB hits regardless of how many placeholders are used.
-  const user = await prisma.user.findUnique({
-    where: { id: ctx.employeeId },
-    include: {
-      employeeProfile: true,
-    },
-  });
-  if (!user) throw new Error(`Employee #${ctx.employeeId} not found.`);
-
-  // Exit row (if present) drives the FnF / relieving placeholders.
+  // Two modes:
+  //   • employeeId → pull the person + profile + exit from the DB.
+  //   • manual     → NEW JOINER not in the DB yet: build a virtual
+  //                  user/profile straight from the typed-in fields so
+  //                  the same placeholder resolver works unchanged.
+  let user: any;
+  let profile: any;
   let exit: any = null;
-  try {
-    const rows = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT "resignationDate", "lastWorkingDay", "noticePeriodDays", "exitType", status
-         FROM "EmployeeExit" WHERE "userId" = $1 LIMIT 1`,
-      ctx.employeeId,
-    );
-    exit = rows[0] ?? null;
-  } catch { /* exit may not exist for non-leavers */ }
+  if (ctx.manual) {
+    const m = ctx.manual;
+    user = { name: m.name || "", email: m.email || "", role: m.designation || "" };
+    profile = {
+      employeeId:        m.employeeNumber || "",
+      designation:       m.designation || "",
+      department:        m.department || "",
+      joiningDate:       m.joiningDate || null,
+      probationEndDate:  m.probationEndDate || null,
+      internshipEndDate: m.internshipEndDate || null,
+      gender:            m.gender || "",
+      businessUnit:      m.brand || "NB Media",
+    };
+  } else {
+    user = await prisma.user.findUnique({
+      where: { id: ctx.employeeId! },
+      include: { employeeProfile: true },
+    });
+    if (!user) throw new Error(`Employee #${ctx.employeeId} not found.`);
 
-  // Extended profile fields (probationEndDate, internshipEndDate)
-  // via raw SQL — same pattern used in /api/hr/people/[id] to dodge
-  // stale Prisma client deployments.
-  let extended: any = {};
-  try {
-    const rows = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT "probationEndDate", "internshipEndDate"
-         FROM "EmployeeProfile" WHERE "userId" = $1`,
-      ctx.employeeId,
-    );
-    extended = rows[0] ?? {};
-  } catch { /* columns may be missing on older deploys */ }
+    // Exit row (if present) drives the FnF / relieving placeholders.
+    try {
+      const rows = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT "resignationDate", "lastWorkingDay", "noticePeriodDays", "exitType", status
+           FROM "EmployeeExit" WHERE "userId" = $1 LIMIT 1`,
+        ctx.employeeId,
+      );
+      exit = rows[0] ?? null;
+    } catch { /* exit may not exist for non-leavers */ }
 
-  const profile = { ...(user.employeeProfile ?? {}), ...extended };
+    // Extended profile fields via raw SQL (stale-client dodge).
+    let extended: any = {};
+    try {
+      const rows = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT "probationEndDate", "internshipEndDate"
+           FROM "EmployeeProfile" WHERE "userId" = $1`,
+        ctx.employeeId,
+      );
+      extended = rows[0] ?? {};
+    } catch { /* columns may be missing on older deploys */ }
+    profile = { ...(user.employeeProfile ?? {}), ...extended };
+  }
+
   const renderCtx = {
     user,
     profile,

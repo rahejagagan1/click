@@ -162,6 +162,11 @@ export default function Sidebar() {
     // Inbox badge count
     const { data: inboxData } = useSWR("/api/hr/inbox", fetcher, { refreshInterval: 30000 });
 
+    // Probation-review badge — the caller's reports whose probation is ending
+    // and still need their feedback/recommendation.
+    const { data: probationData } = useSWR<{ count: number }>("/api/hr/probation-reviews/count", fetcher, { refreshInterval: 60000 });
+    const probationCount = (probationData?.count || 0) as number;
+
     // Approvals badge count — total pending across all types (leave / regularize /
     // wfh / on-duty / comp-off). Only fetched for users who can actually approve.
     const { data: approvalsSummary } = useSWR<{ byTab: Record<string, number>; total: number }>(
@@ -972,6 +977,13 @@ export default function Sidebar() {
                                         inboxCount > 0 ? (
                                             <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[#008CFF] text-white text-[10px] font-bold flex items-center justify-center leading-none tabular-nums">
                                                 {inboxCount > 99 ? "99+" : inboxCount}
+                                            </span>
+                                        ) : undefined
+                                    )}
+                                    {fl("/dashboard/hr/my-team/probation", "Probation Reviews",
+                                        probationCount > 0 ? (
+                                            <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[#008CFF] text-white text-[10px] font-bold flex items-center justify-center leading-none tabular-nums">
+                                                {probationCount > 99 ? "99+" : probationCount}
                                             </span>
                                         ) : undefined
                                     )}

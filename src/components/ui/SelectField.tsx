@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Check } from "lucide-react";
+import { ChevronDown, Check, Search } from "lucide-react";
 
 /**
  * Single-select dropdown with full visual control. Use in place of a
@@ -60,11 +60,31 @@ export default function SelectField({
 }) {
   const [open, setOpen]   = useState(false);
   const [rect, setRect]   = useState<DOMRect | null>(null);
+  const [query, setQuery] = useState("");
   const btnRef            = useRef<HTMLButtonElement>(null);
   const panelRef          = useRef<HTMLDivElement>(null);
+  const searchRef         = useRef<HTMLInputElement>(null);
 
   const items = useMemo(() => normalize(options), [options]);
   const current = items.find((o) => o.value === value);
+
+  // Type-to-search: only worth showing once a list is long enough that
+  // scanning is annoying. Filters by label (case-insensitive contains).
+  const SEARCH_THRESHOLD = 8;
+  const showSearch = items.length > SEARCH_THRESHOLD;
+  const q = query.trim().toLowerCase();
+  const filtered = showSearch && q
+    ? items.filter((o) => o.label.toLowerCase().includes(q))
+    : items;
+
+  // Reset the query on each open and focus the search box so the user can
+  // just start typing.
+  useEffect(() => {
+    if (!open) { setQuery(""); return; }
+    if (!showSearch) return;
+    const t = setTimeout(() => searchRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, [open, showSearch]);
 
   useEffect(() => {
     if (!open) return;
@@ -129,7 +149,8 @@ export default function SelectField({
         // Desired = exactly what the rows need. Clamp to viewport. Cap
         // popupMaxH at `desired` so a short list flipped above the
         // trigger hugs it instead of stretching to fill space-above.
-        const desired   = Math.min(POPUP_MAX, items.length * 36 + 12);
+        const searchH   = showSearch ? 46 : 0;
+        const desired   = Math.min(POPUP_MAX, searchH + Math.max(1, filtered.length) * 36 + 12);
         const flipUp    = spaceBelow < desired && spaceAbove > spaceBelow;
         const avail     = (flipUp ? spaceAbove : spaceBelow) - GAP - 8;
         const popupMaxH = Math.max(120, Math.min(desired, avail));
@@ -157,11 +178,29 @@ export default function SelectField({
               zIndex: 10000,
             }}
           >
-            <div className="overflow-y-auto" style={{ maxHeight: popupMaxH }}>
-              {items.length === 0 ? (
-                <p className="text-[12px] text-slate-400 text-center py-5">No options</p>
+            {showSearch && (
+              <div className="flex items-center gap-2 px-2.5 h-[46px] border-b border-slate-100">
+                <Search size={14} className="shrink-0 text-slate-400" />
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && filtered.length > 0) {
+                      onChange(filtered[0].value);
+                      setOpen(false);
+                    }
+                  }}
+                  placeholder="Search…"
+                  className="w-full bg-transparent text-[13px] text-slate-800 placeholder-slate-400 focus:outline-none"
+                />
+              </div>
+            )}
+            <div className="overflow-y-auto" style={{ maxHeight: popupMaxH - searchH }}>
+              {filtered.length === 0 ? (
+                <p className="text-[12px] text-slate-400 text-center py-5">{items.length === 0 ? "No options" : "No matches"}</p>
               ) : (
-                items.map((o) => {
+                filtered.map((o) => {
                   const isSel = o.value === value;
                   return (
                     <button
