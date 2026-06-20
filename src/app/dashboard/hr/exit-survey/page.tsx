@@ -172,7 +172,7 @@ export default function ExitSurveyPage() {
     <Shell>
       {/* Hero header + live progress */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.05)]">
-        <div className="flex items-start gap-3 bg-gradient-to-r from-[#008CFF] to-[#0061c3] px-6 py-5 text-white">
+        <div className="flex items-start gap-3 bg-gradient-to-r from-[#008CFF] to-[#0061c3] bg-[#008CFF] px-6 py-5 text-white">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/20"><ClipboardList size={20} /></span>
           <div className="min-w-0 flex-1">
             <h1 className="text-[18px] font-semibold leading-tight">Exit Survey</h1>
