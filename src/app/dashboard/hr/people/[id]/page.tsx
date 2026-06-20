@@ -23,6 +23,7 @@ import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
 import PerformancePlanModal from "@/components/hr/PerformancePlanModal";
 import { isHRAdmin as canViewAsHRAdmin, canViewSalary, canViewEmployeeDocuments, canViewExitBadge } from "@/lib/access";
+import ExitSurveyTab from "@/components/hr/ExitSurveyTab";
 import { can } from "@/lib/permissions/can";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
@@ -37,7 +38,7 @@ import type { PickerUser } from "@/components/hr/EmployeePicker";
 // previous standalone "Salary" tab and the inline edit pencils on the
 // Profile tab have been retired so there's exactly one canonical edit
 // surface.
-const TABS = ["About", "Profile", "Job", "Attendance", "Documents", "Assets", "Finances", "Edit Profile"] as const;
+const TABS = ["About", "Profile", "Job", "Attendance", "Documents", "Assets", "Finances", "Exit Survey", "Edit Profile"] as const;
 type Tab = typeof TABS[number];
 
 const fmtDate = (d: string | Date | null | undefined) =>
@@ -329,6 +330,7 @@ export default function EmployeeDetailPage() {
     "documents":   "Documents",
     "assets":      "Assets",
     "finances":    "Finances",
+    "exit-survey": "Exit Survey",
     "edit":        "Edit Profile",
   };
   const SLUG_FROM_TAB: Record<Tab, string> = {
@@ -339,6 +341,7 @@ export default function EmployeeDetailPage() {
     "Documents":    "documents",
     "Assets":       "assets",
     "Finances":     "finances",
+    "Exit Survey":  "exit-survey",
     "Edit Profile": "edit",
   };
   const urlTab = (searchParamsObj?.get("tab") ?? "").toLowerCase();
@@ -441,6 +444,7 @@ export default function EmployeeDetailPage() {
     if (t === "Finances"     && !showFinancesTab)   return false;
     if (t === "Attendance"   && !showAttendanceTab) return false;
     if (t === "Documents"    && !showDocumentsTab)  return false;
+    if (t === "Exit Survey"  && !(canViewExitBadge(me, isSelfView) && (user as any)?.activeExit)) return false;
     return true;
   });
 
@@ -1294,6 +1298,10 @@ export default function EmployeeDetailPage() {
 
             {activeTab === "Finances" && showFinancesTab && (
               <EmployeeFinancesPanel userId={userId} userName={user.name} />
+            )}
+
+            {activeTab === "Exit Survey" && (
+              <ExitSurveyTab userId={userId} />
             )}
 
             {activeTab === "Edit Profile" && showEditTab && (
