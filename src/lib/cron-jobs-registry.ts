@@ -14,6 +14,7 @@ export type CronJobId =
   | "violation_reminders"
   | "probation_reminders"
   | "pip_reminders"
+  | "exit_survey_reminders"
   | "doc_compliance"
   | "auto_lop"
   | "reporting_manager_changes"
@@ -85,6 +86,13 @@ export const CRON_JOB_DEFINITIONS: CronJobDefinition[] = [
     name: "PIP review reminders",
     description:
       "Daily sweep: for every active employee on a Performance Improvement Plan whose review date (pipEndDate) is within the next 7 days AND who hasn't been reminded yet, emails HR + the employee's reporting manager. The manager reviews it in My Team → PIP Reviews (recommend extend / pass / end → HR approves). Stamps pipReminderSentAt so it never double-sends; auto-cleared when the review date changes.",
+    defaultIntervalHours: 24,
+  },
+  {
+    id: "exit_survey_reminders",
+    name: "Exit survey reminders",
+    description:
+      "Daily sweep: emails each leaving employee their Exit Survey link ~2 days before their last working day (once per exit, stamped surveyReminderSentAt). Skips anyone who already submitted. The survey is also required before the employee can clock out on their final day, and HR sees the responses on the employee's profile → Exit Survey tab.",
     defaultIntervalHours: 24,
   },
   {

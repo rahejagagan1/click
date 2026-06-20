@@ -2348,6 +2348,10 @@ model EmployeeExit {
   initiatedById Int?
   initiatedBy   User? @relation("ExitInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
 
+  // Stamped when the exit-survey reminder email goes out (~2 days before
+  // lastWorkingDay) so the daily cron sends it exactly once.
+  surveyReminderSentAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2516,6 +2520,15 @@ model ExitSurvey {
   growthRating          Int? // 1-5
   wouldRecommend        Boolean?
   additionalFeedback    String?  @db.Text
+
+  // Employee-filled detailed exit questionnaire (the long form shown to
+  // the departing employee ~2 days before their last day). Stored as a
+  // JSON blob keyed by question id so the HR offboard drawer's simple
+  // columns above stay untouched. Read/written via raw SQL to avoid the
+  // stale-client drift gotcha.
+  employeeResponses     Json?
+  employeeSubmittedAt   DateTime?
+  employeeSubmittedById Int?
 
   submittedAt DateTime?
 

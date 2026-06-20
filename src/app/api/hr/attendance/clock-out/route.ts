@@ -10,6 +10,7 @@ import { hasDesktopBypassHeader } from "@/lib/desktop-bypass";
 import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
 import { isAfterSendTime, getWeekKey } from "@/lib/hr/pulse-week";
 import { resolveClientPunchAt } from "@/lib/hr/punch-time";
+import { isExitSurveyDue } from "@/lib/hr/exit-survey";
 
 // Same shape as the clock-in body. Optional here because legacy
 // callers (cron sweeper, integration tests, anyone POSTing an empty
@@ -60,6 +61,18 @@ export async function POST(req: NextRequest) {
           pulseUrl: "/dashboard/hr/pulse",
         }, { status: 403 });
       }
+    }
+
+    // ── Exit-survey gate ───────────────────────────────────────
+    // A leaving employee (filed exit, last working day within the
+    // survey window) must submit their Exit Survey before clocking
+    // out. Same hard-block pattern as the Pulse gate above.
+    if (!isSystemCaller && (await isExitSurveyDue(userId))) {
+      return NextResponse.json({
+        error: "Please complete your Exit Survey before clocking out.",
+        reason: "exit_survey_required",
+        exitSurveyUrl: "/dashboard/hr/exit-survey",
+      }, { status: 403 });
     }
 
     // Mobile guard, mirrors clock-in: blocked by default, allowed when
