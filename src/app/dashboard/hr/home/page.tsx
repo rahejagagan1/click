@@ -13,6 +13,7 @@ import { isHRAdmin, canApplyRestrictedLeave, canViewAllBrands } from "@/lib/acce
 import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
 import PulseGateModal from "@/components/hr/PulseGateModal";
+import ExitSurveyGateModal from "@/components/hr/ExitSurveyGateModal";
 import DesktopGateModal from "@/components/hr/DesktopGateModal";
 import { isDesktopBypassActive } from "@/lib/desktop-bypass";
 import { PageShell } from "@/components/layout";
@@ -2756,7 +2757,7 @@ export default function HRHomePage() {
   // one automatic retry on transient failures, all of which were
   // silently dropped in the previous inline handlers (hence the
   // "click 3-4 times before it works" reports).
-  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError, pulseGate, dismissPulseGate, desktopGate, dismissDesktopGate } = useClockActions({
+  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError, pulseGate, dismissPulseGate, exitSurveyGate, dismissExitSurveyGate, desktopGate, dismissDesktopGate } = useClockActions({
     mutateKeys: [`/api/hr/attendance?month=${monthKey}`],
   });
   // Auto-collapse the Confirm/Cancel pair after 6s of idle.
@@ -3906,6 +3907,7 @@ export default function HRHomePage() {
         />
       )}
       <PulseGateModal gate={pulseGate} onDismiss={dismissPulseGate} />
+      <ExitSurveyGateModal gate={exitSurveyGate} onDismiss={dismissExitSurveyGate} />
       <DesktopGateModal gate={desktopGate} onDismiss={dismissDesktopGate} />
     </PageShell>
   );
