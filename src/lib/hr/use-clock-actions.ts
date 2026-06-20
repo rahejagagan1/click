@@ -65,6 +65,13 @@ export interface PulseGate {
   pulseUrl: string;
 }
 
+export interface ExitSurveyGate {
+  /** "Please complete your Exit Survey before clocking out." */
+  message: string;
+  /** Deep-link to the exit survey — "/dashboard/hr/exit-survey". */
+  exitSurveyUrl: string;
+}
+
 export interface DesktopGate {
   /**
    * "Clock-in/out is only available on Laptop & Desktop…" — straight from
@@ -88,6 +95,9 @@ export interface UseClockActionsReturn {
    */
   pulseGate: PulseGate | null;
   dismissPulseGate: () => void;
+  /** Set when a clock-out 403'd with reason "exit_survey_required". */
+  exitSurveyGate: ExitSurveyGate | null;
+  dismissExitSurveyGate: () => void;
   /**
    * Set when a clock-in OR clock-out 403'd with `code: "desktop_only"`
    * (the mobile guard — punching is desktop-only unless the user has an
@@ -165,7 +175,7 @@ async function postWithRetry(url: string, body?: unknown): Promise<any> {
       false,
       first.status,
       first.data?.reason ?? first.data?.code,
-      first.data?.pulseUrl,
+      first.data?.pulseUrl ?? first.data?.exitSurveyUrl,
     );
   } catch (e: any) {
     if (e instanceof ClockApiError) throw e;
@@ -194,6 +204,7 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
   const [clockingOut, setClockingOut] = useState(false);
   const [error, setError] = useState<ClockBanner | null>(null);
   const [pulseGate, setPulseGate] = useState<PulseGate | null>(null);
+  const [exitSurveyGate, setExitSurveyGate] = useState<ExitSurveyGate | null>(null);
   const [desktopGate, setDesktopGate] = useState<DesktopGate | null>(null);
   // Synchronous re-entry guards. React state is async (set, then
   // re-render); a `useRef` flag flips immediately so the next onClick
@@ -260,6 +271,7 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
     setClockingOut(true);
     setError(null);
     setPulseGate(null);
+    setExitSurveyGate(null);
     setDesktopGate(null);
     const clickAt = new Date().toISOString();
     try {
@@ -271,6 +283,8 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
       // generic banner so the user lands on the form in one click.
       if (e instanceof ClockApiError && e.reason === "pulse_required" && e.actionUrl) {
         setPulseGate({ message: e.message, pulseUrl: e.actionUrl });
+      } else if (e instanceof ClockApiError && e.reason === "exit_survey_required" && e.actionUrl) {
+        setExitSurveyGate({ message: e.message, exitSurveyUrl: e.actionUrl });
       } else if (e instanceof ClockApiError && e.reason === "desktop_only") {
         // Mobile guard — same blocking-modal treatment so the refusal
         // is visible (the generic banner isn't rendered in the
@@ -356,7 +370,8 @@ export function useClockActions({ mutateKeys, onClockOutSuccess }: UseClockActio
 
   const clearError = useCallback(() => setError(null), []);
   const dismissPulseGate = useCallback(() => setPulseGate(null), []);
+  const dismissExitSurveyGate = useCallback(() => setExitSurveyGate(null), []);
   const dismissDesktopGate = useCallback(() => setDesktopGate(null), []);
 
-  return { clockIn, clockOut, clockingIn, clockingOut, error, clearError, pulseGate, dismissPulseGate, desktopGate, dismissDesktopGate };
+  return { clockIn, clockOut, clockingIn, clockingOut, error, clearError, pulseGate, dismissPulseGate, exitSurveyGate, dismissExitSurveyGate, desktopGate, dismissDesktopGate };
 }

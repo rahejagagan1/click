@@ -1313,6 +1313,28 @@ export function probationEndingReminderEmail(args: {
 }
 
 // ── PIP (Performance Improvement Plan) ending reminder ─────────────────
+// Heads-up to a leaving employee (~2 days before their last working day)
+// to complete the Exit Survey. CTA → the exit survey form.
+export function exitSurveyReminderEmail(args: {
+  employeeName: string;
+  lastWorkingDay: string; // YYYY-MM-DD
+  daysRemaining: number;
+}): EmailContent {
+  const link = `${appUrl()}/dashboard/hr/exit-survey`;
+  const lwd = new Date(`${args.lastWorkingDay}T00:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric", timeZone: "UTC" });
+  const when = args.daysRemaining <= 0 ? "today" : args.daysRemaining === 1 ? "tomorrow" : `in ${args.daysRemaining} days`;
+  const subject = "Please complete your Exit Survey";
+  const body = `
+    <p style="margin:0 0 12px">Hi ${escape(args.employeeName)},</p>
+    <p style="margin:0 0 12px">As your last working day approaches (<strong>${lwd}</strong>, ${when}), we'd really value your honest feedback. Please take a few minutes to complete your <strong>Exit Survey</strong>.</p>
+    <p style="margin:0 0 12px">It's required before you clock out on your final day, and your responses go straight to HR to help us improve.</p>
+    <p style="margin:16px 0"><a href="${link}" style="display:inline-block;background:#e11d48;color:#ffffff;text-decoration:none;padding:11px 22px;border-radius:8px;font-size:13.5px;font-weight:600">Complete Exit Survey &rarr;</a></p>
+    <p style="margin:0;color:#6b7280;font-size:12px">Thank you for everything &mdash; we wish you the very best.</p>
+  `;
+  const text = `Hi ${args.employeeName},\n\nAs your last working day approaches (${lwd}, ${when}), please complete your Exit Survey. It's required before clocking out on your final day, and your feedback goes to HR.\n\nComplete it here: ${link}\n\nThank you, and all the best.`;
+  return { subject, html: SHELL(subject, body), text };
+}
+
 // 7-day heads-up to brand HR + the employee's reporting manager that a
 // performance plan's review date is approaching. CTA → My Team → PIP Reviews.
 export function pipEndingReminderEmail(args: {
