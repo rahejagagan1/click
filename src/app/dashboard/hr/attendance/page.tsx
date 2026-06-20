@@ -15,6 +15,7 @@ import { isMobileDevice as detectMobileDevice } from "@/lib/is-mobile-device";
 import { DateField } from "@/components/ui/date-field";
 import { useClockActions } from "@/lib/hr/use-clock-actions";
 import PulseGateModal from "@/components/hr/PulseGateModal";
+import ExitSurveyGateModal from "@/components/hr/ExitSurveyGateModal";
 import DesktopGateModal from "@/components/hr/DesktopGateModal";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
 import { isDesktopBypassActive } from "@/lib/desktop-bypass";
@@ -744,7 +745,7 @@ export default function AttendancePage() {
   //     times before anything happened)
   //   • one automatic retry on 5xx / network failure
   //   • per-page SWR refresh after success
-  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError, pulseGate, dismissPulseGate, desktopGate, dismissDesktopGate } = useClockActions({
+  const { clockIn, clockOut, clockingIn, clockingOut, error: clockError, clearError: clearClockError, pulseGate, dismissPulseGate, exitSurveyGate, dismissExitSurveyGate, desktopGate, dismissDesktopGate } = useClockActions({
     mutateKeys: [`/api/hr/attendance?${attendanceQs}`],
     onClockOutSuccess: (rec) => {
       if (typeof rec?.totalMinutes === "number" && rec.totalMinutes >= 540) {
@@ -2289,6 +2290,7 @@ export default function AttendancePage() {
         />
       )}
       <PulseGateModal gate={pulseGate} onDismiss={dismissPulseGate} />
+      <ExitSurveyGateModal gate={exitSurveyGate} onDismiss={dismissExitSurveyGate} />
       <DesktopGateModal gate={desktopGate} onDismiss={dismissDesktopGate} />
       </div>
     </div>
