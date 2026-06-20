@@ -126,7 +126,7 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
   const [mode, setMode] = useState<"employee" | "manual">("employee");
   const [manualFields, setManualFields] = useState({
     name: "", email: "", designation: "", department: "",
-    joiningDate: "", gender: "", employeeNumber: "",
+    joiningDate: "", applicationDate: "", gender: "", employeeNumber: "",
   });
 
   const [employee, setEmployee] = useState<Employee | null>(null);
@@ -541,6 +541,12 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
                   <div>
                     <label className="text-[11.5px] text-slate-600 mb-1 block">Joining date</label>
                     <DateField value={manualFields.joiningDate} onChange={(v) => setManualFields((s) => ({ ...s, joiningDate: v }))} className="w-full" />
+                  </div>
+                  <div>
+                    <label className="text-[11.5px] text-slate-600 mb-1 block">
+                      Application date <span className="text-slate-400">(blank = auto from job application)</span>
+                    </label>
+                    <DateField value={manualFields.applicationDate} onChange={(v) => { setManualFields((s) => ({ ...s, applicationDate: v })); setPreview(null); }} className="w-full" />
                   </div>
                   <div>
                     <label className="text-[11.5px] text-slate-600 mb-1 block">
