@@ -16,6 +16,8 @@ import CustomSelect from "@/components/ui/CustomSelect";
 import SelectField from "@/components/ui/SelectField";
 import PopupPanel from "@/components/ui/PopupPanel";
 import KekaImportModal from "@/components/hr/KekaImportModal";
+import ImportResumeModal from "@/components/hr/ImportResumeModal";
+import type { ResumePatch } from "@/lib/resume-parse";
 import TeamWelcomeModal from "@/components/hr/TeamWelcomeModal";
 import { teamWelcomeEmail } from "@/lib/email/hr-templates";
 import type { KekaRow, KekaFormPatch } from "@/lib/keka-import";
@@ -247,6 +249,7 @@ export default function OnboardEmployeePage() {
   // in this session keeps the modal from offering "Pre-fill" twice for
   // the same employee after a save.
   const [importOpen, setImportOpen] = useState(false);
+  const [resumeOpen, setResumeOpen] = useState(false);
   const [importedFrom, setImportedFrom] = useState<{ hrm: string; name: string } | null>(null);
   const [importDoneIds, setImportDoneIds] = useState<Set<string>>(() => new Set());
 
@@ -402,6 +405,16 @@ export default function OnboardEmployeePage() {
     setAttendanceTouched(false);  // attendance auto-derive will re-fire from the new HRM id
     setImportedFrom({ hrm: row.employeeNumber, name: row.displayName });
     setStep(1);                   // always start the review at the first step
+  };
+
+  // Merge resume-parsed fields onto the form. Unlike the Keka patch this
+  // only sets keys the resume actually yielded (never blanks a field),
+  // and leaves Salary / HRM / dates for HR to enter.
+  const handleResumePick = (patch: ResumePatch, fileName: string) => {
+    setForm((f) => ({ ...f, ...patch }));
+    if (patch.displayName) setDisplayTouched(true);
+    setImportedFrom({ hrm: fileName, name: patch.displayName || "" });
+    setStep(1);
   };
 
   // ── Existing-user lookup by Work Email ────────────────────────────
@@ -995,9 +1008,9 @@ export default function OnboardEmployeePage() {
                 <UploadIcon size={16} />
               </div>
               <div>
-                <p className="text-[13px] font-semibold text-slate-800 dark:text-white">Import</p>
+                <p className="text-[13px] font-semibold text-slate-800 dark:text-white">Import Resume</p>
                 <p className="text-[11.5px] text-slate-500 dark:text-slate-400">
-                  Upload a Keka CSV / Excel export once — pre-fill steps 1, 2, 3 for each employee in seconds.
+                  Upload a resume (PDF / Word) — auto-fills name, email, phone &amp; role. Verify before saving.
                 </p>
                 {importedFrom && (
                   <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
@@ -1006,14 +1019,24 @@ export default function OnboardEmployeePage() {
                 )}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setImportOpen(true)}
-              className="inline-flex items-center gap-2 rounded-lg border border-[#008CFF]/30 bg-[#008CFF]/5 px-3.5 py-2 text-[12.5px] font-semibold text-[#008CFF] transition-colors hover:bg-[#008CFF]/10 hover:border-[#008CFF]/50"
-            >
-              <UploadIcon size={13} />
-              {importedFrom ? "Pick another row" : "Upload & pick row"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setResumeOpen(true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-[#008CFF]/30 bg-[#008CFF]/5 px-3.5 py-2 text-[12.5px] font-semibold text-[#008CFF] transition-colors hover:bg-[#008CFF]/10 hover:border-[#008CFF]/50"
+              >
+                <UploadIcon size={13} />
+                {importedFrom ? "Import another" : "Upload resume"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setImportOpen(true)}
+                className="rounded-lg px-2.5 py-2 text-[11.5px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10"
+                title="Bulk import from a Keka CSV / Excel export"
+              >
+                Keka CSV
+              </button>
+            </div>
           </div>
         )}
 
@@ -1762,6 +1785,12 @@ export default function OnboardEmployeePage() {
           </div>
         )}
       </div>
+
+      <ImportResumeModal
+        open={resumeOpen}
+        onClose={() => setResumeOpen(false)}
+        onParsed={handleResumePick}
+      />
 
       <KekaImportModal
         open={importOpen}
