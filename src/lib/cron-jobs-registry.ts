@@ -92,7 +92,7 @@ export const CRON_JOB_DEFINITIONS: CronJobDefinition[] = [
     id: "exit_survey_reminders",
     name: "Exit survey reminders",
     description:
-      "Daily sweep: emails each leaving employee their Exit Survey link ~2 days before their last working day (once per exit, stamped surveyReminderSentAt). Skips anyone who already submitted. The survey is also required before the employee can clock out on their final day, and HR sees the responses on the employee's profile → Exit Survey tab.",
+      "Daily sweep: ~2 days before each leaving employee's last working day, sends BOTH an in-app notification (with a 'Complete exit survey' button, same style as the weekly pulse) AND an email — once per exit. Skips anyone who already submitted. The survey is also required before the employee can clock out on their final day, and HR sees the responses on the employee's profile → Exit Survey tab.",
     defaultIntervalHours: 24,
   },
   {
