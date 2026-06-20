@@ -1443,35 +1443,43 @@ export default function AdminPage() {
                             No cron jobs configured.
                         </div>
                     ) : (
-                        <div className="space-y-4">
-                            {/* Pill-style sub-tab nav — each job is a chip
-                                with an icon. Active state has solid violet
-                                fill so it reads as the selected option.
-                                Horizontal scroll when many jobs. */}
-                            <div className="flex flex-wrap gap-2">
-                                {cronJobs.map((j) => {
-                                    const active = cronActiveJob === j.id;
-                                    const Icon = jobIconFor(j.id);
-                                    const label = jobShortLabel(j.id, j.name);
-                                    return (
-                                        <button
-                                            key={j.id}
-                                            type="button"
-                                            onClick={() => setCronActiveJob(j.id)}
-                                            className={`inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full text-[12.5px] font-semibold transition-all border ${
-                                                active
-                                                    ? "bg-[#3b82f6] text-white border-[#3b82f6] shadow-[0_1px_2px_rgba(59,130,246,0.25)]"
-                                                    : "bg-white text-slate-600 border-slate-200 hover:border-[#3b82f6]/40 hover:text-[#3b82f6]"
-                                            }`}
-                                        >
-                                            <Icon size={13} />
-                                            {label}
-                                        </button>
-                                    );
-                                })}
+                        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[290px_1fr] lg:items-start">
+                            {/* Left: scannable job list with live status dots —
+                                replaces the old wrapping pill row so it reads
+                                cleanly with 10+ jobs and shows enabled state. */}
+                            <div className="rounded-2xl border border-slate-200 bg-white p-2 lg:sticky lg:top-4">
+                                <p className="px-2 pb-1.5 pt-1 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
+                                    Jobs · {cronJobs.filter((j) => j.enabled).length}/{cronJobs.length} active
+                                </p>
+                                <div className="space-y-0.5">
+                                    {cronJobs.map((j) => {
+                                        const active = cronActiveJob === j.id;
+                                        const Icon = jobIconFor(j.id);
+                                        const label = jobShortLabel(j.id, j.name);
+                                        return (
+                                            <button
+                                                key={j.id}
+                                                type="button"
+                                                onClick={() => setCronActiveJob(j.id)}
+                                                className={`flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                                                    active
+                                                        ? "border-[#3b82f6]/30 bg-[#3b82f6]/[0.06]"
+                                                        : "border-transparent hover:bg-slate-50"
+                                                }`}
+                                            >
+                                                <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${active ? "bg-[#3b82f6] text-white" : "bg-slate-100 text-slate-500"}`}>
+                                                    <Icon size={13} />
+                                                </span>
+                                                <span className={`min-w-0 flex-1 truncate text-[12.5px] font-medium ${active ? "text-[#3b82f6]" : "text-slate-700"}`}>{label}</span>
+                                                <span title={j.enabled ? "Active" : "Paused"} className={`h-2 w-2 shrink-0 rounded-full ${j.enabled ? "bg-emerald-500" : "bg-slate-300"}`} />
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
 
-                            {/* Active job panel */}
+                            {/* Right: active job detail panel */}
+                            <div>
                             {(() => {
                                 const job = cronJobs.find((j) => j.id === cronActiveJob);
                                 if (!job) return null;
@@ -1670,6 +1678,7 @@ export default function AdminPage() {
                                     </div>
                                 );
                             })()}
+                            </div>
                         </div>
                     )}
                 </div>
