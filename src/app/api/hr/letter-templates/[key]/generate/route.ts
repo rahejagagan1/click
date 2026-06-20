@@ -39,6 +39,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
       department:        String(body.manual.department ?? "").trim(),
       employeeNumber:    String(body.manual.employeeNumber ?? "").trim(),
       joiningDate:       String(body.manual.joiningDate ?? "").trim(),
+      applicationDate:   String(body.manual.applicationDate ?? "").trim(),
       probationEndDate:  String(body.manual.probationEndDate ?? "").trim(),
       internshipEndDate: String(body.manual.internshipEndDate ?? "").trim(),
       gender:            String(body.manual.gender ?? "").trim(),
