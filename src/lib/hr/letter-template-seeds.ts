@@ -184,7 +184,7 @@ ${SIGNOFF_HTML}
 <p>Working Hours: <strong>09:00 AM to 6.00 PM (Monday to Friday)</strong></p>
 <p><em>*Please note that Saturdays are flexi-offs.</em></p>
 <p>Kindly acknowledge your acceptance by signing the document, and confirming the joining date by <strong>{{CustomAttributes.AcceptanceDeadline}}</strong>. <em>Failure to accept prior to the specified deadline will render this offer null and void automatically.</em></p>
-<p>For any further questions or concerns feel free to reach us at hrd.nbmedia@gmail.com or hrd@nbmediaproductions.com.</p>
+<p>For any further questions or concerns feel free to reach us at hrd@nbmediaproductions.com.</p>
 <p style="text-align:center"><strong>We extend our heartfelt wishes for an exceptional tenure aboard!</strong></p>
 ${SIGNOFF_HTML}
 
@@ -274,7 +274,7 @@ ${SIGNOFF_HTML}
   <li>Marriage certificate (If applicable)</li>
 </ol>
 <p><strong>Note:</strong> You are requested to bring all the above-specified documents in Original &amp; Xerox for joining. These documents are MANDATORY at the time of joining.</p>
-<p>In case of any query related to the joining process, please feel free to get in touch with us at hrd.nbmedia@gmail.com or hrd@nbmediaproductions.com.</p>
+<p>In case of any query related to the joining process, please feel free to get in touch with us at hrd@nbmediaproductions.com.</p>
 `.trim(),
   },
 
@@ -415,7 +415,7 @@ ${SIGNOFF_HTML_YT_LABS}
 <p>Working Hours: <strong>09:00 AM to 6.00 PM (Monday to Friday)</strong></p>
 <p><em>*Please note that Saturdays are flexi-offs.</em></p>
 <p>Kindly acknowledge your acceptance by signing the document, and confirming the joining date by <strong>{{CustomAttributes.AcceptanceDeadline}}</strong>. <em>Failure to accept prior to the specified deadline will render this offer null and void automatically.</em></p>
-<p>For any further questions or concerns feel free to reach us at hrd.nbmedia@gmail.com or hrd@nbmediaproductions.com.</p>
+<p>For any further questions or concerns feel free to reach us at hrd@nbmediaproductions.com.</p>
 <p style="text-align:center"><strong>We extend our heartfelt wishes for an exceptional tenure aboard!</strong></p>
 ${SIGNOFF_HTML_YT_LABS}
 
