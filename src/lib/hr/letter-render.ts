@@ -771,11 +771,11 @@ export async function wrapLetterPreviewHtml(
        inner .page div has its own 22mm × 18mm padding — without
        this they'd stack and the body content area would be half
        the page. */
-    /* Top/bottom/side margins on EVERY printed page (Chromium honours
-       these via preferCSSPageSize). Page 1's spacing came from .page
-       padding before, so pages 2+ (e.g. the Terms page) had no top
-       gap — moving the margin to @page fixes every page uniformly. */
-    @page { size: A4; margin: 16mm 16mm 18mm 16mm; }
+    /* Page whitespace is applied by the PDF generator's margin option
+       (html-to-pdf.ts) so every page gets it deterministically. @page
+       margin stays 0 here; @media print drops the .page card padding so
+       margins aren't doubled. */
+    @page { size: A4; margin: 0; }
     /* Global letter-spacing of 0.5px on every text element so the
        letter has the airy, formal feel of a printed HR document.
        Applied at the body level so every nested element inherits
