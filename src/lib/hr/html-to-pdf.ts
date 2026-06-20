@@ -87,12 +87,14 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
     await page.setContent(html, { waitUntil: "networkidle0" });
     const pdf = await page.pdf({
       format: "A4",
-      // Margins are already baked into the wrapper's .page padding,
-      // so emit a 0-margin PDF and let the inner layout drive the
-      // whitespace. Matches the in-iframe preview exactly.
-      margin: { top: "0", right: "0", bottom: "0", left: "0" },
+      // Page whitespace applied here (deterministically, on EVERY page)
+      // instead of via CSS @page margins — Chromium's @page-margin
+      // handling under preferCSSPageSize was inconsistent and left
+      // content flush to the edges. The wrapper's @media print drops the
+      // .page card padding so these margins are the single source of
+      // truth and page 1 isn't double-spaced.
+      margin: { top: "16mm", right: "16mm", bottom: "18mm", left: "16mm" },
       printBackground: true,
-      preferCSSPageSize: true,
     });
     return Buffer.from(pdf);
   } finally {
