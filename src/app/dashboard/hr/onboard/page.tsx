@@ -995,7 +995,7 @@ export default function OnboardEmployeePage() {
                 <UploadIcon size={16} />
               </div>
               <div>
-                <p className="text-[13px] font-semibold text-slate-800 dark:text-white">Import from Keka</p>
+                <p className="text-[13px] font-semibold text-slate-800 dark:text-white">Import</p>
                 <p className="text-[11.5px] text-slate-500 dark:text-slate-400">
                   Upload a Keka CSV / Excel export once — pre-fill steps 1, 2, 3 for each employee in seconds.
                 </p>
