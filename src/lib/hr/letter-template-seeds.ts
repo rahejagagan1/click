@@ -274,7 +274,7 @@ ${SIGNOFF_HTML}
   <li>Marriage certificate (If applicable)</li>
 </ol>
 <p><strong>Note:</strong> You are requested to bring all the above-specified documents in Original &amp; Xerox for joining. These documents are MANDATORY at the time of joining.</p>
-<p>In case of any query related to the joining process, please feel free to get in touch with us at Tanvi@nbmediaproductions.com.</p>
+<p>In case of any query related to the joining process, please feel free to get in touch with us at hrd.nbmedia@gmail.com or hrd@nbmediaproductions.com.</p>
 `.trim(),
   },
 
