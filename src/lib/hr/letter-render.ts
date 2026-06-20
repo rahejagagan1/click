@@ -160,6 +160,7 @@ export type ManualRecipient = {
   department?: string;
   employeeNumber?: string;
   joiningDate?: string;       // YYYY-MM-DD
+  applicationDate?: string;   // YYYY-MM-DD — manual override for "application dated"
   probationEndDate?: string;  // YYYY-MM-DD
   internshipEndDate?: string; // YYYY-MM-DD
   gender?: string;            // male | female | other
@@ -229,21 +230,25 @@ export async function buildPlaceholderResolver(ctx: RenderContext): Promise<{
   };
 }
 
+// All letter dates render as dd-mm-yyyy (HR preference). One helper so
+// every date — issue date, joining/acceptance custom fields, application
+// date — reads the same throughout the letter.
+const ddmmyyyy = (date: Date): string => {
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  return `${dd}-${mm}-${date.getFullYear()}`;
+};
 const fmtDate = (d: Date | null | undefined): string => {
   if (!d) return "—";
   const date = d instanceof Date ? d : new Date(d as any);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
+  return ddmmyyyy(date);
 };
-// Despite the legacy name, fmtShortDate uses the FULL month name
-// ("06 June 2026") to match HR's preferred letter-style format.
-// Was 3-letter month previously ("06 Jun 2026"); flipped to long
-// after HR feedback on the Revised Offer Letter preview.
 const fmtShortDate = (d: Date | null | undefined): string => {
-  if (!d) return new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
+  if (!d) return ddmmyyyy(new Date());
   const date = d instanceof Date ? d : new Date(d as any);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
+  return ddmmyyyy(date);
 };
 
 // Resolves a placeholder against the employee row + custom inputs.
@@ -339,9 +344,15 @@ function resolvePlaceholder(
         return "them";
       }
       break;
-    case "CustomAttributes":
-      // HR-supplied per-render values (FnFAmount, ReferenceNo, …)
-      return ctx.customFields?.[field] ?? "";
+    case "CustomAttributes": {
+      // HR-supplied per-render values (FnFAmount, ReferenceNo, dates …).
+      // Reformat ISO dates (YYYY-MM-DD) — e.g. JoiningDate /
+      // AcceptanceDeadline that HR types — to dd-mm-yyyy so every date
+      // in the letter is consistent.
+      const raw = ctx.customFields?.[field] ?? "";
+      const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
+      return iso ? `${iso[3]}-${iso[2]}-${iso[1]}` : raw;
+    }
     case "ExitSettlement":
       // Provisional Full & Final Settlement statement — auto
       // computes the earnings total, deductions total, net
@@ -674,7 +685,38 @@ export async function renderLetterHtml(
     }
     return SAFE_HTML_PLACEHOLDERS.has(key) ? v : escapeHtml(v);
   });
-  return { html, missing };
+
+  // Offer-letter "application dated <date>" auto-fill. The offer template
+  // ships with that line blank; look up the recipient's job application
+  // (by email) and inject the date they applied. No-op for non-offer
+  // letters (the phrase isn't present) and idempotent if the line already
+  // has a date (the regex only matches the empty "dated  and" gap).
+  let outHtml = html;
+  if (/application dated/i.test(outHtml)) {
+    let applied: string | null = null;
+    // Manual override (HR typed it on the new-joiner form) wins; else
+    // auto-fetch from the recipient's job application by email.
+    const manualAppDate = (ctx.manual?.applicationDate || "").trim();
+    if (manualAppDate) {
+      const f = fmtShortDate(new Date(manualAppDate));
+      if (f && f !== "—") applied = f;
+    } else {
+      const email = (ctx.manual?.email || user?.email || "").trim();
+      if (email) {
+        try {
+          const rows = await prisma.$queryRawUnsafe<any[]>(
+            `SELECT "createdAt" FROM "JobApplication" WHERE lower(email) = lower($1) ORDER BY "createdAt" DESC LIMIT 1`,
+            email,
+          );
+          if (rows[0]?.createdAt) applied = fmtShortDate(new Date(rows[0].createdAt));
+        } catch { /* best-effort — leave the line as-is if lookup fails */ }
+      }
+    }
+    if (applied) {
+      outHtml = outHtml.replace(/(application dated)(\s*)(and subsequent)/i, `$1 ${applied} $3`);
+    }
+  }
+  return { html: outHtml, missing };
 }
 
 /** Placeholder keys whose resolved value is intentional HTML and
@@ -729,7 +771,11 @@ export async function wrapLetterPreviewHtml(
        inner .page div has its own 22mm × 18mm padding — without
        this they'd stack and the body content area would be half
        the page. */
-    @page { size: A4; margin: 0; }
+    /* Top/bottom/side margins on EVERY printed page (Chromium honours
+       these via preferCSSPageSize). Page 1's spacing came from .page
+       padding before, so pages 2+ (e.g. the Terms page) had no top
+       gap — moving the margin to @page fixes every page uniformly. */
+    @page { size: A4; margin: 16mm 16mm 18mm 16mm; }
     /* Global letter-spacing of 0.5px on every text element so the
        letter has the airy, formal feel of a printed HR document.
        Applied at the body level so every nested element inherits
@@ -839,11 +885,11 @@ export async function wrapLetterPreviewHtml(
        column visually clean even when amounts differ in digit
        count. */
     table.pay-table td:nth-child(1), table.pay-table th:nth-child(1) { text-align: left; }
-    table.pay-table td:nth-child(2), table.pay-table th:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; }
+    table.pay-table td:nth-child(2), table.pay-table th:nth-child(2) { text-align: center; font-variant-numeric: tabular-nums; }
     /* 3rd column is now ANNUAL (₹) amounts — right-align + tabular
        figures so the rupee digits line up by their right edge,
        matching the monthly column. */
-    table.pay-table td:nth-child(3), table.pay-table th:nth-child(3) { text-align: right; font-variant-numeric: tabular-nums; }
+    table.pay-table td:nth-child(3), table.pay-table th:nth-child(3) { text-align: center; font-variant-numeric: tabular-nums; }
     /* Total row reads as a footer — slightly tinted background +
        bold weight so the eye lands on it. */
     table.pay-table tr:last-child td { background: #f9fafb; font-weight: bold; }
@@ -873,6 +919,21 @@ export async function wrapLetterPreviewHtml(
        own page, keeps the Annexure B list + its closing note together,
        and removes the dashed line entirely. */
     .page-break { display: block; break-before: page; page-break-before: always; height: 0; margin: 0; padding: 0; border: 0; }
+    /* PRINT / PDF: the @page margins above now own the page whitespace,
+       so drop the .page card padding + fixed size (otherwise page 1
+       would get margin + padding = double spacing). The on-screen
+       preview keeps the padded A4 "card" look via the rules above. */
+    @media print {
+      html, body { background: #ffffff; }
+      .page {
+        width: auto;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+        box-shadow: none;
+        overflow: visible;
+      }
+    }
   </style>
 </head>
 <body>
