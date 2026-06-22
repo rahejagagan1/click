@@ -1362,7 +1362,7 @@ export default function EmployeeDetailPage() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[12.5px] font-semibold text-slate-800">{member.name}</p>
                         <p className="truncate text-[10.5px] text-slate-500">
-                          {getUserRoleLabel(member.role) || "Team Member"}
+                          {member.employeeProfile?.designation || getUserRoleLabel(member.role) || "Team Member"}
                         </p>
                       </div>
                     </Link>
