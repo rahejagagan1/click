@@ -250,7 +250,7 @@ export default function ProfilePage() {
     setProfileSeen(true);
     try { window.localStorage.setItem(PROFILE_SEEN_KEY, "1"); } catch {}
   }, [tab, profileSeen]);
-  const [editModal, setEditModal] = useState<null | "primary" | "contact" | "address" | "emergency" | "family" | "photo">(null);
+  const [editModal, setEditModal] = useState<null | "primary" | "contact" | "address" | "emergency" | "family" | "photo" | "statutory">(null);
   const [bioAbout, setBioAbout] = useState("");
   const [bioLove, setBioLove]   = useState("");
   const [bioHobbies, setBioHobbies] = useState("");
@@ -276,6 +276,10 @@ export default function ProfilePage() {
     physicallyHandicapped: "",
     parentName: "", motherName: "", spouseName: "", childrenNames: "",
     emergencyRelationship: "",
+    // Statutory IDs — self-editable by the employee. Bank details are
+    // NOT held here: they're display-only (HR-set), read straight off
+    // `ep` so they can never be sent back in this page's PUT.
+    panNumber: "", aadhaarNumber: "",
     // Onboarding-set fields — read-only on the profile but surfaced
     // here so the UI can show them right away without a separate fetch.
     employeeId: "", firstName: "", middleName: "", lastName: "",
@@ -307,6 +311,7 @@ export default function ProfilePage() {
         spouseName: p.spouseName ?? "",
         childrenNames: p.childrenNames ?? "",
         emergencyRelationship: p.emergencyRelationship ?? "",
+        panNumber: p.panNumber ?? "", aadhaarNumber: p.aadhaarNumber ?? "",
         // Onboarding-set fields straight from the EmployeeProfile row.
         employeeId: p.employeeId ?? "",
         firstName: p.firstName ?? "", middleName: p.middleName ?? "", lastName: p.lastName ?? "",
@@ -691,6 +696,51 @@ export default function ProfilePage() {
               </div>
             </div>
 
+            {/* Statutory & Bank Details — Aadhaar/PAN are self-editable;
+                bank details are read-only (entered by HR). This whole card
+                is private: the API only returns these fields to the owner,
+                HR and developers. */}
+            <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 dark:border-white/[0.05]">
+                <h3 className="text-[13px] font-semibold text-slate-800 dark:text-white flex items-center gap-2">
+                  Statutory &amp; Bank Details
+                  <span className="text-[10px] text-slate-400">(i)</span>
+                </h3>
+                <button onClick={() => setEditModal("statutory")} className="text-[12px] font-medium text-[#008CFF] hover:underline flex items-center gap-1">
+                  <Pencil size={12} /> Edit
+                </button>
+              </div>
+              <div className="px-5 py-4 grid grid-cols-3 gap-x-8 gap-y-4">
+                {[
+                  { label: "AADHAAR NUMBER", value: form.aadhaarNumber || "—" },
+                  { label: "PAN NUMBER",     value: form.panNumber     || "—" },
+                ].map(f => (
+                  <div key={f.label}>
+                    <p className="text-[10px] text-slate-400 uppercase tracking-wider">{f.label}</p>
+                    <p className="text-[13px] text-slate-700 dark:text-slate-200 mt-0.5">{f.value}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="px-5 pb-4 pt-1 border-t border-slate-100 dark:border-white/[0.05]">
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mt-3 mb-2 flex items-center gap-2">
+                  Bank Details
+                  <span className="normal-case font-normal text-slate-400">· read-only, managed by HR</span>
+                </p>
+                <div className="grid grid-cols-3 gap-x-8 gap-y-4">
+                  {[
+                    { label: "BANK NAME",      value: ep?.bankName          || "—" },
+                    { label: "ACCOUNT NUMBER", value: ep?.bankAccountNumber || "—" },
+                    { label: "IFSC CODE",      value: ep?.bankIfsc          || "—" },
+                  ].map(f => (
+                    <div key={f.label}>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wider">{f.label}</p>
+                      <p className="text-[13px] text-slate-700 dark:text-slate-200 mt-0.5">{f.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             {/* Profile Picture */}
             <div className="bg-white dark:bg-[#001529] border border-slate-200 dark:border-white/[0.06] rounded-xl overflow-hidden">
               <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 dark:border-white/[0.05]">
@@ -868,6 +918,21 @@ export default function ProfilePage() {
           values={{
             emergencyRelationship: form.emergencyRelationship,
             emergencyPhone:        form.emergencyPhone,
+          }}
+          onSave={save}
+        />
+      )}
+      {editModal === "statutory" && (
+        // Only Aadhaar + PAN are editable here. Bank details are shown on
+        // the card but never enter this modal — they're HR-managed.
+        <EditModal title="Statutory Details" onClose={() => setEditModal(null)}
+          fields={[
+            { key: "aadhaarNumber", label: "Aadhaar Number" },
+            { key: "panNumber",     label: "PAN Number" },
+          ]}
+          values={{
+            aadhaarNumber: form.aadhaarNumber,
+            panNumber:     form.panNumber,
           }}
           onSave={save}
         />
