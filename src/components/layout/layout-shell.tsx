@@ -79,7 +79,7 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
             </Suspense>
             {/* `ml-[92px]` = exact sidebar width — the header butts up
                 cleanly against the brand block so they read as one strip. */}
-            <main className="ml-[92px] flex min-h-screen flex-1 flex-col bg-[#f4f7fb]">
+            <main className="ml-[92px] flex min-h-screen min-w-0 flex-1 flex-col overflow-x-clip bg-[#f4f7fb]">
                 <Header />
                 <div className={contentCls}>
                     {children}

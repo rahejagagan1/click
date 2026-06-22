@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, requireHRAdmin, serverError } from "@/lib/api-auth";
+import { requireAuth, requireHRAdmin, isHRAdmin, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
 import { isDeveloperEmail } from "@/lib/hr/notification-policy";
 
@@ -39,6 +39,14 @@ export async function GET(req: NextRequest) {
     const canSeeExitBadge =
       viewer?.orgLevel === "hr_manager" || viewer?.isDeveloper === true;
 
+    // Directory visibility policy: active employees are searchable by
+    // everyone (global header search + home feed @-mention picker), but
+    // EXITED / offboarded / inactive people are HR-only. For non-HR
+    // callers we therefore (a) force active-only so a `member` can never
+    // enumerate offboarded employees, and (b) narrow the profile include
+    // to safe display fields (no PII / salary / personal contact).
+    const viewerIsHR = isHRAdmin(viewer);
+
     const users = await prisma.user.findMany({
       where: {
         AND: [
@@ -53,12 +61,20 @@ export async function GET(req: NextRequest) {
           businessUnit ? { employeeProfile: { businessUnit } } : {},
           brand === "YT Labs"  ? { employeeProfile: { businessUnit: "YT Labs" } } : {},
           brand === "NB Media" ? { NOT: { employeeProfile: { businessUnit: "YT Labs" } } } : {},
-          isActive !== null && isActive !== undefined ? { isActive: isActive === "true" } : {},
+          // Non-HR can only ever see active employees — ignore any
+          // isActive override they pass.
+          !viewerIsHR
+            ? { isActive: true }
+            : (isActive !== null && isActive !== undefined ? { isActive: isActive === "true" } : {}),
           hideDevs ? { NOT: { email: { in: devEmails } } } : {},
         ],
       },
       include: {
-        employeeProfile: true,
+        // Full profile (PII) for HR; non-HR get only the display fields the
+        // @-mention picker / directory chips need.
+        employeeProfile: viewerIsHR
+          ? true
+          : { select: { department: true, designation: true } },
         manager: { select: { id: true, name: true } },
         // Conditional include — see canSeeExitBadge above.
         ...(canSeeExitBadge
@@ -85,6 +101,28 @@ export async function GET(req: NextRequest) {
           if (selfExit[0]) (selfRow as any).employeeExit = selfExit[0];
         } catch { /* ignore */ }
       }
+    }
+
+    // PIP fields aren't in the typed client yet — pull them via raw SQL and
+    // merge onto each employeeProfile so the ON PIP badge can render in the
+    // directory + search the same way the probation badge does.
+    try {
+      const ids = (users as any[]).map((u) => u.id).filter((n) => Number.isInteger(n));
+      if (viewerIsHR && ids.length > 0) {
+        const pipRows = await prisma.$queryRawUnsafe<Array<{ userId: number; pipStartedAt: Date | null; pipEndDate: Date | null }>>(
+          `SELECT "userId", "pipStartedAt", "pipEndDate" FROM "EmployeeProfile" WHERE "userId" IN (${ids.join(",")})`,
+        );
+        const byUser = new Map(pipRows.map((r) => [r.userId, r]));
+        for (const u of users as any[]) {
+          const r = byUser.get(u.id);
+          if (r && u.employeeProfile) {
+            u.employeeProfile.pipStartedAt = r.pipStartedAt;
+            u.employeeProfile.pipEndDate = r.pipEndDate;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[employees GET] pip fields merge failed:", e);
     }
 
     return NextResponse.json(serializeBigInt(users));
@@ -143,20 +181,51 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const seriesId = Number(numberSeriesId);
     const result = await prisma.$transaction(async (tx) => {
-      // Atomic allocate: UPDATE ... SET nextNumber = nextNumber + 1 RETURNING ...
-      // The row lock held during UPDATE serializes concurrent callers, so each
-      // transaction gets a unique post-increment value.
-      const bumped = await tx.employeeNumberSeries.update({
-        where: { id: Number(numberSeriesId) },
-        data: { nextNumber: { increment: 1 } },
-        select: { id: true, prefix: true, nextNumber: true, isActive: true },
-      });
-      if (!bumped.isActive) {
-        throw new Error("Selected number series is inactive");
+      // Lock the series row so concurrent adds serialize — FOR UPDATE holds
+      // the lock for the rest of the transaction, so two simultaneous
+      // callers can't claim the same number.
+      const locked = await tx.$queryRawUnsafe<Array<{ prefix: string; nextNumber: number; isActive: boolean }>>(
+        `SELECT prefix, "nextNumber", "isActive" FROM "EmployeeNumberSeries" WHERE id = $1 FOR UPDATE`,
+        seriesId,
+      );
+      if (!locked[0]) throw new Error("Number series not found");
+      if (!locked[0].isActive) throw new Error("Selected number series is inactive");
+      const prefix = locked[0].prefix;
+
+      // HRM numbers are issued strictly serially and are NEVER recycled.
+      // Start from the higher of (the series counter) and (one past the
+      // highest number ever used under this prefix). Exited / offboarded
+      // employees keep their EmployeeProfile row — and thus their number —
+      // so they are counted here and can never be handed to a new joiner.
+      // Counting padded tails too (HRM01 -> 1) so the "max" is always the
+      // true highest, then we skip forward over anything already taken.
+      const used = await tx.$queryRawUnsafe<Array<{ employeeId: string }>>(
+        `SELECT "employeeId" FROM "EmployeeProfile" WHERE "employeeId" LIKE $1`,
+        `${prefix}%`,
+      );
+      let maxTail = 0;
+      for (const r of used) {
+        const tail = (r.employeeId ?? "").slice(prefix.length);
+        if (/^\d+$/.test(tail)) {
+          const t = Number.parseInt(tail, 10);
+          if (t > maxTail) maxTail = t;
+        }
       }
-      const claimed = bumped.nextNumber - 1;
-      const employeeId = `${bumped.prefix}${claimed}`;
+      let n = Math.max(Number(locked[0].nextNumber), maxTail + 1);
+      // Belt-and-braces: skip any exact id that somehow already exists.
+      for (let guard = 0; guard < 100000; guard++) {
+        const taken = await tx.employeeProfile.findFirst({ where: { employeeId: `${prefix}${n}` }, select: { id: true } });
+        if (!taken) break;
+        n++;
+      }
+      const employeeId = `${prefix}${n}`;
+      // Advance the counter past the number we just claimed.
+      await tx.$executeRawUnsafe(
+        `UPDATE "EmployeeNumberSeries" SET "nextNumber" = $1 WHERE id = $2`,
+        n + 1, seriesId,
+      );
 
       // Find or create the User — HR-first identity; clickupUserId stays null and
       // is backfilled by the ClickUp sync on email match.
@@ -180,7 +249,7 @@ export async function POST(req: NextRequest) {
           lastName: String(lastName).trim(),
           workCountry: String(workCountry).trim(),
           nationality: String(nationality).trim(),
-          numberSeriesId: bumped.id,
+          numberSeriesId: seriesId,
           gender: String(gender),
           dateOfBirth: dob,
           phone: String(mobileNumber).trim(),
@@ -205,8 +274,11 @@ export async function POST(req: NextRequest) {
         { status: 409 },
       );
     }
-    if (e?.code === "P2025") {
+    if (e?.code === "P2025" || e?.message === "Number series not found") {
       return NextResponse.json({ error: "Number series not found" }, { status: 400 });
+    }
+    if (e?.message === "Selected number series is inactive") {
+      return NextResponse.json({ error: "Selected number series is inactive" }, { status: 400 });
     }
     return serverError(e, "POST /api/hr/employees");
   }

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Clock, ExternalLink, Wrench, Subtitles, ClipboardList, History, Search } from "lucide-react";
+import { Clock, ExternalLink, Wrench, Subtitles, ClipboardList, History, Search, SpellCheck } from "lucide-react";
 
 // Custom "VO" letter-mark, used in place of a Lucide glyph for the
 // Extractor tool (which pulls voice-over audio). Matches the same prop
@@ -83,6 +83,14 @@ const TOOLS: Tool[] = [
     external: true,
     Icon: Search,
     accent: "#6366f1",
+  },
+  {
+    name: "Proofreader",
+    description: "Check scripts and copy for grammar and factual accuracy before publishing.",
+    href: "https://proofreader.nbmedia.co.in/",
+    external: true,
+    Icon: SpellCheck,
+    accent: "#e11d48",
   },
 ];
 

@@ -104,9 +104,10 @@ function HeaderSearchInner() {
 
   const shouldFetch = open && debounced.length >= 2;
 
-  // Search both active AND inactive (offboarded) employees — HR often needs to
-  // pull up a past employee. Inactive ones are flagged in the result row. The
-  // employees API returns everyone when the isActive param is omitted.
+  // People search is open to everyone, but the employees API only returns
+  // ACTIVE employees to non-HR — exited / offboarded people are never
+  // surfaced to a normal user. HR additionally sees inactive employees,
+  // flagged with an exit badge. See feedback_access_gate_drift.
   const { data: peopleData, error: peopleErr } = useSWR(
     shouldFetch ? `/api/hr/employees?search=${encodeURIComponent(debounced)}` : null,
     fetcher,
@@ -290,6 +291,25 @@ function HeaderSearchInner() {
                                 >
                                   <span className="inline-block h-1 w-1 rounded-full bg-blue-500" />
                                   On Probation
+                                </span>
+                              );
+                            })()}
+                            {/* On PIP (rose) — on a performance plan: started,
+                                not ended (or open-ended), active, not exiting. */}
+                            {exitState === null && u.isActive !== false && (() => {
+                              const ep = u.employeeProfile as any;
+                              if (!ep?.pipStartedAt) return null;
+                              if (ep.pipEndDate) {
+                                const endMs = new Date(`${String(ep.pipEndDate).slice(0, 10)}T00:00:00Z`).getTime();
+                                if (!(endMs >= Date.now() - 86_400_000)) return null;
+                              }
+                              return (
+                                <span
+                                  className="inline-flex items-center gap-0.5 rounded-full bg-rose-50 px-1.5 py-px text-[8.5px] font-bold uppercase tracking-wider text-rose-700 ring-1 ring-inset ring-rose-200 shrink-0"
+                                  title="On Performance Improvement Plan"
+                                >
+                                  <span className="inline-block h-1 w-1 rounded-full bg-rose-500" />
+                                  On PIP
                                 </span>
                               );
                             })()}

@@ -1312,6 +1312,100 @@ export function probationEndingReminderEmail(args: {
   return { subject, html: SHELL(subject, body), text };
 }
 
+// ── PIP (Performance Improvement Plan) ending reminder ─────────────────
+// Heads-up to a leaving employee (~2 days before their last working day)
+// to complete the Exit Survey. CTA → the exit survey form.
+export function exitSurveyReminderEmail(args: {
+  employeeName: string;
+  lastWorkingDay: string; // YYYY-MM-DD
+  daysRemaining: number;
+}): EmailContent {
+  const link = `${appUrl()}/dashboard/hr/exit-survey`;
+  const lwd = new Date(`${args.lastWorkingDay}T00:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric", timeZone: "UTC" });
+  const when = args.daysRemaining <= 0 ? "today" : args.daysRemaining === 1 ? "tomorrow" : `in ${args.daysRemaining} days`;
+  const subject = "Please complete your Exit Survey";
+  const body = `
+    <p style="margin:0 0 12px">Hi ${escape(args.employeeName)},</p>
+    <p style="margin:0 0 12px">As your last working day approaches (<strong>${lwd}</strong>, ${when}), we'd really value your honest feedback. Please take a few minutes to complete your <strong>Exit Survey</strong>.</p>
+    <p style="margin:0 0 12px">It's required before you clock out on your final day, and your responses go straight to HR to help us improve.</p>
+    <p style="margin:16px 0"><a href="${link}" style="display:inline-block;background:#e11d48;color:#ffffff;text-decoration:none;padding:11px 22px;border-radius:8px;font-size:13.5px;font-weight:600">Complete Exit Survey &rarr;</a></p>
+    <p style="margin:0;color:#6b7280;font-size:12px">Thank you for everything &mdash; we wish you the very best.</p>
+  `;
+  const text = `Hi ${args.employeeName},\n\nAs your last working day approaches (${lwd}, ${when}), please complete your Exit Survey. It's required before clocking out on your final day, and your feedback goes to HR.\n\nComplete it here: ${link}\n\nThank you, and all the best.`;
+  return { subject, html: SHELL(subject, body), text };
+}
+
+// 7-day heads-up to brand HR + the employee's reporting manager that a
+// performance plan's review date is approaching. CTA → My Team → PIP Reviews.
+export function pipEndingReminderEmail(args: {
+  recipientName?: string | null;
+  employeeName: string;
+  employeeId?: string | null;
+  pipStartedAt?: Date | null;
+  pipEndDate: Date;
+  daysRemaining: number;
+  managerName?: string | null;
+  department?: string | null;
+  reason?: string | null;
+  employeeUserId: number;
+}): EmailContent {
+  const fmt = (d: Date | null | undefined) =>
+    d ? d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
+  const subject = `Performance plan review due · ${args.employeeName} (${args.daysRemaining} day${args.daysRemaining === 1 ? "" : "s"})`;
+
+  const reviewLink = `${appUrl()}/dashboard/hr/my-team/pip`;
+  const peopleLink = `${appUrl()}/dashboard/hr/people/${args.employeeUserId}`;
+
+  const callout = `
+    <div style="margin:0 0 16px;padding:16px;background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;text-align:center">
+      <p style="margin:0;font-size:10.5px;color:#9f1239;font-weight:700;text-transform:uppercase;letter-spacing:0.12em">Plan review due in</p>
+      <p style="margin:6px 0 0;font-size:32px;font-weight:700;color:#9f1239;line-height:1">${args.daysRemaining}<span style="font-size:14px;font-weight:600;margin-left:4px">day${args.daysRemaining === 1 ? "" : "s"}</span></p>
+      <p style="margin:6px 0 0;font-size:11.5px;color:#9f1239">${escape(args.employeeName)} · review by ${fmt(args.pipEndDate)}</p>
+    </div>`;
+
+  const rows: string[] = [];
+  rows.push(vRow("Employee", escape(args.employeeName)));
+  if (args.employeeId)  rows.push(vRow("HRM No.", escape(args.employeeId)));
+  if (args.department)  rows.push(vRow("Department", escape(args.department)));
+  if (args.managerName) rows.push(vRow("Reporting Manager", escape(args.managerName)));
+  if (args.pipStartedAt) rows.push(vRow("Plan started", fmt(args.pipStartedAt)));
+  rows.push(vRow("Review date", fmt(args.pipEndDate)));
+  if (args.reason) rows.push(vRow("Concern", escape(args.reason)));
+
+  const body = `
+    <p style="margin:0 0 12px;font-size:14px;color:#1f2937;line-height:1.6">
+      ${args.recipientName ? `Hi ${escape(args.recipientName)},` : "Hi,"}
+    </p>
+    <p style="margin:0 0 14px;font-size:13.5px;color:#475569;line-height:1.6">
+      ${escape(args.employeeName)}'s performance improvement plan is approaching its review date. The reporting manager should review it and recommend an outcome — extend, mark as passed, or end employment — for HR approval.
+    </p>
+    ${callout}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:14px 0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      ${rows.join("")}
+    </table>
+    ${ctaButton("Review in My Team → PIP Reviews", reviewLink)}
+    <p style="margin:14px 0 0;font-size:12px;color:#94a3b8;line-height:1.55">
+      Or open the employee's profile: <a href="${peopleLink}" style="color:#9f1239">${peopleLink}</a>
+    </p>
+  `;
+
+  const text = [
+    args.recipientName ? `Hi ${args.recipientName},` : "Hi,",
+    `${args.employeeName}'s performance plan review is due in ${args.daysRemaining} day${args.daysRemaining === 1 ? "" : "s"} (${fmt(args.pipEndDate)}).`,
+    ``,
+    `Employee: ${args.employeeName}`,
+    args.employeeId  ? `HRM No.: ${args.employeeId}` : null,
+    args.managerName ? `Reporting Manager: ${args.managerName}` : null,
+    args.reason      ? `Concern: ${args.reason}` : null,
+    `Review date: ${fmt(args.pipEndDate)}`,
+    ``,
+    `Review: ${reviewLink}`,
+    `Profile: ${peopleLink}`,
+  ].filter(Boolean).join("\n");
+
+  return { subject, html: SHELL(subject, body), text };
+}
+
 // ── Reporting-manager change applied ───────────────────────────────────
 // Sent when a scheduled (effective-dated) reporting-manager change takes
 // effect. Goes to the employee, their new manager, and brand HR.

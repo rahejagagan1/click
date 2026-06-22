@@ -47,9 +47,11 @@ function LeaveTypePicker({
   const balanceByTypeId = useMemo(() => {
     const map = new Map<number, number>();
     for (const b of Array.isArray(balances) ? balances : []) {
-      // Remaining balance shown when applying = total − used. Pending (not-yet-
-      // approved) leaves are deliberately NOT subtracted here.
-      const available = parseFloat(b.totalDays ?? "0") - parseFloat(b.usedDays ?? "0");
+      // Remaining balance shown when applying = total − used − pending.
+      // Pending must be subtracted so this matches what the apply API
+      // enforces (POST /api/hr/leaves uses total-used-pending); otherwise the
+      // form showed more "available" than could actually be applied for.
+      const available = parseFloat(b.totalDays ?? "0") - parseFloat(b.usedDays ?? "0") - parseFloat(b.pendingDays ?? "0");
       if (b.leaveTypeId) map.set(b.leaveTypeId, available);
     }
     return map;
