@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 import {
-  loadExportRows, monYearDash, monShort, HEADERS_PAY_REGISTER,
+  loadExportRows, frozenMonthlyComponents, monYearDash, monShort, HEADERS_PAY_REGISTER,
   brandParam, filterRowsByBrand, COMPANY_BY_BRAND,
 } from "@/lib/payroll-exports";
 
@@ -63,22 +63,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       // amounts; divide by 12 and apply the LOP factor so the columns
       // already match what each employee actually earned this month.
       const workingDays = r.workingDays || 30;
-      const lopFactor = workingDays > 0 ? Math.max(0, (workingDays - r.lopDays) / workingDays) : 1;
 
-      const isIntern = r.salaryType === "intern";
-      const basic    = isIntern ? 0 : (r.basicAnnual / 12) * lopFactor;
-      const hra      = isIntern ? 0 : (r.hraAnnual / 12) * lopFactor;
-      const medical  = isIntern ? 0 : (r.medicalAnnual / 12) * lopFactor;
-      const conv     = isIntern ? 0 : (r.conveyanceAnnual / 12) * lopFactor;
-      // Special Allowance absorbs the employee PF so it's shown as part of
-      // earnings (e.g. 3200 special + 1800 PF = 5000). PF is still subtracted
-      // again as a contribution (column B) below, so net = gross − PF − tax.
-      // This also makes gross(A) include PF, matching the stored payslip.
-      const special  = isIntern ? 0 : (r.specialAnnual / 12) * lopFactor + r.pfEmployee;
-      const da       = isIntern ? 0 : (r.daAnnual / 12) * lopFactor;
-      // Interns receive their whole monthly amount as a stipend; basic
-      // / HRA / etc. stay at zero on the register.
-      const stipend  = isIntern ? Math.max(0, r.grossEarnings - r.bonus) : 0;
+      // Salary breakdown anchored to the LOCKED payslip — components are
+      // scaled to the salary actually paid this cycle so a post-lock
+      // structure edit (e.g. a later raise) can't leak into this file.
+      // See frozenMonthlyComponents in payroll-exports.ts.
+      const { basic, hra, medical, conv, da, special, stipend } = frozenMonthlyComponents(r);
 
       // Per Q2 from spec — every EmployeeBonus row (any bonusType) goes
       // into the "Referral Bonus" column for now. Sub-types are kept on
@@ -87,17 +77,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       const businessExpense = (r.adhocPayByType["Reimbursement"] ?? 0)
                             + (r.adhocPayByType["Travel"] ?? 0);
 
-      // Gross(A) intentionally computed at row level — Keka exports the
-      // numeric value, not the formula. PF Employee is treated as a
-      // contribution (column B); PT + addTax + TDS + adhoc deductions
-      // roll into Total Deductions (column C).
-      const grossA = basic + hra + medical + conv + special + da + stipend + referralBonus + businessExpense;
+      // Headline money columns come straight from the frozen payslip so the
+      // register reconciles exactly with the pre-payroll check + Batch
+      // Payment. PF Employee is the contribution (column B); everything else
+      // withheld (PT + addTax + TDS + ESI + LWF + adhoc) rolls into Total
+      // Deductions (column C) as (totalDeductions − PF).
+      const grossA = r.grossEarnings;
       const pfEmployee = r.pfEmployee;
       const totalContribB = pfEmployee; // ESI not yet wired
       const profTax = r.professionalTax + r.additionalTax;
-      const totalAdhocDed = Object.values(r.adhocDedByType).reduce((s, v) => s + v, 0);
-      const totalDeductionC = profTax + r.tds + totalAdhocDed;
-      const netPay = grossA - totalContribB - totalDeductionC;
+      const totalDeductionC = Math.max(0, r.totalDeductions - r.pfEmployee);
+      const netPay = r.netPay;
       // D / E / F kept at zero — the cash-advance + settlement flows
       // aren't wired to AdhocLineItem yet; revisit when those go live.
       const cashAdvance = 0;
@@ -155,7 +145,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
      14, 14, 18, 18, 18].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
     const buf = await wb.xlsx.writeBuffer();
-    const filename = `Keka PayRegister_${company}_${monYearDash(run.month, run.year)}.xlsx`;
+    const filename = `NbStudio PayRegister_${company}_${monYearDash(run.month, run.year)}.xlsx`;
     return new NextResponse(buf as any, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
