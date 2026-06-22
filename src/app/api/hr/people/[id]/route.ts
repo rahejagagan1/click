@@ -223,13 +223,24 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       sUser?.isDeveloper === true ||
       sUser?.orgLevel === "hr_manager";
     const docsAllowed = isSelfRequest || isDocViewer;
+    // Identity + bank PII (PAN / Aadhaar / bank account) is as sensitive as
+    // documents — visible only to the owner, HR (hr_manager), CEO and
+    // developers. Redact it from the response for any other viewer (e.g. a
+    // colleague browsing the directory) so it never reaches the client at
+    // all — not even masked.
+    const mergedProfile = employeeProfile ? { ...employeeProfile, ...extended, ...pip } : null;
+    if (mergedProfile && !docsAllowed) {
+      for (const k of ["panNumber", "aadhaarNumber", "aadhaarEnrollment", "bankName", "bankAccountNumber", "bankIfsc", "bankBranch", "accountHolderName"]) {
+        delete (mergedProfile as any)[k];
+      }
+    }
     const payload = {
       ...rest,
       // Salary (CTC) is the most sensitive field — HR / CEO / developer
       // only. Stripped for a direct manager or the employee themselves on
       // this route. `...rest` carries salaryStructure, so override after.
       salaryStructure: isDocViewer ? ((rest as any).salaryStructure ?? null) : null,
-      profile:       employeeProfile ? { ...employeeProfile, ...extended, ...pip } : null,
+      profile:       mergedProfile,
       documents:     docsAllowed ? ownedDocuments : [],
       // Asset assignments (serial numbers etc.) follow the same gate as
       // documents — self or HR only, never an arbitrary viewer.
@@ -459,15 +470,25 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
                                                                           : Math.max(0, parseInt(String(noticePeriodDays), 10) || 0);
     if (workCountry       !== undefined) profileData.workCountry       = workCountry || "India";
     if (nationality       !== undefined) profileData.nationality       = nationality || "India";
-    if (panNumber         !== undefined) profileData.panNumber         = panNumber         ? String(panNumber).trim().toUpperCase() || null : null;
-    if (aadhaarNumber     !== undefined) profileData.aadhaarNumber     = aadhaarNumber     ? String(aadhaarNumber).trim()           || null : null;
-    if (aadhaarEnrollment !== undefined) profileData.aadhaarEnrollment = aadhaarEnrollment ? String(aadhaarEnrollment).trim()       || null : null;
-    // Bank details — plaintext. IFSC is upper-cased for consistency.
-    if (bankName          !== undefined) profileData.bankName          = bankName          ? String(bankName).trim()                       || null : null;
-    if (bankBranch        !== undefined) profileData.bankBranch        = bankBranch        ? String(bankBranch).trim()                     || null : null;
-    if (accountHolderName !== undefined) profileData.accountHolderName = accountHolderName ? String(accountHolderName).trim()              || null : null;
-    if (bankAccountNumber !== undefined) profileData.bankAccountNumber = bankAccountNumber ? String(bankAccountNumber).trim()              || null : null;
-    if (bankIfsc          !== undefined) profileData.bankIfsc          = bankIfsc          ? String(bankIfsc).trim().toUpperCase()         || null : null;
+    // Identity + bank PII may only be WRITTEN by doc-viewers (HR / CEO /
+    // developer) — the same gate that lets them SEE it on GET. Editors who
+    // can change the rest of a profile but can't see PII (special_access /
+    // admin) receive it redacted, so writing here would silently wipe the
+    // stored PAN / Aadhaar / bank. Skip those writes entirely for them.
+    const putUser = session?.user as any;
+    const putIsDocViewer =
+      putUser?.orgLevel === "ceo" || putUser?.isDeveloper === true || putUser?.orgLevel === "hr_manager";
+    if (putIsDocViewer) {
+      if (panNumber         !== undefined) profileData.panNumber         = panNumber         ? String(panNumber).trim().toUpperCase() || null : null;
+      if (aadhaarNumber     !== undefined) profileData.aadhaarNumber     = aadhaarNumber     ? String(aadhaarNumber).trim()           || null : null;
+      if (aadhaarEnrollment !== undefined) profileData.aadhaarEnrollment = aadhaarEnrollment ? String(aadhaarEnrollment).trim()       || null : null;
+      // Bank details — plaintext. IFSC is upper-cased for consistency.
+      if (bankName          !== undefined) profileData.bankName          = bankName          ? String(bankName).trim()                       || null : null;
+      if (bankBranch        !== undefined) profileData.bankBranch        = bankBranch        ? String(bankBranch).trim()                     || null : null;
+      if (accountHolderName !== undefined) profileData.accountHolderName = accountHolderName ? String(accountHolderName).trim()              || null : null;
+      if (bankAccountNumber !== undefined) profileData.bankAccountNumber = bankAccountNumber ? String(bankAccountNumber).trim()              || null : null;
+      if (bankIfsc          !== undefined) profileData.bankIfsc          = bankIfsc          ? String(bankIfsc).trim().toUpperCase()         || null : null;
+    }
 
     const userPatch: Record<string, unknown> = {};
     if (profilePictureUrl) userPatch.profilePictureUrl = profilePictureUrl;
