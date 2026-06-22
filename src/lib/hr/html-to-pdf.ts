@@ -86,14 +86,14 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
     // styles all finish before we snapshot to PDF.
     await page.setContent(html, { waitUntil: "networkidle0" });
     const pdf = await page.pdf({
-      format: "A4",
-      // Page whitespace applied here (deterministically, on EVERY page)
-      // instead of via CSS @page margins — Chromium's @page-margin
-      // handling under preferCSSPageSize was inconsistent and left
-      // content flush to the edges. The wrapper's @media print drops the
-      // .page card padding so these margins are the single source of
-      // truth and page 1 isn't double-spaced.
-      margin: { top: "16mm", right: "16mm", bottom: "18mm", left: "16mm" },
+      // Page whitespace comes from the CSS `@page { margin: 16mm 16mm 18mm
+      // 16mm }` in wrapLetterPreviewHtml. We MUST honour the CSS page box
+      // (preferCSSPageSize) rather than pass a `margin` option here:
+      // Chromium gives the CSS @page margin precedence over the page.pdf
+      // margin option, so the option was being silently ignored and every
+      // letter rendered with content flush to the left edge (0mm margin).
+      // @page size is A4, so we don't pass `format` either.
+      preferCSSPageSize: true,
       printBackground: true,
     });
     return Buffer.from(pdf);
