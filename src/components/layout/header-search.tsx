@@ -6,7 +6,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import { useSession } from "next-auth/react";
 import { fetcher } from "@/lib/swr";
-import { canViewExitBadge } from "@/lib/access";
+import { canViewExitBadge, isHRAdmin } from "@/lib/access";
 
 // Next.js 16 + Turbopack require any consumer of useSearchParams() to
 // sit under a <Suspense> boundary, otherwise pages that try to
@@ -103,12 +103,17 @@ function HeaderSearchInner() {
   }, []);
 
   const shouldFetch = open && debounced.length >= 2;
+  // People search is HR-only — the directory (and its inactive / exited
+  // people) is HR-confidential. Non-HR users only get Pages + Cases here.
+  // Matches the /dashboard/hr/people sidebar gate and the API guards on
+  // /api/hr/people/[id] + /api/hr/employees. See feedback_access_gate_drift.
+  const canSearchPeople = isHRAdmin(sessionUser);
 
   // Search both active AND inactive (offboarded) employees — HR often needs to
   // pull up a past employee. Inactive ones are flagged in the result row. The
   // employees API returns everyone when the isActive param is omitted.
   const { data: peopleData, error: peopleErr } = useSWR(
-    shouldFetch ? `/api/hr/employees?search=${encodeURIComponent(debounced)}` : null,
+    shouldFetch && canSearchPeople ? `/api/hr/employees?search=${encodeURIComponent(debounced)}` : null,
     fetcher,
     { dedupingInterval: 500, keepPreviousData: true },
   );
