@@ -17,6 +17,7 @@ import { sendMissingDocReminders } from "@/lib/hr/doc-compliance";
 import { runAutoLOP } from "@/lib/hr/auto-lop";
 import { applyDueManagerChanges } from "@/lib/hr/manager-changes";
 import { attachDuePendingDocuments } from "@/lib/hr/pending-documents";
+import { finaliseDueExits } from "@/lib/hr/auto-exit";
 import { getCronJobsConfig } from "@/lib/cron-jobs-config";
 import type { CronJobId } from "@/lib/cron-jobs-registry";
 
@@ -68,4 +69,6 @@ export const CRON_JOB_RUNNERS: Record<CronJobId, () => Promise<void>> = {
   reporting_manager_changes: async () => { await applyDueManagerChanges(); },
   // Attach parked new-joiner docs to users that now exist.
   attach_pending_documents: async () => { await attachDuePendingDocuments(); },
+  // Flip offboarding exits to "exited" + deactivate once notice ends.
+  auto_exit: async () => { await finaliseDueExits(); },
 };
