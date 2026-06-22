@@ -124,7 +124,7 @@ function DocCard({ doc, accent, onDelete }: {
 
 function EditModal({ title, fields, values, onSave, onClose }: {
   title: string;
-  fields: { key: string; label: string; type?: string; options?: string[]; min?: string; max?: string; fullWidth?: boolean; readOnly?: boolean }[];
+  fields: { key: string; label: string; type?: string; options?: string[]; min?: string; max?: string; fullWidth?: boolean; readOnly?: boolean; maxLength?: number; inputMode?: "numeric" | "text"; placeholder?: string; transform?: (v: string) => string }[];
   values: Record<string, string>;
   onSave: (v: Record<string, string>) => Promise<void>;
   onClose: () => void;
@@ -157,9 +157,12 @@ function EditModal({ title, fields, values, onSave, onClose }: {
                 <input
                   type={f.type ?? "text"}
                   value={form[f.key] ?? ""}
-                  onChange={e => set(f.key, e.target.value)}
+                  onChange={e => set(f.key, f.transform ? f.transform(e.target.value) : e.target.value)}
                   min={f.min}
                   max={f.max}
+                  maxLength={f.maxLength}
+                  inputMode={f.inputMode}
+                  placeholder={f.placeholder}
                   readOnly={f.readOnly}
                   onClick={(e) => { if (f.type === "date" && !f.readOnly) (e.currentTarget as HTMLInputElement).showPicker?.(); }}
                   onFocus={(e) => { if (f.type === "date" && !f.readOnly) (e.currentTarget as HTMLInputElement).showPicker?.(); }}
@@ -927,8 +930,9 @@ export default function ProfilePage() {
         // the card but never enter this modal — they're HR-managed.
         <EditModal title="Statutory Details" onClose={() => setEditModal(null)}
           fields={[
-            { key: "aadhaarNumber", label: "Aadhaar Number" },
-            { key: "panNumber",     label: "PAN Number" },
+            // Aadhaar = exactly 12 digits; PAN = 10 chars (ABCDE1234F).
+            { key: "aadhaarNumber", label: "Aadhaar Number", maxLength: 12, inputMode: "numeric", placeholder: "12-digit number", transform: (v) => v.replace(/\D/g, "").slice(0, 12) },
+            { key: "panNumber",     label: "PAN Number",     maxLength: 10, placeholder: "ABCDE1234F",       transform: (v) => v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10) },
           ]}
           values={{
             aadhaarNumber: form.aadhaarNumber,
