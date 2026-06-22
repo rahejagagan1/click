@@ -109,7 +109,25 @@ export async function GET() {
             },
         }));
 
-        return NextResponse.json({ channels, year, quarter, rows: pageRows });
+        // Company-wide aggregate over EVERY configured channel (not just the
+        // ones this viewer can see individually). The "All channels" tab uses
+        // this so anyone with access to the tile sees the full target picture,
+        // even if their per-channel tabs are capsule-limited.
+        let aQV = 0, aYV = 0, aQT = 0, aYT = 0;
+        for (const c of allConfigured) {
+            aQV += currentByChannel.get(c.channelId) ?? 0;
+            aYV += ytdByChannel.get(c.channelId) ?? 0;
+            aQT += quarterTargetByChannel.get(c.channelId) ?? 0;
+            aYT += yearTargetByChannel.get(c.channelId) ?? 0;
+        }
+        const allTotals = {
+            quarterViews: aQV,
+            yearViews: aYV,
+            quarterTarget: aQT > 0 ? aQT : null,
+            yearTarget: aYT > 0 ? aYT : null,
+        };
+
+        return NextResponse.json({ channels, allTotals, year, quarter, rows: pageRows });
     } catch (error) {
         return serverError(error, "GET /api/me/view-targets");
     }

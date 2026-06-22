@@ -25,10 +25,20 @@ type ChannelRow = {
   yearTarget: number | null;
 };
 
+type AllTotals = {
+  quarterViews: number;
+  quarterTarget: number | null;
+  yearViews: number;
+  yearTarget: number | null;
+};
+
 type Payload = {
   year: number;
   quarter: 1 | 2 | 3 | 4;
   channels: ChannelRow[];
+  // Company-wide totals across EVERY channel (not just the ones this viewer
+  // can see individually). Drives the "All channels" tab.
+  allTotals?: AllTotals;
 };
 
 type Mode = "quarter" | "year";
@@ -125,9 +135,22 @@ export default function ChannelViewsTargetsPanel() {
   const subtitle = `Q${quarter} ${year} · ${QUARTER_LABEL[quarter]}`;
 
   const channels = data?.channels ?? [];
+  // "All channels" aggregate: prefer the server's company-wide totals (every
+  // channel, even ones this viewer can't see individually); fall back to
+  // summing the visible channels if the API didn't send it.
+  const allRow: ChannelRow = data?.allTotals
+    ? {
+        channelId: "__ALL__",
+        channelName: "All channels",
+        quarterViews:  data.allTotals.quarterViews,
+        quarterTarget: data.allTotals.quarterTarget,
+        yearViews:     data.allTotals.yearViews,
+        yearTarget:    data.allTotals.yearTarget,
+      }
+    : aggregateAll(channels);
   // Tabs = "All" + every configured channel. Aggregate stays on top.
   const tabs: ChannelRow[] = channels.length > 0
-    ? [aggregateAll(channels), ...channels]
+    ? [allRow, ...channels]
     : [];
   const active = tabs.find((c) => c.channelId === activeTab) ?? tabs[0];
 
