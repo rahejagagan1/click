@@ -41,7 +41,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         // regular) without a second roundtrip.
         salaryStructure: { select: { ctc: true, pfEligible: true, salaryType: true } },
         manager: { select: { id: true, name: true, profilePictureUrl: true, role: true, employeeProfile: { select: { designation: true } } } },
-        teamMembers: { select: { id: true, name: true, profilePictureUrl: true, role: true, employeeProfile: { select: { designation: true } } } },
+        // Reporting team excludes deactivated / exited / offboarded reports
+        // (isActive=false) — only currently-active direct reports show.
+        teamMembers: { where: { isActive: true }, select: { id: true, name: true, profilePictureUrl: true, role: true, employeeProfile: { select: { designation: true } } } },
         userShift: { include: { shift: true } },
         leaveBalances: { include: { leaveType: true } },
         leavePolicy: { select: { id: true, name: true, isActive: true } },
