@@ -667,6 +667,51 @@ export function exitNotificationEmail(args: {
   return { subject, html, text };
 }
 
+// Daily reminder sent to the offboarding stakeholders when an employee's
+// last working day is TODAY. Not frozen — distinct from the leave templates.
+export function lastWorkingDayReminderEmail(args: {
+  name: string;
+  employeeId?: string | null;
+  designation?: string | null;
+  exitType: string;
+  lastWorkingDay: string | Date;
+  reason?: string | null;
+}): EmailContent {
+  const subject = `Reminder: today is ${args.name}'s last working day`;
+  const link = `${appUrl()}/dashboard/hr/offboard`;
+  const html = SHELL("Last working day — today", `
+    <p style="margin:0 0 12px;font-size:14.5px;color:#1f2937;line-height:1.6">
+      Reminder: <strong>${escape(args.name)}</strong>'s last working day with us
+      is <strong>today</strong>. Please make sure handover, asset return, access
+      revocation and final settlement are wrapped up.
+    </p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%">
+      ${detailRow("Employee",          escape(args.name))}
+      ${args.employeeId  ? detailRow("Employee ID",  escape(args.employeeId))  : ""}
+      ${args.designation ? detailRow("Designation",  escape(args.designation)) : ""}
+      ${detailRow("Exit type",         escape(args.exitType.replace(/_/g, " ")))}
+      ${detailRow("Last working day",   fmtDate(args.lastWorkingDay))}
+      ${args.reason ? detailRow("Reason", escape(args.reason)) : ""}
+    </table>
+    ${ctaButton("Open Offboarding", link)}
+  `);
+  const text = [
+    `Reminder: today is ${args.name}'s last working day with us.`,
+    "",
+    `Employee: ${args.name}`,
+    args.employeeId  ? `Employee ID: ${args.employeeId}`   : "",
+    args.designation ? `Designation: ${args.designation}`  : "",
+    `Exit type: ${args.exitType.replace(/_/g, " ")}`,
+    `Last working day: ${fmtDate(args.lastWorkingDay)}`,
+    args.reason ? `Reason: ${args.reason}` : "",
+    "",
+    `Please ensure handover, asset return, access revocation and final settlement are complete.`,
+    "",
+    `Open: ${link}`,
+  ].filter(Boolean).join("\n");
+  return { subject, html, text };
+}
+
 export function jobApplicationEmail(args: {
   name: string;
   email: string;
