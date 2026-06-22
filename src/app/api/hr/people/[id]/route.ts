@@ -51,20 +51,22 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     });
     if (!user) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // Access gate: full employee profiles are HR-confidential. Only HR /
-    // CEO / developer / special-access (canEditOthers), the profile owner,
-    // or the target's direct manager may load this. Everyone else gets 403
-    // — mirrors GET /api/hr/employees/[id]. Without this a plain `member`
-    // could open /dashboard/hr/people/<anyone> via global search and pull
-    // salary / assets / PII straight from the API even though the UI hides
-    // those tabs.
+    // Access gate: ACTIVE employees are viewable by any authenticated
+    // user (org directory). EXITED / offboarded / otherwise-deactivated
+    // employees are confidential — only HR / CEO / developer / special-
+    // access (canEditOthers), the profile owner, or the target's direct
+    // manager may open them. This is what stops a plain `member` from
+    // pulling up an ex-employee via global search. (Salary / documents /
+    // assets are additionally stripped for non-HR further down.)
     const callerId = await resolveUserId(session);
     const isSelfRequest = callerId != null && callerId === id;
     const isManagerOfTarget =
       callerId != null &&
       ((((user as any).managerId ?? null) === callerId) ||
         (((user as any).inlineManagerId ?? null) === callerId));
-    if (!canEditOthers(session) && !isSelfRequest && !isManagerOfTarget) {
+    const isPrivilegedViewer = canEditOthers(session) || isSelfRequest || isManagerOfTarget;
+    const targetIsActive = (user as any).isActive !== false;
+    if (!targetIsActive && !isPrivilegedViewer) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
