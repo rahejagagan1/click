@@ -3,6 +3,10 @@
         {
             "path": "/api/sync/all",
             "schedule": "30 20 * * *"
+        },
+        {
+            "path": "/api/cron/exits/last-day-reminder",
+            "schedule": "30 3 * * *"
         }
     ]
 }
