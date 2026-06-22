@@ -433,22 +433,275 @@ function DecorativeTree() {
   );
 }
 
-// Welcome banner — backed by /public/image_8b71d84b.png. The image is set
-// as a CSS background so it `cover`s the banner cleanly at any aspect
-// ratio without stretching. A faint left-side dark gradient keeps the
-// white "Welcome ___" text readable against bright wave details.
-function BannerArt() {
+// Welcome banner — a compact animated hero spanning both columns. Deep-navy
+// gradient base + the on-brand wave art (/public/image_8b71d84b.png), with a
+// slow light sheen, a few drifting ambient particles, an animated brand-blue
+// accent line, and a time-aware greeting that rises in on mount. Keeps the
+// 72px footprint of the old banner. Honours prefers-reduced-motion so the
+// motion-sensitive get a clean static version.
+// Small brand glyphs for the banner's floating badges (matches the
+// careers-page PlayBadges set: YouTube / Instagram / Spotify / Facebook).
+function MiniGlyph({ p, size }: { p: string; size: number }) {
+  // Crisp vector brand glyphs (accurate paths, render sharp at any DPI).
+  if (p === "youtube") return (<svg viewBox="0 0 24 24" width={size} height={size} fill="#fff" aria-hidden shapeRendering="geometricPrecision"><path d="M9.6 7.85v8.3L16.7 12z" /></svg>);
+  if (p === "facebook") return (<svg viewBox="0 0 24 24" width={size} height={size} fill="#fff" aria-hidden shapeRendering="geometricPrecision"><path d="M13.45 21v-8.1h2.72l.41-3.16h-3.13V7.72c0-.92.26-1.54 1.57-1.54h1.67V3.35c-.29-.04-1.28-.12-2.44-.12-2.42 0-4.07 1.47-4.07 4.18v2.33H7.46v3.16h2.73V21z" /></svg>);
+  if (p === "instagram") { const sw = Math.max(1.8, size * 0.085); return (<svg viewBox="0 0 24 24" width={size} height={size} fill="none" aria-hidden shapeRendering="geometricPrecision"><rect x="3.2" y="3.2" width="17.6" height="17.6" rx="5.2" stroke="#fff" strokeWidth={sw} strokeLinejoin="round" /><circle cx="12" cy="12" r="4.2" stroke="#fff" strokeWidth={sw} /><circle cx="16.9" cy="7.1" r="1.25" fill="#fff" /></svg>); }
+  if (p === "premiere") return (<span aria-hidden style={{ fontFamily: "Arial, Helvetica, sans-serif", fontWeight: 800, fontSize: Math.round(size * 0.98), lineHeight: 1, letterSpacing: "-0.5px", color: "#c9b3ff" }}>Pr</span>);
+  return (<svg viewBox="0 0 24 24" width={size} height={size} fill="#031b0d" aria-hidden shapeRendering="geometricPrecision"><path d="M17.9 10.9C14.7 9 9.35 8.8 6.3 9.75c-.5.15-1-.15-1.15-.6-.15-.5.15-1 .6-1.15 3.55-1.05 9.4-.85 13.1 1.35.45.25.6.85.35 1.3-.25.35-.85.5-1.3.25z" /><path d="M17.8 13.7c-.25.35-.7.5-1.05.25-2.7-1.65-6.8-2.15-9.95-1.15-.4.1-.85-.1-.95-.5-.1-.4.1-.85.5-.95 3.65-1.1 8.15-.55 11.25 1.35.3.15.45.6.2 1z" /><path d="M16.6 16.45c-.2.3-.55.4-.85.2-2.35-1.45-5.3-1.75-8.8-.95-.35.1-.65-.15-.75-.45-.1-.35.15-.65.45-.75 3.8-.85 7.1-.5 9.7 1.1.35.15.4.55.25.85z" /></svg>);
+}
+
+// The floating brand badges. box = badge size in px (YouTube stays smaller
+// but is wider via w); the rest are bumped up. Positions/motion are handled
+// by FloatingBadges (drift + flee cursor + spring home).
+const SOCIAL_BADGES = [
+  { p: "youtube",   box: 30, w: 1.35, rot: -8,  rad: "9px", bg: "linear-gradient(180deg,#ff1f1f,#d90000)" },
+  { p: "instagram", box: 34, w: 1,    rot: 6,   rad: "50%", bg: "radial-gradient(115% 115% at 25% 110%,#fdc468,#f5733a 25%,#d6249f 55%,#285aeb 100%)" },
+  { p: "spotify",   box: 34, w: 1,    rot: 7,   rad: "50%", bg: "linear-gradient(180deg,#1ed760,#0fb84e)" },
+  { p: "facebook",  box: 33, w: 1,    rot: -10, rad: "50%", bg: "linear-gradient(180deg,#1877f2,#0e5fcc)" },
+  { p: "premiere",  box: 34, w: 1,    rot: 5,   rad: "9px", bg: "linear-gradient(160deg,#4b2a86 0%,#2a0d52 60%,#1b0636 100%)" },
+] as const;
+
+// Floating brand badges with a tiny physics loop: they drift continuously
+// around the empty (right) part of the banner, bounce off the edges so they
+// stay inside, never enter the left text zone, and flee from the mouse cursor
+// when it gets close. Honours prefers-reduced-motion (static scatter).
+function FloatingBadges() {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const nodeRefs = useRef<Array<HTMLSpanElement | null>>([]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || typeof window === "undefined") return;
+    const dims = SOCIAL_BADGES.map((b) => ({ w: Math.round(b.box * b.w), h: b.box, rot: b.rot }));
+    const N = SOCIAL_BADGES.length;
+
+    let W = host.clientWidth || 900;
+    let H = host.clientHeight || 72;
+    const measure = () => { W = host.clientWidth || W; H = host.clientHeight || H; };
+    measure();
+    // Left edge of the play area — keeps badges clear of the greeting/name.
+    const leftBound = () => Math.max(W * 0.30, 250);
+
+    // Start already scattered across the empty area (spread x + varied
+    // height) so they never appear as a clump.
+    const lb0 = leftBound();
+    const SLOTX = [0.04, 0.27, 0.50, 0.72, 0.94];
+    const SLOTY = [0.16, 0.62, 0.18, 0.64, 0.34];
+    // On load: start clustered at the centre of the play area, fired outward
+    // toward each home slot, so the spring flings them out in a "grouped →
+    // scatter" burst (same reveal as the careers page) before they settle
+    // into the continuous float.
+    const gx = (lb0 + W) / 2, gy = H / 2;
+    const ps = dims.map((d, i) => {
+      const homeX = lb0 + Math.max(1, W - lb0 - d.w) * SLOTX[i % SLOTX.length];
+      const homeY = 4 + Math.max(1, H - d.h - 8) * SLOTY[i % SLOTY.length];
+      const x0 = gx - d.w / 2 + (Math.random() - 0.5) * 14;
+      const y0 = gy - d.h / 2 + (Math.random() - 0.5) * 8;
+      const ddx = homeX - x0, ddy = homeY - y0, dd = Math.hypot(ddx, ddy) || 1;
+      const launch = 2.6;
+      return { x: x0, y: y0, vx: (ddx / dd) * launch, vy: (ddy / dd) * launch, ph: Math.random() * Math.PI * 2 };
+    });
+    nodeRefs.current.forEach((n, i) => {
+      if (!n) return;
+      n.style.transform = `translate(${ps[i].x}px, ${ps[i].y}px) rotate(${dims[i].rot}deg) scale(0.35)`;
+      n.style.opacity = "0";
+      requestAnimationFrame(() => { if (n) { n.style.transition = "opacity .45s ease"; n.style.opacity = "1"; } });
+    });
+
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) {
+      // No burst/float for reduced motion — drop each badge straight onto its
+      // scattered home spot.
+      nodeRefs.current.forEach((n, i) => {
+        if (!n) return;
+        const d = dims[i];
+        const hx = lb0 + Math.max(1, W - lb0 - d.w) * SLOTX[i % SLOTX.length];
+        const hy = 4 + Math.max(1, H - d.h - 8) * SLOTY[i % SLOTY.length];
+        n.style.transform = `translate(${hx}px, ${hy}px) rotate(${d.rot}deg)`;
+        n.style.opacity = "1";
+      });
+    }
+    const mouse = { x: -9999, y: -9999 };
+    const onMove = (e: MouseEvent) => { const r = host.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; };
+    const onLeave = () => { mouse.x = -9999; mouse.y = -9999; };
+    window.addEventListener("mousemove", onMove, { passive: true });
+    window.addEventListener("mouseout", onLeave, { passive: true });
+    window.addEventListener("resize", measure);
+
+    let raf = 0;
+    let tFrame = 0;
+    const R = 100;     // cursor "personal space" — badges flee inside this
+    const FORCE = 2.8; // repulsion strength
+    const tick = () => {
+      tFrame += 1;
+      const lb = leftBound();
+      // Separation — push any two badges apart when they get close, so they
+      // stay scattered instead of clumping into a pile.
+      for (let i = 0; i < N; i++) {
+        for (let j = i + 1; j < N; j++) {
+          const a = ps[i], b = ps[j], da = dims[i], db = dims[j];
+          const sx = (a.x + da.w / 2) - (b.x + db.w / 2);
+          const sy = (a.y + da.h / 2) - (b.y + db.h / 2);
+          const sd = Math.hypot(sx, sy) || 0.001;
+          const minD = (da.w + db.w) / 2 + 18;
+          if (sd < minD) {
+            const f = ((minD - sd) / minD) * 0.7;
+            const ux = sx / sd, uy = sy / sd;
+            a.vx += ux * f; a.vy += uy * f;
+            b.vx -= ux * f; b.vy -= uy * f;
+          }
+        }
+      }
+      for (let i = 0; i < N; i++) {
+        const p = ps[i], d = dims[i];
+        const cx = p.x + d.w / 2, cy = p.y + d.h / 2;
+        const dx = cx - mouse.x, dy = cy - mouse.y;
+        const dist2 = dx * dx + dy * dy;
+        if (dist2 < R * R) {
+          const dist = Math.sqrt(dist2) || 0.001;
+          const f = ((R - dist) / R) * FORCE;
+          p.vx += (dx / dist) * f;
+          p.vy += (dy / dist) * f;
+        }
+        // Continuous float: the home target itself drifts in a slow loop, so
+        // each badge perpetually floats around its scattered spot. The cursor
+        // repulsion (above) still shoves them off it; they ease back to the
+        // (still-moving) home when the cursor leaves.
+        const baseX = lb + Math.max(1, W - lb - d.w) * SLOTX[i % SLOTX.length];
+        const baseY = 4 + Math.max(1, H - d.h - 8) * SLOTY[i % SLOTY.length];
+        const hx = baseX + Math.sin(tFrame * 0.018 + p.ph) * 14;
+        const hy = baseY + Math.cos(tFrame * 0.023 + p.ph * 1.4) * 7;
+        p.vx += (hx - p.x) * 0.04;
+        p.vy += (hy - p.y) * 0.04;
+        p.vx *= 0.86; p.vy *= 0.86;
+        const sp = Math.hypot(p.vx, p.vy);
+        const max = 6;
+        if (sp > max) { p.vx = (p.vx / sp) * max; p.vy = (p.vy / sp) * max; }
+        p.x += p.vx; p.y += p.vy;
+        const maxX = Math.max(lb, W - d.w - 2);
+        if (p.x < lb) { p.x = lb; p.vx = Math.abs(p.vx); }
+        if (p.x > maxX) { p.x = maxX; p.vx = -Math.abs(p.vx); }
+        const maxY = Math.max(2, H - d.h - 2);
+        if (p.y < 2) { p.y = 2; p.vy = Math.abs(p.vy); }
+        if (p.y > maxY) { p.y = maxY; p.vy = -Math.abs(p.vy); }
+        // Entrance scale-up — staggered per badge so they pop out of the
+        // group one after another, then hold at full size.
+        const e = Math.min(1, Math.max(0, (tFrame - i * 5) / 24));
+        const scale = 0.35 + 0.65 * (e * (2 - e));
+        const n = nodeRefs.current[i];
+        if (n) n.style.transform = `translate(${p.x}px, ${p.y}px) rotate(${d.rot}deg) scale(${scale})`;
+      }
+      if (!reduce) raf = requestAnimationFrame(tick);
+    };
+    if (!reduce) raf = requestAnimationFrame(tick);
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseout", onLeave);
+      window.removeEventListener("resize", measure);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div
-      className="absolute inset-0"
-      style={{
-        backgroundImage:
-          "linear-gradient(90deg, rgba(8,18,38,0.55) 0%, rgba(8,18,38,0.20) 35%, rgba(8,18,38,0) 100%), url('/image_8b71d84b.png')",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
-      }}
-    />
+    <div ref={hostRef} className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+      {SOCIAL_BADGES.map((b, i) => (
+        <span
+          key={i}
+          ref={(el) => { nodeRefs.current[i] = el; }}
+          className="absolute left-0 top-0 inline-flex items-center justify-center"
+          style={{
+            width: Math.round(b.box * b.w),
+            height: b.box,
+            borderRadius: b.rad,
+            background: b.bg,
+            boxShadow: "0 6px 14px -5px rgba(15,23,42,0.4), inset 0 1px 0 rgba(255,255,255,0.4)",
+            opacity: 0,
+            willChange: "transform",
+          }}
+        >
+          <MiniGlyph p={b.p} size={Math.round(b.box * 0.62)} />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function WelcomeBanner({ name }: { name?: string | null }) {
+  const [greeting, setGreeting] = useState("Good morning");
+  // Gate the entrance animation until after mount so it plays on the REAL
+  // greeting (computed client-side) instead of starting on the placeholder
+  // and swapping mid-animation — that swap was the "not smooth" reload.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const h = new Date().getHours();
+    setGreeting(h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening");
+    setMounted(true);
+  }, []);
+  const words = (name || "back").trim().split(/\s+/);
+  return (
+    <section className="relative hidden h-[72px] w-full max-w-[1120px] overflow-hidden rounded-[10px] border border-slate-200/80 shadow-[0_2px_10px_rgba(15,23,42,0.06)] xl:col-span-2 xl:block">
+      {/* Premium light mesh gradient — soft brand-blue / cyan / periwinkle
+          blooms blended into a near-white base. Clean and airy (blends with
+          the dashboard's white cards), with depth from the layered radials
+          rather than a flat wash. */}
+      <div
+        className="absolute inset-0"
+        aria-hidden
+        style={{
+          background:
+            "radial-gradient(75% 160% at 12% 4%, rgba(0,140,255,0.16), transparent 58%)," +
+            "radial-gradient(60% 150% at 97% -10%, rgba(45,196,247,0.16), transparent 55%)," +
+            "radial-gradient(65% 150% at 82% 128%, rgba(124,108,255,0.14), transparent 60%)," +
+            "linear-gradient(120deg, #f7faff 0%, #eef4ff 55%, #e9f0fe 100%)",
+        }}
+      />
+      {/* glassy top sheen for a subtle premium highlight */}
+      <div className="absolute inset-x-0 top-0 h-1/2" aria-hidden style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0))" }} />
+      {/* floating brand badges — drift around the empty space + flee the cursor */}
+      <FloatingBadges />
+      {/* content — greeting fades in, then the name reveals word-by-word
+          (same WordReveal feel as the careers hero). */}
+      <div className="relative flex h-full items-center px-8">
+        <div>
+          <p
+            className={`text-[10.5px] font-semibold uppercase tracking-[0.2em] ${mounted ? "wb-greet" : ""}`}
+            style={{ color: "#1f6fd0", WebkitTextFillColor: "#1f6fd0", opacity: mounted ? undefined : 0 }}
+          >
+            {greeting}
+          </p>
+          <p className="mt-1 text-[19px] font-bold leading-none tracking-[-0.01em]" style={{ color: "#0f2747", WebkitTextFillColor: "#0f2747" }}>
+            {words.map((w, i) => (
+              <span
+                key={i}
+                className={mounted ? "wb-word" : ""}
+                style={{ display: "inline-block", animationDelay: `${0.1 + i * 0.12}s`, marginRight: i < words.length - 1 ? "0.28em" : 0, opacity: mounted ? undefined : 0 }}
+              >
+                {w}
+              </span>
+            ))}
+          </p>
+        </div>
+      </div>
+      {/* thin brand accent line — draws in from the left once, then static */}
+      <div
+        className="wb-line absolute inset-x-0 bottom-0 h-[2px]"
+        aria-hidden
+        style={{ background: "linear-gradient(90deg,#008CFF 0%,#38bdf8 55%,rgba(56,189,248,0) 100%)", transformOrigin: "left" }}
+      />
+      <style>{`
+        .wb-greet{animation:wbIn .55s cubic-bezier(.2,.7,.2,1) .05s both}
+        .wb-word{display:inline-block;animation:wbWord .6s cubic-bezier(.2,.7,.2,1) both}
+        .wb-line{animation:wbLine .7s cubic-bezier(.2,.7,.2,1) .3s both}
+        @keyframes wbIn{0%{opacity:0;transform:translateY(8px)}100%{opacity:1;transform:translateY(0)}}
+        @keyframes wbWord{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
+        @keyframes wbLine{0%{transform:scaleX(0);opacity:0}100%{transform:scaleX(1);opacity:1}}
+        @media (prefers-reduced-motion:reduce){
+          .wb-greet,.wb-word,.wb-line{animation:none!important}
+        }
+      `}</style>
+    </section>
   );
 }
 
@@ -2911,26 +3164,7 @@ export default function HRHomePage() {
             max-w instead of a fixed 1180px so it shrinks with the
             content area on smaller laptops. */}
         <div className="grid w-full flex-1 min-h-0 gap-5 px-4 py-3 xl:grid-cols-[minmax(0,400px)_minmax(0,1fr)] xl:grid-rows-[auto_minmax(0,1fr)] xl:justify-start xl:px-6 2xl:px-10">
-          <section className="relative hidden h-[72px] w-full max-w-[1180px] overflow-hidden rounded-[2px] border border-[#2b3440] shadow-[0_1px_2px_rgba(15,23,42,0.14)] xl:col-span-2 xl:block">
-            <div className="absolute inset-0">
-              <BannerArt />
-            </div>
-            <div className="relative px-8 py-5">
-              {/* Welcome text — pure white with a dark drop shadow so it
-                  stays readable against the busy painterly banner regardless
-                  of light/dark theme. */}
-              <p
-                className="text-[16px] font-semibold tracking-[-0.01em]"
-                style={{
-                  color: "#ffffff",
-                  WebkitTextFillColor: "#ffffff",
-                  textShadow: "0 1px 2px rgba(0,0,0,0.7), 0 0 12px rgba(0,0,0,0.5)",
-                }}
-              >
-                Welcome {user?.name || "back"}!
-              </p>
-            </div>
-          </section>
+          <WelcomeBanner name={user?.name} />
 
           <div className="no-scrollbar space-y-3 min-h-0 overflow-y-auto pr-1">
             <p className={`pb-0.5 pt-1 text-[13px] font-semibold leading-none ${C.t1}`}>
