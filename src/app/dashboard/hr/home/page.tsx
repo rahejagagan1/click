@@ -545,7 +545,7 @@ function FloatingBadges() {
     // Live particles, animated by the rAF loop so they roam the whole banner.
     const particles: Array<{ el: HTMLSpanElement; x: number; y: number; vx: number; vy: number; bi: number; born: number; sz: number }> = [];
     const shatter = (i: number) => {
-      if (shattered[i] || SOCIAL_BADGES[i].p === "instagram") return; // instagram is indestructible
+      if (shattered[i]) return;
       shattered[i] = true;
       const node = nodeRefs.current[i];
       const p = ps[i], d = dims[i];
@@ -580,14 +580,14 @@ function FloatingBadges() {
     // overlays (sheen / content layer) paint over the badges and would
     // otherwise swallow a direct DOM click. A geometric test sidesteps that
     // and still requires the click to land ON an icon (+6px), so empty
-    // banner does nothing. Instagram is skipped — it can't be destroyed.
+    // banner does nothing.
     const onBannerClick = (e: MouseEvent) => {
       const r = host.getBoundingClientRect();
       const mx = e.clientX - r.left, my = e.clientY - r.top;
       if (mx < 0 || my < 0 || mx > r.width || my > r.height) return;
       const pad = 6;
       for (let i = 0; i < N; i++) {
-        if (shattered[i] || SOCIAL_BADGES[i].p === "instagram") continue;
+        if (shattered[i]) continue;
         const p = ps[i], d = dims[i];
         if (mx >= p.x - pad && mx <= p.x + d.w + pad && my >= p.y - pad && my <= p.y + d.h + pad) {
           shatter(i);
@@ -599,8 +599,8 @@ function FloatingBadges() {
 
     let raf = 0;
     let tFrame = 0;
-    const R = 100;     // cursor "personal space" — badges flee inside this
-    const FORCE = 2.8; // repulsion strength
+    const R = 175;     // cursor "personal space" — badges flee inside this
+    const FORCE = 8;   // repulsion strength — strong, so they're slippery / hard to catch
     const tick = () => {
       tFrame += 1;
       const lb = leftBound();
@@ -628,8 +628,7 @@ function FloatingBadges() {
         const cx = p.x + d.w / 2, cy = p.y + d.h / 2;
         const dx = cx - mouse.x, dy = cy - mouse.y;
         const dist2 = dx * dx + dy * dy;
-        // Every badge (incl. Instagram) flees the cursor; Instagram just
-        // can't be SHATTERED (guarded in shatter() + skipped on click).
+        // Every badge flees the cursor.
         if (dist2 < R * R) {
           const dist = Math.sqrt(dist2) || 0.001;
           const f = ((R - dist) / R) * FORCE;
@@ -648,7 +647,7 @@ function FloatingBadges() {
         p.vy += (hy - p.y) * 0.04;
         p.vx *= 0.86; p.vy *= 0.86;
         const sp = Math.hypot(p.vx, p.vy);
-        const max = 6;
+        const max = 18; // high cap so they dart away faster than the cursor can chase
         if (sp > max) { p.vx = (p.vx / sp) * max; p.vy = (p.vy / sp) * max; }
         p.x += p.vx; p.y += p.vy;
         const maxX = Math.max(lb, W - d.w - 2);
@@ -728,7 +727,7 @@ function FloatingBadges() {
             opacity: 0,
             willChange: "transform",
             pointerEvents: "auto",
-            cursor: b.p === "instagram" ? "default" : "pointer",
+            cursor: "pointer",
           }}
         >
           <MiniGlyph p={b.p} size={Math.round(b.box * 0.62)} />
