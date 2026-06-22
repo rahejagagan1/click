@@ -36,8 +36,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     // ECR only covers PF members; skip non-eligible employees and any
-    // on-hold payslips (no contribution to remit for those).
-    const eligible = scoped.filter(r => r.pfEligible && r.status !== "on_hold");
+    // on-hold payslips (no contribution to remit for those). Anchor to the
+    // LOCKED payslip: only members who actually contributed PF this cycle
+    // are remitted, so a mid-cycle enrolment (eligible now but PF=0 in the
+    // locked month) or a fully-LOP month correctly drops out.
+    const eligible = scoped.filter(r => r.pfEligible && r.status !== "on_hold" && r.pfEmployee > 0);
 
     // EPFO won't accept the file if any row is missing a UAN — block
     // with a 422 + the list so HR can backfill before re-trying.
@@ -69,16 +72,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     eligible.forEach((r, idx) => {
       const row = idx + 2;
 
-      // Statutory wages — PF is computed on basic+DA capped at the
-      // ceiling. EDLI always sits at the ceiling regardless.
-      const monthlyBasicDa = (r.basicAnnual + r.daAnnual) / 12;
-      const epfWages = Math.min(monthlyBasicDa, EPF_CEILING);
+      // EE share = the PF actually deducted on the LOCKED payslip (already
+      // LOP-adjusted). EPF wages are back-derived from it (÷12%) so the
+      // challan reconciles to what was withheld, capped at the ceiling.
+      // EDLI always sits at the ceiling regardless.
+      const eeShare = Math.round(r.pfEmployee);
+      const epfWages = Math.min(Math.round(eeShare / 0.12), EPF_CEILING);
       const edliWages = EDLI_CEILING;
       // EPS toggle is future — everyone is EPS=0 today.
       const epsWages = 0;
-      // EE share = 12% of EPF wages. ER share = same minus EPS contrib.
-      // With EPS=0 across the board, ER == EE for now.
-      const eeShare = Math.round(epfWages * 0.12);
+      // ER share = EE minus EPS contrib. With EPS=0 across the board, ER == EE.
       const epsContrib = Math.round(epsWages * 0.0833);
       const erShare = eeShare - epsContrib;
 
