@@ -14,6 +14,7 @@ import { fetcher } from "@/lib/swr";
 import { showToast } from "@/components/ui/Toast";
 import { Star, Clock, Mail, Phone, Briefcase, ExternalLink, MessageSquare, ChevronDown } from "lucide-react";
 import CandidateDrawer from "./CandidateDrawer";
+import ArchiveCandidateModal from "./ArchiveCandidateModal";
 
 type Stage = { id: number; key: string; label: string; sortOrder: number; kind: string; color: string };
 type Candidate = {
@@ -58,10 +59,18 @@ function initials(name: string): string {
 }
 
 export default function KanbanBoard({ jobId }: { jobId: number }) {
+  // Cards mid-move. Declared above the fetch so we can PAUSE polling
+  // during a drag — otherwise an in-flight poll could revert the
+  // optimistic move before its PATCH commits.
+  const [moving, setMoving] = useState<Set<number>>(new Set());
   const { data: stagesData } = useSWR<{ stages: Stage[] }>("/api/hr/hiring/stages", fetcher);
   const { data: candidatesData, isLoading } = useSWR<{ candidates: Candidate[] }>(
     `/api/hr/hiring/candidates?openingId=${jobId}`,
     fetcher,
+    // Auto-refresh so moves made in the List view, the candidate drawer,
+    // or by another HR user surface here without a reload. Paused mid-move;
+    // SWR also revalidates on tab focus.
+    { refreshInterval: moving.size > 0 ? 0 : 8000 },
   );
   const stages = stagesData?.stages ?? [];
   const candidates = candidatesData?.candidates ?? [];
@@ -79,6 +88,10 @@ export default function KanbanBoard({ jobId }: { jobId: number }) {
   }, [stages, candidates]);
 
   const [dragOver, setDragOver] = useState<number | null>(null);
+  // Candidate currently being archived via drag-into-Rejected. When set,
+  // the ArchiveCandidateModal renders so HR picks a reason + emails the
+  // candidate, instead of the drag silently flipping the stage.
+  const [archivingCandidate, setArchivingCandidate] = useState<Candidate | null>(null);
   // selectedId is URL-derived (`?candidate=<id>`) so reload reopens
   // the same drawer. Shared key with JobApplicantList — switching
   // Kanban <-> List preserves the open drawer.
@@ -102,8 +115,6 @@ export default function KanbanBoard({ jobId }: { jobId: number }) {
     return () => window.removeEventListener("nb:candidateDrawer:navigate", onNav as any);
   }, [setSelectedId]);
 
-  const [moving, setMoving] = useState<Set<number>>(new Set());
-
   const onDrop = async (stageId: number, e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(null);
@@ -114,6 +125,15 @@ export default function KanbanBoard({ jobId }: { jobId: number }) {
     // Already moving this card — ignore a second drag so two PATCHes can't
     // race and land out of order.
     if (moving.has(candidateId)) return;
+
+    // Drop into the "Rejected" column → funnel HR into the Archive
+    // modal (reason + email) instead of a silent stage flip. The
+    // modal does its own backend call to move the card to rejected.
+    const target = stages.find((s) => s.id === stageId);
+    if (target?.kind === "rejected") {
+      setArchivingCandidate(curr);
+      return;
+    }
 
     setMoving((prev) => new Set(prev).add(candidateId));
     // Optimistic patch — update SWR cache first so the card jumps
@@ -258,6 +278,19 @@ export default function KanbanBoard({ jobId }: { jobId: number }) {
           candidateId={selectedId}
           onClose={() => setSelectedId(null)}
           onChange={() => globalMutate(`/api/hr/hiring/candidates?openingId=${jobId}`)}
+        />
+      )}
+
+      {archivingCandidate && (
+        <ArchiveCandidateModal
+          candidate={{
+            id: archivingCandidate.id,
+            fullName: archivingCandidate.fullName,
+            email: archivingCandidate.email,
+            roleTitle: archivingCandidate.roleTitle,
+          }}
+          onClose={() => setArchivingCandidate(null)}
+          onDone={() => globalMutate(`/api/hr/hiring/candidates?openingId=${jobId}`)}
         />
       )}
     </>

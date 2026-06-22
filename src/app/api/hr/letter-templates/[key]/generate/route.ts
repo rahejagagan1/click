@@ -39,6 +39,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
       department:        String(body.manual.department ?? "").trim(),
       employeeNumber:    String(body.manual.employeeNumber ?? "").trim(),
       joiningDate:       String(body.manual.joiningDate ?? "").trim(),
+      applicationDate:   String(body.manual.applicationDate ?? "").trim(),
       probationEndDate:  String(body.manual.probationEndDate ?? "").trim(),
       internshipEndDate: String(body.manual.internshipEndDate ?? "").trim(),
       gender:            String(body.manual.gender ?? "").trim(),
@@ -58,6 +59,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
     const customFields: Record<string, string> = body.customFields && typeof body.customFields === "object"
       ? Object.fromEntries(Object.entries(body.customFields).map(([k, v]) => [k, String(v ?? "")]))
       : {};
+    // Optional letter-issue date override (YYYY-MM-DD). HR uses this to
+    // backdate letters (or post-date them) instead of always stamping
+    // today. Ignored if absent or unparseable — the renderer falls back
+    // to today's date.
+    const letterDate: string | null = typeof body.letterDate === "string" && body.letterDate.trim()
+      ? body.letterDate.trim()
+      : null;
 
     // Look up the employee's business unit so we can pick the
     // matching template variant. NULL businessUnit on the
@@ -100,7 +108,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
 
     const { html, missing } = await renderLetterHtml(
       tpl.bodyHtml,
-      isManual ? { manual: manual!, customFields } : { employeeId, customFields },
+      isManual
+        ? { manual: manual!, customFields, letterDate }
+        : { employeeId, customFields, letterDate },
     );
 
     if (action === "preview") {

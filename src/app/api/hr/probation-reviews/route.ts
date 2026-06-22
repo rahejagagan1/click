@@ -10,6 +10,7 @@ import {
   listPendingHrReviews,
   listManagerHistory,
   listHrHistory,
+  listOnProbationEmployees,
   submitProbationReview,
   type Recommendation,
 } from "@/lib/hr/probation-review";
@@ -21,9 +22,11 @@ export async function GET(req: NextRequest) {
   if (errorResponse) return errorResponse;
   try {
     const scope = req.nextUrl.searchParams.get("scope") || "manager";
-    if (scope === "hr" || scope === "hr-history") {
+    const brand = req.nextUrl.searchParams.get("brand"); // "NB Media" | "YT Labs" | null(all)
+    if (scope === "hr" || scope === "hr-history" || scope === "on-probation") {
       if (!isLeadershipOrHR(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      return NextResponse.json({ reviews: scope === "hr-history" ? await listHrHistory() : await listPendingHrReviews() });
+      if (scope === "on-probation") return NextResponse.json({ employees: await listOnProbationEmployees(brand) });
+      return NextResponse.json({ reviews: scope === "hr-history" ? await listHrHistory(brand) : await listPendingHrReviews(brand) });
     }
     const me = await resolveUserId(session);
     if (!me) return NextResponse.json({ error: "No user" }, { status: 400 });

@@ -40,8 +40,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         // get CTC + PF eligibility + salary type (intern vs
         // regular) without a second roundtrip.
         salaryStructure: { select: { ctc: true, pfEligible: true, salaryType: true } },
-        manager: { select: { id: true, name: true, profilePictureUrl: true, role: true } },
-        teamMembers: { select: { id: true, name: true, profilePictureUrl: true, role: true } },
+        manager: { select: { id: true, name: true, profilePictureUrl: true, role: true, employeeProfile: { select: { designation: true } } } },
+        // Reporting team excludes deactivated / exited / offboarded reports
+        // (isActive=false) — only currently-active direct reports show.
+        teamMembers: { where: { isActive: true }, select: { id: true, name: true, profilePictureUrl: true, role: true, employeeProfile: { select: { designation: true } } } },
         userShift: { include: { shift: true } },
         leaveBalances: { include: { leaveType: true } },
         leavePolicy: { select: { id: true, name: true, isActive: true } },
@@ -50,6 +52,25 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       },
     });
     if (!user) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    // Access gate: ACTIVE employees are viewable by any authenticated
+    // user (org directory). EXITED / offboarded / otherwise-deactivated
+    // employees are confidential — only HR / CEO / developer / special-
+    // access (canEditOthers), the profile owner, or the target's direct
+    // manager may open them. This is what stops a plain `member` from
+    // pulling up an ex-employee via global search. (Salary / documents /
+    // assets are additionally stripped for non-HR further down.)
+    const callerId = await resolveUserId(session);
+    const isSelfRequest = callerId != null && callerId === id;
+    const isManagerOfTarget =
+      callerId != null &&
+      ((((user as any).managerId ?? null) === callerId) ||
+        (((user as any).inlineManagerId ?? null) === callerId));
+    const isPrivilegedViewer = canEditOthers(session) || isSelfRequest || isManagerOfTarget;
+    const targetIsActive = (user as any).isActive !== false;
+    if (!targetIsActive && !isPrivilegedViewer) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     // Inline manager — fetched via raw SQL so the route works even when
     // `prisma generate` hasn't picked up the new column yet (same
@@ -90,7 +111,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     try {
       const erows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
         `SELECT "secondaryJobTitle", "legalEntity", "jobLocation",
-                "probationPolicy", "probationEndDate", "probationReminderSentAt",
+                "probationPolicy", "probationEndDate", "probationReminderSentAt", "probationConfirmedAt",
                 "educationDetails",
                 "internshipEndDate",
                 "leavePlan", "holidayList", "weeklyOff",
@@ -112,6 +133,21 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       extended = erows[0] ?? {};
     } catch (e) {
       console.warn("[people GET] extended fields lookup failed:", e);
+    }
+
+    // PIP fields in a SEPARATE query so a missing column (e.g. before the
+    // performance_plan migration has applied) can't take down the rest of
+    // the extended profile fields above.
+    let pip: Record<string, unknown> = {};
+    try {
+      const prows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+        `SELECT "pipStartedAt", "pipEndDate", "pipReason", "pipReportedById"
+           FROM "EmployeeProfile" WHERE "userId" = $1`,
+        id,
+      );
+      pip = prows[0] ?? {};
+    } catch (e) {
+      console.warn("[people GET] pip fields lookup failed:", e);
     }
 
     // Today's attendance + any currently-open session — drives the "IN /
@@ -181,9 +217,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // special_access and role=admin (which pass canEditOthers for
     // most other things). Mirrors canViewEmployeeDocuments in
     // src/lib/access.ts and the GET /api/hr/documents gate below.
-    const callerId = await resolveUserId(session);
     const sUser = session?.user as any;
-    const isSelfRequest = callerId != null && callerId === id;
     const isDocViewer =
       sUser?.orgLevel === "ceo" ||
       sUser?.isDeveloper === true ||
@@ -191,9 +225,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const docsAllowed = isSelfRequest || isDocViewer;
     const payload = {
       ...rest,
-      profile:       employeeProfile ? { ...employeeProfile, ...extended } : null,
+      // Salary (CTC) is the most sensitive field — HR / CEO / developer
+      // only. Stripped for a direct manager or the employee themselves on
+      // this route. `...rest` carries salaryStructure, so override after.
+      salaryStructure: isDocViewer ? ((rest as any).salaryStructure ?? null) : null,
+      profile:       employeeProfile ? { ...employeeProfile, ...extended, ...pip } : null,
       documents:     docsAllowed ? ownedDocuments : [],
-      assets:        heldAssets.map((a) => ({ ...a.asset, assignedAt: a.assignedAt })),
+      // Asset assignments (serial numbers etc.) follow the same gate as
+      // documents — self or HR only, never an arbitrary viewer.
+      assets:        docsAllowed ? heldAssets.map((a) => ({ ...a.asset, assignedAt: a.assignedAt })) : [],
       directReports: teamMembers,
       shift:         userShift?.shift ?? null,
       inlineManager,

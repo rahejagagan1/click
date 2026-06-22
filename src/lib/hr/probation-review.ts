@@ -37,6 +37,16 @@ function daysUntil(d: Date | string | null): number | null {
   return Math.ceil((t - Date.now()) / 86_400_000);
 }
 
+// Brand scope for the HR dashboard's per-brand sub-views. "YT Labs" is an
+// exact match; "NB Media" is everything-not-YT-Labs (incl. null / legacy);
+// anything else (all / none) applies no filter. Fixed literals only — safe
+// to inline into the raw query.
+export function brandFilterSql(brand: string | null | undefined, ep = "ep"): string {
+  if (brand === "YT Labs") return ` AND ${ep}."businessUnit" = 'YT Labs'`;
+  if (brand === "NB Media") return ` AND (${ep}."businessUnit" IS DISTINCT FROM 'YT Labs')`;
+  return "";
+}
+
 // ── Recipient lookups ───────────────────────────────────────────────
 async function hrRecipientIds(): Promise<number[]> {
   const rows = await prisma.$queryRawUnsafe<{ id: number }[]>(
@@ -146,23 +156,24 @@ export async function pendingManagerReviewCount(managerId: number): Promise<numb
 }
 
 // ── HR view: pending recommendations awaiting approval ───────────────
-export async function listPendingHrReviews(): Promise<any[]> {
+export async function listPendingHrReviews(brand?: string | null): Promise<any[]> {
   const rows = await prisma.$queryRawUnsafe<any[]>(
     `SELECT pr.id, pr."employeeUserId", pr."managerId", pr.recommendation,
             pr."extendMonths", pr."proposedEndDate", pr.feedback, pr."createdAt",
-            e.name AS "employeeName", ep."employeeId", ep.designation, ep."probationEndDate",
+            e.name AS "employeeName", e."profilePictureUrl", ep."employeeId", ep.designation, ep."probationEndDate",
             m.name AS "managerName"
        FROM "ProbationReview" pr
        JOIN "User" e ON e.id = pr."employeeUserId"
        LEFT JOIN "EmployeeProfile" ep ON ep."userId" = pr."employeeUserId"
        LEFT JOIN "User" m ON m.id = pr."managerId"
-      WHERE pr.status = 'pending'
+      WHERE pr.status = 'pending'${brandFilterSql(brand)}
       ORDER BY pr."createdAt" ASC`,
   );
   return rows.map((r) => ({
     id:               r.id,
     employeeUserId:   r.employeeUserId,
     employeeName:     r.employeeName,
+    profilePictureUrl: r.profilePictureUrl ?? null,
     employeeId:       r.employeeId ?? null,
     designation:      r.designation ?? null,
     managerId:        r.managerId,
@@ -198,7 +209,7 @@ export async function listManagerHistory(managerId: number): Promise<any[]> {
   }));
 }
 
-export async function listHrHistory(): Promise<any[]> {
+export async function listHrHistory(brand?: string | null): Promise<any[]> {
   const rows = await prisma.$queryRawUnsafe<any[]>(
     `SELECT pr.id, pr."employeeUserId", pr.recommendation, pr."extendMonths", pr."proposedEndDate",
             pr.feedback, pr.status, pr."hrNote", pr."decidedAt",
@@ -210,7 +221,7 @@ export async function listHrHistory(): Promise<any[]> {
        LEFT JOIN "EmployeeProfile" ep ON ep."userId" = pr."employeeUserId"
        LEFT JOIN "User" m ON m.id = pr."managerId"
        LEFT JOIN "User" d ON d.id = pr."decidedById"
-      WHERE pr.status IN ('approved','rejected')
+      WHERE pr.status IN ('approved','rejected')${brandFilterSql(brand)}
       ORDER BY COALESCE(pr."decidedAt", pr."createdAt") DESC LIMIT 100`);
   return rows.map((r) => ({
     id: r.id, employeeUserId: r.employeeUserId, employeeName: r.employeeName,
@@ -222,6 +233,33 @@ export async function listHrHistory(): Promise<any[]> {
     decidedAt: r.decidedAt ? new Date(r.decidedAt).toISOString() : null,
     isConfirmed: !!r.probationConfirmedAt,
     probationEndDate: r.probationEndDate ? new Date(r.probationEndDate).toISOString() : null,
+  }));
+}
+
+// ── Full roster of everyone currently on probation (HR visibility) ──
+export async function listOnProbationEmployees(brand?: string | null): Promise<any[]> {
+  const rows = await prisma.$queryRawUnsafe<any[]>(
+    `SELECT u.id AS "userId", u.name, u.email,
+            ep.designation, COALESCE(ep."businessUnit", 'NB Media') AS "businessUnit",
+            ep."joiningDate", ep."probationEndDate",
+            m.name AS "managerName",
+            (SELECT pr.status FROM "ProbationReview" pr WHERE pr."employeeUserId" = u.id ORDER BY pr.id DESC LIMIT 1) AS "lastReviewStatus"
+       FROM "EmployeeProfile" ep
+       JOIN "User" u ON u.id = ep."userId"
+       LEFT JOIN "User" m ON m.id = u."managerId"
+      WHERE u."isActive" = true
+        AND ep."probationEndDate" IS NOT NULL
+        AND ep."probationConfirmedAt" IS NULL
+        AND ep."probationEndDate" >= CURRENT_DATE${brandFilterSql(brand)}
+      ORDER BY ep."probationEndDate" ASC`);
+  return rows.map((r) => ({
+    userId: r.userId, name: r.name, email: r.email,
+    designation: r.designation ?? null, businessUnit: r.businessUnit,
+    managerName: r.managerName ?? null,
+    joiningDate: r.joiningDate ? new Date(r.joiningDate).toISOString() : null,
+    probationEndDate: r.probationEndDate ? new Date(r.probationEndDate).toISOString() : null,
+    daysRemaining: daysUntil(r.probationEndDate),
+    lastReviewStatus: r.lastReviewStatus ?? null,
   }));
 }
 
