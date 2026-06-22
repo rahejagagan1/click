@@ -35,7 +35,7 @@ function defaultStateFor(id: CronJobId): CronJobState {
     // so this one defaults ON (existing installs pick this up too — the
     // config reader falls back to this default for any key it's missing).
     // Every other sync stays opt-in via Admin → Crons.
-    enabled: id === "reporting_manager_changes" || id === "attach_pending_documents",
+    enabled: id === "reporting_manager_changes" || id === "attach_pending_documents" || id === "auto_exit",
     intervalHours: def?.defaultIntervalHours ?? 6,
     lastAutoRunAt: null,
     lastManualRunAt: null,
