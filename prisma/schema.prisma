@@ -2070,6 +2070,11 @@ model Payslip {
   // confirmed. Interns store 0.
   additionalTax     Decimal  @default(0) @db.Decimal(10, 2)
   status            String   @default("generated") // generated | sent | acknowledged
+  // Per-payslip salary-type snapshot ("regular" | "intern"). Null = use the
+  // linked SalaryStructure's type (back-compat for existing rows). Captured
+  // per month so a later structure change (e.g. an intern→regular conversion)
+  // can't retro-relabel an already-locked payslip.
+  salaryType        String?
   createdAt         DateTime @default(now())
 
   user            User            @relation(fields: [userId], references: [id])
