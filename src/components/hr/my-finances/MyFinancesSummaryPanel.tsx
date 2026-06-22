@@ -42,13 +42,6 @@ function maskMiddle(v: string | null | undefined, showLast = 4): string {
   return "X".repeat(s.length - showLast) + s.slice(-showLast);
 }
 
-function maskAadhaar(v: string | null | undefined): string {
-  if (!v) return "Not provided";
-  const s = String(v).replace(/\s|-/g, "");
-  if (s.length !== 12) return maskMiddle(s, 4);
-  return `XXXX-XXXX-${s.slice(-4)}`;
-}
-
 function formatDob(iso: string | null | undefined): string {
   if (!iso) return "Not provided";
   const d = new Date(iso);
@@ -75,6 +68,28 @@ function Label({ children }: { children: React.ReactNode }) {
 
 function Value({ children }: { children: React.ReactNode }) {
   return <p className="mt-1 text-[13.5px] font-medium text-slate-800">{children}</p>;
+}
+
+// Masked value (X's + last 4) with an eye toggle to reveal — same format as
+// the bank account number. Shows "Not provided" (no toggle) when empty.
+function RevealValue({
+  value, show, onToggle, label,
+}: { value: string | null | undefined; show: boolean; onToggle: () => void; label: string }) {
+  if (!value) return <>Not provided</>;
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="font-mono tracking-wider">{show ? String(value) : maskMiddle(value, 4)}</span>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={show ? `Hide ${label}` : `Show ${label}`}
+        title={show ? "Hide" : "Show"}
+        className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+      >
+        {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+      </button>
+    </span>
+  );
 }
 
 function VerifiedBadge() {
@@ -118,6 +133,8 @@ export default function MyFinancesSummaryPanel({ userId }: Props) {
   // Lives in client state so the toggle is per-session and never persists.
   const [showAccount, setShowAccount] = useState(false);
   const [showIfsc, setShowIfsc] = useState(false);
+  const [showPan, setShowPan] = useState(false);
+  const [showAadhaar, setShowAadhaar] = useState(false);
 
   const fullName =
     profile?.firstName || profile?.lastName
@@ -343,9 +360,7 @@ export default function MyFinancesSummaryPanel({ userId }: Props) {
             <div>
               <Label>Permanent account number</Label>
               <Value>
-                <span className="font-mono tracking-wider">
-                  {profile?.panNumber ? maskMiddle(profile.panNumber, 4) : "Not provided"}
-                </span>
+                <RevealValue value={profile?.panNumber} show={showPan} onToggle={() => setShowPan((v) => !v)} label="PAN number" />
               </Value>
             </div>
             <div>
@@ -378,10 +393,7 @@ export default function MyFinancesSummaryPanel({ userId }: Props) {
             <div>
               <Label>Aadhaar number</Label>
               <Value>
-                <span className="font-mono tracking-wider inline-flex items-center gap-2">
-                  {maskAadhaar(profile?.aadhaarNumber)}
-                  {profile?.aadhaarNumber ? <Eye className="h-3.5 w-3.5 text-slate-400" /> : null}
-                </span>
+                <RevealValue value={profile?.aadhaarNumber} show={showAadhaar} onToggle={() => setShowAadhaar((v) => !v)} label="Aadhaar number" />
               </Value>
             </div>
             <div>
@@ -422,10 +434,7 @@ export default function MyFinancesSummaryPanel({ userId }: Props) {
             <div>
               <Label>Aadhaar number</Label>
               <Value>
-                <span className="font-mono tracking-wider inline-flex items-center gap-2">
-                  {maskAadhaar(profile?.aadhaarNumber)}
-                  {profile?.aadhaarNumber ? <Eye className="h-3.5 w-3.5 text-slate-400" /> : null}
-                </span>
+                <RevealValue value={profile?.aadhaarNumber} show={showAadhaar} onToggle={() => setShowAadhaar((v) => !v)} label="Aadhaar number" />
               </Value>
             </div>
             <div>
