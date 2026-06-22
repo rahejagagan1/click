@@ -51,6 +51,23 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     });
     if (!user) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+    // Access gate: full employee profiles are HR-confidential. Only HR /
+    // CEO / developer / special-access (canEditOthers), the profile owner,
+    // or the target's direct manager may load this. Everyone else gets 403
+    // — mirrors GET /api/hr/employees/[id]. Without this a plain `member`
+    // could open /dashboard/hr/people/<anyone> via global search and pull
+    // salary / assets / PII straight from the API even though the UI hides
+    // those tabs.
+    const callerId = await resolveUserId(session);
+    const isSelfRequest = callerId != null && callerId === id;
+    const isManagerOfTarget =
+      callerId != null &&
+      ((((user as any).managerId ?? null) === callerId) ||
+        (((user as any).inlineManagerId ?? null) === callerId));
+    if (!canEditOthers(session) && !isSelfRequest && !isManagerOfTarget) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     // Inline manager — fetched via raw SQL so the route works even when
     // `prisma generate` hasn't picked up the new column yet (same
     // pattern we use for businessUnit / lastReminderAt).
@@ -196,9 +213,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // special_access and role=admin (which pass canEditOthers for
     // most other things). Mirrors canViewEmployeeDocuments in
     // src/lib/access.ts and the GET /api/hr/documents gate below.
-    const callerId = await resolveUserId(session);
     const sUser = session?.user as any;
-    const isSelfRequest = callerId != null && callerId === id;
     const isDocViewer =
       sUser?.orgLevel === "ceo" ||
       sUser?.isDeveloper === true ||
@@ -206,9 +221,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const docsAllowed = isSelfRequest || isDocViewer;
     const payload = {
       ...rest,
+      // Salary (CTC) is the most sensitive field — HR / CEO / developer
+      // only. Stripped for a direct manager or the employee themselves on
+      // this route. `...rest` carries salaryStructure, so override after.
+      salaryStructure: isDocViewer ? ((rest as any).salaryStructure ?? null) : null,
       profile:       employeeProfile ? { ...employeeProfile, ...extended, ...pip } : null,
       documents:     docsAllowed ? ownedDocuments : [],
-      assets:        heldAssets.map((a) => ({ ...a.asset, assignedAt: a.assignedAt })),
+      // Asset assignments (serial numbers etc.) follow the same gate as
+      // documents — self or HR only, never an arbitrary viewer.
+      assets:        docsAllowed ? heldAssets.map((a) => ({ ...a.asset, assignedAt: a.assignedAt })) : [],
       directReports: teamMembers,
       shift:         userShift?.shift ?? null,
       inlineManager,
