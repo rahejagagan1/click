@@ -124,6 +124,10 @@ export async function GET(req: NextRequest) {
           leaveType: true,
           ...includeUser,
           finalApprover: { select: { id: true, name: true } },
+          // POC = the person the applicant named to cover for them while
+          // they're out (shown in the approvals list). pocUserId/workStatus
+          // are scalar columns already returned; this adds the POC's name.
+          poc: { select: { id: true, name: true, profilePictureUrl: true } },
         },
         orderBy: { appliedAt: "desc" },
         take: 300,

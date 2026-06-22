@@ -86,13 +86,15 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
     // styles all finish before we snapshot to PDF.
     await page.setContent(html, { waitUntil: "networkidle0" });
     const pdf = await page.pdf({
-      format: "A4",
-      // Margins are already baked into the wrapper's .page padding,
-      // so emit a 0-margin PDF and let the inner layout drive the
-      // whitespace. Matches the in-iframe preview exactly.
-      margin: { top: "0", right: "0", bottom: "0", left: "0" },
-      printBackground: true,
+      // Page whitespace comes from the CSS `@page { margin: 16mm 16mm 18mm
+      // 16mm }` in wrapLetterPreviewHtml. We MUST honour the CSS page box
+      // (preferCSSPageSize) rather than pass a `margin` option here:
+      // Chromium gives the CSS @page margin precedence over the page.pdf
+      // margin option, so the option was being silently ignored and every
+      // letter rendered with content flush to the left edge (0mm margin).
+      // @page size is A4, so we don't pass `format` either.
       preferCSSPageSize: true,
+      printBackground: true,
     });
     return Buffer.from(pdf);
   } finally {

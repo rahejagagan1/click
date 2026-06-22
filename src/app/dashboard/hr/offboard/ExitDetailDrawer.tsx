@@ -24,9 +24,11 @@ import { fetcher } from "@/lib/swr";
 import {
   X, CheckCircle2, Circle, RefreshCw, FileText, Star, ClipboardList,
   Plus, Trash2, Save, AlertCircle, CalendarDays, ArrowRight, Pencil,
+  ListChecks, MessageSquare,
 } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 import ExitFinaliseWizard from "./ExitFinaliseWizard";
+import ExitSurveyTab from "@/components/hr/ExitSurveyTab";
 
 type ExitDetail = {
   exit: {
@@ -331,41 +333,35 @@ function SummaryTab({
 
   return (
     <div className="p-5 space-y-4 max-w-3xl">
-      {/* Header card */}
-      <section className="bg-white border border-slate-200 rounded-xl p-5 relative">
-        <button
-          type="button"
-          onClick={openSummaryEdit}
-          aria-label="Edit exit summary"
-          className="absolute top-3 right-3 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11.5px] font-medium text-slate-500 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.06] transition-colors"
-        >
-          <Pencil size={12} /> Edit
-        </button>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-[12.5px]">
-          <div>
-            <p className="text-slate-500 text-[11px] uppercase font-semibold mb-0.5">Exit Type</p>
-            <p className="text-slate-800 font-semibold capitalize">{e.exitType.replace(/_/g, " ")}</p>
+      {/* Exit details */}
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-5 py-3">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0f6ecd]/10 text-[#0f6ecd]"><FileText size={15} /></span>
+            <h3 className="text-[13px] font-semibold text-slate-800">Exit Details</h3>
           </div>
-          <div>
-            <p className="text-slate-500 text-[11px] uppercase font-semibold mb-0.5">Resignation Date</p>
-            <p className="text-slate-800 font-semibold tabular-nums">{fmtDate(e.resignationDate)}</p>
-          </div>
-          <div>
-            <p className="text-slate-500 text-[11px] uppercase font-semibold mb-0.5">Last Working Day</p>
-            <p className="text-slate-800 font-semibold tabular-nums">{fmtDate(e.lastWorkingDay)}</p>
-          </div>
-          <div>
-            <p className="text-slate-500 text-[11px] uppercase font-semibold mb-0.5">Notice Period</p>
-            <p className="text-slate-800 font-semibold">{e.noticePeriodDays} days</p>
-          </div>
-          <div>
-            <p className="text-slate-500 text-[11px] uppercase font-semibold mb-0.5">Reason</p>
-            <p className="text-slate-800">{e.reason || "—"}</p>
-          </div>
-          <div>
-            <p className="text-slate-500 text-[11px] uppercase font-semibold mb-0.5">Rehire</p>
-            <p className="text-slate-800">{e.okToRehire ? "Ok to rehire" : "Not flagged"}</p>
-          </div>
+          <button
+            type="button"
+            onClick={openSummaryEdit}
+            aria-label="Edit exit summary"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] font-medium text-slate-500 transition-colors hover:bg-[#0f6ecd]/[0.06] hover:text-[#0f6ecd]"
+          >
+            <Pencil size={12} /> Edit
+          </button>
+        </div>
+        <div className="grid grid-cols-1 gap-x-4 gap-y-4 p-5 sm:grid-cols-3">
+          <Detail label="Exit Type">
+            <span className="inline-flex rounded-md bg-slate-100 px-2 py-0.5 text-[12px] font-semibold capitalize text-slate-700">{e.exitType.replace(/_/g, " ")}</span>
+          </Detail>
+          <Detail label="Resignation Date"><span className="text-[12.5px] font-semibold tabular-nums text-slate-800">{fmtDate(e.resignationDate)}</span></Detail>
+          <Detail label="Last Working Day"><span className="text-[12.5px] font-semibold tabular-nums text-slate-800">{fmtDate(e.lastWorkingDay)}</span></Detail>
+          <Detail label="Notice Period"><span className="text-[12.5px] font-semibold text-slate-800">{e.noticePeriodDays} days</span></Detail>
+          <Detail label="Reason"><span className="text-[12.5px] text-slate-800">{e.reason || "—"}</span></Detail>
+          <Detail label="Rehire">
+            {e.okToRehire
+              ? <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">Ok to rehire</span>
+              : <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">Not flagged</span>}
+          </Detail>
         </div>
       </section>
 
@@ -487,49 +483,75 @@ function SummaryTab({
       {/* Status pipeline — "Under Review" was retired (all new exits
           land in_progress). Legacy under_review / notice_period /
           cleared rows count as in_progress for the active highlight. */}
-      <section className="bg-white border border-slate-200 rounded-xl p-5">
-        <h3 className="text-[13px] font-bold text-slate-800 mb-3">Exit Stage</h3>
-        <div className="flex gap-2">
-          {(["in_progress", "exited"] as const).map(s => {
-            const active = e.status === s
-              || (s === "in_progress" && (e.status === "under_review" || e.status === "notice_period" || e.status === "cleared"))
-              || (s === "exited" && e.status === "offboarded");
-            return (
-              <button
-                key={s}
-                onClick={() => setStatus(s)}
-                className={`flex-1 h-10 rounded-lg text-[12px] font-semibold transition-colors ${
-                  active
-                    ? "bg-[#0f6ecd] text-white"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                }`}
-              >
-                {s === "in_progress" ? "In Progress" : "Exited"}
-              </button>
-            );
-          })}
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="flex items-center gap-2.5 border-b border-slate-100 bg-slate-50/60 px-5 py-3">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50 text-violet-600"><ArrowRight size={15} /></span>
+          <h3 className="text-[13px] font-semibold text-slate-800">Exit Stage</h3>
         </div>
-        {e.status === "exited" && (
-          <p className="mt-2 text-[11.5px] text-slate-500">
-            Marking as exited deactivates the user account. Move back to In Progress to reactivate.
-          </p>
-        )}
+        <div className="p-5">
+          <div className="grid grid-cols-2 gap-2.5">
+            {(["in_progress", "exited"] as const).map(s => {
+              const active = e.status === s
+                || (s === "in_progress" && (e.status === "under_review" || e.status === "notice_period" || e.status === "cleared"))
+                || (s === "exited" && e.status === "offboarded");
+              return (
+                <button
+                  key={s}
+                  onClick={() => setStatus(s)}
+                  className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+                    active ? "border-[#0f6ecd] bg-[#0f6ecd]/[0.06] ring-1 ring-[#0f6ecd]/20" : "border-slate-200 bg-white hover:border-slate-300"
+                  }`}
+                >
+                  <span className={`block text-[12.5px] font-semibold ${active ? "text-[#0f6ecd]" : "text-slate-700"}`}>
+                    {s === "in_progress" ? "In Progress" : "Exited"}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] text-slate-500">
+                    {s === "in_progress" ? "Clearance underway" : "Off the books · account off"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {e.status === "exited" && (
+            <p className="mt-3 flex items-start gap-1.5 text-[11.5px] text-amber-700">
+              <AlertCircle size={13} className="mt-0.5 shrink-0" />
+              Marking as exited deactivates the user account. Move back to In Progress to reactivate.
+            </p>
+          )}
+        </div>
       </section>
 
       {/* Clearance */}
-      <section className="bg-white border border-slate-200 rounded-xl p-5">
-        <h3 className="text-[13px] font-bold text-slate-800 mb-3">Clearance Checklist</h3>
-        <div className="space-y-2">
-          <ClearanceRow label="Assets returned"          checked={e.assetsReturned}      onChange={v => setClearance("assetsReturned", v)} />
-          <ClearanceRow label="Documents handled"        checked={e.documentsHandled}    onChange={v => setClearance("documentsHandled", v)} />
-          <ClearanceRow label="Final settlement done"    checked={e.finalSettlementDone} onChange={v => setClearance("finalSettlementDone", v)} />
-          <ClearanceRow label="Exit interview completed" checked={e.exitInterviewDone}   onChange={v => setClearance("exitInterviewDone", v)} />
-        </div>
-      </section>
+      {(() => {
+        const done = [e.assetsReturned, e.documentsHandled, e.finalSettlementDone, e.exitInterviewDone].filter(Boolean).length;
+        return (
+          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-5 py-3">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600"><ListChecks size={15} /></span>
+                <h3 className="text-[13px] font-semibold text-slate-800">Clearance Checklist</h3>
+              </div>
+              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ring-1 ${done === 4 ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-slate-100 text-slate-600 ring-slate-200"}`}>
+                {done}/4 done
+              </span>
+            </div>
+            <div className="space-y-2 p-3">
+              <ClearanceRow label="Assets returned"          checked={e.assetsReturned}      onChange={v => setClearance("assetsReturned", v)} />
+              <ClearanceRow label="Documents handled"        checked={e.documentsHandled}    onChange={v => setClearance("documentsHandled", v)} />
+              <ClearanceRow label="Final settlement done"    checked={e.finalSettlementDone} onChange={v => setClearance("finalSettlementDone", v)} />
+              <ClearanceRow label="Exit interview completed" checked={e.exitInterviewDone}   onChange={v => setClearance("exitInterviewDone", v)} />
+            </div>
+          </section>
+        );
+      })()}
 
       {/* Activity log */}
-      <section className="bg-white border border-slate-200 rounded-xl p-5">
-        <h3 className="text-[13px] font-bold text-slate-800 mb-3">Activity log</h3>
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="flex items-center gap-2.5 border-b border-slate-100 bg-slate-50/60 px-5 py-3">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600"><MessageSquare size={15} /></span>
+          <h3 className="text-[13px] font-semibold text-slate-800">Activity Log</h3>
+        </div>
+        <div className="p-5">
         <div className="flex gap-2">
           <textarea
             rows={2}
@@ -561,7 +583,17 @@ function SummaryTab({
             </li>
           ))}
         </ul>
+        </div>
       </section>
+    </div>
+  );
+}
+
+function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      {children}
     </div>
   );
 }
@@ -570,15 +602,17 @@ function ClearanceRow({
   label, checked, onChange,
 }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="flex items-center gap-3 cursor-pointer text-[13px] text-slate-700 py-1">
+    <label className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors ${
+      checked ? "border-emerald-200 bg-emerald-50/40" : "border-slate-200 hover:bg-slate-50"
+    }`}>
       <input
         type="checkbox"
         checked={checked}
         onChange={e => onChange(e.target.checked)}
         className="h-4 w-4 rounded border-slate-300 text-[#0f6ecd] focus:ring-[#0f6ecd]"
       />
-      <span>{label}</span>
-      {checked && <CheckCircle2 size={14} className="text-emerald-500 ml-auto" />}
+      <span className={`text-[13px] ${checked ? "font-medium text-slate-700" : "text-slate-600"}`}>{label}</span>
+      {checked && <CheckCircle2 size={15} className="ml-auto text-emerald-500" />}
     </label>
   );
 }
@@ -737,16 +771,27 @@ function SurveyTab({
 
   return (
     <div className="p-5 space-y-4 max-w-3xl">
-      <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-[13px] font-bold text-slate-800">Exit Interview</h3>
+      {/* The employee's own submitted Exit Survey (detailed questionnaire). */}
+      <ExitSurveyTab userId={data.exit.userId} />
+
+      {/* HR's exit-interview notes (separate from the employee's survey). */}
+      <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-5 py-3">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0f6ecd]/10 text-[#0f6ecd]"><Pencil size={15} /></span>
+            <div>
+              <h3 className="text-[13px] font-semibold text-slate-800">Exit Interview</h3>
+              <p className="text-[11.5px] text-slate-500">HR&apos;s private notes from the exit conversation.</p>
+            </div>
+          </div>
           {submitted && (
-            <span className="text-[11px] text-emerald-600 inline-flex items-center gap-1">
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
               <CheckCircle2 size={12} /> Submitted {fmtDateTime(initial!.submittedAt)}
             </span>
           )}
         </div>
 
+        <div className="p-5 space-y-4">
         <Field label="Reason for leaving (the employee's own words)">
           <textarea
             rows={2}
@@ -813,6 +858,7 @@ function SurveyTab({
           >
             {submitted ? "Update" : "Submit interview"}
           </button>
+        </div>
         </div>
       </section>
     </div>

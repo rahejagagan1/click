@@ -166,6 +166,8 @@ export default function Sidebar() {
     // and still need their feedback/recommendation.
     const { data: probationData } = useSWR<{ count: number }>("/api/hr/probation-reviews/count", fetcher, { refreshInterval: 60000 });
     const probationCount = (probationData?.count || 0) as number;
+    const { data: pipData } = useSWR<{ count: number }>("/api/hr/pip-reviews/count", fetcher, { refreshInterval: 60000 });
+    const pipCount = (pipData?.count || 0) as number;
 
     // Approvals badge count — total pending across all types (leave / regularize /
     // wfh / on-duty / comp-off). Only fetched for users who can actually approve.
@@ -984,6 +986,13 @@ export default function Sidebar() {
                                         probationCount > 0 ? (
                                             <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[#008CFF] text-white text-[10px] font-bold flex items-center justify-center leading-none tabular-nums">
                                                 {probationCount > 99 ? "99+" : probationCount}
+                                            </span>
+                                        ) : undefined
+                                    )}
+                                    {fl("/dashboard/hr/my-team/pip", "PIP Reviews",
+                                        pipCount > 0 ? (
+                                            <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-[#008CFF] text-white text-[10px] font-bold flex items-center justify-center leading-none tabular-nums">
+                                                {pipCount > 99 ? "99+" : pipCount}
                                             </span>
                                         ) : undefined
                                     )}

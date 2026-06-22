@@ -246,10 +246,35 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const overlap = await prisma.leaveApplication.findFirst({
+    // Overlap guard. A plain date-range overlap isn't always a real clash:
+    // a First-Half and a Second-Half leave on the SAME calendar day are
+    // complementary, not overlapping. The half is encoded as a "[First Half]"
+    // / "[Second Half]" marker in the reason (no dedicated column), so we
+    // parse it to let the two halves of one day coexist while still blocking
+    // every genuine overlap (full days, duplicate halves, multi-day ranges,
+    // generic [Half Day] which carries no specific half).
+    const leaveHalf = (txt: string | null | undefined): "first" | "second" | null => {
+      const m = /^\s*\[(First Half|Second Half)\]/i.exec(String(txt ?? ""));
+      return m ? (/first/i.test(m[1]) ? "first" : "second") : null;
+    };
+    const newHalf = leaveHalf(reason);
+    const newSingleDay = from.toDateString() === to.toDateString();
+    const overlaps = await prisma.leaveApplication.findMany({
       where: { userId: subjectUserId, status: { in: ["pending", "approved"] }, fromDate: { lte: to }, toDate: { gte: from } },
+      select: { fromDate: true, toDate: true, reason: true },
     });
-    if (overlap) return NextResponse.json({ error: "Overlapping leave exists" }, { status: 400 });
+    const realConflict = overlaps.some((o) => {
+      const oHalf = leaveHalf(o.reason);
+      const oSingleDay = new Date(o.fromDate).toDateString() === new Date(o.toDate).toDateString();
+      const sameDate = new Date(o.fromDate).toDateString() === from.toDateString();
+      // Opposite halves of the same single day → not a conflict.
+      if (newHalf && oHalf && newSingleDay && oSingleDay && sameDate &&
+          ((newHalf === "first" && oHalf === "second") || (newHalf === "second" && oHalf === "first"))) {
+        return false;
+      }
+      return true;
+    });
+    if (realConflict) return NextResponse.json({ error: "Overlapping leave exists" }, { status: 400 });
 
     // Every leave starts as "pending" — including HR applying on behalf
     // of someone else. The on-behalf path used to auto-approve, but HR

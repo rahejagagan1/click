@@ -13,10 +13,13 @@ export type CronJobId =
   | "all_sync"
   | "violation_reminders"
   | "probation_reminders"
+  | "pip_reminders"
+  | "exit_survey_reminders"
   | "doc_compliance"
   | "auto_lop"
   | "reporting_manager_changes"
-  | "attach_pending_documents";
+  | "attach_pending_documents"
+  | "auto_exit";
 
 export type CronJobDefinition = {
   id: CronJobId;
@@ -80,6 +83,20 @@ export const CRON_JOB_DEFINITIONS: CronJobDefinition[] = [
     defaultIntervalHours: 24,
   },
   {
+    id: "pip_reminders",
+    name: "PIP review reminders",
+    description:
+      "Daily sweep: for every active employee on a Performance Improvement Plan whose review date (pipEndDate) is within the next 7 days AND who hasn't been reminded yet, emails HR + the employee's reporting manager. The manager reviews it in My Team → PIP Reviews (recommend extend / pass / end → HR approves). Stamps pipReminderSentAt so it never double-sends; auto-cleared when the review date changes.",
+    defaultIntervalHours: 24,
+  },
+  {
+    id: "exit_survey_reminders",
+    name: "Exit survey reminders",
+    description:
+      "Daily sweep: ~2 days before each leaving employee's last working day, sends BOTH an in-app notification (with a 'Complete exit survey' button, same style as the weekly pulse) AND an email — once per exit. Skips anyone who already submitted. The survey is also required before the employee can clock out on their final day, and HR sees the responses on the employee's profile → Exit Survey tab.",
+    defaultIntervalHours: 24,
+  },
+  {
     id: "doc_compliance",
     name: "Compliance docs (PAN / Aadhaar / Education)",
     description:
@@ -106,6 +123,13 @@ export const CRON_JOB_DEFINITIONS: CronJobDefinition[] = [
     description:
       "Sweep: for every parked PendingDocument (offer letters etc. generated for a new joiner before they were in the system) whose email now matches an active User, copies it into that employee's EmployeeDocument (Documents tab) and marks it attached. Covers joiners added via any path (Add-Employee hooks this immediately; ClickUp-sync joiners get caught here). Idempotent. Enabled by default.",
     defaultIntervalHours: 1,
+  },
+  {
+    id: "auto_exit",
+    name: "Auto-finalise exits at end of notice",
+    description:
+      "Daily sweep: for every offboarding exit still 'In Progress' whose last working day has passed (IST), flips the Exit Stage to 'Exited' and deactivates the user account — the same effect as HR's manual Exited toggle. Idempotent (only touches non-final exits with a past last working day). Enabled by default so the stage moves itself once notice ends.",
+    defaultIntervalHours: 24,
   },
 ];
 

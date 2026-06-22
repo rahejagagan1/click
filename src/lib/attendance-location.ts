@@ -67,17 +67,20 @@ export type GeoResult =
  *     ~10–20 m as it locks in). We keep the lowest `accuracy` value.
  *   • Early-exit as soon as a reading hits ≤ 20 m, so happy-path
  *     clock-ins don't wait a full 7 s.
- *   • `maximumAge: 0` — never accept a cached fix.
+ *   • Reuse a fix up to 5 min old (`maximumAge`) so quick / repeat
+ *     punches don't re-fetch, then fall back to a fast coarse
+ *     (Wi-Fi / IP) fix when the GPS chip can't lock a position —
+ *     which is what makes desktop / indoor clock-ins reliable.
  */
-const ACCURACY_TARGET_M = 20;   // good enough; exit early
-const ACCURACY_BUDGET_MS = 7000; // hard cap so clock-in never stalls
+const ACCURACY_TARGET_M = 20;    // good enough; exit early
+const ACCURACY_BUDGET_MS = 7000; // hard cap on the high-accuracy stage
+const RECENT_FIX_MAX_AGE_MS = 5 * 60_000; // accept a position up to 5 min old
 
-export async function captureClockInGeo(): Promise<GeoResult> {
-  if (typeof navigator === "undefined" || !navigator.geolocation) {
-    return { ok: false, reason: "unsupported", message: "Your browser doesn't support geolocation." };
-  }
-
-  const fix = await new Promise<GeolocationPosition | GeolocationPositionError | null>((resolve) => {
+// Stage 1 — high-accuracy GPS. watchPosition tightens the fix over a few
+// seconds; we early-exit at ≤20 m. maximumAge lets a recent fix return
+// instantly so quick / repeat punches don't trigger a fresh lookup.
+function highAccuracyFix(): Promise<GeolocationPosition | GeolocationPositionError | null> {
+  return new Promise((resolve) => {
     let best: GeolocationPosition | null = null;
     let lastErr: GeolocationPositionError | null = null;
     let settled = false;
@@ -94,15 +97,42 @@ export async function captureClockInGeo(): Promise<GeoResult> {
       },
       (e) => {
         lastErr = e;
-        // If we already have any reading at all, prefer it over the
-        // error. Otherwise surface the error so the caller can show
-        // the right "permission denied" / "timeout" message.
+        // Prefer any reading we already have over the error; otherwise
+        // surface it so the caller shows the right denied/timeout message.
         if (!best) settle(e);
       },
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: RECENT_FIX_MAX_AGE_MS },
     );
     setTimeout(() => settle(best ?? lastErr), ACCURACY_BUDGET_MS);
   });
+}
+
+// Stage 2 — fast, coarse fallback (Wi-Fi / IP). Rescues laptops and indoor
+// spots where the GPS chip never locks. Lower accuracy, but well within the
+// office geofence, and it accepts a slightly older cached position.
+function lowAccuracyFix(): Promise<GeolocationPosition | null> {
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve(p),
+      () => resolve(null),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 10 * 60_000 },
+    );
+  });
+}
+
+export async function captureClockInGeo(): Promise<GeoResult> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return { ok: false, reason: "unsupported", message: "Your browser doesn't support geolocation." };
+  }
+
+  // High-accuracy first; if it yields nothing usable, fall back to the fast
+  // coarse fix before giving up. Keep the stage-1 error (e.g. "denied") for
+  // messaging when both stages fail.
+  let fix = await highAccuracyFix();
+  if (!fix || "code" in fix) {
+    const lo = await lowAccuracyFix();
+    if (lo) fix = lo;
+  }
 
   if (!fix) {
     return { ok: false, reason: "position_unavailable", message: "Your device couldn't determine a location. Make sure Location services are ON." };

@@ -160,6 +160,7 @@ export type ManualRecipient = {
   department?: string;
   employeeNumber?: string;
   joiningDate?: string;       // YYYY-MM-DD
+  applicationDate?: string;   // YYYY-MM-DD — manual override for "application dated"
   probationEndDate?: string;  // YYYY-MM-DD
   internshipEndDate?: string; // YYYY-MM-DD
   gender?: string;            // male | female | other
@@ -172,6 +173,13 @@ export type RenderContext = {
   /** New-joiner mode: render purely from typed-in fields (no DB row). */
   manual?: ManualRecipient;
   customFields: Record<string, string>;
+  /**
+   * Optional override for the letter-issue date — drives every
+   * `{{*.ShortDate}}` placeholder. Accepts a YYYY-MM-DD string or a
+   * Date. When omitted, today's date in the server's locale is used
+   * (legacy behaviour). HR sets this to backdate letters.
+   */
+  letterDate?: string | Date | null;
 };
 
 /** Build a placeholder resolver bound to one employee + custom
@@ -211,33 +219,53 @@ export async function buildPlaceholderResolver(ctx: RenderContext): Promise<{
   } catch { /* columns may be missing on older deploys */ }
 
   const profile = { ...(user.employeeProfile ?? {}), ...extended };
-  const renderCtx = { user, profile, exit, customFields: ctx.customFields ?? {} };
+  const renderCtx = {
+    user, profile, exit,
+    customFields: ctx.customFields ?? {},
+    letterDate: ctx.letterDate ?? null,
+  };
   return {
     resolve: (key: string) => resolvePlaceholder(key, renderCtx),
     user, profile, exit,
   };
 }
 
+// All letter dates render as dd-mm-yyyy (HR preference). One helper so
+// every date — issue date, joining/acceptance custom fields, application
+// date — reads the same throughout the letter.
+const ddmmyyyy = (date: Date): string => {
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  return `${dd}-${mm}-${date.getFullYear()}`;
+};
 const fmtDate = (d: Date | null | undefined): string => {
   if (!d) return "—";
   const date = d instanceof Date ? d : new Date(d as any);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
+  return ddmmyyyy(date);
 };
-// Despite the legacy name, fmtShortDate uses the FULL month name
-// ("06 June 2026") to match HR's preferred letter-style format.
-// Was 3-letter month previously ("06 Jun 2026"); flipped to long
-// after HR feedback on the Revised Offer Letter preview.
 const fmtShortDate = (d: Date | null | undefined): string => {
-  if (!d) return new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
+  if (!d) return ddmmyyyy(new Date());
   const date = d instanceof Date ? d : new Date(d as any);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
+  return ddmmyyyy(date);
 };
 
 // Resolves a placeholder against the employee row + custom inputs.
 // Returns the substituted string or null if the placeholder isn't
 // known.
+/**
+ * Resolves the effective "issue date" for the letter. Honors the
+ * caller-supplied override (HR can backdate via the UI) and falls
+ * back to today. Anything unparseable also falls back to today so a
+ * typo'd date never produces an empty/Invalid Date in the letter.
+ */
+function resolveLetterDate(raw: string | Date | null | undefined): Date {
+  if (raw == null || raw === "") return new Date();
+  const d = raw instanceof Date ? raw : new Date(raw);
+  return Number.isNaN(d.getTime()) ? new Date() : d;
+}
+
 function resolvePlaceholder(
   fullKey: string,
   ctx: {
@@ -245,6 +273,7 @@ function resolvePlaceholder(
     profile: any;
     exit: any | null;
     customFields: Record<string, string>;
+    letterDate?: string | Date | null;
   },
 ): string | null {
   const [section, field] = fullKey.split(".");
@@ -252,6 +281,8 @@ function resolvePlaceholder(
   const u = ctx.user;
   const p = ctx.profile;
   const ex = ctx.exit;
+  // Effective letter date — caller override or today.
+  const letterDate = resolveLetterDate(ctx.letterDate);
 
   switch (section) {
     case "EmployeeBasicInfo":
@@ -260,7 +291,7 @@ function resolvePlaceholder(
       break;
     case "EmployeeBasicHeaderInfo":
       if (field === "EmployeeNumber") return p?.employeeId || "";
-      if (field === "ShortDate")      return fmtShortDate(new Date());
+      if (field === "ShortDate")      return fmtShortDate(letterDate);
       break;
     case "EmployeeJobInfo":
       if (field === "JobTitle")        return p?.designation || u?.role || "";
@@ -274,7 +305,7 @@ function resolvePlaceholder(
       if (field === "InternshipEndDate") return fmtDate(p?.internshipEndDate);
       break;
     case "DocumentFilterInfo":
-      if (field === "ShortDate") return fmtShortDate(new Date());
+      if (field === "ShortDate") return fmtShortDate(letterDate);
       // Pronouns return lowercase by default because every existing
       // template uses them MID-SENTENCE ("Arpit fulfilled his roles",
       // "we wish him good luck") — capitalized would read as a
@@ -313,9 +344,15 @@ function resolvePlaceholder(
         return "them";
       }
       break;
-    case "CustomAttributes":
-      // HR-supplied per-render values (FnFAmount, ReferenceNo, …)
-      return ctx.customFields?.[field] ?? "";
+    case "CustomAttributes": {
+      // HR-supplied per-render values (FnFAmount, ReferenceNo, dates …).
+      // Reformat ISO dates (YYYY-MM-DD) — e.g. JoiningDate /
+      // AcceptanceDeadline that HR types — to dd-mm-yyyy so every date
+      // in the letter is consistent.
+      const raw = ctx.customFields?.[field] ?? "";
+      const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
+      return iso ? `${iso[3]}-${iso[2]}-${iso[1]}` : raw;
+    }
     case "ExitSettlement":
       // Provisional Full & Final Settlement statement — auto
       // computes the earnings total, deductions total, net
@@ -623,6 +660,7 @@ export async function renderLetterHtml(
     profile,
     exit,
     customFields: ctx.customFields ?? {},
+    letterDate: ctx.letterDate ?? null,
   };
 
   const missing: string[] = [];
@@ -647,7 +685,38 @@ export async function renderLetterHtml(
     }
     return SAFE_HTML_PLACEHOLDERS.has(key) ? v : escapeHtml(v);
   });
-  return { html, missing };
+
+  // Offer-letter "application dated <date>" auto-fill. The offer template
+  // ships with that line blank; look up the recipient's job application
+  // (by email) and inject the date they applied. No-op for non-offer
+  // letters (the phrase isn't present) and idempotent if the line already
+  // has a date (the regex only matches the empty "dated  and" gap).
+  let outHtml = html;
+  if (/application dated/i.test(outHtml)) {
+    let applied: string | null = null;
+    // Manual override (HR typed it on the new-joiner form) wins; else
+    // auto-fetch from the recipient's job application by email.
+    const manualAppDate = (ctx.manual?.applicationDate || "").trim();
+    if (manualAppDate) {
+      const f = fmtShortDate(new Date(manualAppDate));
+      if (f && f !== "—") applied = f;
+    } else {
+      const email = (ctx.manual?.email || user?.email || "").trim();
+      if (email) {
+        try {
+          const rows = await prisma.$queryRawUnsafe<any[]>(
+            `SELECT "createdAt" FROM "JobApplication" WHERE lower(email) = lower($1) ORDER BY "createdAt" DESC LIMIT 1`,
+            email,
+          );
+          if (rows[0]?.createdAt) applied = fmtShortDate(new Date(rows[0].createdAt));
+        } catch { /* best-effort — leave the line as-is if lookup fails */ }
+      }
+    }
+    if (applied) {
+      outHtml = outHtml.replace(/(application dated)(\s*)(and subsequent)/i, `$1 ${applied} $3`);
+    }
+  }
+  return { html: outHtml, missing };
 }
 
 /** Placeholder keys whose resolved value is intentional HTML and
@@ -698,11 +767,17 @@ export async function wrapLetterPreviewHtml(
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
   <title>${escapeHtml(title)}</title>
   <style>
-    /* Page size for print/PDF generation. Margin is 0 because the
-       inner .page div has its own 22mm × 18mm padding — without
-       this they'd stack and the body content area would be half
-       the page. */
-    @page { size: A4; margin: 0; }
+    /* Page whitespace for print/PDF is owned by @page margins (with
+       preferCSSPageSize:true in html-to-pdf.ts). These apply per printed
+       page — including continuation pages — so every page gets a real
+       16mm side / 16mm top / 18mm bottom margin.
+
+       NOTE: this MUST be non-zero. Chromium gives the CSS @page margin
+       precedence over puppeteer's page.pdf({margin}) option, so leaving
+       this at 0 pinned content flush to the left edge (0mm) no matter
+       what margin the generator passed. @media print also drops the
+       on-screen .page card padding so the two don't stack. */
+    @page { size: A4; margin: 16mm 16mm 18mm 16mm; }
     /* Global letter-spacing of 0.5px on every text element so the
        letter has the airy, formal feel of a printed HR document.
        Applied at the body level so every nested element inherits
@@ -812,11 +887,11 @@ export async function wrapLetterPreviewHtml(
        column visually clean even when amounts differ in digit
        count. */
     table.pay-table td:nth-child(1), table.pay-table th:nth-child(1) { text-align: left; }
-    table.pay-table td:nth-child(2), table.pay-table th:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; }
+    table.pay-table td:nth-child(2), table.pay-table th:nth-child(2) { text-align: center; font-variant-numeric: tabular-nums; }
     /* 3rd column is now ANNUAL (₹) amounts — right-align + tabular
        figures so the rupee digits line up by their right edge,
        matching the monthly column. */
-    table.pay-table td:nth-child(3), table.pay-table th:nth-child(3) { text-align: right; font-variant-numeric: tabular-nums; }
+    table.pay-table td:nth-child(3), table.pay-table th:nth-child(3) { text-align: center; font-variant-numeric: tabular-nums; }
     /* Total row reads as a footer — slightly tinted background +
        bold weight so the eye lands on it. */
     table.pay-table tr:last-child td { background: #f9fafb; font-weight: bold; }
@@ -846,6 +921,21 @@ export async function wrapLetterPreviewHtml(
        own page, keeps the Annexure B list + its closing note together,
        and removes the dashed line entirely. */
     .page-break { display: block; break-before: page; page-break-before: always; height: 0; margin: 0; padding: 0; border: 0; }
+    /* PRINT / PDF: the @page margins above now own the page whitespace,
+       so drop the .page card padding + fixed size (otherwise page 1
+       would get margin + padding = double spacing). The on-screen
+       preview keeps the padded A4 "card" look via the rules above. */
+    @media print {
+      html, body { background: #ffffff; }
+      .page {
+        width: auto;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+        box-shadow: none;
+        overflow: visible;
+      }
+    }
   </style>
 </head>
 <body>

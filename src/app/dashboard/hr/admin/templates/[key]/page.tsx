@@ -16,7 +16,12 @@ import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { isLeadershipOrHR } from "@/lib/access";
 import { DateField } from "@/components/ui/date-field";
-import { JOB_TITLES } from "@/lib/job-titles";
+// NOTE: previously imported JOB_TITLES from @/lib/job-titles — a stale
+// 28-entry hardcoded list that was missing 40+ designations HR had added
+// via Admin → RBAC → Designations (CEO, COO, Manager, Lead, Channel
+// Manager, etc.) and still showed 13 designations that no longer exist
+// in the DB. Now reads the same /api/designations source Edit Profile
+// uses, so the picker stays in sync without code changes.
 import { Search, Save, FileText, RefreshCw } from "lucide-react";
 
 // Reuse the same Quill build the JD editor uses so HR gets a
@@ -76,6 +81,7 @@ type Employee = {
   name: string;
   email: string;
   profilePictureUrl?: string | null;
+  isActive?: boolean;
   employeeProfile?: { designation?: string | null; department?: string | null } | null;
 };
 
@@ -121,11 +127,16 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
   const [mode, setMode] = useState<"employee" | "manual">("employee");
   const [manualFields, setManualFields] = useState({
     name: "", email: "", designation: "", department: "",
-    joiningDate: "", gender: "", employeeNumber: "",
+    joiningDate: "", applicationDate: "", gender: "", employeeNumber: "",
   });
 
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [customValues, setCustomValues] = useState<Record<string, string>>({});
+  // Letter-issue date — drives every {{*.ShortDate}} placeholder. Empty
+  // string means "today" (legacy behaviour). HR sets this when they
+  // need to backdate a letter or post-date one. Stored as YYYY-MM-DD
+  // to match the DateField component's value shape.
+  const [letterDate, setLetterDate] = useState<string>("");
   // Salary type of the picked employee — "intern" or "regular".
   // Used by the Exit Statement template to hide the EnablePf
   // checkbox for interns (interns don't have PF). Set in the
@@ -138,6 +149,18 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
   const [designationDraft, setDesignationDraft]       = useState("");
   const [savingDesignation, setSavingDesignation]     = useState(false);
   const [designationSaved, setDesignationSaved]       = useState(false);
+
+  // Live designation list — same source as Edit Profile so HR sees the
+  // full set (CEO, COO, Manager, Lead, every brand-scoped role) instead
+  // of the stale 28-entry hardcoded list this page used previously.
+  const { data: desigData } = useSWR<{ designations: { label: string }[] }>(
+    "/api/designations",
+    fetcher,
+  );
+  const designationOptions: string[] = useMemo(() => {
+    const labels = (desigData?.designations ?? []).map((d) => d.label).filter(Boolean);
+    return Array.from(new Set(labels)).sort((a, b) => a.localeCompare(b));
+  }, [desigData]);
 
   // Auto-fill custom fields from the picked employee's profile +
   // salary structure so HR doesn't retype data we already have.
@@ -259,10 +282,12 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
     ? !!employee
     : !!(manualFields.name.trim() && manualFields.email.trim());
 
-  const buildBody = (action: "preview" | "pdf") =>
-    mode === "manual"
-      ? { manual: { ...manualFields, brand: activeBrand }, customFields: customValues, action }
-      : { employeeId: employee?.id, customFields: customValues, action };
+  const buildBody = (action: "preview" | "pdf") => {
+    const base = { customFields: customValues, action, letterDate: letterDate || null };
+    return mode === "manual"
+      ? { ...base, manual: { ...manualFields, brand: activeBrand } }
+      : { ...base, employeeId: employee?.id };
+  };
 
   const refreshPreview = async () => {
     if (!ready) { setPreview(null); return; }
@@ -298,8 +323,14 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
         throw new Error(j?.error || "Couldn't update designation");
       }
       setEmployee((e) => e ? { ...e, employeeProfile: { ...(e.employeeProfile ?? {}), designation: next } } : e);
-      setPreview(null);             // force a fresh preview with the new title
+      setPreview(null);
       setDesignationSaved(true);
+      // Auto-re-render the letter so HR sees the new title applied
+      // without a second click. Previously we only cleared the
+      // preview; the user had to manually click "Preview" again to
+      // see the change, which looked like the save hadn't worked.
+      // Fire-and-forget — refreshPreview owns its own busy/error UI.
+      void refreshPreview();
     } catch (err: any) {
       alert(err?.message || "Couldn't update designation");
     } finally {
@@ -448,10 +479,10 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
                         <option value="">— Select designation —</option>
                         {/* Keep the current title selectable even if it's not in
                             the canonical list, so we never silently change it. */}
-                        {designationDraft && !JOB_TITLES.includes(designationDraft) && (
+                        {designationDraft && !designationOptions.includes(designationDraft) && (
                           <option value={designationDraft}>{designationDraft}</option>
                         )}
-                        {JOB_TITLES.map((t) => (
+                        {designationOptions.map((t) => (
                           <option key={t} value={t}>{t}</option>
                         ))}
                       </select>
@@ -471,6 +502,32 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
                     </p>
                   </div>
                 )}
+                {/* Letter date override — the {{*.ShortDate}} placeholder
+                    defaults to today's date. HR sets this to backdate a
+                    letter or post-date one. The "Reset to today" button
+                    clears the override. */}
+                <div>
+                  <label className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Letter date</label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <DateField
+                      value={letterDate}
+                      onChange={(v) => { setLetterDate(v); setPreview(null); }}
+                      className="flex-1"
+                    />
+                    {letterDate && (
+                      <button
+                        type="button"
+                        onClick={() => { setLetterDate(""); setPreview(null); }}
+                        className="h-9 px-3 rounded-lg border border-slate-200 text-[12px] text-slate-600 hover:bg-slate-50"
+                      >
+                        Today
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Leave blank to use today's date. Pick a date to back/post-date the letter.
+                  </p>
+                </div>
               </div>
             ) : (
               <div className="space-y-3">
@@ -485,6 +542,18 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
                   <div>
                     <label className="text-[11.5px] text-slate-600 mb-1 block">Joining date</label>
                     <DateField value={manualFields.joiningDate} onChange={(v) => setManualFields((s) => ({ ...s, joiningDate: v }))} className="w-full" />
+                  </div>
+                  <div>
+                    <label className="text-[11.5px] text-slate-600 mb-1 block">
+                      Application date <span className="text-slate-400">(blank = auto from job application)</span>
+                    </label>
+                    <DateField value={manualFields.applicationDate} onChange={(v) => { setManualFields((s) => ({ ...s, applicationDate: v })); setPreview(null); }} className="w-full" />
+                  </div>
+                  <div>
+                    <label className="text-[11.5px] text-slate-600 mb-1 block">
+                      Letter date <span className="text-slate-400">(blank = today)</span>
+                    </label>
+                    <DateField value={letterDate} onChange={(v) => { setLetterDate(v); setPreview(null); }} className="w-full" />
                   </div>
                   <div>
                     <label className="text-[11.5px] text-slate-600 mb-1 block">Gender</label>
@@ -788,8 +857,11 @@ function EmployeePicker({
     return () => clearTimeout(t);
   }, [query]);
 
+  // No isActive filter — letter templates (Exit Statement, Relieving,
+  // Experience, etc.) often target EXITED / deactivated employees, so the
+  // picker must surface them too. Inactive rows are flagged "Exited" below.
   const fetchUrl = open
-    ? `/api/hr/employees?search=${encodeURIComponent(debounced)}&isActive=true${brand ? `&businessUnit=${encodeURIComponent(brand)}` : ""}`
+    ? `/api/hr/employees?search=${encodeURIComponent(debounced)}${brand ? `&businessUnit=${encodeURIComponent(brand)}` : ""}`
     : null;
   const { data: results = [] as Employee[], isLoading } = useSWR<Employee[]>(
     fetchUrl,
@@ -821,6 +893,9 @@ function EmployeePicker({
             <p className="text-[13px] font-medium text-slate-800 truncate">{value.name}</p>
             <p className="text-[11px] text-slate-500 truncate">{value.employeeProfile?.designation || value.email}</p>
           </div>
+          {value.isActive === false && (
+            <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-500 ring-1 ring-inset ring-slate-300">Exited</span>
+          )}
           <button onClick={() => onChange(null)} className="text-slate-400 hover:text-rose-500 text-sm">✕</button>
         </div>
       ) : (
@@ -862,6 +937,9 @@ function EmployeePicker({
                 <p className="text-[12.5px] font-medium text-slate-800 truncate">{u.name}</p>
                 <p className="text-[11px] text-slate-500 truncate">{u.employeeProfile?.designation || u.email}</p>
               </div>
+              {u.isActive === false && (
+                <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-500 ring-1 ring-inset ring-slate-300">Exited</span>
+              )}
             </button>
           ))}
         </div>
