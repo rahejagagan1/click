@@ -434,10 +434,10 @@ function rupeesInWords(amount: number): string {
  *    Special          = remaining (so monthly columns tie to CTC)
  *    Then each ×= (WorkingDays / 30)  →  pro-rated for the partial
  *                                        last month.
- *    LeaveEncashment  = (Basic_pro + DA_pro) / WorkingDays × LeaveEncashmentDays
- *                       — standard formula based on per-day basic+DA
- *                       rate × encashment days. Falls back to 0 if
- *                       no LE days entered.
+ *    LeaveEncashment  = (Monthly / 30) × LeaveEncashmentDays
+ *                       — based on the full monthly in-hand salary
+ *                       (₹30k month → ₹1,000/day → ₹7,000 for 7 days).
+ *                       Falls back to 0 if no LE days entered.
  *
  *  HR can also enter any individual amount manually as a custom
  *  field — manual values override the computed defaults. That's
@@ -480,11 +480,13 @@ function resolveExitSettlement(field: string, customFields: Record<string, strin
     ProvidentFund:       mPF      * proRata,
     SpecialAllowance:    mSpecial * proRata,
   };
-  // Leave encashment: daily Basic+DA × LE days. Fall back to 0
-  // if no encashment days entered (no implicit encashment).
+  // Leave encashment: based on the FULL monthly in-hand salary (gross),
+  // not just Basic+DA — per company policy. Per-day = monthly / 30, so a
+  // ₹30,000 month encashes ₹1,000/day (7 days → ₹7,000). Falls back to 0
+  // when no encashment days are entered (no implicit encashment).
   const leDays = num("LeaveEncashmentDays");
-  const dailyBasicDA = (mBasic + mDA) / 30;
-  const calcLE = leDays > 0 ? dailyBasicDA * leDays : 0;
+  const dailyGross = monthly / 30;
+  const calcLE = leDays > 0 ? dailyGross * leDays : 0;
   // Manual overrides take precedence — HR can type any line and
   // the typed value wins over the computed one.
   const final = {
