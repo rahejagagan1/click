@@ -893,7 +893,10 @@ function PreCheckPanel({ runId, monthLabel, runStatus, brand, onClose }: { runId
   const { data: payslips = [] } = useSWR<any[]>(`/api/hr/payroll/payslips?runId=${runId}`, fetcher);
   const totalGross = payslips.reduce((s, p) => s + parseFloat(p.grossEarnings || 0), 0);
   const totalNet   = payslips.reduce((s, p) => s + parseFloat(p.netPay || 0), 0);
-  const totalDed   = payslips.reduce((s, p) => s + parseFloat(p.totalDeductions || 0), 0);
+  const totalPf    = payslips.reduce((s, p) => s + parseFloat(p.pfEmployee || 0), 0);
+  // Deductions stat excludes PF — PF is shown in its own column/stat so HR can
+  // read the statutory PF figure separately from PT / TDS / other deductions.
+  const totalDed   = payslips.reduce((s, p) => s + (parseFloat(p.totalDeductions || 0) - parseFloat(p.pfEmployee || 0)), 0);
 
   // Statutory + bank exports are gated until the run is locked or paid.
   // Showing them earlier risks HR emailing the bank a draft batch that
@@ -904,7 +907,7 @@ function PreCheckPanel({ runId, monthLabel, runStatus, brand, onClose }: { runId
   return (
     <>
       <div className="fixed inset-0 bg-slate-900/40 z-40" onClick={onClose} />
-      <aside className="fixed top-0 right-0 bottom-0 w-full max-w-2xl bg-white shadow-2xl z-50 flex flex-col">
+      <aside className="fixed top-0 right-0 bottom-0 w-full max-w-5xl bg-white shadow-2xl z-50 flex flex-col">
         <header className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
           <div>
             <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Pre-Payroll Check</p>
@@ -913,8 +916,9 @@ function PreCheckPanel({ runId, monthLabel, runStatus, brand, onClose }: { runId
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
         </header>
 
-        <div className="px-5 py-3 grid grid-cols-3 gap-4 border-b border-slate-100">
+        <div className="px-5 py-3 grid grid-cols-4 gap-4 border-b border-slate-100">
           <StatBlock label="Gross"      value={fmtInr(totalGross)} small />
+          <StatBlock label="PF"         value={fmtInr(totalPf)}    small />
           <StatBlock label="Deductions" value={fmtInr(totalDed)}   small />
           <StatBlock label="Net Pay"    value={fmtInr(totalNet)}   small />
         </div>
@@ -928,19 +932,31 @@ function PreCheckPanel({ runId, monthLabel, runStatus, brand, onClose }: { runId
             <table className="w-full text-[12.5px]">
               <thead className="bg-slate-50 sticky top-0">
                 <tr className="text-left text-[10.5px] uppercase tracking-wider text-slate-500">
-                  <th className="px-5 py-2">Employee</th>
-                  <th className="px-5 py-2 text-right">Gross</th>
-                  <th className="px-5 py-2 text-right">Deductions</th>
-                  <th className="px-5 py-2 text-right">Net</th>
+                  <th className="px-4 py-2">Employee</th>
+                  <th className="px-2 py-2 text-center">Days</th>
+                  <th className="px-2 py-2 text-right">Gross</th>
+                  <th className="px-2 py-2 text-right">Arrears</th>
+                  <th className="px-2 py-2 text-right">PF</th>
+                  <th className="px-2 py-2 text-right">Deductions</th>
+                  <th className="px-4 py-2 text-right">Net</th>
                 </tr>
               </thead>
               <tbody>
                 {payslips.map((p: any) => (
                   <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="px-5 py-2 text-slate-800">{p.user?.name ?? `User ${p.userId}`}</td>
-                    <td className="px-5 py-2 text-right tabular-nums">{fmtInr(parseFloat(p.grossEarnings))}</td>
-                    <td className="px-5 py-2 text-right tabular-nums text-rose-700">{fmtInr(parseFloat(p.totalDeductions))}</td>
-                    <td className="px-5 py-2 text-right tabular-nums font-semibold">{fmtInr(parseFloat(p.netPay))}</td>
+                    <td className="px-4 py-2 text-slate-800 whitespace-nowrap">{p.user?.name ?? `User ${p.userId}`}</td>
+                    <td className="px-2 py-2 text-center tabular-nums text-slate-600 whitespace-nowrap">
+                      {Number(p.presentDays)}<span className="text-slate-400">/{p.workingDays}</span>
+                    </td>
+                    <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap">{fmtInr(parseFloat(p.grossEarnings))}</td>
+                    <td className="px-2 py-2 text-right tabular-nums text-emerald-700 whitespace-nowrap">
+                      {parseFloat(p.bonus) > 0 ? fmtInr(parseFloat(p.bonus)) : "—"}
+                    </td>
+                    <td className="px-2 py-2 text-right tabular-nums text-rose-700 whitespace-nowrap">
+                      {parseFloat(p.pfEmployee) > 0 ? fmtInr(parseFloat(p.pfEmployee)) : "—"}
+                    </td>
+                    <td className="px-2 py-2 text-right tabular-nums text-rose-700 whitespace-nowrap">{fmtInr(parseFloat(p.totalDeductions) - parseFloat(p.pfEmployee))}</td>
+                    <td className="px-4 py-2 text-right tabular-nums font-semibold whitespace-nowrap">{fmtInr(parseFloat(p.netPay))}</td>
                   </tr>
                 ))}
               </tbody>

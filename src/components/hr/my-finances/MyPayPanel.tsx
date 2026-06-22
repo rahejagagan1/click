@@ -89,10 +89,22 @@ function companyHeader(legalEntity?: string | null) {
   return (legalEntity && COMPANY_HEADERS[legalEntity]) || COMPANY_HEADERS["NB Media Productions"];
 }
 
-// Base monthly salary (CTC ÷ 12) — the contractual figure for the "Monthly
-// Salary" header field. Distinct from grossEarnings, which includes bonuses.
-function monthlyBaseSalary(structure: any): number {
-  return Math.round(parseFloat(structure?.ctc || 0) / 12);
+// Contractual monthly pay for THIS payslip's month. Derived from the frozen
+// payslip (base earnings ÷ LOP factor) rather than the live structure's
+// CTC/12, so a later salary revision doesn't retro-change a past month's
+// "Monthly Salary" header. For an unrevised employee this equals CTC/12;
+// falls back to CTC/12 when the payslip has no usable base figure.
+function monthlyBaseSalary(p: any, structure: any): number {
+  const gross = parseFloat(p?.grossEarnings || 0) || 0;
+  const bonus = parseFloat(p?.bonus || 0) || 0;
+  const adhoc = (Array.isArray(p?.adhocPayments) ? p.adhocPayments : [])
+    .reduce((s: number, a: any) => s + (parseFloat(String(a.amount)) || 0), 0);
+  const wd = parseFloat(p?.workingDays || 0) || 0;
+  const lop = parseFloat(p?.lopDays || 0) || 0;
+  const lopFactor = wd > 0 ? Math.max(0, (wd - lop) / wd) : 1;
+  const base = Math.max(0, gross - bonus - adhoc);
+  if (base > 0 && lopFactor > 0) return Math.round(base / lopFactor);
+  return Math.round((parseFloat(structure?.ctc || 0) || 0) / 12);
 }
 
 // Bonuses (EmployeeBonus rows) whose effectiveDate falls in the payslip's month.
@@ -222,7 +234,7 @@ function downloadPayslip(
     ${cell("Bank", profile?.bankName)}
     ${cell("Bank IFSC", profile?.bankIfsc)}
     ${cell("Bank Account", profile?.bankAccountNumber)}
-    ${cell("Monthly Salary", fmtInrWhole(monthlyBaseSalary(structure)))}
+    ${cell("Monthly Salary", fmtInrWhole(monthlyBaseSalary(p, structure)))}
     ${cell("PAN Number", profile?.panNumber)}
   </div>
 
@@ -752,7 +764,7 @@ function PaySlipsView({ payslips, structure, userId }: { payslips: any[]; struct
 
                     <PayslipField label="Bank IFSC"        value={profile?.bankIfsc || "—"} />
                     <PayslipField label="Bank Account"     value={maskedAcct(profile?.bankAccountNumber)} />
-                    <PayslipField label="Monthly Salary"   value={fmtInrWhole(monthlyBaseSalary(structure))} />
+                    <PayslipField label="Monthly Salary"   value={fmtInrWhole(monthlyBaseSalary(active, structure))} />
                     <PayslipField label="PAN Number"       value={maskedPan(profile?.panNumber)} />
                   </div>
 
@@ -893,15 +905,34 @@ function BonusDetailRow({ bonus }: { bonus: BonusRow }) {
   );
 }
 
+// Friendly labels for adhoc payment types on the payslip. "Reimbursement" /
+// "Travel" mirror the Pay Register's "Business Expense Reimbursement" column;
+// anything else is shown as its stored type, de-snaked and title-cased.
+function adhocLabel(type: string): string {
+  const k = (type || "").toLowerCase();
+  if (k === "reimbursement") return "Business Expense Reimbursement";
+  if (k === "travel")        return "Travel Reimbursement";
+  if (!type)                 return "Other";
+  return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function renderEarnings(p: any, structure: any, bonuses: BonusRow[] = []): { label: string; value: string }[] {
   const gross = parseFloat(p.grossEarnings || 0);
-  // The bonus amount actually baked into gross (from payroll). Base salary is
-  // gross minus that, so Total Earnings always reconciles to gross.
+  // The bonus amount actually baked into gross (from payroll). Adhoc payment
+  // line items (reimbursements / travel / arrears) are also baked into gross
+  // but itemised separately below — so base salary is gross minus both, and
+  // Total Earnings always reconciles to gross.
   const bonusInGross = parseFloat(p.bonus || 0);
-  const baseEarnings = Math.max(0, gross - bonusInGross);
+  const adhocItems: { type: string; amount: number }[] = Array.isArray(p?.adhocPayments) ? p.adhocPayments : [];
+  const adhocTotal = adhocItems.reduce((s, a) => s + parseFloat(String(a.amount) || "0"), 0);
+  const baseEarnings = Math.max(0, gross - bonusInGross - adhocTotal);
   const rows: { label: string; value: string }[] = [];
 
-  if (!structure || structure.salaryType === "intern") {
+  // Per-payslip type wins over the (current) structure type, so a month that
+  // was paid as an intern stipend stays a single Stipend line even after the
+  // employee is converted to a regular structure.
+  const effType = p?.salaryType ?? structure?.salaryType;
+  if (!structure || effType === "intern") {
     rows.push({ label: "Monthly Stipend", value: fmtInr(baseEarnings) });
   } else {
     const basic   = parseFloat(structure.basic               || 0) / 12;
@@ -931,6 +962,15 @@ function renderEarnings(p: any, structure: any, bonuses: BonusRow[] = []): { lab
     for (const b of bonuses) rows.push({ label: bonusLabel(b), value: fmtInr(b.amount) });
   } else if (bonusInGross > 0) {
     rows.push({ label: "Bonus", value: fmtInr(bonusInGross) });
+  }
+
+  // Itemise adhoc payments (reimbursements / travel / arrears / …) by their
+  // type so they show as their own earnings line rather than being silently
+  // folded into Special Allowance / Stipend.
+  for (const a of adhocItems) {
+    const amt = parseFloat(String(a.amount) || "0");
+    if (amt === 0) continue;
+    rows.push({ label: adhocLabel(a.type), value: fmtInr(amt) });
   }
   return rows;
 }

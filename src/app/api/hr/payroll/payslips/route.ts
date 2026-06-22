@@ -53,6 +53,33 @@ export async function GET(req: NextRequest) {
         user: { select: { id: true, name: true, email: true } },
       },
     });
-    return NextResponse.json(payslips);
+
+    // Attach adhoc PAYMENT line items (reimbursements, travel, arrears, etc.)
+    // per payslip so the slip can itemise them by type instead of absorbing
+    // them into base earnings. Bonuses are itemised separately via
+    // EmployeeBonus; adhoc deductions are handled in the deductions column.
+    const uids = Array.from(new Set(payslips.map((p) => p.userId)));
+    const adhoc = uids.length
+      ? await prisma.$queryRawUnsafe<{ userId: number; month: number; year: number; type: string | null; amount: string }[]>(
+          `SELECT "userId", month, year, type, SUM(amount)::text AS amount
+             FROM "AdhocLineItem"
+            WHERE kind = 'payment' AND "userId" = ANY($1::int[])
+            GROUP BY "userId", month, year, type`,
+          uids,
+        )
+      : [];
+    const adhocKey = (u: number, m: number, y: number) => `${u}:${m}:${y}`;
+    const adhocMap = new Map<string, { type: string; amount: number }[]>();
+    for (const a of adhoc) {
+      const k = adhocKey(a.userId, a.month, a.year);
+      const arr = adhocMap.get(k) ?? [];
+      arr.push({ type: a.type || "Other", amount: parseFloat(a.amount) });
+      adhocMap.set(k, arr);
+    }
+    const withAdhoc = payslips.map((p) => ({
+      ...p,
+      adhocPayments: adhocMap.get(adhocKey(p.userId, p.month, p.year)) ?? [],
+    }));
+    return NextResponse.json(withAdhoc);
   } catch (e) { return serverError(e, "GET /api/hr/payroll/payslips"); }
 }
