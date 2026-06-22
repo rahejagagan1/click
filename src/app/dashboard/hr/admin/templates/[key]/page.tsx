@@ -81,6 +81,7 @@ type Employee = {
   name: string;
   email: string;
   profilePictureUrl?: string | null;
+  isActive?: boolean;
   employeeProfile?: { designation?: string | null; department?: string | null } | null;
 };
 
@@ -856,8 +857,11 @@ function EmployeePicker({
     return () => clearTimeout(t);
   }, [query]);
 
+  // No isActive filter — letter templates (Exit Statement, Relieving,
+  // Experience, etc.) often target EXITED / deactivated employees, so the
+  // picker must surface them too. Inactive rows are flagged "Exited" below.
   const fetchUrl = open
-    ? `/api/hr/employees?search=${encodeURIComponent(debounced)}&isActive=true${brand ? `&businessUnit=${encodeURIComponent(brand)}` : ""}`
+    ? `/api/hr/employees?search=${encodeURIComponent(debounced)}${brand ? `&businessUnit=${encodeURIComponent(brand)}` : ""}`
     : null;
   const { data: results = [] as Employee[], isLoading } = useSWR<Employee[]>(
     fetchUrl,
@@ -889,6 +893,9 @@ function EmployeePicker({
             <p className="text-[13px] font-medium text-slate-800 truncate">{value.name}</p>
             <p className="text-[11px] text-slate-500 truncate">{value.employeeProfile?.designation || value.email}</p>
           </div>
+          {value.isActive === false && (
+            <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-500 ring-1 ring-inset ring-slate-300">Exited</span>
+          )}
           <button onClick={() => onChange(null)} className="text-slate-400 hover:text-rose-500 text-sm">✕</button>
         </div>
       ) : (
@@ -930,6 +937,9 @@ function EmployeePicker({
                 <p className="text-[12.5px] font-medium text-slate-800 truncate">{u.name}</p>
                 <p className="text-[11px] text-slate-500 truncate">{u.employeeProfile?.designation || u.email}</p>
               </div>
+              {u.isActive === false && (
+                <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-500 ring-1 ring-inset ring-slate-300">Exited</span>
+              )}
             </button>
           ))}
         </div>
