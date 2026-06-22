@@ -468,6 +468,10 @@ const SOCIAL_BADGES = [
 function FloatingBadges() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const nodeRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  // Dedicated layer for the shatter particles. They're appended imperatively;
+  // keeping them in their OWN node (empty in JSX) means a React re-render of
+  // the badges can't reconcile them away.
+  const layerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -528,6 +532,71 @@ function FloatingBadges() {
     window.addEventListener("mouseout", onLeave, { passive: true });
     window.addEventListener("resize", measure);
 
+    // ── Click to shatter into particles, reassemble after 10s ──────────
+    // Clicking a badge bursts it into ~18 colored particles (CSS handles the
+    // explode → scatter → implode over 10s); the badge is hidden + frozen
+    // (skipped by the physics loop) until the particles converge, then it
+    // fades back in. Skipped under reduced motion.
+    const shattered = new Array(N).fill(false);
+    const timers: number[] = [];
+    const PCOLOR: Record<string, string> = {
+      youtube: "#ff2b2b", instagram: "#e1306c", spotify: "#1ed760", facebook: "#1877f2", premiere: "#a07bff",
+    };
+    // Live particles, animated by the rAF loop so they roam the whole banner.
+    const particles: Array<{ el: HTMLSpanElement; x: number; y: number; vx: number; vy: number; bi: number; born: number; sz: number }> = [];
+    const shatter = (i: number) => {
+      if (shattered[i] || SOCIAL_BADGES[i].p === "instagram") return; // instagram is indestructible
+      shattered[i] = true;
+      const node = nodeRefs.current[i];
+      const p = ps[i], d = dims[i];
+      const cx = p.x + d.w / 2, cy = p.y + d.h / 2;
+      if (node) { node.style.transition = "opacity .12s ease"; node.style.opacity = "0"; }
+      const color = PCOLOR[SOCIAL_BADGES[i].p] || "#8a93a6";
+      const born = performance.now();
+      const NUM = 18;
+      for (let k = 0; k < NUM; k++) {
+        const el = document.createElement("span");
+        el.className = "wb-particle";
+        const sz = 5 + Math.random() * 4;
+        el.style.width = `${sz}px`; el.style.height = `${sz}px`;
+        el.style.background = color; el.style.color = color;
+        el.style.transform = `translate(${cx}px, ${cy}px)`;
+        (layerRef.current ?? host).appendChild(el);
+        const ang = (k / NUM) * Math.PI * 2 + Math.random() * 0.6;
+        const sp = 1.8 + Math.random() * 2; // initial burst speed
+        particles.push({ el, x: cx, y: cy, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, bi: i, born, sz });
+      }
+      const t = window.setTimeout(() => {
+        for (let q = particles.length - 1; q >= 0; q--) {
+          if (particles[q].bi === i) { particles[q].el.remove(); particles.splice(q, 1); }
+        }
+        if (node) { node.style.transition = "opacity .4s ease"; node.style.opacity = "1"; }
+        shattered[i] = false;
+      }, 5000);
+      timers.push(t);
+    };
+    // Click directly on an icon shatters it. We hit-test the click against
+    // each badge's live rect on WINDOW (not per-node listeners): banner
+    // overlays (sheen / content layer) paint over the badges and would
+    // otherwise swallow a direct DOM click. A geometric test sidesteps that
+    // and still requires the click to land ON an icon (+6px), so empty
+    // banner does nothing. Instagram is skipped — it can't be destroyed.
+    const onBannerClick = (e: MouseEvent) => {
+      const r = host.getBoundingClientRect();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      if (mx < 0 || my < 0 || mx > r.width || my > r.height) return;
+      const pad = 6;
+      for (let i = 0; i < N; i++) {
+        if (shattered[i] || SOCIAL_BADGES[i].p === "instagram") continue;
+        const p = ps[i], d = dims[i];
+        if (mx >= p.x - pad && mx <= p.x + d.w + pad && my >= p.y - pad && my <= p.y + d.h + pad) {
+          shatter(i);
+          break;
+        }
+      }
+    };
+    if (!reduce) window.addEventListener("click", onBannerClick);
+
     let raf = 0;
     let tFrame = 0;
     const R = 100;     // cursor "personal space" — badges flee inside this
@@ -539,6 +608,7 @@ function FloatingBadges() {
       // stay scattered instead of clumping into a pile.
       for (let i = 0; i < N; i++) {
         for (let j = i + 1; j < N; j++) {
+          if (shattered[i] || shattered[j]) continue;
           const a = ps[i], b = ps[j], da = dims[i], db = dims[j];
           const sx = (a.x + da.w / 2) - (b.x + db.w / 2);
           const sy = (a.y + da.h / 2) - (b.y + db.h / 2);
@@ -553,10 +623,13 @@ function FloatingBadges() {
         }
       }
       for (let i = 0; i < N; i++) {
+        if (shattered[i]) continue; // frozen + hidden while shattered
         const p = ps[i], d = dims[i];
         const cx = p.x + d.w / 2, cy = p.y + d.h / 2;
         const dx = cx - mouse.x, dy = cy - mouse.y;
         const dist2 = dx * dx + dy * dy;
+        // Every badge (incl. Instagram) flees the cursor; Instagram just
+        // can't be SHATTERED (guarded in shatter() + skipped on click).
         if (dist2 < R * R) {
           const dist = Math.sqrt(dist2) || 0.001;
           const f = ((R - dist) / R) * FORCE;
@@ -591,6 +664,33 @@ function FloatingBadges() {
         const n = nodeRefs.current[i];
         if (n) n.style.transform = `translate(${p.x}px, ${p.y}px) rotate(${d.rot}deg) scale(${scale})`;
       }
+      // Shatter particles — wander + bounce off ALL banner edges so they roam
+      // the whole banner, then (last ~1.2s) converge to their badge centre so
+      // it reforms cleanly. Fade in on spawn, fade out near the end.
+      if (particles.length) {
+        const now = performance.now();
+        for (const pt of particles) {
+          const elapsed = now - pt.born;
+          if (elapsed > 3800) {
+            const dd = dims[pt.bi];
+            const tx = ps[pt.bi].x + dd.w / 2, ty = ps[pt.bi].y + dd.h / 2;
+            pt.vx += (tx - pt.x) * 0.1; pt.vy += (ty - pt.y) * 0.1;
+            pt.vx *= 0.8; pt.vy *= 0.8;
+          } else {
+            pt.vx += (Math.random() - 0.5) * 0.18; pt.vy += (Math.random() - 0.5) * 0.18;
+            pt.vx *= 0.985; pt.vy *= 0.985;
+            const s = Math.hypot(pt.vx, pt.vy); if (s > 2.4) { pt.vx = (pt.vx / s) * 2.4; pt.vy = (pt.vy / s) * 2.4; }
+          }
+          pt.x += pt.vx; pt.y += pt.vy;
+          if (pt.x < 2) { pt.x = 2; pt.vx = Math.abs(pt.vx); }
+          if (pt.x > W - pt.sz - 2) { pt.x = W - pt.sz - 2; pt.vx = -Math.abs(pt.vx); }
+          if (pt.y < 2) { pt.y = 2; pt.vy = Math.abs(pt.vy); }
+          if (pt.y > H - pt.sz - 2) { pt.y = H - pt.sz - 2; pt.vy = -Math.abs(pt.vy); }
+          const op = elapsed < 150 ? elapsed / 150 : elapsed > 4600 ? Math.max(0, (5000 - elapsed) / 400) : 1;
+          pt.el.style.opacity = String(op);
+          pt.el.style.transform = `translate(${pt.x}px, ${pt.y}px)`;
+        }
+      }
       if (!reduce) raf = requestAnimationFrame(tick);
     };
     if (!reduce) raf = requestAnimationFrame(tick);
@@ -600,12 +700,20 @@ function FloatingBadges() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseout", onLeave);
       window.removeEventListener("resize", measure);
+      timers.forEach((t) => clearTimeout(t));
+      window.removeEventListener("click", onBannerClick);
+      (layerRef.current ?? host).querySelectorAll(".wb-particle").forEach((el) => el.remove());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <div ref={hostRef} className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+      <style>{`
+        .wb-particle{position:absolute;left:0;top:0;border-radius:9999px;pointer-events:none;opacity:0;
+          will-change:transform,opacity;box-shadow:0 0 7px currentColor}
+        @media (prefers-reduced-motion:reduce){ .wb-particle{display:none} }
+      `}</style>
       {SOCIAL_BADGES.map((b, i) => (
         <span
           key={i}
@@ -619,11 +727,16 @@ function FloatingBadges() {
             boxShadow: "0 6px 14px -5px rgba(15,23,42,0.4), inset 0 1px 0 rgba(255,255,255,0.4)",
             opacity: 0,
             willChange: "transform",
+            pointerEvents: "auto",
+            cursor: b.p === "instagram" ? "default" : "pointer",
           }}
         >
           <MiniGlyph p={b.p} size={Math.round(b.box * 0.62)} />
         </span>
       ))}
+      {/* Shatter particles are appended here imperatively (kept out of the
+          badge list so React re-renders don't remove them). */}
+      <div ref={layerRef} className="pointer-events-none absolute inset-0" aria-hidden />
     </div>
   );
 }
