@@ -180,6 +180,10 @@ export async function syncCapsules(): Promise<number> {
             );
 
             for (const folder of response.folders || []) {
+                const prev = await prisma.capsule.findUnique({
+                    where: { clickupFolderId: folder.id },
+                    select: { name: true },
+                });
                 await prisma.capsule.upsert({
                     where: { clickupFolderId: folder.id },
                     create: {
@@ -188,8 +192,9 @@ export async function syncCapsules(): Promise<number> {
                         name: folder.name,
                         shortName: deriveShortName(folder.name),
                     },
-                    update: { name: folder.name },
+                    update: { name: folder.name, shortName: deriveShortName(folder.name) },
                 });
+                if (prev) await cascadeTeamCapsuleRename(prev.name, folder.name);
                 count++;
             }
         } catch (error) {
@@ -201,6 +206,20 @@ export async function syncCapsules(): Promise<number> {
     }
 
     return count;
+}
+
+// Cascade a capsule / production-list rename to the denormalized
+// User.teamCapsule strings. teamCapsule stores the label BY NAME (not an
+// id), and teamCapsuleToSelectionKey matches it by exact name — so a ClickUp
+// rename would otherwise leave every already-assigned user pointing at the
+// old label: their org-tree dropdown reads "— Not set —" and displays show
+// the stale name. Called right after each name change is persisted.
+async function cascadeTeamCapsuleRename(oldName: string, newName: string): Promise<void> {
+    if (!oldName || oldName === newName) return;
+    await prisma.user.updateMany({
+        where: { teamCapsule: oldName },
+        data: { teamCapsule: newName },
+    });
 }
 
 // ═══ STEP 4: Sync Lists ═══
@@ -217,6 +236,10 @@ export async function syncLists(): Promise<number> {
             );
 
             for (const list of response.lists || []) {
+                const prev = await prisma.productionList.findUnique({
+                    where: { clickupListId: list.id },
+                    select: { name: true },
+                });
                 await prisma.productionList.upsert({
                     where: { clickupListId: list.id },
                     create: {
@@ -226,6 +249,7 @@ export async function syncLists(): Promise<number> {
                     },
                     update: { name: list.name },
                 });
+                if (prev) await cascadeTeamCapsuleRename(prev.name, list.name);
                 count++;
             }
         } catch (error) {
@@ -246,11 +270,24 @@ export async function syncLists(): Promise<number> {
             );
 
             for (const list of response.lists || []) {
-                // Skip if already added as a folder list
                 const existing = await prisma.productionList.findUnique({
                     where: { clickupListId: list.id },
+                    select: { id: true, name: true },
                 });
-                if (!existing) {
+                if (existing) {
+                    // Keep the name in sync when the list is renamed in
+                    // ClickUp (previously folderless lists were create-only,
+                    // so renames never propagated and dropdowns showed the
+                    // stale label). Also cascade the rename to any users whose
+                    // denormalized teamCapsule still holds the old name.
+                    if (existing.name !== list.name) {
+                        await prisma.productionList.update({
+                            where: { clickupListId: list.id },
+                            data: { name: list.name },
+                        });
+                        await cascadeTeamCapsuleRename(existing.name, list.name);
+                    }
+                } else {
                     await prisma.productionList.create({
                         data: {
                             clickupListId: list.id,
