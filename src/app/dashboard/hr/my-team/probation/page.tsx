@@ -44,7 +44,7 @@ const REC_OPTS: { key: Recommendation; title: string; sub: string; Icon: typeof 
   { key: "end",     title: "End employment",     sub: "Part ways",        Icon: UserX,         color: "#e11d48", selBg: "bg-rose-50",          selRing: "ring-rose-400",   btn: "bg-rose-600 hover:bg-rose-700" },
 ];
 
-export default function ProbationReviewsPage() {
+export default function ProbationReviewsPage({ embedded = false }: { embedded?: boolean }) {
   const { data, mutate, isLoading } = useSWR<{ employees: Row[] }>("/api/hr/probation-reviews?scope=manager", fetcher, { refreshInterval: 60_000 });
   const employees = data?.employees ?? [];
   const [forms, setForms] = useState<Record<number, FormState>>({});
@@ -80,11 +80,13 @@ export default function ProbationReviewsPage() {
   };
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <div className="mb-5">
-        <h1 className="text-[18px] font-semibold text-slate-900">Probation Reviews</h1>
-        <p className="text-[12.5px] text-slate-500 mt-0.5">Team members whose probation is ending. Add feedback, pick a recommendation, and submit it to HR for approval.</p>
-      </div>
+    <div className={embedded ? "" : "p-6 max-w-3xl mx-auto"}>
+      {!embedded && (
+        <div className="mb-5">
+          <h1 className="text-[18px] font-semibold text-slate-900">Probation Reviews</h1>
+          <p className="text-[12.5px] text-slate-500 mt-0.5">Team members whose probation is ending. Add feedback, pick a recommendation, and submit it to HR for approval.</p>
+        </div>
+      )}
 
       <div className="mb-4 inline-flex rounded-lg bg-slate-100 p-0.5 text-[12.5px] font-medium">
         <button type="button" onClick={() => setTab("pending")} className={`rounded-md px-3.5 py-1.5 transition-colors ${tab === "pending" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>Needs review</button>

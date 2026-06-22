@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { Bell, CheckCheck, Activity, Home, Briefcase, ShieldCheck, Coffee, MoreHorizontal, BellOff, Trash2, HeartPulse, ArrowRight } from "lucide-react";
+import { Bell, CheckCheck, Activity, Home, Briefcase, ShieldCheck, Coffee, MoreHorizontal, BellOff, Trash2, HeartPulse, ArrowRight, ClipboardList } from "lucide-react";
 import Link from "next/link";
 
 /**
@@ -65,6 +65,7 @@ const TYPE_META: Record<string, { tint: string; Icon: React.ComponentType<{ size
   comp_off:       { tint: "#14b8a6", Icon: Activity    },
   pulse_weekly:   { tint: "#008CFF", Icon: HeartPulse  },
   pulse_monthly:  { tint: "#8b5cf6", Icon: HeartPulse  },
+  exit_survey:    { tint: "#e11d48", Icon: ClipboardList },
   _default:       { tint: "#14b8a6", Icon: Activity    },
 };
 const metaFor = (type: string) => TYPE_META[type] || TYPE_META._default;
@@ -74,6 +75,7 @@ const metaFor = (type: string) => TYPE_META[type] || TYPE_META._default;
 const PULSE_CTA: Record<string, string> = {
   pulse_weekly:  "Take the pulse",
   pulse_monthly: "Take the survey",
+  exit_survey:   "Complete exit survey",
 };
 
 export default function NotificationBell() {

@@ -15,13 +15,15 @@ import {
 import {
   Mail, Phone, MapPin, Briefcase, Calendar, Building2, IdCard, FileText, Laptop,
   Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
-  MoreVertical, UserMinus, TreePine, Coffee,
+  MoreVertical, UserMinus, TreePine, Coffee, ClipboardList,
   CheckCircle2, AlertCircle, Circle, Upload as UploadIcon, Eye, Trash2, RefreshCw,
   Clock,
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
+import PerformancePlanModal from "@/components/hr/PerformancePlanModal";
 import { isHRAdmin as canViewAsHRAdmin, canViewSalary, canViewEmployeeDocuments, canViewExitBadge } from "@/lib/access";
+import ExitSurveyTab from "@/components/hr/ExitSurveyTab";
 import { can } from "@/lib/permissions/can";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
 import EditProfilePanel from "@/components/hr/EditProfilePanel";
@@ -36,7 +38,7 @@ import type { PickerUser } from "@/components/hr/EmployeePicker";
 // previous standalone "Salary" tab and the inline edit pencils on the
 // Profile tab have been retired so there's exactly one canonical edit
 // surface.
-const TABS = ["About", "Profile", "Job", "Attendance", "Documents", "Assets", "Finances", "Edit Profile"] as const;
+const TABS = ["About", "Profile", "Job", "Attendance", "Documents", "Assets", "Finances", "Exit Survey", "Edit Profile"] as const;
 type Tab = typeof TABS[number];
 
 const fmtDate = (d: string | Date | null | undefined) =>
@@ -287,7 +289,7 @@ function AttendanceCountingToggle({ userId, userName }: { userId: number; userNa
 export default function EmployeeDetailPage() {
   const { id } = useParams();
   const userId = Number(id);
-  const { data: user, isLoading } = useSWR(`/api/hr/people/${id}`, fetcher);
+  const { data: user, isLoading, error: userError } = useSWR(`/api/hr/people/${id}`, fetcher);
   // Probation extension modal — opens automatically when the URL
   // carries ?extendProbation=1m | 2m | custom (deep-link from the
   // probationEndingReminderEmail). HR can also open it from the Edit
@@ -328,6 +330,7 @@ export default function EmployeeDetailPage() {
     "documents":   "Documents",
     "assets":      "Assets",
     "finances":    "Finances",
+    "exit-survey": "Exit Survey",
     "edit":        "Edit Profile",
   };
   const SLUG_FROM_TAB: Record<Tab, string> = {
@@ -338,6 +341,7 @@ export default function EmployeeDetailPage() {
     "Documents":    "documents",
     "Assets":       "assets",
     "Finances":     "finances",
+    "Exit Survey":  "exit-survey",
     "Edit Profile": "edit",
   };
   const urlTab = (searchParamsObj?.get("tab") ?? "").toLowerCase();
@@ -375,6 +379,7 @@ export default function EmployeeDetailPage() {
   // duplicate the form here.
   const router = useRouter();
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [pipOpen, setPipOpen] = useState(false);
   // Which PROFILE-tab section is currently being edited. null = closed.
   // Each section opens its own focused modal with just that card's fields.
   const [editSection, setEditSection] = useState<null | "primary" | "contact" | "family" | "address" | "identity" | "job" | "time" | "other" | "org" | "bios" | "education">(null);
@@ -439,6 +444,7 @@ export default function EmployeeDetailPage() {
     if (t === "Finances"     && !showFinancesTab)   return false;
     if (t === "Attendance"   && !showAttendanceTab) return false;
     if (t === "Documents"    && !showDocumentsTab)  return false;
+    if (t === "Exit Survey"  && !(canViewExitBadge(me, isSelfView) && (user as any)?.activeExit)) return false;
     return true;
   });
 
@@ -446,6 +452,22 @@ export default function EmployeeDetailPage() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="w-8 h-8 border-2 border-[#008CFF] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+  // The API returns 403 for anyone who isn't HR / the profile owner / the
+  // target's direct manager. Show an explicit access message rather than a
+  // misleading "not found" so a member who lands here via a stale link knows
+  // it's a permission boundary, not a missing record.
+  if (userError) {
+    const forbidden = /\b403\b/.test(String((userError as any)?.message ?? ""));
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 py-20 text-center">
+        <ShieldCheck className="h-8 w-8 text-slate-300" />
+        <p className="text-slate-600 font-medium">
+          {forbidden ? "You don't have access to this profile." : "Couldn't load this profile."}
+        </p>
+        <Link href="/dashboard/hr/home" className="text-[13px] text-[#008CFF] hover:underline">Back to home</Link>
       </div>
     );
   }
@@ -460,6 +482,20 @@ export default function EmployeeDetailPage() {
 
   return (
     <div className="-mx-6 -mt-6 min-h-screen bg-[#f4f7fb]">
+      <PerformancePlanModal
+        open={pipOpen}
+        onClose={() => setPipOpen(false)}
+        employee={{
+          id: userId,
+          name: user.name,
+          designation: user.designationLabel || p.designation || null,
+          employeeCode: p.employeeId || null,
+          managerName: user.manager?.name || null,
+        }}
+        brand={p.businessUnit === "YT Labs" ? "YT Labs" : "NB Media"}
+        defaultReportedById={me?.dbId != null ? Number(me.dbId) : null}
+        onSaved={() => mutate(`/api/hr/people/${id}`)}
+      />
       {/* ── Identity card — banner + avatar + identity + contact + dept + tabs all in one rounded card ── */}
       <div className="px-6 pt-6">
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.06)]">
@@ -512,7 +548,10 @@ export default function EmployeeDetailPage() {
                       probationConfirmedAt may be undefined until the prisma
                       client is regenerated — the `!` check is future-proof. */}
                   {(() => {
-                    const ep = user.employeeProfile as any;
+                    // The API returns the profile under `profile` (employeeProfile
+                    // is destructured + re-keyed), so read it from there — not
+                    // user.employeeProfile, which is always undefined here.
+                    const ep = (user.profile ?? {}) as any;
                     if (!ep?.probationEndDate || ep.probationConfirmedAt) return null;
                     if (!isActive || user.activeExit) return null;
                     const endMs = new Date(`${String(ep.probationEndDate).slice(0, 10)}T00:00:00Z`).getTime();
@@ -525,6 +564,28 @@ export default function EmployeeDetailPage() {
                       >
                         <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500" />
                         On Probation
+                      </span>
+                    );
+                  })()}
+                  {/* PIP badge (rose) — shown while the employee is on a
+                      performance plan: pipStartedAt set, plan not ended
+                      (pipEndDate today-or-future, or null = open-ended),
+                      active, not exiting. */}
+                  {(() => {
+                    const ep = (user.profile ?? {}) as any;
+                    if (!ep?.pipStartedAt) return null;
+                    if (!isActive || user.activeExit) return null;
+                    if (ep.pipEndDate) {
+                      const endMs = new Date(`${String(ep.pipEndDate).slice(0, 10)}T00:00:00Z`).getTime();
+                      if (!(endMs >= Date.now() - 86_400_000)) return null;
+                    }
+                    return (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-700 ring-1 ring-inset ring-rose-200"
+                        title="On Performance Improvement Plan"
+                      >
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-500" />
+                        On PIP
                       </span>
                     );
                   })()}
@@ -631,6 +692,19 @@ export default function EmployeeDetailPage() {
                           <TreePine className="h-4 w-4 text-violet-500" />
                           Apply Leave
                         </button>
+                        {isActive && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setHeaderMenuOpen(false);
+                              setPipOpen(true);
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-slate-700 hover:bg-slate-50"
+                          >
+                            <ClipboardList className="h-4 w-4 text-amber-500" />
+                            Place on Performance Plan
+                          </button>
+                        )}
                         {isActive && (
                           <button
                             type="button"
@@ -1242,6 +1316,10 @@ export default function EmployeeDetailPage() {
               <EmployeeFinancesPanel userId={userId} userName={user.name} />
             )}
 
+            {activeTab === "Exit Survey" && (
+              <ExitSurveyTab userId={userId} />
+            )}
+
             {activeTab === "Edit Profile" && showEditTab && (
               <EditProfilePanel userId={userId} user={user} managers={managers} canSeeSalary={canSeeSalary} />
             )}
@@ -1284,7 +1362,7 @@ export default function EmployeeDetailPage() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[12.5px] font-semibold text-slate-800">{member.name}</p>
                         <p className="truncate text-[10.5px] text-slate-500">
-                          {getUserRoleLabel(member.role) || "Team Member"}
+                          {member.employeeProfile?.designation || getUserRoleLabel(member.role) || "Team Member"}
                         </p>
                       </div>
                     </Link>
@@ -3407,9 +3485,11 @@ function EmployeeTimePanel({
   const resetHandoff = () => { setHandoffPoc([]); setHandoffWorkStatus(""); setHandoffUnavailability(""); setHandoffPocNa(false); };
   const [leaveTypes,  setLeaveTypes]    = useState<{ id: number; name: string }[]>([]);
   // Per-type available balance for the target user, keyed by leaveTypeId.
-  // available = totalDays - usedDays (pending is NOT subtracted — pending
-  // leaves don't reduce the number shown when applying). Refetched each time
-  // the modal opens so a stale draft doesn't show outdated numbers.
+  // available = totalDays - usedDays - pendingDays. Pending MUST be
+  // subtracted so the number shown matches what the apply API actually
+  // enforces (POST /api/hr/leaves rejects on total-used-pending) — otherwise
+  // the form showed a higher "available" than could really be applied for.
+  // Refetched each time the modal opens so a stale draft isn't shown.
   const [targetBalances, setTargetBalances] = useState<Record<number, number>>({});
   useEffect(() => {
     if (!isHRAdmin) return;
@@ -3437,7 +3517,8 @@ function EmployeeTimePanel({
         for (const b of rows) {
           const total   = parseFloat(b.totalDays   ?? "0");
           const used    = parseFloat(b.usedDays    ?? "0");
-          map[b.leaveTypeId] = total - used;
+          const pending = parseFloat(b.pendingDays ?? "0");
+          map[b.leaveTypeId] = total - used - pending;
         }
         setTargetBalances(map);
       })

@@ -213,7 +213,7 @@ export function canSeeReports(user: ClientUser): boolean {
 export const HR_MANAGER_ALLOWED_TABS = new Set<string>([
   "attendance-dashboard",
   "approvals",
-  "probation-reviews",
+  "reviews",
   "leaves",
   "holidays",
   "assets",

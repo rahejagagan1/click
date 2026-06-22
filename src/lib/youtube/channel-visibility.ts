@@ -114,6 +114,10 @@ export async function filterVisibleChannels<T extends { channelId: string }>(
     // EA / equivalent sees every channel regardless of org placement.
     const designation = rows.find((r) => r.designation)?.designation?.trim().toLowerCase();
     if (designation && BYPASS_DESIGNATIONS.has(designation)) return channels;
+    // Researchers (any "…Researcher…" / "Research Manager" designation) get
+    // org-wide channel visibility so they can see every channel's targets,
+    // regardless of which capsule they're assigned to.
+    if (designation && designation.includes("research")) return channels;
 
     const mySuffixes = new Set(
         rows.map((r) => suffixOf(r.teamCapsule)).filter((s): s is string => s != null),
