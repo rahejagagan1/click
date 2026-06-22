@@ -767,15 +767,17 @@ export async function wrapLetterPreviewHtml(
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
   <title>${escapeHtml(title)}</title>
   <style>
-    /* Page size for print/PDF generation. Margin is 0 because the
-       inner .page div has its own 22mm × 18mm padding — without
-       this they'd stack and the body content area would be half
-       the page. */
-    /* Page whitespace is applied by the PDF generator's margin option
-       (html-to-pdf.ts) so every page gets it deterministically. @page
-       margin stays 0 here; @media print drops the .page card padding so
-       margins aren't doubled. */
-    @page { size: A4; margin: 0; }
+    /* Page whitespace for print/PDF is owned by @page margins (with
+       preferCSSPageSize:true in html-to-pdf.ts). These apply per printed
+       page — including continuation pages — so every page gets a real
+       16mm side / 16mm top / 18mm bottom margin.
+
+       NOTE: this MUST be non-zero. Chromium gives the CSS @page margin
+       precedence over puppeteer's page.pdf({margin}) option, so leaving
+       this at 0 pinned content flush to the left edge (0mm) no matter
+       what margin the generator passed. @media print also drops the
+       on-screen .page card padding so the two don't stack. */
+    @page { size: A4; margin: 16mm 16mm 18mm 16mm; }
     /* Global letter-spacing of 0.5px on every text element so the
        letter has the airy, formal feel of a printed HR document.
        Applied at the body level so every nested element inherits

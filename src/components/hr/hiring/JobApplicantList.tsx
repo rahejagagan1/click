@@ -14,6 +14,7 @@ import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import {
   Mail, Phone, Briefcase, Star, Clock, ChevronUp, ChevronDown, FileText, Users, Archive,
+  Search, X,
 } from "lucide-react";
 import CandidateDrawer from "./CandidateDrawer";
 import AddApplicantModal from "./AddApplicantModal";
@@ -141,6 +142,9 @@ export default function JobApplicantList({ jobId, jobTitle = "this job" }: { job
   //   • "archived"     — explicit archive OR stage.kind === "rejected"
   type TabKey = "all" | "new" | "in_progress" | "archived";
   const [tab, setTab] = useState<TabKey>("all");
+  // Free-text filter — matches name / email / phone, case-insensitive.
+  // Combines with the active tab (search within the current bucket).
+  const [query, setQuery] = useState("");
   const bucketOf = (c: Candidate): Exclude<TabKey, "all"> => {
     if (isArchived(c)) return "archived";
     if (c.currentStage?.key === "sourced") return "new";
@@ -155,9 +159,16 @@ export default function JobApplicantList({ jobId, jobTitle = "this job" }: { job
 
   const sorted = useMemo(() => {
     const dir = sortDir === "asc" ? 1 : -1;
-    const filtered = tab === "all"
+    const byTab = tab === "all"
       ? candidates
       : candidates.filter((c) => bucketOf(c) === tab);
+    const q = query.trim().toLowerCase();
+    const filtered = q
+      ? byTab.filter((c) =>
+          c.fullName.toLowerCase().includes(q) ||
+          (c.email ?? "").toLowerCase().includes(q) ||
+          (c.phone ?? "").toLowerCase().includes(q))
+      : byTab;
     return [...filtered].sort((a, b) => {
       switch (sortKey) {
         case "name":   return a.fullName.localeCompare(b.fullName) * dir;
@@ -168,7 +179,7 @@ export default function JobApplicantList({ jobId, jobTitle = "this job" }: { job
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candidates, sortKey, sortDir, tab]);
+  }, [candidates, sortKey, sortDir, tab, query]);
 
   const moveStage = async (candidateId: number, stageId: number) => {
     const curr = candidates.find((c) => c.id === candidateId);
@@ -278,6 +289,26 @@ export default function JobApplicantList({ jobId, jobTitle = "this job" }: { job
             })}
           </div>
           <div className="flex items-center gap-3 mb-2">
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search name, email, phone…"
+                className="h-7 w-44 md:w-56 pl-7 pr-7 rounded-md border border-slate-300 bg-white text-[11.5px] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#008CFF]/20 focus:border-[#93c5fd]"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear search"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full text-slate-400 hover:text-slate-700 flex items-center justify-center"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setAddOpen(true)}
@@ -306,7 +337,9 @@ export default function JobApplicantList({ jobId, jobTitle = "this job" }: { job
               {sorted.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-4 py-10 text-center text-[12.5px] text-slate-400">
-                    No candidates in this bucket yet.
+                    {query.trim()
+                      ? `No applicants match "${query.trim()}".`
+                      : "No candidates in this bucket yet."}
                   </td>
                 </tr>
               )}
