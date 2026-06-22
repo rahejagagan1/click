@@ -39,14 +39,12 @@ export async function GET(req: NextRequest) {
     const canSeeExitBadge =
       viewer?.orgLevel === "hr_manager" || viewer?.isDeveloper === true;
 
-    // Directory visibility policy (see /dashboard/hr/people sidebar gate):
-    // the full employee directory — and any inactive / exited people in it
-    // — is HR-only. Non-HR callers still need this endpoint for the home
-    // feed @-mention picker, so we don't 403 them; instead we (a) force
-    // active-only so a `member` can never enumerate offboarded employees,
-    // and (b) narrow the profile include to safe display fields (no PII /
-    // salary / personal contact). Global header search additionally hides
-    // the People section from non-HR entirely.
+    // Directory visibility policy: active employees are searchable by
+    // everyone (global header search + home feed @-mention picker), but
+    // EXITED / offboarded / inactive people are HR-only. For non-HR
+    // callers we therefore (a) force active-only so a `member` can never
+    // enumerate offboarded employees, and (b) narrow the profile include
+    // to safe display fields (no PII / salary / personal contact).
     const viewerIsHR = isHRAdmin(viewer);
 
     const users = await prisma.user.findMany({
