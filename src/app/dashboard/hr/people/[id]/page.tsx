@@ -289,7 +289,7 @@ function AttendanceCountingToggle({ userId, userName }: { userId: number; userNa
 export default function EmployeeDetailPage() {
   const { id } = useParams();
   const userId = Number(id);
-  const { data: user, isLoading } = useSWR(`/api/hr/people/${id}`, fetcher);
+  const { data: user, isLoading, error: userError } = useSWR(`/api/hr/people/${id}`, fetcher);
   // Probation extension modal — opens automatically when the URL
   // carries ?extendProbation=1m | 2m | custom (deep-link from the
   // probationEndingReminderEmail). HR can also open it from the Edit
@@ -452,6 +452,22 @@ export default function EmployeeDetailPage() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="w-8 h-8 border-2 border-[#008CFF] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+  // The API returns 403 for anyone who isn't HR / the profile owner / the
+  // target's direct manager. Show an explicit access message rather than a
+  // misleading "not found" so a member who lands here via a stale link knows
+  // it's a permission boundary, not a missing record.
+  if (userError) {
+    const forbidden = /\b403\b/.test(String((userError as any)?.message ?? ""));
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 py-20 text-center">
+        <ShieldCheck className="h-8 w-8 text-slate-300" />
+        <p className="text-slate-600 font-medium">
+          {forbidden ? "You don't have access to this profile." : "Couldn't load this profile."}
+        </p>
+        <Link href="/dashboard/hr/home" className="text-[13px] text-[#008CFF] hover:underline">Back to home</Link>
       </div>
     );
   }
