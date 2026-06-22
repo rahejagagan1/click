@@ -1027,6 +1027,7 @@ export default function ApprovalsPanel({
                                 </Link>
                                 <span className="text-[11px] text-slate-500 truncate block">
                                   {profile.designation || getUserRoleLabel(u.role) || "—"}
+                                  {profile.employeeId ? <span className="text-slate-400 font-mono"> · {profile.employeeId}</span> : null}
                                 </span>
                               </div>
                             </div>
@@ -1040,6 +1041,9 @@ export default function ApprovalsPanel({
                             </p>
                             <p className="text-[11px] text-slate-500 dark:text-slate-400">
                               {totalDays} day{totalDays === 1 ? "" : "s"}
+                            </p>
+                            <p className="text-[10.5px] text-slate-400 mt-0.5" title={`Applied · ${fmtDt(r.appliedAt)}`}>
+                              Applied · {new Date(r.appliedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
                             </p>
                           </td>
                           {/* Leave type — applied date moved to the hover
