@@ -15,6 +15,7 @@ export type CronJobId =
   | "probation_reminders"
   | "pip_reminders"
   | "exit_survey_reminders"
+  | "last_day_reminders"
   | "doc_compliance"
   | "auto_lop"
   | "reporting_manager_changes"
@@ -94,6 +95,13 @@ export const CRON_JOB_DEFINITIONS: CronJobDefinition[] = [
     name: "Exit survey reminders",
     description:
       "Daily sweep: ~2 days before each leaving employee's last working day, sends BOTH an in-app notification (with a 'Complete exit survey' button, same style as the weekly pulse) AND an email — once per exit. Skips anyone who already submitted. The survey is also required before the employee can clock out on their final day, and HR sees the responses on the employee's profile → Exit Survey tab.",
+    defaultIntervalHours: 24,
+  },
+  {
+    id: "last_day_reminders",
+    name: "Last working day reminders",
+    description:
+      "Daily sweep: for every employee whose last working day is TODAY (IST) and who isn't already marked exited, emails the offboarding stakeholders (HR managers / special-access / admins, toggle-gated developers, the employee's direct manager, and their brand CEO) one reminder per employee — so leadership knows the person is off the books as of today. Deduped by the date itself (no per-row stamp needed).",
     defaultIntervalHours: 24,
   },
   {

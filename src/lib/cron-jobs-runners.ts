@@ -12,6 +12,7 @@ import { sendProbationEndingReminders } from "@/lib/hr/probation-reminders";
 import { sweepProbationManagerNotifications } from "@/lib/hr/probation-review";
 import { sendPipEndingReminders } from "@/lib/hr/pip-reminders";
 import { sendExitSurveyReminders } from "@/lib/hr/exit-survey-reminders";
+import { sendLastWorkingDayReminders } from "@/lib/hr/last-working-day-reminders";
 import { sweepPipManagerNotifications } from "@/lib/hr/performance-plan-review";
 import { sendMissingDocReminders } from "@/lib/hr/doc-compliance";
 import { runAutoLOP } from "@/lib/hr/auto-lop";
@@ -63,6 +64,8 @@ export const CRON_JOB_RUNNERS: Record<CronJobId, () => Promise<void>> = {
     catch (e) { console.error("[pip] manager sweep failed", e); }
   },
   exit_survey_reminders: async () => { await sendExitSurveyReminders(); },
+  // Email leadership when an employee's last working day is today.
+  last_day_reminders:  async () => { await sendLastWorkingDayReminders(); },
   doc_compliance:      async () => { await sendMissingDocReminders(); },
   auto_lop:            async () => { await runAutoLOP(); },
   // Apply effective-dated reporting-manager changes whose date arrived.
