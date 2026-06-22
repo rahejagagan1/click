@@ -90,6 +90,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       after:  { status: next },
     });
 
+    // Releasing to employees (locked → paid) auto-emails each one their
+    // payslip PDF. Fire-and-forget: a slow/failed mail run must never block
+    // or fail the status transition. Dynamic import keeps puppeteer/email
+    // out of the hot path for lock/reopen.
+    if (action === "mark_paid") {
+      import("@/lib/hr/payslip-email")
+        .then(({ emailPayslipsForRun }) => emailPayslipsForRun(runId))
+        .catch((e) => console.error("[payslip-email] dispatch failed:", e));
+    }
+
     return NextResponse.json({ run: updated });
   } catch (e) { return serverError(e, "POST /api/hr/payroll/runs/[id]/transition"); }
 }
