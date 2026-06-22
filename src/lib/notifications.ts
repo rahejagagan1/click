@@ -328,6 +328,48 @@ export async function brandCeoIdForEmployee(
 }
 
 /**
+ * Email addresses to notify about an employee's exit — the canonical
+ * offboarding audience: HR managers / special-access / admins, developers
+ * (gated by the "Notify developers" toggle), the employee's direct manager,
+ * and the employee's brand CEO (each CEO sees only their own brand). Deduped.
+ *
+ * Shared by the "exit recorded" notification (POST /api/hr/exits) and the
+ * daily "last working day today" reminder cron, so both fire to the same
+ * people without the two lists drifting apart.
+ */
+export async function exitStakeholderEmails(
+  employee: { id: number; managerId: number | null },
+): Promise<string[]> {
+  const [stakeholders, brandCeoId] = await Promise.all([
+    prisma.user.findMany({
+      where: {
+        isActive: true,
+        orgLevel: { not: "ceo" }, // brand CEO resolved separately below
+        OR: [
+          { orgLevel: { in: ["hr_manager", "special_access"] } },
+          { role: "admin" },
+          ...(await devEmailRecipientsClause()),
+          ...(employee.managerId ? [{ id: employee.managerId }] : []),
+        ],
+      },
+      select: { email: true },
+    }),
+    brandCeoIdForEmployee(employee.id),
+  ]);
+  let brandCeoEmail: string | null = null;
+  if (brandCeoId) {
+    const ceo = await prisma.user.findUnique({
+      where:  { id: brandCeoId },
+      select: { email: true },
+    });
+    brandCeoEmail = ceo?.email ?? null;
+  }
+  return Array.from(
+    new Set(([...stakeholders.map((u) => u.email), brandCeoEmail].filter(Boolean)) as string[]),
+  );
+}
+
+/**
  * Returns the subject employee's direct manager id (any role) — used as
  * the "always-deliver" exemption for the per-role email-toggle filter.
  *

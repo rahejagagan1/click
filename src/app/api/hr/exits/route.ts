@@ -12,8 +12,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth } from "@/lib/api-auth";
 import { sendEmail } from "@/lib/email/sender";
 import { employeeFarewellEmail, exitNotificationEmail } from "@/lib/email/templates";
-import { devEmailRecipientsClause } from "@/lib/email/toggles";
-import { brandCeoIdForEmployee } from "@/lib/notifications";
+import { exitStakeholderEmails } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -199,41 +198,12 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      // Brand-CEO routing: HR / Special Access / admin (CEO excluded)
-      // + the exiting employee's brand CEO + direct manager. Each CEO
-      // sees only their own brand's exits.
-      const [stakeholders, brandCeoId] = await Promise.all([
-        prisma.user.findMany({
-          where: {
-            isActive: true,
-            orgLevel: { not: "ceo" },
-            OR: [
-              { orgLevel: { in: ["hr_manager", "special_access"] } },
-              { role: "admin" },
-              // Developer accounts gated by the "Notify developers"
-              // toggle in Admin → Emails Automation.
-              ...(await devEmailRecipientsClause()),
-              ...(target.managerId ? [{ id: target.managerId }] : []),
-            ],
-          },
-          select: { id: true, email: true },
-        }),
-        brandCeoIdForEmployee(target.id),
-      ]);
-      // Resolve the brand CEO's email separately (the query above
-      // excluded all CEOs).
-      let brandCeoEmail: string | null = null;
-      if (brandCeoId) {
-        const ceo = await prisma.user.findUnique({
-          where: { id: brandCeoId },
-          select: { email: true },
-        });
-        brandCeoEmail = ceo?.email ?? null;
-      }
-      const recipientEmails = [
-        ...stakeholders.map(u => u.email),
-        brandCeoEmail,
-      ].filter(Boolean) as string[];
+      // HR / Special Access / admin + toggle-gated developers + the
+      // employee's direct manager + their brand CEO (brand-scoped).
+      const recipientEmails = await exitStakeholderEmails({
+        id: target.id,
+        managerId: target.managerId,
+      });
       if (recipientEmails.length > 0) {
         void sendEmail({
           to: recipientEmails,
