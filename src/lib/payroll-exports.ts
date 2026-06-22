@@ -168,7 +168,8 @@ export async function loadExportRows(runId: number): Promise<{
       bankIfsc: prof?.bankIfsc ? decryptPII(prof.bankIfsc) : null,
       uanNumber: prof?.uanNumber ? decryptPII(prof.uanNumber) : null,
       pfEligible: s.pfEligible,
-      salaryType: s.salaryType,
+      // Per-payslip snapshot wins over the (mutable) structure type.
+      salaryType: (p as any).salaryType ?? s.salaryType,
       ctcAnnual: num(s.ctc),
       basicAnnual: num(s.basic),
       hraAnnual: num(s.hra),
@@ -198,6 +199,43 @@ export async function loadExportRows(runId: number): Promise<{
   return { run, rows };
 }
 
+// ── Frozen-anchored monthly salary breakdown ─────────────────────────────
+// Once a run is LOCKED, the payslip's stored gross / net / PF are the source
+// of truth. SalaryStructure can still be edited afterwards (e.g. a later
+// raise effective next month), and reading it live would leak those new
+// figures into a locked month's exports. So we use the CURRENT structure
+// only for the *ratio* between components and scale it so the breakdown sums
+// to the salary actually paid this cycle (frozen gross − bonus − adhoc pay).
+// scale == 1 (byte-identical output) for anyone whose structure was not
+// touched after the run was generated.
+export function frozenMonthlyComponents(r: ExportRow) {
+  const wd = r.workingDays || 30;
+  const lopFactor = wd > 0 ? Math.max(0, (wd - r.lopDays) / wd) : 1;
+  const m = (annual: number) => (annual / 12) * lopFactor;
+  const isIntern = r.salaryType === "intern";
+
+  let basic   = isIntern ? 0 : m(r.basicAnnual);
+  let hra     = isIntern ? 0 : m(r.hraAnnual);
+  let medical = isIntern ? 0 : m(r.medicalAnnual);
+  let conv    = isIntern ? 0 : m(r.conveyanceAnnual);
+  let da      = isIntern ? 0 : m(r.daAnnual);
+  // Special Allowance absorbs the employee PF so gross includes it.
+  let special = isIntern ? 0 : m(r.specialAnnual) + m(r.pfEmployeeAnnual);
+
+  const computedSalary = basic + hra + medical + conv + da + special;
+  const adhocPay = Object.values(r.adhocPayByType).reduce((s, v) => s + v, 0);
+  const targetSalary = Math.max(0, r.grossEarnings - r.bonus - adhocPay);
+  const scale = computedSalary > 1 ? targetSalary / computedSalary : 1;
+  if (Math.abs(scale - 1) > 1e-9) {
+    basic *= scale; hra *= scale; medical *= scale; conv *= scale; da *= scale; special *= scale;
+  }
+  // Interns: the whole monthly salary is a stipend (basic / HRA stay zero).
+  // Exclude bonus + adhoc payments so they remain their own columns and the
+  // breakdown still sums to the frozen gross.
+  const stipend = isIntern ? Math.max(0, r.grossEarnings - r.bonus - adhocPay) : 0;
+  return { lopFactor, basic, hra, medical, conv, da, special, stipend };
+}
+
 // Excel sheet names cap at 31 chars; truncate without ellipsis since the
 // cap is hard. Banks like "kotak mahindra bank limited" (27 chars) fit
 // but a long name could go over.
@@ -220,7 +258,7 @@ export function brandOf(businessUnit: string | null | undefined): PayrollBrand {
 // against it). Replace the YT Labs value with its exact registered name.
 export const COMPANY_BY_BRAND: Record<PayrollBrand, string> = {
   "NB Media": "YT Money Productions Pvt. Ltd (NB Media)",
-  "YT Labs":  "YT Labs",
+  "YT Labs":  "YT Money Productions Pvt. Ltd (YT Labs)",
 };
 
 // Short slug used in non-Keka filenames so a YT Labs file never overwrites

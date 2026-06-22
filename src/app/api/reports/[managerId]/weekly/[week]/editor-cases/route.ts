@@ -3,7 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { calcBusinessDaysTat, formatTatDays } from "@/lib/utils";
 import { getWeeklyReportPeriod } from "@/lib/reports/weekly-period";
-import { resolveReportTeam } from "@/lib/reports/team-snapshot";
+import { resolveReportTeam, teamFunction } from "@/lib/reports/team-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
             return NextResponse.json({ error: "Manager not found" }, { status: 404 });
         }
         const team = await resolveReportTeam(managerId, { kind: "weekly", week, month, year });
-        const editors = team.filter((m) => m.role === "editor");
+        const editors = team.filter((m) => teamFunction(m) === "editor");
         const editorIds = editors.map((m) => m.id);
         if (editorIds.length === 0) {
             return NextResponse.json({ editorCases: [] });
