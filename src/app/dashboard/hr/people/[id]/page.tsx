@@ -3485,9 +3485,11 @@ function EmployeeTimePanel({
   const resetHandoff = () => { setHandoffPoc([]); setHandoffWorkStatus(""); setHandoffUnavailability(""); setHandoffPocNa(false); };
   const [leaveTypes,  setLeaveTypes]    = useState<{ id: number; name: string }[]>([]);
   // Per-type available balance for the target user, keyed by leaveTypeId.
-  // available = totalDays - usedDays (pending is NOT subtracted — pending
-  // leaves don't reduce the number shown when applying). Refetched each time
-  // the modal opens so a stale draft doesn't show outdated numbers.
+  // available = totalDays - usedDays - pendingDays. Pending MUST be
+  // subtracted so the number shown matches what the apply API actually
+  // enforces (POST /api/hr/leaves rejects on total-used-pending) — otherwise
+  // the form showed a higher "available" than could really be applied for.
+  // Refetched each time the modal opens so a stale draft isn't shown.
   const [targetBalances, setTargetBalances] = useState<Record<number, number>>({});
   useEffect(() => {
     if (!isHRAdmin) return;
@@ -3515,7 +3517,8 @@ function EmployeeTimePanel({
         for (const b of rows) {
           const total   = parseFloat(b.totalDays   ?? "0");
           const used    = parseFloat(b.usedDays    ?? "0");
-          map[b.leaveTypeId] = total - used;
+          const pending = parseFloat(b.pendingDays ?? "0");
+          map[b.leaveTypeId] = total - used - pending;
         }
         setTargetBalances(map);
       })
