@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, requireHRAdmin, serverError } from "@/lib/api-auth";
+import { requireAuth, requireHRAdmin, isHRAdmin, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
 import { isDeveloperEmail } from "@/lib/hr/notification-policy";
 
@@ -39,6 +39,16 @@ export async function GET(req: NextRequest) {
     const canSeeExitBadge =
       viewer?.orgLevel === "hr_manager" || viewer?.isDeveloper === true;
 
+    // Directory visibility policy (see /dashboard/hr/people sidebar gate):
+    // the full employee directory — and any inactive / exited people in it
+    // — is HR-only. Non-HR callers still need this endpoint for the home
+    // feed @-mention picker, so we don't 403 them; instead we (a) force
+    // active-only so a `member` can never enumerate offboarded employees,
+    // and (b) narrow the profile include to safe display fields (no PII /
+    // salary / personal contact). Global header search additionally hides
+    // the People section from non-HR entirely.
+    const viewerIsHR = isHRAdmin(viewer);
+
     const users = await prisma.user.findMany({
       where: {
         AND: [
@@ -53,12 +63,20 @@ export async function GET(req: NextRequest) {
           businessUnit ? { employeeProfile: { businessUnit } } : {},
           brand === "YT Labs"  ? { employeeProfile: { businessUnit: "YT Labs" } } : {},
           brand === "NB Media" ? { NOT: { employeeProfile: { businessUnit: "YT Labs" } } } : {},
-          isActive !== null && isActive !== undefined ? { isActive: isActive === "true" } : {},
+          // Non-HR can only ever see active employees — ignore any
+          // isActive override they pass.
+          !viewerIsHR
+            ? { isActive: true }
+            : (isActive !== null && isActive !== undefined ? { isActive: isActive === "true" } : {}),
           hideDevs ? { NOT: { email: { in: devEmails } } } : {},
         ],
       },
       include: {
-        employeeProfile: true,
+        // Full profile (PII) for HR; non-HR get only the display fields the
+        // @-mention picker / directory chips need.
+        employeeProfile: viewerIsHR
+          ? true
+          : { select: { department: true, designation: true } },
         manager: { select: { id: true, name: true } },
         // Conditional include — see canSeeExitBadge above.
         ...(canSeeExitBadge
@@ -92,7 +110,7 @@ export async function GET(req: NextRequest) {
     // directory + search the same way the probation badge does.
     try {
       const ids = (users as any[]).map((u) => u.id).filter((n) => Number.isInteger(n));
-      if (ids.length > 0) {
+      if (viewerIsHR && ids.length > 0) {
         const pipRows = await prisma.$queryRawUnsafe<Array<{ userId: number; pipStartedAt: Date | null; pipEndDate: Date | null }>>(
           `SELECT "userId", "pipStartedAt", "pipEndDate" FROM "EmployeeProfile" WHERE "userId" IN (${ids.join(",")})`,
         );
