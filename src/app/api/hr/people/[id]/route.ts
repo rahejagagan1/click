@@ -111,7 +111,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     try {
       const erows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
         `SELECT "secondaryJobTitle", "legalEntity", "jobLocation",
-                "probationPolicy", "probationEndDate", "probationReminderSentAt", "probationConfirmedAt",
+                "probationPolicy", "probationStartDate", "probationEndDate", "probationReminderSentAt", "probationConfirmedAt",
                 "educationDetails",
                 "internshipEndDate",
                 "leavePlan", "holidayList", "weeklyOff",
@@ -297,7 +297,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       noticePeriodDays,
       // Extended onboarding fields — every wizard input is now editable.
       workCountry, nationality,
-      secondaryJobTitle, legalEntity, jobLocation, probationPolicy, probationEndDate, educationDetails, internshipEndDate,
+      secondaryJobTitle, legalEntity, jobLocation, probationPolicy, probationStartDate, probationEndDate, educationDetails, internshipEndDate,
       leavePlan, holidayList, weeklyOff, attendanceNumber, timeTrackingPolicy, penalizationPolicy,
       // ── Keka-parity additions (extended profile) ──
       homePhone, physicallyHandicapped,
@@ -566,6 +566,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (legalEntity        !== undefined) { setParts.push(`"legalEntity" = $${i++}`);        args.push(legalEntity        || null); }
       if (jobLocation        !== undefined) { setParts.push(`"jobLocation" = $${i++}`);        args.push(jobLocation        || null); }
       if (probationPolicy    !== undefined) { setParts.push(`"probationPolicy" = $${i++}`);    args.push(probationPolicy    || null); }
+      if (probationStartDate !== undefined) { setParts.push(`"probationStartDate" = $${i++}`); args.push(probationStartDate ? new Date(probationStartDate) : null); }
       // probationEndDate — either explicitly sent by HR (override) OR
       // auto-derived from joiningDate when this is the first time the
       // joining date is being set and probationEndDate is still NULL
