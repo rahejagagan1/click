@@ -14,6 +14,7 @@
 import prisma from "@/lib/prisma";
 import { istDateOnlyFrom, istMinutesOfDay } from "@/lib/ist-date";
 import { stringifyAttLoc } from "@/lib/attendance-location";
+import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
 
 const DEVICE_LOCATION = stringifyAttLoc({
   mode: "office",
@@ -50,6 +51,14 @@ export async function resolveUserByDeviceId(employeeNo: string): Promise<number 
 export async function recordDevicePunch(opts: { employeeNo: string; at: Date; checkOut?: boolean }): Promise<DevicePunchResult> {
   const userId = await resolveUserByDeviceId(opts.employeeNo);
   if (!userId) return { action: "unmapped", employeeNo: opts.employeeNo };
+
+  // Respect the per-employee attendance toggle (HR Dashboard → Permissions →
+  // Payroll & Attendance). CEO / developers default OFF — their door scans
+  // must NOT create attendance, same as the Web clock-in route enforces.
+  if (!(await isAttendanceEnabled(userId))) {
+    return { action: "noop", userId, note: "attendance tracking disabled" };
+  }
+
   const at = opts.at;
   const date = istDateOnlyFrom(at);
 
