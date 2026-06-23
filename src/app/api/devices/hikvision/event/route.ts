@@ -23,7 +23,7 @@
 //     to keep employee PII out of steady-state logs.
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
-import { recordDevicePunch, type PunchDirection } from "@/lib/hr/device-punch";
+import { recordDevicePunch } from "@/lib/hr/device-punch";
 
 export const dynamic = "force-dynamic";
 export const runtime  = "nodejs";
@@ -79,13 +79,6 @@ async function extractEventJson(req: NextRequest): Promise<any | null> {
   }
 }
 
-function directionFromStatus(status: unknown): PunchDirection | null {
-  const s = String(status || "").toLowerCase();
-  if (s.endsWith("out")) return "out";
-  if (s.endsWith("in")) return "in";
-  return null;
-}
-
 async function handlePunch(req: NextRequest) {
   const authErr = checkAuth(req);
   if (authErr) return authErr;
@@ -131,11 +124,10 @@ async function handlePunch(req: NextRequest) {
   }
   const at = haveValidTime ? eventAt! : new Date();
 
-  const direction = directionFromStatus(ace.attendanceStatus);
-  console.log(`[hikvision] emp=${employeeNo} status=${ace.attendanceStatus ?? "?"} dir=${direction ?? "auto"} at=${at.toISOString()}`);
+  console.log(`[hikvision] emp=${employeeNo} at=${at.toISOString()} (first-in/last-out)`);
 
   try {
-    const result = await recordDevicePunch({ employeeNo, at, direction });
+    const result = await recordDevicePunch({ employeeNo, at });
     console.log("[hikvision] →", JSON.stringify(result));
     return NextResponse.json({ ok: true, result });
   } catch (e: any) {
