@@ -2623,7 +2623,10 @@ export default function HRHomePage() {
   const { data: analyticsData }    = useSWR("/api/hr/analytics", fetcher);
   const { data: boardData }        = useSWR("/api/hr/attendance/board", fetcher);
   const { data: balanceData = [] } = useSWR("/api/hr/leaves/balance", fetcher);
-  const { data: myData }           = useSWR(`/api/hr/attendance?month=${monthKey}`, fetcher);
+  // Poll every 15s so a machine (biometric) scan reflects on the clock
+  // widget without a manual reload. SWR pauses polling when the tab is
+  // hidden, so this only refetches while the dashboard is actually open.
+  const { data: myData }           = useSWR(`/api/hr/attendance?month=${monthKey}`, fetcher, { refreshInterval: 15_000 });
   const { data: profile }          = useSWR("/api/hr/profile", fetcher);
   const { data: myWfh = [] }       = useSWR("/api/hr/attendance/wfh?view=my", fetcher);
 
