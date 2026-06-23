@@ -116,14 +116,20 @@ async function handlePunch(req: NextRequest) {
   // status, heartbeats, tamper, failed/unknown reads carry no employee no.
   if (!ace || !employeeNo) return NextResponse.json({ ok: true, ignored: "no-employee" });
 
-  // Punch time from the event, clamped to ±15 min of now so a forged or
-  // stale dateTime can't backdate attendance.
+  // Only act on LIVE punches (event time within ±15 min of now). The
+  // terminal buffers events while it has no destination and flushes the
+  // whole backlog on first connect — those carry old timestamps and must
+  // NOT be recorded (they'd pollute today's attendance). Future-dated
+  // events (clock skew / forgery) are dropped too. We still return 200 so
+  // the device clears them from its buffer instead of retrying forever.
   const dtRaw = payload.dateTime ?? ace.time ?? ace.dateTime ?? null;
-  let at = dtRaw ? new Date(dtRaw) : new Date();
-  if (Number.isNaN(at.getTime()) || Math.abs(at.getTime() - Date.now()) > CLOCK_SKEW_MS) {
-    if (dtRaw) console.warn(`[hikvision] punch time ${dtRaw} out of range — using server time`);
-    at = new Date();
+  const eventAt = dtRaw ? new Date(dtRaw) : null;
+  const haveValidTime = !!eventAt && !Number.isNaN(eventAt.getTime());
+  if (haveValidTime && Math.abs(eventAt!.getTime() - Date.now()) > CLOCK_SKEW_MS) {
+    console.warn(`[hikvision] ignoring non-live event emp=${employeeNo} time=${dtRaw}`);
+    return NextResponse.json({ ok: true, ignored: "stale-or-future" });
   }
+  const at = haveValidTime ? eventAt! : new Date();
 
   const direction = directionFromStatus(ace.attendanceStatus);
   console.log(`[hikvision] emp=${employeeNo} status=${ace.attendanceStatus ?? "?"} dir=${direction ?? "auto"} at=${at.toISOString()}`);
