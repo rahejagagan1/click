@@ -34,6 +34,11 @@ const PUBLIC_PATHS = [
     // /api/__deploy-check has). Path-prefix match — covers all
     // /api/cron/<job> children.
     "/api/cron",
+    // Hardware webhooks (Hikvision biometric terminal etc.) — the device
+    // isn't a logged-in user, so the session redirect would bounce its POST
+    // to /login. The route handler does its own auth (shared secret,
+    // constant-time compare, fail-closed in production).
+    "/api/devices",
 ];
 
 export async function proxy(request: NextRequest) {
