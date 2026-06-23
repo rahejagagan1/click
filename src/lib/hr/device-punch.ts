@@ -1,17 +1,17 @@
-// Records attendance from a physical biometric terminal (Hikvision) that is
-// ALSO the office door lock: people punch every time they enter OR exit, so
-// there are many punches a day. We must NOT create a clock-in/out per punch.
+// Records attendance from a biometric terminal mounted OUTSIDE the door.
 //
-// Model — first-in / last-out, single span:
-//   • The FIRST punch of the day = clock-in (opens the day).
-//   • EVERY later punch just pushes the day's clock-OUT forward to that time.
-//   • Result: one record per day = arrival (first punch) → last exit (last
-//     punch); total hours = last − first. All the door opens in between are
-//     absorbed into the span.
-//   • Rapid duplicates / timeout-retries are debounced (90s).
+// Physical reality: people scan to ENTER, but leave freely from inside (no
+// exit scan). So a scan reliably marks an ARRIVAL, never a departure.
 //
-// The terminal's attendanceStatus is ignored on purpose — for a door lock it
-// can't reliably say "in" vs "out", and first-in/last-out doesn't need it.
+// Model — scan = clock-IN only:
+//   • First scan of the day → clock-in (opens the day).
+//   • Any scan after you're already clocked in → IGNORED (a re-entry must NOT
+//     clock you out / make you re-punch).
+//   • A scan after you've clocked out for the day → IGNORED (don't reopen).
+//   • CLOCK-OUT is never triggered by a scan — it's done on the web portal
+//     (Web Clock-Out) at end of day. (If the device's "Check Out" is enabled
+//     and the employee presses it, that explicit checkout IS honored — see
+//     `checkOut`.)
 import prisma from "@/lib/prisma";
 import { istDateOnlyFrom, istMinutesOfDay } from "@/lib/ist-date";
 import { stringifyAttLoc } from "@/lib/attendance-location";
@@ -21,13 +21,11 @@ const DEVICE_LOCATION = stringifyAttLoc({
   address: "Biometric terminal (face / fingerprint)",
   atOffice: true,
 });
-const DEBOUNCE_MS = 90_000;
 
 export type DevicePunchResult =
-  | { action: "clock_in" | "extend" | "noop"; userId: number; status?: string; totalMinutes?: number; note?: string }
+  | { action: "clock_in" | "clock_out" | "noop"; userId: number; status?: string; totalMinutes?: number; note?: string }
   | { action: "unmapped"; employeeNo: string };
 
-// Per-shift late cutoff = shift.startTime + grace; no shift → legacy 10:00 IST.
 async function statusAtPunch(userId: number, at: Date): Promise<string> {
   const userShift = await prisma.userShift.findUnique({ where: { userId }, include: { shift: true } });
   const nowMin = istMinutesOfDay(at);
@@ -39,9 +37,6 @@ async function statusAtPunch(userId: number, at: Date): Promise<string> {
   return nowMin >= 10 * 60 ? "late" : "present";
 }
 
-// Resolve the device's person id (employeeNoString, e.g. "HRM159") to a User.
-// Primary match is EmployeeProfile.employeeId (HRM number); biometricId is a
-// fallback for anyone whose device id was set manually to something else.
 export async function resolveUserByDeviceId(employeeNo: string): Promise<number | null> {
   const id = String(employeeNo || "").trim();
   if (!id) return null;
@@ -52,7 +47,7 @@ export async function resolveUserByDeviceId(employeeNo: string): Promise<number 
   return rows[0]?.userId ?? null;
 }
 
-export async function recordDevicePunch(opts: { employeeNo: string; at: Date }): Promise<DevicePunchResult> {
+export async function recordDevicePunch(opts: { employeeNo: string; at: Date; checkOut?: boolean }): Promise<DevicePunchResult> {
   const userId = await resolveUserByDeviceId(opts.employeeNo);
   if (!userId) return { action: "unmapped", employeeNo: opts.employeeNo };
   const at = opts.at;
@@ -61,39 +56,47 @@ export async function recordDevicePunch(opts: { employeeNo: string; at: Date }):
   return prisma.$transaction(async (tx) => {
     const existing = await tx.attendance.findUnique({
       where: { userId_date: { userId, date } },
-      select: { id: true, clockIn: true, status: true },
+      select: { id: true, clockIn: true, clockOut: true, status: true },
     });
 
-    // FIRST punch of the day → clock-in (one open session).
-    if (!existing || !existing.clockIn) {
-      const status = await statusAtPunch(userId, at);
-      if (!existing) {
-        const created = await tx.attendance.create({ data: { userId, date, clockIn: at, status, location: DEVICE_LOCATION } });
-        await tx.$executeRawUnsafe(`INSERT INTO "AttendanceSession" ("attendanceId","clockIn","clockInLocation") VALUES ($1,$2,$3)`, created.id, at, DEVICE_LOCATION);
-        return { action: "clock_in", userId, status };
-      }
-      await tx.attendance.update({ where: { id: existing.id }, data: { clockIn: at, status, location: DEVICE_LOCATION } });
-      await tx.$executeRawUnsafe(`INSERT INTO "AttendanceSession" ("attendanceId","clockIn","clockInLocation") VALUES ($1,$2,$3)`, existing.id, at, DEVICE_LOCATION);
-      return { action: "clock_in", userId, status };
+    // ── Explicit machine "Check Out" (only when attendance mode is enabled
+    //    and the employee chose Check Out). Closes the open session. ──
+    if (opts.checkOut) {
+      if (!existing?.clockIn) return { action: "noop", userId, note: "checkout with no clock-in" };
+      if (existing.clockOut) return { action: "noop", userId, note: "already clocked out" };
+      const open = await tx.$queryRawUnsafe<Array<{ id: number }>>(
+        `SELECT id FROM "AttendanceSession" WHERE "attendanceId"=$1 AND "clockOut" IS NULL ORDER BY "clockIn" DESC LIMIT 1`,
+        existing.id,
+      );
+      if (open.length === 0) return { action: "noop", userId, note: "no open session" };
+      const punchAt = at.getTime() < existing.clockIn.getTime() ? existing.clockIn : at;
+      await tx.$executeRawUnsafe(`UPDATE "AttendanceSession" SET "clockOut"=$1, "clockOutLocation"=$2 WHERE id=$3`, punchAt, DEVICE_LOCATION, open[0].id);
+      const sum = await tx.$queryRawUnsafe<Array<{ totalSeconds: number }>>(
+        `SELECT COALESCE(EXTRACT(EPOCH FROM SUM("clockOut" - "clockIn")),0)::int AS "totalSeconds" FROM "AttendanceSession" WHERE "attendanceId"=$1 AND "clockOut" IS NOT NULL`,
+        existing.id,
+      );
+      const totalMinutes = Math.floor((sum[0]?.totalSeconds ?? 0) / 60);
+      let status = existing.status;
+      if (totalMinutes >= 540) status = existing.status === "late" ? "late" : "present";
+      else if (totalMinutes >= 270) status = "half_day";
+      await tx.attendance.update({ where: { id: existing.id }, data: { clockOut: punchAt, totalMinutes, status, overtimeMinutes: Math.max(0, totalMinutes - 540) } });
+      return { action: "clock_out", userId, status, totalMinutes };
     }
 
-    // Debounce duplicate / retried / rapid re-tap punches.
-    const r = await tx.$queryRawUnsafe<Array<{ t: Date | null }>>(
-      `SELECT MAX(GREATEST("clockIn", COALESCE("clockOut","clockIn"))) AS t FROM "AttendanceSession" WHERE "attendanceId"=$1`,
-      existing.id,
-    );
-    const lastT = r[0]?.t ? new Date(r[0].t as any).getTime() : 0;
-    if (lastT && Math.abs(at.getTime() - lastT) < DEBOUNCE_MS) return { action: "noop", userId, note: "debounced (<90s)" };
-    if (at.getTime() <= existing.clockIn.getTime()) return { action: "noop", userId, note: "punch before clock-in" };
-
-    // Subsequent punch → push the day's clock-out forward (keep ONE session).
-    const last = await tx.$queryRawUnsafe<Array<{ id: number }>>(
-      `SELECT id FROM "AttendanceSession" WHERE "attendanceId"=$1 ORDER BY "clockIn" DESC LIMIT 1`,
-      existing.id,
-    );
-    if (last[0]) await tx.$executeRawUnsafe(`UPDATE "AttendanceSession" SET "clockOut"=$1, "clockOutLocation"=$2 WHERE id=$3`, at, DEVICE_LOCATION, last[0].id);
-    const totalMinutes = Math.max(0, Math.floor((at.getTime() - existing.clockIn.getTime()) / 60000));
-    await tx.attendance.update({ where: { id: existing.id }, data: { clockOut: at, totalMinutes, overtimeMinutes: Math.max(0, totalMinutes - 540) } });
-    return { action: "extend", userId, status: existing.status, totalMinutes };
+    // ── Plain scan / Check-In = clock-IN only ──
+    // Already has a clock-in today → ignore (re-entry, or already done).
+    if (existing?.clockIn) {
+      return { action: "noop", userId, note: existing.clockOut ? "already clocked out (scan ignored)" : "already clocked in (re-entry ignored)" };
+    }
+    // First scan of the day → clock-in (open session).
+    const status = await statusAtPunch(userId, at);
+    if (!existing) {
+      const created = await tx.attendance.create({ data: { userId, date, clockIn: at, status, location: DEVICE_LOCATION } });
+      await tx.$executeRawUnsafe(`INSERT INTO "AttendanceSession" ("attendanceId","clockIn","clockInLocation") VALUES ($1,$2,$3)`, created.id, at, DEVICE_LOCATION);
+    } else {
+      await tx.attendance.update({ where: { id: existing.id }, data: { clockIn: at, status, location: DEVICE_LOCATION } });
+      await tx.$executeRawUnsafe(`INSERT INTO "AttendanceSession" ("attendanceId","clockIn","clockInLocation") VALUES ($1,$2,$3)`, existing.id, at, DEVICE_LOCATION);
+    }
+    return { action: "clock_in", userId, status };
   });
 }
