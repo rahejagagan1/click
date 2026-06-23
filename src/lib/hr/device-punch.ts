@@ -117,11 +117,28 @@ export async function recordDevicePunch(opts: {
   const userId = await resolveUserByDeviceId(opts.employeeNo);
   if (!userId) return { action: "unmapped", employeeNo: opts.employeeNo };
 
-  let dir = opts.direction ?? null;
-  if (!dir) {
-    const date = istDateOnlyFrom(opts.at);
-    const existing = await prisma.attendance.findUnique({ where: { userId_date: { userId, date } }, select: { clockIn: true, clockOut: true } });
-    dir = existing?.clockIn && !existing.clockOut ? "out" : "in";
+  const date = istDateOnlyFrom(opts.at);
+  const existing = await prisma.attendance.findUnique({
+    where: { userId_date: { userId, date } },
+    select: { id: true, clockIn: true, clockOut: true },
+  });
+
+  // Debounce: the terminal re-POSTs the same punch on timeout and a single
+  // tap can emit several events; without this each one toggles in/out and
+  // sprays zero-length sessions. Ignore any punch within 90s of this user's
+  // last session activity today — real in/out are minutes apart.
+  if (existing) {
+    const r = await prisma.$queryRawUnsafe<Array<{ t: Date | null }>>(
+      `SELECT MAX(GREATEST("clockIn", COALESCE("clockOut","clockIn"))) AS t FROM "AttendanceSession" WHERE "attendanceId"=$1`,
+      existing.id,
+    );
+    const lastT = r[0]?.t ? new Date(r[0].t as any).getTime() : 0;
+    if (lastT && Math.abs(opts.at.getTime() - lastT) < 90_000) {
+      return { action: "noop", userId, note: "debounced (<90s since last punch)" };
+    }
   }
+
+  let dir = opts.direction ?? null;
+  if (!dir) dir = existing?.clockIn && !existing.clockOut ? "out" : "in";
   return dir === "out" ? deviceClockOut(userId, opts.at) : deviceClockIn(userId, opts.at);
 }
