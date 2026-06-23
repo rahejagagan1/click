@@ -124,10 +124,13 @@ async function handlePunch(req: NextRequest) {
   }
   const at = haveValidTime ? eventAt! : new Date();
 
-  console.log(`[hikvision] emp=${employeeNo} at=${at.toISOString()} (first-in/last-out)`);
+  // A scan only ever clocks IN. The one exception: if the device's attendance
+  // mode is on and the employee explicitly chose "Check Out", honor it.
+  const checkOut = String(ace.attendanceStatus ?? "").toLowerCase().endsWith("out");
+  console.log(`[hikvision] emp=${employeeNo} at=${at.toISOString()} checkOut=${checkOut}`);
 
   try {
-    const result = await recordDevicePunch({ employeeNo, at });
+    const result = await recordDevicePunch({ employeeNo, at, checkOut });
     console.log("[hikvision] →", JSON.stringify(result));
     return NextResponse.json({ ok: true, result });
   } catch (e: any) {
