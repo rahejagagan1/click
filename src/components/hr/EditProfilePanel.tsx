@@ -245,6 +245,8 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
     internshipEndDate:  dateISO(p.internshipEndDate),
     noticePeriodDays:   String(p.noticePeriodDays ?? "30"),
     probationPolicy:    p.probationPolicy ?? "Regular Employees",
+    probationStartDate: dateISO(p.probationStartDate),
+    probationEndDate:   dateISO(p.probationEndDate),
     role:               user.role ?? "member",
     orgLevel:           user.orgLevel ?? "member",
     managerId:          user.manager?.id ? String(user.manager.id) : "",
@@ -383,6 +385,8 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
       internshipEndDate:  dateISO(p.internshipEndDate),
       noticePeriodDays:   String(p.noticePeriodDays ?? "30"),
       probationPolicy:    p.probationPolicy ?? "Regular Employees",
+      probationStartDate: dateISO(p.probationStartDate),
+      probationEndDate:   dateISO(p.probationEndDate),
       role:               user.role ?? "member",
       orgLevel:           user.orgLevel ?? "member",
       managerId:          user.manager?.id ? String(user.manager.id) : "",
@@ -787,6 +791,8 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
           internshipEndDate:  job.internshipEndDate || null,
           noticePeriodDays:   job.noticePeriodDays === "" ? null : Number(job.noticePeriodDays),
           probationPolicy:    job.probationPolicy.trim() || null,
+          probationStartDate: job.probationStartDate || null,
+          probationEndDate:   job.probationEndDate || null,
           role:               job.role,
           orgLevel:           job.orgLevel,
           ...(designationPick != null
@@ -951,6 +957,18 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
               value={job.probationPolicy}
               onChange={(v) => setJob({ ...job, probationPolicy: v })}
             />
+          </div>
+          <div>
+            <label className={cls.label}>Probation Start Date</label>
+            <DateField value={job.probationStartDate}
+              onChange={(v) => setJob({ ...job, probationStartDate: v })}
+              className="w-full" />
+          </div>
+          <div>
+            <label className={cls.label}>Probation End Date</label>
+            <DateField value={job.probationEndDate}
+              onChange={(v) => setJob({ ...job, probationEndDate: v })}
+              className="w-full" />
           </div>
           <div>
             <label className={cls.label}>Reporting Manager</label>
