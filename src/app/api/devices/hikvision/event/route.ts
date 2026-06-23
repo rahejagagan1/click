@@ -6,39 +6,72 @@
 // Device setup (HTTP Listening):
 //   Event Alarm IP/Domain : studio.nbmedia.co.in
 //   URL                   : /api/devices/hikvision/event?key=<HIKVISION_WEBHOOK_KEY>
-//   Port                  : 443
-//   Protocol              : HTTPS
+//   Port                  : 443      Protocol: HTTPS
+// (The key may instead be sent as the header `X-Hikvision-Key` if the
+//  firmware supports custom headers — preferred, since it stays out of logs.)
 //
-// Security: requests must carry ?key= matching env HIKVISION_WEBHOOK_KEY (if
-// set). The device serial can additionally be pinned via HIKVISION_DEVICE_SERIAL.
-// The raw payload is always logged (truncated) so the exact event shape can be
-// verified from `pm2 logs` after the first real punch.
+// Security model:
+//   • Shared secret (HIKVISION_WEBHOOK_KEY) — required in production; compared
+//     in constant time. In dev (NODE_ENV !== production) the endpoint is open
+//     so a LAN test needs no env setup.
+//   • Punch time is clamped to ±15 min of now, so a forged/stale dateTime
+//     can't backdate attendance.
+//   • Device-serial pin (HIKVISION_DEVICE_SERIAL) is a HYGIENE filter only —
+//     a serial can be spoofed; real device identity should come from TLS /
+//     reverse-proxy IP allowlist. Not relied on for auth.
+//   • Raw payload logging is gated to dev / HIKVISION_LOG_RAW=1 (onboarding)
+//     to keep employee PII out of steady-state logs.
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { recordDevicePunch, type PunchDirection } from "@/lib/hr/device-punch";
 
 export const dynamic = "force-dynamic";
 export const runtime  = "nodejs";
+
+const CLOCK_SKEW_MS = 15 * 60_000;
+
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  if (ab.length !== bb.length) return false; // length is not secret here
+  return timingSafeEqual(ab, bb);
+}
+
+// Returns an error response if auth fails, else null.
+function checkAuth(req: NextRequest): NextResponse | null {
+  const expectedKey = process.env.HIKVISION_WEBHOOK_KEY;
+  if (expectedKey) {
+    const provided = req.headers.get("x-hikvision-key") ?? req.nextUrl.searchParams.get("key") ?? "";
+    if (!safeEqual(provided, expectedKey)) {
+      console.warn("[hikvision] rejected: bad/missing key");
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    return null;
+  }
+  // No key configured: fail CLOSED in production, open only in dev for testing.
+  if (process.env.NODE_ENV === "production") {
+    console.error("[hikvision] HIKVISION_WEBHOOK_KEY not set in production — refusing.");
+    return NextResponse.json({ error: "Server misconfigured" }, { status: 503 });
+  }
+  console.warn("[hikvision] dev mode, no key set — open for LOCAL testing only.");
+  return null;
+}
 
 // Pull the event JSON out of whatever the device sent: a JSON body, or a
 // multipart/form-data body (event JSON in one part + optional capture image).
 async function extractEventJson(req: NextRequest): Promise<any | null> {
   const ct = (req.headers.get("content-type") || "").toLowerCase();
   try {
-    if (ct.includes("application/json")) {
-      return await req.json();
-    }
-    if (ct.includes("multipart/form-data") || ct.includes("form-data")) {
+    if (ct.includes("application/json")) return await req.json();
+    if (ct.includes("form-data")) {
       const form = await req.formData();
       for (const [, value] of form.entries()) {
         const text = typeof value === "string" ? value : await (value as Blob).text().catch(() => "");
         const trimmed = text.trim();
-        if (trimmed.startsWith("{")) {
-          try { return JSON.parse(trimmed); } catch { /* try next part */ }
-        }
+        if (trimmed.startsWith("{")) { try { return JSON.parse(trimmed); } catch { /* next part */ } }
       }
       return null;
     }
-    // Fallback: read as text and try to parse.
     const body = (await req.text()).trim();
     return body.startsWith("{") ? JSON.parse(body) : null;
   } catch {
@@ -46,8 +79,6 @@ async function extractEventJson(req: NextRequest): Promise<any | null> {
   }
 }
 
-// "checkIn" / "breakIn" / "overTimeIn" → in; "...Out" → out; anything else
-// (incl. "undefined") → null, and the recorder infers from today's state.
 function directionFromStatus(status: unknown): PunchDirection | null {
   const s = String(status || "").toLowerCase();
   if (s.endsWith("out")) return "out";
@@ -55,30 +86,26 @@ function directionFromStatus(status: unknown): PunchDirection | null {
   return null;
 }
 
-async function handle(req: NextRequest) {
-  // ── Auth ──────────────────────────────────────────────────────────
-  const expectedKey = process.env.HIKVISION_WEBHOOK_KEY;
-  if (expectedKey) {
-    if (req.nextUrl.searchParams.get("key") !== expectedKey) {
-      console.warn("[hikvision] rejected: bad/missing ?key");
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  } else {
-    console.warn("[hikvision] HIKVISION_WEBHOOK_KEY is not set — endpoint is OPEN. Set it before going live.");
-  }
+async function handlePunch(req: NextRequest) {
+  const authErr = checkAuth(req);
+  if (authErr) return authErr;
 
   const payload = await extractEventJson(req);
-  // Always log (truncated) so we can confirm the real event shape from logs.
-  try { console.log("[hikvision] event:", JSON.stringify(payload).slice(0, 1500)); }
-  catch { console.log("[hikvision] event: <unparseable body>"); }
 
+  // Raw logging only during onboarding (dev or HIKVISION_LOG_RAW=1) — the
+  // payload carries employee PII. Steady state logs structural metadata only.
+  const logRaw = process.env.NODE_ENV !== "production" || process.env.HIKVISION_LOG_RAW === "1";
+  if (logRaw) {
+    try { console.log("[hikvision] raw:", JSON.stringify(payload).slice(0, 1500)); }
+    catch { console.log("[hikvision] raw: <unparseable>"); }
+  }
   if (!payload) return NextResponse.json({ ok: true, ignored: "no-json" });
 
-  // Optional device pinning.
+  // Hygiene filter only (not auth) — drop events from an unexpected serial.
   const pinnedSerial = process.env.HIKVISION_DEVICE_SERIAL;
   const serial = payload.AccessControllerEvent?.serialNo ?? payload.serialNo ?? payload.deviceID ?? null;
   if (pinnedSerial && serial && String(serial) !== pinnedSerial) {
-    console.warn(`[hikvision] rejected: serial ${serial} != pinned`);
+    console.warn(`[hikvision] dropped: serial ${serial} != pinned`);
     return NextResponse.json({ error: "Unknown device" }, { status: 403 });
   }
 
@@ -87,28 +114,34 @@ async function handle(req: NextRequest) {
 
   // Only act on events that identify a person (a successful auth). Door
   // status, heartbeats, tamper, failed/unknown reads carry no employee no.
-  if (!ace || !employeeNo) {
-    return NextResponse.json({ ok: true, ignored: "no-employee" });
+  if (!ace || !employeeNo) return NextResponse.json({ ok: true, ignored: "no-employee" });
+
+  // Punch time from the event, clamped to ±15 min of now so a forged or
+  // stale dateTime can't backdate attendance.
+  const dtRaw = payload.dateTime ?? ace.time ?? ace.dateTime ?? null;
+  let at = dtRaw ? new Date(dtRaw) : new Date();
+  if (Number.isNaN(at.getTime()) || Math.abs(at.getTime() - Date.now()) > CLOCK_SKEW_MS) {
+    if (dtRaw) console.warn(`[hikvision] punch time ${dtRaw} out of range — using server time`);
+    at = new Date();
   }
 
-  // Punch time from the event (ISO8601 with offset, e.g. ...+05:30). Falls
-  // back to now if the device omitted it.
-  const dtRaw = payload.dateTime ?? ace.time ?? ace.dateTime ?? null;
-  const at = dtRaw ? new Date(dtRaw) : new Date();
-  const at2 = Number.isNaN(at.getTime()) ? new Date() : at;
-
   const direction = directionFromStatus(ace.attendanceStatus);
+  console.log(`[hikvision] emp=${employeeNo} status=${ace.attendanceStatus ?? "?"} dir=${direction ?? "auto"} at=${at.toISOString()}`);
 
   try {
-    const result = await recordDevicePunch({ employeeNo, at: at2, direction });
-    console.log(`[hikvision] punch emp=${employeeNo} dir=${direction ?? "auto"} at=${at2.toISOString()} →`, JSON.stringify(result));
+    const result = await recordDevicePunch({ employeeNo, at, direction });
+    console.log("[hikvision] →", JSON.stringify(result));
     return NextResponse.json({ ok: true, result });
   } catch (e: any) {
     console.error("[hikvision] record failed:", e?.message ?? e);
-    // Still 200 so the device doesn't retry-storm; we have it in the logs.
-    return NextResponse.json({ ok: false, error: "record-failed" });
+    return NextResponse.json({ ok: false, error: "record-failed" }); // 200 so the device doesn't retry-storm
   }
 }
 
-export const POST = handle;
-export const GET  = handle; // some firmware probes with GET first
+export const POST = handlePunch;
+
+// GET is a no-op probe only (some firmware checks the URL with GET first).
+// It never records a punch — state changes go through POST.
+export function GET() {
+  return NextResponse.json({ ok: true, probe: true });
+}
