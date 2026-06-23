@@ -1270,6 +1270,9 @@ model EmployeeProfile {
   legalEntity             String?
   jobLocation             String? // City-level (Mohali / Delhi / Mumbai / Remote) — distinct from workLocation (office/remote/hybrid).
   probationPolicy         String?
+  /// When probation begins. Defaults to the joining date for display, but
+  /// HR can set it explicitly (e.g. probation starting after an internship).
+  probationStartDate      DateTime? @db.Date
   /// When the new hire's 3-month probation ends. Auto-set to
   /// joiningDate + 3 months when an EmployeeProfile is created with a
   /// joiningDate; HR can override per-employee from People →
