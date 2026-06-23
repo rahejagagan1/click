@@ -2623,9 +2623,24 @@ export default function HRHomePage() {
   const { data: analyticsData }    = useSWR("/api/hr/analytics", fetcher);
   const { data: boardData }        = useSWR("/api/hr/attendance/board", fetcher);
   const { data: balanceData = [] } = useSWR("/api/hr/leaves/balance", fetcher);
-  const { data: myData }           = useSWR(`/api/hr/attendance?month=${monthKey}`, fetcher);
+  // Poll every 3s so a machine (biometric) scan reflects on the clock widget
+  // near-instantly without a manual reload. SWR dedupes in-flight requests and
+  // pauses polling when the tab is hidden, so it only refetches while the
+  // dashboard is actually open.
+  const { data: myData }           = useSWR(`/api/hr/attendance?month=${monthKey}`, fetcher, { refreshInterval: 3_000 });
   const { data: profile }          = useSWR("/api/hr/profile", fetcher);
   const { data: myWfh = [] }       = useSWR("/api/hr/attendance/wfh?view=my", fetcher);
+
+  // Live push: open an SSE stream so a biometric-machine scan reflects on the
+  // clock widget the INSTANT it's recorded (no 3s wait). On each push we just
+  // revalidate the attendance data. EventSource auto-reconnects if dropped;
+  // the 3s poll above is the fallback when the stream isn't available.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof EventSource === "undefined") return;
+    const es = new EventSource("/api/realtime/attendance");
+    es.addEventListener("punch", () => { mutate(`/api/hr/attendance?month=${monthKey}`); });
+    return () => es.close();
+  }, [monthKey]);
 
   // displayName/email/photo used by the merged global header (src/components/layout/header.tsx).
 
