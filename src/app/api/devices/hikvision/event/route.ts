@@ -24,6 +24,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { recordDevicePunch } from "@/lib/hr/device-punch";
+import { publishPunch } from "@/lib/realtime/attendance-bus";
 
 export const dynamic = "force-dynamic";
 export const runtime  = "nodejs";
@@ -124,11 +125,18 @@ async function handlePunch(req: NextRequest) {
   }
   const at = haveValidTime ? eventAt! : new Date();
 
-  console.log(`[hikvision] emp=${employeeNo} at=${at.toISOString()} (first-in/last-out)`);
+  // A scan only ever clocks IN. The one exception: if the device's attendance
+  // mode is on and the employee explicitly chose "Check Out", honor it.
+  const checkOut = String(ace.attendanceStatus ?? "").toLowerCase().endsWith("out");
+  console.log(`[hikvision] emp=${employeeNo} at=${at.toISOString()} checkOut=${checkOut}`);
 
   try {
-    const result = await recordDevicePunch({ employeeNo, at });
+    const result = await recordDevicePunch({ employeeNo, at, checkOut });
     console.log("[hikvision] →", JSON.stringify(result));
+    // Push the live update to any open dashboard for this user (instant SSE).
+    if ((result.action === "clock_in" || result.action === "clock_out") && "userId" in result) {
+      publishPunch(result.userId);
+    }
     return NextResponse.json({ ok: true, result });
   } catch (e: any) {
     console.error("[hikvision] record failed:", e?.message ?? e);
