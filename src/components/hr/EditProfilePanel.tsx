@@ -817,7 +817,16 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
                 const { orgLevel, role } = legacyFromDesignationKey(v);
                 setJob((j) => ({ ...j, orgLevel, role }));
               }}
-              options={designations.map((d) => ({ value: d.key, label: d.label, badge: brandBadge(d.businessUnit) }))}
+              // Show only this employee's brand's designations (YT Labs → YT
+              // Labs; NB Media → NB Media + shared/null). The currently-set
+              // designation always stays visible so the value never breaks.
+              options={designations
+                .filter((d) =>
+                  d.key === designationKey ||
+                  (job.businessUnit === "YT Labs"
+                    ? d.businessUnit === "YT Labs"
+                    : d.businessUnit !== "YT Labs"))
+                .map((d) => ({ value: d.key, label: d.label, badge: brandBadge(d.businessUnit) }))}
             />
             <p className="mt-1 text-[11px] text-slate-400">Sets access tier + scorecard. Replaces the old Role + Org Level.</p>
           </div>
