@@ -24,7 +24,7 @@ import { fetcher } from "@/lib/swr";
 import {
   X, CheckCircle2, Circle, RefreshCw, FileText, Star, ClipboardList,
   Plus, Trash2, Save, AlertCircle, CalendarDays, ArrowRight, Pencil,
-  ListChecks, MessageSquare,
+  ListChecks, MessageSquare, Paperclip, ExternalLink,
 } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 import ExitFinaliseWizard from "./ExitFinaliseWizard";
@@ -87,6 +87,7 @@ const TABS = [
   { k: "survey",   label: "Survey",         icon: Star },
   { k: "tasks",    label: "Tasks",          icon: CheckCircle2 },
   { k: "leave",    label: "Leave Settings", icon: CalendarDays },
+  { k: "documents", label: "Documents",     icon: Paperclip },
 ] as const;
 type TabKey = typeof TABS[number]["k"];
 
@@ -100,6 +101,50 @@ const inr = (n: number | string | null | undefined) => {
   const v = Number(n ?? 0);
   return v.toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 };
+
+/* ── Documents tab ────────────────────────────────────────────────────────
+   Lists every file uploaded for this employee (offer letter, exit letters,
+   settlement docs, ID proofs, etc.) so HR can open them right from the exit
+   drawer. Reuses the existing per-user documents API + file-serve endpoint. */
+function DocumentsTab({ userId }: { userId: number }) {
+  const { data: docs = [], isLoading } = useSWR<any[]>(`/api/hr/documents?userId=${userId}`, fetcher);
+  const fileHref = (d: any) =>
+    typeof d.fileUrl === "string" && /^https?:\/\//.test(d.fileUrl) ? d.fileUrl : `/api/hr/documents/${d.id}/file`;
+  const catLabel = (c: string) =>
+    (c || "other").replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+  return (
+    <div className="space-y-3">
+      <p className="text-[12px] text-slate-500">
+        Files uploaded for this employee — offer letter, exit / relieving letters, settlement docs, ID proofs, etc.
+      </p>
+      {isLoading ? (
+        <p className="text-[13px] text-slate-400">Loading documents…</p>
+      ) : docs.length === 0 ? (
+        <p className="text-[13px] text-slate-400">No documents uploaded for this employee yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {docs.map((d) => (
+            <a key={d.id} href={fileHref(d)} target="_blank" rel="noopener noreferrer"
+              className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 transition-colors hover:bg-slate-50">
+              <div className="flex min-w-0 items-center gap-3">
+                <Paperclip className="h-4 w-4 shrink-0 text-slate-400" />
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-medium text-slate-800">{d.fileName || "Document"}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {catLabel(d.category)} · {fmtDate(d.createdAt)}{d.uploadedBy?.name ? ` · by ${d.uploadedBy.name}` : ""}
+                  </p>
+                </div>
+              </div>
+              <span className="inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold text-sky-600">
+                View <ExternalLink className="h-3.5 w-3.5" />
+              </span>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ExitDetailDrawer({
   exitId, onClose, onChanged,
@@ -177,6 +222,7 @@ export default function ExitDetailDrawer({
               {tab === "survey"   && <SurveyTab   data={data} onChanged={() => { refetch(); onChanged(); }} />}
               {tab === "tasks"    && <TasksTab    data={data} onChanged={() => { refetch(); onChanged(); }} />}
               {tab === "leave"    && <LeaveTab    data={data} onJumpFinances={() => setTab("finances")} />}
+              {tab === "documents" && <DocumentsTab userId={data.exit.userId} />}
             </>
           )}
         </div>
