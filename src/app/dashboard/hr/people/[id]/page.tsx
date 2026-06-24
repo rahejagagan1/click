@@ -3126,8 +3126,14 @@ function LocationLink({ raw }: { raw: string | null | undefined }) {
 type BarTone = "default" | "pending" | "approved";
 
 function TimelineBar({
-  clockIn, clockOut, tone = "default",
-}: { clockIn: string | Date | null; clockOut: string | Date | null; tone?: BarTone }) {
+  clockIn, clockOut, tone = "default", sessions, isTodayRow,
+}: {
+  clockIn: string | Date | null;
+  clockOut: string | Date | null;
+  tone?: BarTone;
+  sessions?: Array<{ clockIn: string | Date; clockOut?: string | Date | null }>;
+  isTodayRow?: boolean;
+}) {
   // 9-to-6 shift window. Clamp the filled bar to the window edges.
   const inMin  = clockIn  ? toIstMin(new Date(clockIn))  : null;
   const outMin = clockOut ? toIstMin(new Date(clockOut)) : null;
@@ -3222,15 +3228,46 @@ function TimelineBar({
           role="tooltip"
           className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-20 whitespace-nowrap rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0a1526] px-2.5 py-1.5 text-[11.5px] font-medium text-slate-700 dark:text-slate-200 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150"
         >
-          <div className="flex items-center gap-1.5">
-            <span className={`w-1.5 h-1.5 rounded-full ${toneCls.dot}`} />
-            <span>
-              Logged In <span className="font-semibold tabular-nums">{inLabel}</span>{" "}
-              <span className="opacity-50">–</span>{" "}
-              <span className="font-semibold tabular-nums">{outLabel ?? "now"}</span>
-              {toneSuffix && <span className="ml-1 text-slate-500 dark:text-slate-400">{toneSuffix}</span>}
-            </span>
-          </div>
+          {sessions && sessions.length > 1 ? (
+            // Multiple clock-in/out segments → list each in/out so HR can see
+            // the breaks, not just the overall first-in → last-out span.
+            <div className="space-y-1 whitespace-nowrap">
+              <div className="mb-0.5 flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${toneCls.dot}`} />
+                <span className="font-semibold">{sessions.length} sessions</span>
+              </div>
+              {sessions.map((s, i) => {
+                const open = !s.clockOut;
+                return (
+                  <div key={i} className="flex items-center gap-1 tabular-nums">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                    <span className="font-semibold">{fmt(new Date(s.clockIn))}</span>
+                    <span className="px-0.5 opacity-40">–</span>
+                    {open && isTodayRow ? (
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">now</span>
+                    ) : open ? (
+                      <span className="font-semibold text-amber-600 dark:text-amber-400">missed</span>
+                    ) : (
+                      <>
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" />
+                        <span className="font-semibold">{fmt(new Date(s.clockOut!))}</span>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${toneCls.dot}`} />
+              <span>
+                Logged In <span className="font-semibold tabular-nums">{inLabel}</span>{" "}
+                <span className="opacity-50">–</span>{" "}
+                <span className="font-semibold tabular-nums">{outLabel ?? "now"}</span>
+                {toneSuffix && <span className="ml-1 text-slate-500 dark:text-slate-400">{toneSuffix}</span>}
+              </span>
+            </div>
+          )}
           <span className="absolute left-1/2 -translate-x-1/2 -bottom-[5px] w-2.5 h-2.5 rotate-45 bg-white dark:bg-[#0a1526] border-r border-b border-slate-200 dark:border-white/10" />
         </div>
       )}
@@ -4171,7 +4208,7 @@ function EmployeeTimePanel({
                               const barTone: BarTone = useReg
                                 ? (isRegPending ? "pending" : isRegApproved ? "approved" : "default")
                                 : "default";
-                              return <TimelineBar clockIn={barIn} clockOut={barOut} tone={barTone} />;
+                              return <TimelineBar clockIn={barIn} clockOut={barOut} tone={barTone} sessions={hasActual ? sess : undefined} isTodayRow={isToday} />;
                             })()}
                           </div>
                           <LocationLink raw={rec.location} />
