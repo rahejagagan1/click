@@ -1127,12 +1127,14 @@ export default function AttendancePage() {
 
         {/* ── Panel 3: Actions ── */}
         <div className="p-5">
-          {/* Two columns: quick-action pills fill the empty left space, the
-              clock / button / totals cluster sits on the right. */}
-          <div className="flex items-start justify-between gap-6">
+          <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-4">Actions</h3>
 
-            {/* Left: quick-action pills, centred in the open space */}
-            <div className="flex flex-col gap-2 self-center">
+          {/* Pills + clock cluster, centred as a pair with even side margins
+              and a controlled gap — no gaping void between the two groups. */}
+          <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-6">
+
+            {/* Left: quick-action pills */}
+            <div className="flex flex-col gap-2">
               {[
                 ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
                 { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
@@ -1149,11 +1151,7 @@ export default function AttendancePage() {
 
             {/* Right: clock / button / totals cluster */}
             <div className="w-fit">
-          <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-3">Actions</h3>
-
-          {/* Top row: clock + date + totals (left) and the clock-in/out
-              button (right). Quick actions moved to a full-width pill row
-              below so the panel reads as clean, aligned sections. */}
+          {/* Clock + date + totals (left) and the clock-in/out button (right). */}
           <div className="flex flex-wrap items-start gap-5">
 
             {/* Left column */}
