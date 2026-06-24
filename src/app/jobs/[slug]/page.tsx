@@ -74,7 +74,12 @@ const JD_SANITIZE: sanitizeHtml.IOptions = {
   },
 };
 
-export const dynamic = "force-dynamic";
+// Public JDs change rarely (only when HR edits / republishes), so serve a
+// cached render and revalidate every 5 minutes instead of querying the DB and
+// re-rendering on every visit. ISR: the page is built on first hit, then
+// served from cache. Safe here because the page reads only `params.slug` — no
+// cookies / headers / searchParams — so it's eligible for static generation.
+export const revalidate = 300;
 
 type PublicJob = {
   id: number;

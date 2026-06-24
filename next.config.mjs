@@ -1,8 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-    // Optimize large library imports for smaller bundles
+    // Optimize large library imports for smaller bundles. lucide-react is
+    // imported on nearly every page — tree-shaking it (vs. pulling the whole
+    // icon set) meaningfully shrinks per-route JS.
     experimental: {
-        optimizePackageImports: ["recharts", "lru-cache"],
+        optimizePackageImports: ["recharts", "lru-cache", "lucide-react"],
     },
     // Keep these packages as real node_modules imports at runtime instead
     // of bundling them into Next.js's chunked server output. pdfjs-dist
