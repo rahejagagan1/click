@@ -1127,10 +1127,15 @@ export default function AttendancePage() {
 
         {/* ── Panel 3: Actions ── */}
         <div className="p-5">
+          {/* Right-aligned content cluster — shrink-to-fit + ml-auto pushes
+              the whole Actions block to the right edge of the panel. */}
+          <div className="ml-auto w-fit">
           <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-3">Actions</h3>
 
-          {/* 2-col layout: left = clock+date+totals, right = button+links+elapsed */}
-          <div className="flex items-start gap-3">
+          {/* Top row: clock + date + totals (left) and the clock-in/out
+              button (right). Quick actions moved to a full-width pill row
+              below so the panel reads as clean, aligned sections. */}
+          <div className="flex flex-wrap items-start gap-5">
 
             {/* Left column */}
             <div className="flex flex-col gap-1 shrink-0">
@@ -1152,17 +1157,21 @@ export default function AttendancePage() {
                 {clock ? clock.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "2-digit", month: "short", year: "numeric" }) : ""}
               </p>
 
-              {/* Total hours */}
-              <div className="mt-1">
-                <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase tracking-widest font-bold mb-1">
+              {/* Total hours — two compact stat chips, evenly split */}
+              <div className="mt-2">
+                <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase tracking-widest font-bold mb-1.5">
                   TOTAL HOURS <Info size={10} strokeWidth={2} />
                 </div>
-                <p className="text-[12px] text-slate-600 dark:text-slate-400 leading-5">
-                  Effective: <span className="font-bold text-slate-800 dark:text-white">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</span>
-                </p>
-                <p className="text-[12px] text-slate-600 dark:text-slate-400 leading-5">
-                  Gross: <span className="font-bold text-slate-800 dark:text-white">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</span>
-                </p>
+                <div className="flex gap-2">
+                  <div className="flex-1 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-2.5 py-1.5">
+                    <p className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1">Effective</p>
+                    <p className="text-[13px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
+                  </div>
+                  <div className="flex-1 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-2.5 py-1.5">
+                    <p className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1">Gross</p>
+                    <p className="text-[13px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1352,23 +1361,25 @@ export default function AttendancePage() {
                 </div>
               )}
 
-              {/* Quick links */}
-              <div className="flex flex-col gap-1.5">
-                {[
-                  ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
-                  { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
-                  { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
-                  { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
-                ].map(({ label, Icon, onClick }) => (
-                  <button key={label} onClick={onClick}
-                    className="flex items-center gap-1.5 text-[12px] font-medium text-[#008CFF] hover:underline w-fit">
-                    <Icon size={12} strokeWidth={1.75} />
-                    {label}
-                  </button>
-                ))}
             </div>
           </div>
-        </div>
+
+          {/* Quick actions — full-width pill row, divided from the row above */}
+          <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 dark:border-white/[0.06] pt-4">
+            {[
+              ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
+              { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
+              { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
+              { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
+            ].map(({ label, Icon, onClick }) => (
+              <button key={label} onClick={onClick}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3 py-2 text-[12px] font-semibold text-slate-700 dark:text-slate-200 transition-colors hover:border-[#008CFF]/40 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.04]">
+                <Icon size={13} strokeWidth={1.9} className="text-[#008CFF]" />
+                {label}
+              </button>
+            ))}
+          </div>
+          </div>{/* end right-aligned cluster */}
         </div>{/* end Panel 3 */}
       </div>{/* end 3-panel header */}
 
