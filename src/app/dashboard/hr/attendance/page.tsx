@@ -1127,9 +1127,28 @@ export default function AttendancePage() {
 
         {/* ── Panel 3: Actions ── */}
         <div className="p-5">
-          {/* Right-aligned content cluster — shrink-to-fit + ml-auto pushes
-              the whole Actions block to the right edge of the panel. */}
-          <div className="ml-auto w-fit">
+          {/* Two columns: quick-action pills fill the empty left space, the
+              clock / button / totals cluster sits on the right. */}
+          <div className="flex items-start justify-between gap-6">
+
+            {/* Left: quick-action pills, centred in the open space */}
+            <div className="flex flex-col gap-2 self-center">
+              {[
+                ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
+                { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
+                { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
+                { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
+              ].map(({ label, Icon, onClick }) => (
+                <button key={label} onClick={onClick}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3.5 py-2.5 text-[12.5px] font-semibold text-slate-700 dark:text-slate-200 transition-colors hover:border-[#008CFF]/40 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.04]">
+                  <Icon size={14} strokeWidth={1.9} className="text-[#008CFF]" />
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Right: clock / button / totals cluster */}
+            <div className="w-fit">
           <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-3">Actions</h3>
 
           {/* Top row: clock + date + totals (left) and the clock-in/out
@@ -1364,22 +1383,8 @@ export default function AttendancePage() {
             </div>
           </div>
 
-          {/* Quick actions — full-width pill row, divided from the row above */}
-          <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 dark:border-white/[0.06] pt-4">
-            {[
-              ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
-              { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
-              { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
-              { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
-            ].map(({ label, Icon, onClick }) => (
-              <button key={label} onClick={onClick}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3 py-2 text-[12px] font-semibold text-slate-700 dark:text-slate-200 transition-colors hover:border-[#008CFF]/40 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.04]">
-                <Icon size={13} strokeWidth={1.9} className="text-[#008CFF]" />
-                {label}
-              </button>
-            ))}
-          </div>
-          </div>{/* end right-aligned cluster */}
+            </div>{/* end right cluster */}
+          </div>{/* end actions split */}
         </div>{/* end Panel 3 */}
       </div>{/* end 3-panel header */}
 
