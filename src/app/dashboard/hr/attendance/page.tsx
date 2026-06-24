@@ -1361,8 +1361,9 @@ export default function AttendancePage() {
                 </div>
               )}
 
-              {/* Quick-action pills — stacked directly below the clock-in/out button */}
-              <div className="flex flex-col gap-2 mt-1">
+              {/* Quick-action pills — 2×2 grid directly below the clock-in/out
+                  button (two side by side, then the next two below). */}
+              <div className="grid grid-cols-2 gap-2 mt-1">
                 {[
                   ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
                   { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
@@ -1370,8 +1371,8 @@ export default function AttendancePage() {
                   { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
                 ].map(({ label, Icon, onClick }) => (
                   <button key={label} onClick={onClick}
-                    className="inline-flex items-center gap-2 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3.5 py-2.5 text-[12.5px] font-semibold text-slate-700 dark:text-slate-200 transition-colors hover:border-[#008CFF]/40 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.04]">
-                    <Icon size={14} strokeWidth={1.9} className="text-[#008CFF]" />
+                    className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3.5 py-2.5 text-[12.5px] font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap transition-colors hover:border-[#008CFF]/40 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.04]">
+                    <Icon size={14} strokeWidth={1.9} className="shrink-0 text-[#008CFF]" />
                     {label}
                   </button>
                 ))}
