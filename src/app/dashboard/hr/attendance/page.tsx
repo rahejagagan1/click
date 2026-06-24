@@ -352,11 +352,13 @@ function DayLocationPin({ inRaw }: { inRaw?: string | null }) {
 // ── Timeline bar (same proportional grid as Keka) ────────────────────────────
 // Shift-progress bar: fills from 0 → 100% of a 9h shift based on elapsed minutes.
 // Orange < 50% · blue < 100% · green once the full 9h is met.
-function TimelineBar({ liveMins, firstIn, lastOut, isOpen }: {
+function TimelineBar({ liveMins, firstIn, lastOut, isOpen, sessions, isTodayRow }: {
   liveMins: number;
   firstIn?: Date | null;
   lastOut?: Date | null;
   isOpen?: boolean; // true when there's still an open session (no final clock-out yet)
+  sessions?: Array<{ clockIn: string | Date; clockOut?: string | Date | null }>;
+  isTodayRow?: boolean;
 }) {
   if (!liveMins || liveMins <= 0) return <span className="text-[11px] text-slate-400">—</span>;
   const SHIFT_LEN = 540; // 9h in minutes
@@ -389,15 +391,46 @@ function TimelineBar({ liveMins, firstIn, lastOut, isOpen }: {
           white card, soft shadow, slate text, coloured status dot.
           Positioned above the bar, centred horizontally. Pointer-events
           are disabled so it never blocks clicks on the bar / pin. */}
-      {tooltip && (
+      {(tooltip || (sessions && sessions.length > 1)) && (
         <div
           role="tooltip"
-          className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-20 whitespace-nowrap rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0a1526] px-2.5 py-1.5 text-[11.5px] font-medium text-slate-700 dark:text-slate-200 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+          className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-20 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0a1526] px-2.5 py-1.5 text-[11.5px] font-medium text-slate-700 dark:text-slate-200 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150"
         >
-          <div className="flex items-center gap-1.5">
-            <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
-            <span>Logged In <span className="font-semibold tabular-nums">{inLabel}</span> <span className="opacity-50">–</span> <span className="font-semibold tabular-nums">{outLabel}</span></span>
-          </div>
+          {sessions && sessions.length > 1 ? (
+            // Multiple clock-in/out segments → list each in/out so HR can see
+            // the breaks, not just the overall span.
+            <div className="space-y-1 whitespace-nowrap">
+              <div className="mb-0.5 flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
+                <span className="font-semibold">{sessions.length} sessions</span>
+              </div>
+              {sessions.map((s, i) => {
+                const open = !s.clockOut;
+                return (
+                  <div key={i} className="flex items-center gap-1 tabular-nums">
+                    <ArrowDownLeft size={12} strokeWidth={2.4} className="shrink-0 text-emerald-500" />
+                    <span className="font-semibold">{fmt(new Date(s.clockIn))}</span>
+                    <span className="px-0.5 opacity-40">–</span>
+                    {open && isTodayRow ? (
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">now</span>
+                    ) : open ? (
+                      <span className="font-semibold text-amber-600 dark:text-amber-400">missed</span>
+                    ) : (
+                      <>
+                        <ArrowUpRight size={12} strokeWidth={2.4} className="shrink-0 text-rose-500" />
+                        <span className="font-semibold">{fmt(new Date(s.clockOut!))}</span>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
+              <span>Logged In <span className="font-semibold tabular-nums">{inLabel}</span> <span className="opacity-50">–</span> <span className="font-semibold tabular-nums">{outLabel}</span></span>
+            </div>
+          )}
           {/* Little notch pointing down at the bar. Two stacked
               elements give it a border so it matches the card's edge. */}
           <span className="absolute left-1/2 -translate-x-1/2 -bottom-[5px] w-2.5 h-2.5 rotate-45 bg-white dark:bg-[#0a1526] border-r border-b border-slate-200 dark:border-white/10" />
@@ -1805,6 +1838,8 @@ export default function AttendancePage() {
                                     return null;
                                   })()}
                                   isOpen={!!sessions.find((s) => !s.clockOut)}
+                                  sessions={sessions}
+                                  isTodayRow={isTodayRow}
                                 />
                                 <DayLocationPin
                                   inRaw={sessions[0]?.clockInLocation ?? rec.location}
