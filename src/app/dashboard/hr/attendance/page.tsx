@@ -1129,27 +1129,10 @@ export default function AttendancePage() {
         <div className="p-5">
           <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-4">Actions</h3>
 
-          {/* Pills + clock cluster, centred as a pair with even side margins
-              and a controlled gap — no gaping void between the two groups. */}
-          <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-6">
+          {/* Clock cluster on top, quick-action pills below it. */}
+          <div className="flex flex-col gap-4">
 
-            {/* Left: quick-action pills */}
-            <div className="flex flex-col gap-2">
-              {[
-                ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
-                { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
-                { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
-                { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
-              ].map(({ label, Icon, onClick }) => (
-                <button key={label} onClick={onClick}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3.5 py-2.5 text-[12.5px] font-semibold text-slate-700 dark:text-slate-200 transition-colors hover:border-[#008CFF]/40 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.04]">
-                  <Icon size={14} strokeWidth={1.9} className="text-[#008CFF]" />
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* Right: clock / button / totals cluster */}
+            {/* Clock / button / totals cluster (on top) */}
             <div className="w-fit">
           {/* Clock + date + totals (left) and the clock-in/out button (right). */}
           <div className="flex flex-wrap items-start gap-5">
@@ -1381,8 +1364,24 @@ export default function AttendancePage() {
             </div>
           </div>
 
-            </div>{/* end right cluster */}
-          </div>{/* end actions split */}
+            </div>{/* end clock cluster */}
+
+            {/* Quick-action pills — row beneath the clock cluster */}
+            <div className="flex flex-wrap gap-2">
+              {[
+                ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
+                { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
+                { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
+                { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
+              ].map(({ label, Icon, onClick }) => (
+                <button key={label} onClick={onClick}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3.5 py-2.5 text-[12.5px] font-semibold text-slate-700 dark:text-slate-200 transition-colors hover:border-[#008CFF]/40 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.04]">
+                  <Icon size={14} strokeWidth={1.9} className="text-[#008CFF]" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>{/* end actions stack */}
         </div>{/* end Panel 3 */}
       </div>{/* end 3-panel header */}
 
