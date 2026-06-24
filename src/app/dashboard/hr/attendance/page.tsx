@@ -1059,7 +1059,7 @@ export default function AttendancePage() {
       </div>
 
       {/* ── 3-Panel Header ── */}
-      <div className="grid grid-cols-3 bg-white dark:bg-[#001529] border-b border-slate-200 dark:border-white/[0.06]">
+      <div className="grid grid-cols-2 bg-white dark:bg-[#001529] border-b border-slate-200 dark:border-white/[0.06]">
 
         {/* ── Panel 1: Attendance Stats ── */}
         <div className="p-5 border-r border-slate-200 dark:border-white/[0.06]">
@@ -1125,76 +1125,17 @@ export default function AttendancePage() {
           </div>
         </div>
 
-        {/* ── Panel 2: Timings ── */}
-        <div className="p-5 border-r border-slate-200 dark:border-white/[0.06]">
-          <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-3">Timings</h3>
-
-          {/* Week day circles — past days render darker + slightly blurred
-              so "done" days visually recede and the eye lands on today. */}
-          <div className="flex items-center gap-1.5 mb-4">
-            {days.map((d, i) => {
-              const isToday = i === todayDow;
-              const isPast  = i < todayDow;
-              return (
-                <div
-                  key={i}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold transition-all ${
-                    isToday
-                      ? "bg-[#00BCD4] text-white shadow-sm shadow-[#00BCD4]/40"
-                      : isPast
-                      ? "bg-slate-300 dark:bg-[#05101c] text-slate-500 dark:text-slate-600 border border-slate-300 dark:border-white/[0.03] opacity-60 blur-[0.4px]"
-                      : "bg-slate-100 dark:bg-white/[0.07] text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-white/[0.06]"
-                  }`}
-                >{d}</div>
-              );
-            })}
-          </div>
-
-          {/* Shift info */}
-          <p className="text-[12px] font-medium text-slate-600 dark:text-slate-400 mb-3">Today ({fmtShiftTime(SHIFT_START)} - {fmtShiftTime(SHIFT_END)})</p>
-
-          {/* Timeline progress bar: grey track, yellow half-day bands where the
-              user missed a half, cyan fill = elapsed / 9 h. Progress starts at 0
-              and grows in real time from clock-in, independent of whether the
-              session falls inside or outside the 9:00–18:00 window. */}
-          {(() => {
-            const elapsedPct = todayRec?.clockIn
-              ? Math.min(100, (elapsedMins / SHIFT_LEN) * 100)
-              : 0;
-            return (
-              <div className="relative w-full h-3 bg-slate-100 dark:bg-white/[0.07] rounded-full overflow-hidden">
-                {missedFirstHalf && (
-                  <div className="absolute inset-y-0 bg-amber-400/80" style={{ left: "0%", width: `${MID_PCT}%` }} />
-                )}
-                {missedSecondHalf && (
-                  <div className="absolute inset-y-0 bg-amber-400/80" style={{ left: `${MID_PCT}%`, width: `${100 - MID_PCT}%` }} />
-                )}
-                {elapsedPct > 0 && (
-                  <div className="absolute inset-y-0 left-0 bg-[#00BCD4] transition-all duration-500" style={{ width: `${elapsedPct}%` }} />
-                )}
-                {/* Subtle 2 PM marker so the half-day boundary is readable. */}
-                <div className="absolute inset-y-0 w-px bg-slate-300/70 dark:bg-white/10" style={{ left: `${MID_PCT}%` }} />
-              </div>
-            );
-          })()}
-
-          <div className="flex items-center justify-between mt-2">
-            <p className="text-[11px] font-medium text-slate-500 dark:text-[#00BCD4]" suppressHydrationWarning>
-              Duration: {todayRec?.clockIn ? elapsedStr : "0h 0m"}
-            </p>
-            <div className="flex items-center gap-1 text-[11px] text-slate-500" suppressHydrationWarning>
-              <Clock3 size={11} strokeWidth={1.75} />
-              {remainingLabel}
-            </div>
-          </div>
-        </div>
-
         {/* ── Panel 3: Actions ── */}
         <div className="p-5">
-          <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-3">Actions</h3>
+          <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-4">Actions</h3>
 
-          {/* 2-col layout: left = clock+date+totals, right = button+links+elapsed */}
-          <div className="flex items-start gap-3">
+          {/* Clock cluster on top, quick-action pills below it. */}
+          <div className="flex flex-col gap-4">
+
+            {/* Clock / button / totals cluster (on top) */}
+            <div className="w-fit">
+          {/* Clock + date + totals (left) and the clock-in/out button (right). */}
+          <div className="flex flex-wrap items-start gap-5">
 
             {/* Left column */}
             <div className="flex flex-col gap-1 shrink-0">
@@ -1216,17 +1157,21 @@ export default function AttendancePage() {
                 {clock ? clock.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "2-digit", month: "short", year: "numeric" }) : ""}
               </p>
 
-              {/* Total hours */}
-              <div className="mt-1">
-                <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase tracking-widest font-bold mb-1">
+              {/* Total hours — two compact stat chips, evenly split */}
+              <div className="mt-2">
+                <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase tracking-widest font-bold mb-1.5">
                   TOTAL HOURS <Info size={10} strokeWidth={2} />
                 </div>
-                <p className="text-[12px] text-slate-600 dark:text-slate-400 leading-5">
-                  Effective: <span className="font-bold text-slate-800 dark:text-white">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</span>
-                </p>
-                <p className="text-[12px] text-slate-600 dark:text-slate-400 leading-5">
-                  Gross: <span className="font-bold text-slate-800 dark:text-white">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</span>
-                </p>
+                <div className="flex gap-2">
+                  <div className="flex-1 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-2.5 py-1.5">
+                    <p className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1">Effective</p>
+                    <p className="text-[13px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
+                  </div>
+                  <div className="flex-1 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-2.5 py-1.5">
+                    <p className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1">Gross</p>
+                    <p className="text-[13px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1416,8 +1361,10 @@ export default function AttendancePage() {
                 </div>
               )}
 
-              {/* Quick links */}
-              <div className="flex flex-col gap-1.5">
+              {/* Quick-action pills — compact 2×2 grid below the clock-in/out
+                  button. Sized to match the button height so the cluster reads
+                  as one clean, formatted block. */}
+              <div className="grid grid-cols-2 gap-1.5 mt-2">
                 {[
                   ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
                   { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
@@ -1425,14 +1372,18 @@ export default function AttendancePage() {
                   { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
                 ].map(({ label, Icon, onClick }) => (
                   <button key={label} onClick={onClick}
-                    className="flex items-center gap-1.5 text-[12px] font-medium text-[#008CFF] hover:underline w-fit">
-                    <Icon size={12} strokeWidth={1.75} />
+                    className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3 text-[11.5px] font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap transition-colors hover:border-[#008CFF]/40 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.04]">
+                    <Icon size={13} strokeWidth={1.9} className="shrink-0 text-[#008CFF]" />
                     {label}
                   </button>
                 ))}
+              </div>
+
             </div>
           </div>
-        </div>
+
+            </div>{/* end clock cluster */}
+          </div>{/* end actions stack */}
         </div>{/* end Panel 3 */}
       </div>{/* end 3-panel header */}
 
