@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
@@ -3168,8 +3169,19 @@ function TimelineBar({
         ? { fill: "from-[#34d399] to-[#10b981]", glow: "0 2px 5px rgba(16,185,129,0.35)", ring: "#10b981", dot: "bg-[#10b981]" }
         : { fill: "from-[#38bdf8] to-[#0ea5e9]", glow: "0 2px 5px rgba(14,165,233,0.35)", ring: "#0ea5e9", dot: "bg-[#0ea5e9]" };
 
+  // The hover tooltip is portaled to <body> so it can render ABOVE the bar
+  // without being clipped by the attendance table's overflow-hidden card.
+  // Capture the bar's viewport rect on hover; position the tooltip from it.
+  const barRef = useRef<HTMLDivElement>(null);
+  const [tipPos, setTipPos] = useState<{ left: number; top: number } | null>(null);
+  const showTip = () => {
+    const r = barRef.current?.getBoundingClientRect();
+    if (r) setTipPos({ left: r.left + r.width / 2, top: r.top });
+  };
+  const hideTip = () => setTipPos(null);
+
   return (
-    <div className="group relative h-5 w-full">
+    <div ref={barRef} onMouseEnter={showTip} onMouseLeave={hideTip} className="group relative h-5 w-full">
       {/* Track */}
       <div className="absolute inset-x-0 top-1/2 h-[8px] -translate-y-1/2 rounded-full bg-slate-100 ring-1 ring-inset ring-slate-200/60" />
 
@@ -3224,10 +3236,11 @@ function TimelineBar({
           Pointer-events disabled so it never swallows clicks on the
           row's other interactive children (regularize, on-behalf
           actions, etc.). Hidden when there's no clock-in to show. */}
-      {inLabel && (
+      {inLabel && tipPos && typeof document !== "undefined" && createPortal(
         <div
           role="tooltip"
-          className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-full mt-2 z-30 whitespace-nowrap rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0a1526] px-2.5 py-1.5 text-[11.5px] font-medium text-slate-700 dark:text-slate-200 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+          style={{ position: "fixed", left: tipPos.left, top: tipPos.top - 8, transform: "translate(-50%, -100%)" }}
+          className="pointer-events-none z-[80] whitespace-nowrap rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0a1526] px-2.5 py-1.5 text-[11.5px] font-medium text-slate-700 dark:text-slate-200 shadow-lg"
         >
           {/* Web Clock In — each session as ↙ clock-in / ↗ clock-out (now /
               Missed), matching the attendance-page LOG tooltip exactly. */}
@@ -3285,8 +3298,9 @@ function TimelineBar({
               </div>
             </div>
           )}
-          <span className="absolute left-1/2 -translate-x-1/2 -top-[5px] w-2.5 h-2.5 rotate-45 bg-white dark:bg-[#0a1526] border-l border-t border-slate-200 dark:border-white/10" />
-        </div>
+          <span className="absolute left-1/2 -translate-x-1/2 -bottom-[5px] w-2.5 h-2.5 rotate-45 bg-white dark:bg-[#0a1526] border-r border-b border-slate-200 dark:border-white/10" />
+        </div>,
+        document.body
       )}
     </div>
   );
