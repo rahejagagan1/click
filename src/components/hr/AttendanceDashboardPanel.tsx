@@ -33,6 +33,7 @@ type Row = {
   distanceFromOfficeM: number | null;
   status: "office" | "remote" | "hybrid" | "wfh" | "on_leave" | "absent";
   wfhToday: boolean;
+  wfhKind?: "full" | "first_half" | "second_half" | null;
 };
 
 type Counts = {
@@ -964,7 +965,16 @@ export default function AttendanceDashboardPanel({
                         <span className="text-slate-400">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3"><StatusPill s={r.status} rawStatus={r.rawStatus} /></td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <StatusPill s={r.status} rawStatus={r.rawStatus} />
+                        {r.wfhToday && (r.wfhKind === "first_half" || r.wfhKind === "second_half") && (
+                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ring-inset ring-[#008CFF]/30 bg-[#008CFF]/10 text-[#008CFF]">
+                            {r.wfhKind === "first_half" ? "1st half" : "2nd half"}
+                          </span>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
