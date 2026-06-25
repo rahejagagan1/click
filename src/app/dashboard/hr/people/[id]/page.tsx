@@ -3126,13 +3126,14 @@ function LocationLink({ raw }: { raw: string | null | undefined }) {
 type BarTone = "default" | "pending" | "approved";
 
 function TimelineBar({
-  clockIn, clockOut, tone = "default", sessions, isTodayRow,
+  clockIn, clockOut, tone = "default", sessions, isTodayRow, doorEntries,
 }: {
   clockIn: string | Date | null;
   clockOut: string | Date | null;
   tone?: BarTone;
   sessions?: Array<{ clockIn: string | Date; clockOut?: string | Date | null }>;
   isTodayRow?: boolean;
+  doorEntries?: Array<{ scannedAt: string | Date }>;
 }) {
   // 9-to-6 shift window. Clamp the filled bar to the window edges.
   const inMin  = clockIn  ? toIstMin(new Date(clockIn))  : null;
@@ -3266,6 +3267,21 @@ function TimelineBar({
                 <span className="font-semibold tabular-nums">{outLabel ?? "now"}</span>
                 {toneSuffix && <span className="ml-1 text-slate-500 dark:text-slate-400">{toneSuffix}</span>}
               </span>
+            </div>
+          )}
+          {/* Door entries — mid-day re-entry scans. Present in the payload only
+              for managers / HR / CEO / devs, so this renders only for them. */}
+          {Array.isArray(doorEntries) && doorEntries.length > 0 && (
+            <div className="mt-1.5 whitespace-nowrap border-t border-slate-200/60 dark:border-white/10 pt-1.5">
+              <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Door Entries</p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                {doorEntries.map((d, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 font-medium text-slate-600 dark:text-slate-300">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#008CFF]" />
+                    {fmt(new Date(d.scannedAt))}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
           <span className="absolute left-1/2 -translate-x-1/2 -bottom-[5px] w-2.5 h-2.5 rotate-45 bg-white dark:bg-[#0a1526] border-r border-b border-slate-200 dark:border-white/10" />
@@ -4208,7 +4224,7 @@ function EmployeeTimePanel({
                               const barTone: BarTone = useReg
                                 ? (isRegPending ? "pending" : isRegApproved ? "approved" : "default")
                                 : "default";
-                              return <TimelineBar clockIn={barIn} clockOut={barOut} tone={barTone} sessions={hasActual ? sess : undefined} isTodayRow={isToday} />;
+                              return <TimelineBar clockIn={barIn} clockOut={barOut} tone={barTone} sessions={hasActual ? sess : undefined} isTodayRow={isToday} doorEntries={(rec as any).doorEntries} />;
                             })()}
                           </div>
                           <LocationLink raw={rec.location} />
