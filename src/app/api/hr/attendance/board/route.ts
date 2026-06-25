@@ -45,9 +45,24 @@ export async function GET() {
         date: today,
         status: { notIn: ["rejected", "cancelled"] },
       },
-      select: { userId: true },
+      select: { userId: true, reason: true },
+      orderBy: { createdAt: "desc" }, // newest request wins for the half-day kind
     });
     const wfhTodayIds = new Set(wfhTodayRows.map((r) => r.userId));
+
+    // Per-user WFH half-day kind for the "Working Remotely" badge. Uses the
+    // SAME [First Half]/[Second Half]/[Half Day] markers the leave form writes —
+    // the WFH form stamps them into the reason too. (no marker → full)
+    const wfhKindByUser = new Map<number, "full" | "first_half" | "second_half">();
+    for (const r of wfhTodayRows) {
+      if (wfhKindByUser.has(r.userId)) continue; // newest (first) row wins
+      const reason = r.reason || "";
+      let kind: "full" | "first_half" | "second_half" = "full";
+      if      (/\[First Half\]/i.test(reason))  kind = "first_half";
+      else if (/\[Second Half\]/i.test(reason)) kind = "second_half";
+      else if (/\[Half Day\]/i.test(reason))    kind = "first_half"; // legacy
+      wfhKindByUser.set(r.userId, kind);
+    }
 
     // Anyone with a leave application that *covers* today, in any status that
     // isn't rejected/cancelled. Mirrors the WFH treatment so the On Leave list
@@ -92,6 +107,7 @@ export async function GET() {
         totalMinutes: rec?.totalMinutes || 0,
         location: rec?.location ?? null,
         wfhToday:   wfhTodayIds.has(u.id),
+        wfhKind:    wfhKindByUser.get(u.id) ?? null,
         leaveToday: leaveTodayIds.has(u.id),
         leaveKind:  leaveKindByUser.get(u.id) ?? null,
         // Brand for client-side filtering. Bucket NULL as NB Media
