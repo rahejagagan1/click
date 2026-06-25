@@ -1132,9 +1132,10 @@ export default function AttendancePage() {
           {/* Clock cluster on top, quick-action pills below it. */}
           <div className="flex flex-col gap-4">
 
-            {/* Full-width top row: clock+date, total hours, and the clock-in/out
-                button spread across the panel — no empty space on the right. */}
-            <div className="flex flex-wrap items-start justify-between gap-6">
+            {/* Top row aligned to the 4-pill grid below: clock in the first
+                column, totals centred in the middle, button right-aligned in
+                the last column. Fills the width without flinging items apart. */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 items-start">
 
             {/* Clock + date */}
             <div className="flex flex-col gap-1 shrink-0">
@@ -1157,8 +1158,8 @@ export default function AttendancePage() {
               </p>
             </div>
 
-            {/* Total hours — two compact stat chips (middle group) */}
-            <div className="shrink-0">
+            {/* Total hours — two compact stat chips, centred in the middle columns */}
+            <div className="col-span-2 justify-self-center">
               <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase tracking-widest font-bold mb-1.5">
                 TOTAL HOURS <Info size={10} strokeWidth={2} />
               </div>
@@ -1174,8 +1175,8 @@ export default function AttendancePage() {
               </div>
             </div>
 
-            {/* Right column: button → quick links → elapsed */}
-            <div className="flex flex-col gap-2">
+            {/* Clock-in/out button — right-aligned in the last column */}
+            <div className="flex flex-col gap-2 justify-self-end items-end">
               {/* Location permission warning — attendance requires location. */}
               {!todayRec?.clockIn && locPerm === "denied" && (
                 <div className="max-w-xs px-3 py-2 rounded-md bg-red-50 text-red-700 border border-red-200 text-[11px] leading-snug">
