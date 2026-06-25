@@ -1135,48 +1135,38 @@ export default function AttendancePage() {
             {/* Top row aligned to the 4-pill grid below: clock in the first
                 column, totals centred in the middle, button right-aligned in
                 the last column. Fills the width without flinging items apart. */}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 items-start">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 items-stretch">
 
-            {/* Clock + date */}
-            <div className="flex flex-col gap-1 shrink-0">
-              {/* Clock box */}
-              <div className="bg-slate-50 dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg px-3 py-2 min-w-[148px]">
-                <p className="font-bold text-slate-800 dark:text-white leading-none whitespace-nowrap" suppressHydrationWarning
-                  style={{ fontSize: "1.25rem", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
-                  {clock
-                    ? clock.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: !use24 }).replace(/\s?(am|pm)/i, "")
-                    : "--:--:--"}
-                  {!use24 && clock && (
-                    <span className="text-[12px] font-bold ml-1.5">{clock.getHours() >= 12 ? "PM" : "AM"}</span>
-                  )}
-                </p>
-              </div>
-
-              {/* Date */}
-              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400" suppressHydrationWarning>
+            {/* Tile 1 — current time + date */}
+            <div className="flex flex-col justify-center rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-2">
+              <p className="font-bold text-slate-800 dark:text-white leading-none whitespace-nowrap" suppressHydrationWarning
+                style={{ fontSize: "1.15rem", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
+                {clock
+                  ? clock.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: !use24 }).replace(/\s?(am|pm)/i, "")
+                  : "--:--:--"}
+                {!use24 && clock && (
+                  <span className="text-[11px] font-bold ml-1.5">{clock.getHours() >= 12 ? "PM" : "AM"}</span>
+                )}
+              </p>
+              <p className="mt-1 text-[10.5px] font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap" suppressHydrationWarning>
                 {clock ? clock.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "2-digit", month: "short", year: "numeric" }) : ""}
               </p>
             </div>
 
-            {/* Total hours — two compact stat chips, centred in the middle columns */}
-            <div className="col-span-2 justify-self-center">
-              <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase tracking-widest font-bold mb-1.5">
-                TOTAL HOURS <Info size={10} strokeWidth={2} />
-              </div>
-              <div className="flex gap-2">
-                <div className="rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-1.5 min-w-[84px]">
-                  <p className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1">Effective</p>
-                  <p className="text-[13px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
-                </div>
-                <div className="rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-1.5 min-w-[84px]">
-                  <p className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1">Gross</p>
-                  <p className="text-[13px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
-                </div>
-              </div>
+            {/* Tile 2 — effective hours */}
+            <div className="flex flex-col justify-center rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-2">
+              <p className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1.5">Effective <Info size={9} strokeWidth={2} /></p>
+              <p className="text-[15px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
             </div>
 
-            {/* Clock-in/out button — right-aligned in the last column */}
-            <div className="flex flex-col gap-2 justify-self-end items-end">
+            {/* Tile 3 — gross hours */}
+            <div className="flex flex-col justify-center rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-2">
+              <p className="text-[9px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1.5">Gross</p>
+              <p className="text-[15px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
+            </div>
+
+            {/* Tile 4 — clock-in/out button, centred in the last column */}
+            <div className="flex flex-col gap-2 items-center justify-center">
               {/* Location permission warning — attendance requires location. */}
               {!todayRec?.clockIn && locPerm === "denied" && (
                 <div className="max-w-xs px-3 py-2 rounded-md bg-red-50 text-red-700 border border-red-200 text-[11px] leading-snug">
