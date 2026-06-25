@@ -1132,51 +1132,41 @@ export default function AttendancePage() {
           {/* Clock cluster on top, quick-action pills below it. */}
           <div className="flex flex-col gap-4">
 
-            {/* Clock / button / totals cluster (on top) */}
-            <div className="w-fit">
-          {/* Clock + date + totals (left) and the clock-in/out button (right). */}
-          <div className="flex flex-wrap items-start gap-5">
+            {/* Top row aligned to the 4-pill grid below: clock in the first
+                column, totals centred in the middle, button right-aligned in
+                the last column. Fills the width without flinging items apart. */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 items-stretch">
 
-            {/* Left column */}
-            <div className="flex flex-col gap-1 shrink-0">
-              {/* Clock box */}
-              <div className="bg-slate-50 dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg px-3 py-2 min-w-[148px]">
-                <p className="font-bold text-slate-800 dark:text-white leading-none whitespace-nowrap" suppressHydrationWarning
-                  style={{ fontSize: "1.25rem", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
-                  {clock
-                    ? clock.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: !use24 }).replace(/\s?(am|pm)/i, "")
-                    : "--:--:--"}
-                  {!use24 && clock && (
-                    <span className="text-[12px] font-bold ml-1.5">{clock.getHours() >= 12 ? "PM" : "AM"}</span>
-                  )}
-                </p>
-              </div>
-
-              {/* Date */}
-              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400" suppressHydrationWarning>
+            {/* Tile 1 — current time + date */}
+            <div className="flex flex-col justify-center rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-2">
+              <p className="font-bold text-slate-800 dark:text-white leading-none whitespace-nowrap" suppressHydrationWarning
+                style={{ fontSize: "1.15rem", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
+                {clock
+                  ? clock.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: !use24 }).replace(/\s?(am|pm)/i, "")
+                  : "--:--:--"}
+                {!use24 && clock && (
+                  <span className="text-[11px] font-bold ml-1.5">{clock.getHours() >= 12 ? "PM" : "AM"}</span>
+                )}
+              </p>
+              <p className="mt-1 text-[10.5px] font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap" suppressHydrationWarning>
                 {clock ? clock.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "2-digit", month: "short", year: "numeric" }) : ""}
               </p>
-
-              {/* Total hours — two compact stat chips, evenly split */}
-              <div className="mt-2">
-                <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase tracking-widest font-bold mb-1.5">
-                  TOTAL HOURS <Info size={10} strokeWidth={2} />
-                </div>
-                <div className="flex gap-2">
-                  <div className="flex-1 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-2.5 py-1.5">
-                    <p className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1">Effective</p>
-                    <p className="text-[13px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
-                  </div>
-                  <div className="flex-1 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-2.5 py-1.5">
-                    <p className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1">Gross</p>
-                    <p className="text-[13px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
-                  </div>
-                </div>
-              </div>
             </div>
 
-            {/* Right column: button → quick links → elapsed */}
-            <div className="flex flex-col gap-2">
+            {/* Tile 2 — effective hours */}
+            <div className="flex flex-col justify-center rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-2">
+              <p className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1.5">Effective <Info size={9} strokeWidth={2} /></p>
+              <p className="text-[15px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
+            </div>
+
+            {/* Tile 3 — gross hours */}
+            <div className="flex flex-col justify-center rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-2">
+              <p className="text-[9px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1.5">Gross</p>
+              <p className="text-[15px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
+            </div>
+
+            {/* Tile 4 — clock-in/out button, centred in the last column */}
+            <div className="flex flex-col gap-2 items-center justify-center">
               {/* Location permission warning — attendance requires location. */}
               {!todayRec?.clockIn && locPerm === "denied" && (
                 <div className="max-w-xs px-3 py-2 rounded-md bg-red-50 text-red-700 border border-red-200 text-[11px] leading-snug">
@@ -1361,28 +1351,24 @@ export default function AttendancePage() {
                 </div>
               )}
 
-              {/* Quick-action pills — compact 2×2 grid below the clock-in/out
-                  button. Sized to match the button height so the cluster reads
-                  as one clean, formatted block. */}
-              <div className="grid grid-cols-2 gap-1.5 mt-2">
-                {[
-                  ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
-                  { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
-                  { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
-                  { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
-                ].map(({ label, Icon, onClick }) => (
-                  <button key={label} onClick={onClick}
-                    className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3 text-[11.5px] font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap transition-colors hover:border-[#008CFF]/40 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.04]">
-                    <Icon size={13} strokeWidth={1.9} className="shrink-0 text-[#008CFF]" />
-                    {label}
-                  </button>
-                ))}
-              </div>
-
             </div>
           </div>
 
-            </div>{/* end clock cluster */}
+          {/* Full-width quick-action row — 4 across, fills the panel width */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 border-t border-slate-100 dark:border-white/[0.06] pt-4">
+            {[
+              ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
+              { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
+              { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
+              { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
+            ].map(({ label, Icon, onClick }) => (
+              <button key={label} onClick={onClick}
+                className="flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap transition-colors hover:border-[#008CFF]/40 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.04]">
+                <Icon size={13} strokeWidth={1.9} className="shrink-0 text-[#008CFF]" />
+                {label}
+              </button>
+            ))}
+          </div>
           </div>{/* end actions stack */}
         </div>{/* end Panel 3 */}
       </div>{/* end 3-panel header */}
