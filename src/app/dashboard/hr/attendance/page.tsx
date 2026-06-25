@@ -1132,12 +1132,11 @@ export default function AttendancePage() {
           {/* Clock cluster on top, quick-action pills below it. */}
           <div className="flex flex-col gap-4">
 
-            {/* Clock / button / totals cluster (on top) */}
-            <div className="w-fit">
-          {/* Clock + date + totals (left) and the clock-in/out button (right). */}
-          <div className="flex flex-wrap items-start gap-5">
+            {/* Full-width top row: clock+date, total hours, and the clock-in/out
+                button spread across the panel — no empty space on the right. */}
+            <div className="flex flex-wrap items-start justify-between gap-6">
 
-            {/* Left column */}
+            {/* Clock + date */}
             <div className="flex flex-col gap-1 shrink-0">
               {/* Clock box */}
               <div className="bg-slate-50 dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg px-3 py-2 min-w-[148px]">
@@ -1156,21 +1155,21 @@ export default function AttendancePage() {
               <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400" suppressHydrationWarning>
                 {clock ? clock.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "2-digit", month: "short", year: "numeric" }) : ""}
               </p>
+            </div>
 
-              {/* Total hours — two compact stat chips, evenly split */}
-              <div className="mt-2">
-                <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase tracking-widest font-bold mb-1.5">
-                  TOTAL HOURS <Info size={10} strokeWidth={2} />
+            {/* Total hours — two compact stat chips (middle group) */}
+            <div className="shrink-0">
+              <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase tracking-widest font-bold mb-1.5">
+                TOTAL HOURS <Info size={10} strokeWidth={2} />
+              </div>
+              <div className="flex gap-2">
+                <div className="rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-1.5 min-w-[84px]">
+                  <p className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1">Effective</p>
+                  <p className="text-[13px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
                 </div>
-                <div className="flex gap-2">
-                  <div className="flex-1 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-2.5 py-1.5">
-                    <p className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1">Effective</p>
-                    <p className="text-[13px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
-                  </div>
-                  <div className="flex-1 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-2.5 py-1.5">
-                    <p className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1">Gross</p>
-                    <p className="text-[13px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
-                  </div>
+                <div className="rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-1.5 min-w-[84px]">
+                  <p className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1">Gross</p>
+                  <p className="text-[13px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
                 </div>
               </div>
             </div>
@@ -1361,28 +1360,24 @@ export default function AttendancePage() {
                 </div>
               )}
 
-              {/* Quick-action pills — compact 2×2 grid below the clock-in/out
-                  button. Sized to match the button height so the cluster reads
-                  as one clean, formatted block. */}
-              <div className="grid grid-cols-2 gap-1.5 mt-2">
-                {[
-                  ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
-                  { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
-                  { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
-                  { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
-                ].map(({ label, Icon, onClick }) => (
-                  <button key={label} onClick={onClick}
-                    className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3 text-[11.5px] font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap transition-colors hover:border-[#008CFF]/40 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.04]">
-                    <Icon size={13} strokeWidth={1.9} className="shrink-0 text-[#008CFF]" />
-                    {label}
-                  </button>
-                ))}
-              </div>
-
             </div>
           </div>
 
-            </div>{/* end clock cluster */}
+          {/* Full-width quick-action row — 4 across, fills the panel width */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 border-t border-slate-100 dark:border-white/[0.06] pt-4">
+            {[
+              ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
+              { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
+              { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
+              { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
+            ].map(({ label, Icon, onClick }) => (
+              <button key={label} onClick={onClick}
+                className="flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap transition-colors hover:border-[#008CFF]/40 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.04]">
+                <Icon size={13} strokeWidth={1.9} className="shrink-0 text-[#008CFF]" />
+                {label}
+              </button>
+            ))}
+          </div>
           </div>{/* end actions stack */}
         </div>{/* end Panel 3 */}
       </div>{/* end 3-panel header */}
