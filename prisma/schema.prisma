@@ -1452,6 +1452,25 @@ model AttendanceSession {
   @@index([attendanceId])
 }
 
+/// Append-only log of every biometric door-OPEN (entry) scan from the terminal,
+/// including mid-day re-entries from break / washroom that do NOT affect
+/// clock-in/out or worked hours. Surfaced only to managers / HR / CEO /
+/// developers as an entry audit. Standalone (no relations) so it can never
+/// touch the attendance hours math; queried by userId + scannedAt range.
+model DoorEntry {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  /// Convenience link to the day's Attendance row when one already exists at
+  /// scan time (null for the day's very first scan, which creates it after).
+  attendanceId Int?
+  scannedAt    DateTime
+  source       String   @default("device")
+  createdAt    DateTime @default(now())
+
+  @@index([userId, scannedAt])
+  @@index([attendanceId])
+}
+
 // ═══════════════════════════════════════════════════════
 // HR MODULE — Leave Management
 // ═══════════════════════════════════════════════════════
