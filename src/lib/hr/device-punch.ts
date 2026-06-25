@@ -103,7 +103,19 @@ export async function recordDevicePunch(opts: { employeeNo: string; at: Date; ch
       return { action: "clock_out", userId, status, totalMinutes };
     }
 
-    // ── CHECK IN (or plain scan) → open a session ──
+    // ── CHECK IN (or plain scan) ──
+    // Log EVERY entry scan to the door-entry audit: the day's first clock-in
+    // AND every mid-day re-entry from break / washroom. Purely additive — it
+    // does NOT touch the clock-in/out or worked-hours logic below (those keep
+    // working on first-in / last-out exactly as before). Surfaced only to
+    // managers / HR / CEO / developers. attendanceId links to today's row when
+    // it already exists (null on the very first scan, which creates it next).
+    await tx.$executeRawUnsafe(
+      `INSERT INTO "DoorEntry" ("userId","attendanceId","scannedAt","source") VALUES ($1,$2,$3,$4)`,
+      userId, existing?.id ?? null, at, "device",
+    );
+
+    // → then open / resume a session exactly as before
     if (open) return { action: "noop", userId, note: "already clocked in (re-entry ignored)" };
     if (!existing) {
       const status = await statusAtPunch(userId, at);

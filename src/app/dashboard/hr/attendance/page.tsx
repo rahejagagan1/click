@@ -1951,6 +1951,23 @@ export default function AttendancePage() {
                                         );
                                       })}
                                     </div>
+                                    {/* Door entries — every mid-day door-open scan (break /
+                                        washroom returns). Only present in the payload for
+                                        managers / HR / CEO / devs, so this never renders for a
+                                        regular employee viewing their own attendance. */}
+                                    {Array.isArray((rec as any).doorEntries) && (rec as any).doorEntries.length > 0 && (
+                                      <>
+                                        <p className="mt-2 border-t border-slate-200/60 dark:border-white/[0.06] pt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Door Entries</p>
+                                        <div className="mt-1 flex flex-wrap gap-x-2.5 gap-y-1 tabular-nums">
+                                          {((rec as any).doorEntries as Array<{ scannedAt: string }>).map((d, i) => (
+                                            <span key={i} className="inline-flex items-center gap-1 text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
+                                              <ArrowDownLeft size={12} strokeWidth={2.4} className="shrink-0 text-[#008CFF]" />
+                                              {fmtT(d.scannedAt)}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </>
+                                    )}
                                   </div>
                                 ) : (
                                   <span
