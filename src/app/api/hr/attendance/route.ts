@@ -113,12 +113,18 @@ export async function GET(req: NextRequest) {
     const istDateKey = (d: Date) => new Date(d).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
     const doorByDate = new Map<string, Array<{ scannedAt: Date; source: string }>>();
     if (canSeeDoor) {
-      // Range covers the requested window AND today (so today's entries show
-      // even while browsing a past month). +2d absorbs the IST/UTC offset.
-      const doorHi = new Date(Math.max(toDate.getTime(), Date.now()) + 2 * 24 * 3600 * 1000);
+      // fromDate / toDate are UTC-midnight stamps of the first / last IST days
+      // in range. A scan's UTC instant can land up to 5.5h on either side of
+      // its IST calendar day, so widen the SQL window a full day on each side
+      // (and through today, so today's entries show even while browsing a past
+      // month). istDateKey below is the source of truth for which day each
+      // entry attaches to — over-fetched days bucket to dates with no record
+      // and are ignored — so this guarantees no boundary entry is dropped.
+      const doorLo = new Date(fromDate.getTime() - 24 * 3600 * 1000);
+      const doorHi = new Date(Math.max(toDate.getTime(), Date.now()) + 24 * 3600 * 1000);
       const doorRows = await prisma.$queryRawUnsafe<Array<{ scannedAt: Date; source: string }>>(
         `SELECT "scannedAt", "source" FROM "DoorEntry" WHERE "userId" = $1 AND "scannedAt" >= $2 AND "scannedAt" < $3 ORDER BY "scannedAt" ASC`,
-        targetUserId, fromDate, doorHi,
+        targetUserId, doorLo, doorHi,
       );
       for (const d of doorRows) {
         const k = istDateKey(d.scannedAt);
