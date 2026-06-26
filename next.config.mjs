@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-    // Optimize large library imports for smaller bundles. lucide-react is
-    // imported on nearly every page — tree-shaking it (vs. pulling the whole
-    // icon set) meaningfully shrinks per-route JS.
+    // Optimize large library imports for smaller bundles. lucide-react is used
+    // with named icon imports across the app — barrel-optimizing it ships only
+    // the icons actually referenced instead of pulling the whole icon set.
     experimental: {
         optimizePackageImports: ["recharts", "lru-cache", "lucide-react"],
     },

@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import ScoreCard from "@/components/scores/score-card";
+// Lazy: ScoreCard pulls in recharts — defer it out of the initial bundle.
+const ScoreCard = dynamic(() => import("@/components/scores/score-card"), { ssr: false });
 
 // Helper: get last month in "YYYY-MM" format
 function getLastMonth(): string {

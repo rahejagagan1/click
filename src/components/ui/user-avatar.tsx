@@ -28,6 +28,10 @@ export default function UserAvatar({ name, src, size = "md", gradient = "from-sl
             <img
                 src={src}
                 alt={name}
+                // Lazy + async decode: avatars render dozens-per-page in people /
+                // home / team lists; eager loading fired all of them at once.
+                loading="lazy"
+                decoding="async"
                 className={`${sizeClass} ${roundedClass} object-cover ${className}`}
                 onError={() => setFailed(true)}
                 referrerPolicy="no-referrer"

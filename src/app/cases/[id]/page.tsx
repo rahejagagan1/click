@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
 import { getStatusColor, getChannelColor, formatDate, formatNumber } from "@/lib/utils";
 import SubtaskTimeline from "@/components/cases/subtask-timeline";
-import YoutubeStats from "@/components/cases/youtube-stats";
+// Lazy: YoutubeStats renders recharts — keep it off the case-detail initial load.
+const YoutubeStats = dynamic(() => import("@/components/cases/youtube-stats"), { ssr: false });
 
 function extractVideoId(url: string): string | null {
     if (!url) return null;
