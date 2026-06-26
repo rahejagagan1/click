@@ -728,6 +728,11 @@ export default function EngagePage() {
   // general workforce. content text serves as the caption.
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  // Surfaces a failed POST (403 Forbidden / 413 too-large / 500 / network)
+  // under the composer. Previously submit() ignored the response, so a failed
+  // post silently cleared the box with zero feedback — it just looked like
+  // "I can't post anything."
+  const [postError, setPostError] = useState<string | null>(null);
   // Wider HR-admin tier so role=admin + special_access also see the
   // composer, matching the rest of the dashboard's gate. Everyone
   // else (regular employees) sees the per-channel YouTube view
@@ -756,17 +761,35 @@ export default function EngagePage() {
   const submit = async () => {
     if (!content.trim() && !mediaUrl) return;
     setSubmitting(true);
-    await fetch("/api/hr/engage/posts", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        content,
-        type: feedTab,
-        praiseToId: praiseToId || undefined,
-        mediaUrl: mediaUrl || undefined,
-      }),
-    });
-    setContent(""); setPraiseToId(""); setMediaUrl(null); setSubmitting(false);
-    mutate("/api/hr/engage/posts");
+    setPostError(null);
+    try {
+      const res = await fetch("/api/hr/engage/posts", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content,
+          type: feedTab,
+          praiseToId: praiseToId || undefined,
+          mediaUrl: mediaUrl || undefined,
+        }),
+      });
+      if (!res.ok) {
+        // Keep the composer contents so the user can retry without retyping.
+        const data = await res.json().catch(() => ({} as any));
+        setPostError(
+          res.status === 403 ? "You don't have permission to post here."
+          : res.status === 413 ? "That image is too large — please use a smaller one."
+          : data?.error || `Couldn't post (error ${res.status}). Please try again.`,
+        );
+        return;
+      }
+      // Success — clear the composer and refresh the feed.
+      setContent(""); setPraiseToId(""); setMediaUrl(null);
+      mutate("/api/hr/engage/posts");
+    } catch {
+      setPostError("Network error — please check your connection and try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -867,6 +890,9 @@ export default function EngagePage() {
               <p className="mt-1 text-[11.5px] text-red-600">{mediaError}</p>
             )}
 
+            {postError && (
+              <p className="mt-2 text-[12px] font-medium text-red-600">{postError}</p>
+            )}
             {(content || mediaUrl) && (
               <div className="flex justify-end mt-2">
                 <button onClick={submit} disabled={submitting}

@@ -65,6 +65,26 @@ export function isLeadershipOrHR(user: ClientUser): boolean {
 }
 
 /**
+ * Who may see the biometric DOOR-ENTRY log (every mid-day door-open / re-entry
+ * scan) on the attendance views. Regular employees see attendance exactly as
+ * before — NO entry log. It's an oversight tool, so it's visible to:
+ *   • Developers, CEO, the HR team (isLeadershipOrHR)
+ *   • People-managers — anyone who manages a team: VIEW_MY_TEAM / MANAGE_HR
+ *     permission holders, report-owner roles (isPickableAsManager), and the
+ *     org-tree lead / sub-lead tiers.
+ * Used to gate BOTH the API payload (server) and the tooltip render (client),
+ * so the data never even reaches a regular employee's browser.
+ */
+export function canViewDoorEntryLog(user: ClientUser): boolean {
+  if (!user) return false;
+  if (isLeadershipOrHR(user)) return true;
+  if (hasResolvedPermissions(user) && (can(user, "VIEW_MY_TEAM") || can(user, "MANAGE_HR"))) return true;
+  if (isPickableAsManager(user)) return true;
+  if (user.orgLevel === "lead" || user.orgLevel === "sub_lead") return true;
+  return false;
+}
+
+/**
  * Tighter gate for an EMPLOYEE'S DOCUMENTS tab — PAN / Aadhaar /
  * education / employee letters are PII. Per explicit HR policy
  * (2026-06-05): only the profile owner, anyone in the HR team

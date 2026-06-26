@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
+import { canViewDoorEntryLog } from "@/lib/access";
 import { istTodayDateOnly } from "@/lib/ist-date";
 
 // GET /api/hr/attendance?userId=X&month=2026-04
@@ -12,6 +13,9 @@ export async function GET(req: NextRequest) {
     const self = session!.user as any;
     const { searchParams } = new URL(req.url);
     const isAdmin = isHRAdmin(self);
+    // Door-entry log (mid-day re-entries) is gated to managers / HR / CEO /
+    // devs. Regular employees never receive it in the payload.
+    const canSeeDoor = canViewDoorEntryLog(self);
 
     // Resolve dbId — fallback to DB lookup by email if session doesn't have it
     let myDbId = self.dbId;
@@ -101,10 +105,39 @@ export async function GET(req: NextRequest) {
       return { totalMinutes, status };
     }
 
+    // Door-entry audit — every mid-day door-open / re-entry scan. Gated to
+    // managers / HR / CEO / devs (regular employees never receive it, so it
+    // can't leak client-side). Queried by userId + scannedAt — NOT attendanceId,
+    // because the day's first scan logs with a null attendanceId — and bucketed
+    // by IST calendar date so it lines up with each attendance row's `date`.
+    const istDateKey = (d: Date) => new Date(d).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const doorByDate = new Map<string, Array<{ scannedAt: Date; source: string }>>();
+    if (canSeeDoor) {
+      // fromDate / toDate are UTC-midnight stamps of the first / last IST days
+      // in range. A scan's UTC instant can land up to 5.5h on either side of
+      // its IST calendar day, so widen the SQL window a full day on each side
+      // (and through today, so today's entries show even while browsing a past
+      // month). istDateKey below is the source of truth for which day each
+      // entry attaches to — over-fetched days bucket to dates with no record
+      // and are ignored — so this guarantees no boundary entry is dropped.
+      const doorLo = new Date(fromDate.getTime() - 24 * 3600 * 1000);
+      const doorHi = new Date(Math.max(toDate.getTime(), Date.now()) + 24 * 3600 * 1000);
+      const doorRows = await prisma.$queryRawUnsafe<Array<{ scannedAt: Date; source: string }>>(
+        `SELECT "scannedAt", "source" FROM "DoorEntry" WHERE "userId" = $1 AND "scannedAt" >= $2 AND "scannedAt" < $3 ORDER BY "scannedAt" ASC`,
+        targetUserId, doorLo, doorHi,
+      );
+      for (const d of doorRows) {
+        const k = istDateKey(d.scannedAt);
+        if (!doorByDate.has(k)) doorByDate.set(k, []);
+        doorByDate.get(k)!.push({ scannedAt: d.scannedAt, source: d.source });
+      }
+    }
+
     const recordsWithSessions = records.map((r) => {
       const sess = sessionsByAttendance.get(r.id) ?? [];
       const fixed = rederive(sess, r.status);
-      return { ...r, totalMinutes: fixed.totalMinutes, status: fixed.status, sessions: sess };
+      const base = { ...r, totalMinutes: fixed.totalMinutes, status: fixed.status, sessions: sess };
+      return canSeeDoor ? { ...base, doorEntries: doorByDate.get(istDateKey(r.date)) ?? [] } : base;
     });
 
     // Summary rolls up the re-derived status (not the stale DB column) so
@@ -165,6 +198,7 @@ export async function GET(req: NextRequest) {
         totalMinutes: fixed.totalMinutes,
         status: fixed.status,
         sessions: todaySessions,
+        ...(canSeeDoor ? { doorEntries: doorByDate.get(istDateKey(todayRecord.date)) ?? [] } : {}),
       };
     }
 
