@@ -1,13 +1,16 @@
 "use client";
 
 import useSWR from "swr";
+import dynamic from "next/dynamic";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { fetcher, swrConfig } from "@/lib/swr";
 import SummaryCards from "@/components/dashboard/summary-cards";
 import CasesTable from "@/components/dashboard/cases-table";
-import RatingChart from "@/components/dashboard/rating-chart";
+// Lazy: keeps recharts out of the dashboard landing bundle — only fetched
+// when the rating chart actually renders.
+const RatingChart = dynamic(() => import("@/components/dashboard/rating-chart"), { ssr: false });
 import { DashboardSkeleton } from "@/components/ui/loading-spinner";
 
 export default function DashboardPage() {

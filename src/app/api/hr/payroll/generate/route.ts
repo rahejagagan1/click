@@ -108,6 +108,46 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // ── Batched per-employee reads ──────────────────────────────────
+    // Previously the loop ran 4 attendance.count() + 1 leave findMany per
+    // employee (5×N serial queries against a 5-connection pool). Replace
+    // with one grouped attendance count and one batched leave fetch,
+    // bucketed per user into Maps the loop reads as O(1) lookups.
+    const userIds = activeStructures.map(s => s.userId);
+
+    const attnGroups = userIds.length ? await prisma.attendance.groupBy({
+      by: ["userId", "status"],
+      where: {
+        userId: { in: userIds },
+        date:   { gte: firstDay, lte: lastDay },
+        status: { in: ["absent", "lop", "half_day", "half_day_lop"] },
+      },
+      _count: { _all: true },
+    }) : [];
+    const attnByUser = new Map<number, { absent: number; lop: number; half_day: number; half_day_lop: number }>();
+    for (const g of attnGroups) {
+      const bucket = attnByUser.get(g.userId) ?? { absent: 0, lop: 0, half_day: 0, half_day_lop: 0 };
+      (bucket as Record<string, number>)[g.status] = g._count._all;
+      attnByUser.set(g.userId, bucket);
+    }
+
+    const unpaidLeaveRows = userIds.length ? await prisma.leaveApplication.findMany({
+      where: {
+        userId:   { in: userIds },
+        status:   "approved",
+        fromDate: { lte: lastDay },
+        toDate:   { gte: firstDay },
+        leaveType: { isPaid: false },
+      },
+      select: { userId: true, fromDate: true, toDate: true },
+    }) : [];
+    const unpaidLeavesByUser = new Map<number, { fromDate: Date; toDate: Date }[]>();
+    for (const lv of unpaidLeaveRows) {
+      const arr = unpaidLeavesByUser.get(lv.userId) ?? [];
+      arr.push({ fromDate: lv.fromDate, toDate: lv.toDate });
+      unpaidLeavesByUser.set(lv.userId, arr);
+    }
+
     let totalNetPay = 0, totalCTC = 0, skipped = 0;
 
     const payslipsData: any[] = [];
@@ -122,23 +162,13 @@ export async function POST(req: NextRequest) {
       //   half_day     = 0.5   (worked only a half day)
       //   half_day_lop = 0.5   (auto-LOP: missed clock-out not regularized in time)
       // on_leave is paid here; unpaid leaves are netted out separately below.
-      const [absentCount, lopCount, halfDayCount, halfDayLopCount] = await Promise.all([
-        prisma.attendance.count({ where: { userId: s.userId, date: { gte: firstDay, lte: lastDay }, status: "absent" } }),
-        prisma.attendance.count({ where: { userId: s.userId, date: { gte: firstDay, lte: lastDay }, status: "lop" } }),
-        prisma.attendance.count({ where: { userId: s.userId, date: { gte: firstDay, lte: lastDay }, status: "half_day" } }),
-        prisma.attendance.count({ where: { userId: s.userId, date: { gte: firstDay, lte: lastDay }, status: "half_day_lop" } }),
-      ]);
+      const attn = attnByUser.get(s.userId);
+      const absentCount     = attn?.absent ?? 0;
+      const lopCount        = attn?.lop ?? 0;
+      const halfDayCount    = attn?.half_day ?? 0;
+      const halfDayLopCount = attn?.half_day_lop ?? 0;
 
-      const unpaidLeaves = await prisma.leaveApplication.findMany({
-        where: {
-          userId:   s.userId,
-          status:   "approved",
-          fromDate: { lte: lastDay },
-          toDate:   { gte: firstDay },
-          leaveType: { isPaid: false },
-        },
-        select: { fromDate: true, toDate: true },
-      });
+      const unpaidLeaves = unpaidLeavesByUser.get(s.userId) ?? [];
       let unpaidLeaveDays = 0;
       for (const lv of unpaidLeaves) {
         const start = lv.fromDate > firstDay ? lv.fromDate : firstDay;
@@ -230,13 +260,21 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    await Promise.all(payslipsData.map(p =>
-      prisma.payslip.upsert({
-        where:  { userId_month_year: { userId: p.userId, month: p.month, year: p.year } },
-        create: p as any,
-        update: p as any,
-      })
-    ));
+    // Upsert in small concurrency-bounded batches: a full-company run would
+    // otherwise fire N upserts at once and exhaust the 5-connection pool
+    // (surplus blocks on pool_timeout → P2024). 4-at-a-time keeps the pool
+    // healthy while still parallelising.
+    const UPSERT_CHUNK = 4;
+    for (let i = 0; i < payslipsData.length; i += UPSERT_CHUNK) {
+      const batch = payslipsData.slice(i, i + UPSERT_CHUNK);
+      await Promise.all(batch.map(p =>
+        prisma.payslip.upsert({
+          where:  { userId_month_year: { userId: p.userId, month: p.month, year: p.year } },
+          create: p as any,
+          update: p as any,
+        })
+      ));
+    }
 
     const updated = await prisma.payrollRun.update({
       where: { id: runId },

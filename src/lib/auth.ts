@@ -2,10 +2,108 @@ import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import prisma from "@/lib/prisma";
+import { cachedFetch } from "@/lib/cache";
 import { getPermissionsByEmail, getScorecardFunctionByEmail, hasDesignationReportGrantsByEmail } from "@/lib/permissions/resolve-permissions";
 
 const useDevLogin = process.env.NEXT_PUBLIC_DEV_LOGIN === "true";
 const developerEmails = (process.env.DEVELOPER_EMAILS || "").split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
+
+// ── Per-user auth bundle ────────────────────────────────────────────
+// Everything the JWT + session callbacks need about a user, fetched in
+// as few round-trips as possible and cached briefly. Both `jwt()` AND
+// `session()` run on EVERY `getServerSession()` call (JWT strategy), so
+// without this each authenticated request paid ~6 DB queries — and a
+// single dashboard page fires ~10 parallel API calls. The short TTL
+// keeps role / permission / onboarding changes propagating within ~30s
+// (preserving the previous "resolved per request" behaviour) while
+// collapsing the DB load to ~one fetch per user per 30s, shared across
+// both callbacks and all concurrent requests in that window.
+const AUTH_BUNDLE_TTL_MS = 30_000;
+
+type AuthBundle = {
+    dbId: number | null;
+    role: string | null;
+    orgLevel: string | null;
+    clickupUserId: string | null;
+    teamCapsule: unknown;
+    dbName: string | null;
+    department: string | null;
+    businessUnit: string | null;
+    onboardingPending: boolean;
+    permissions: string[];
+    scorecardFunction: string | null;
+    hasReportGrants: boolean;
+    isDeveloper: boolean;
+};
+
+const userBundleSelect = {
+    id: true,
+    clickupUserId: true,
+    role: true,
+    orgLevel: true,
+    teamCapsule: true,
+    name: true,
+    // department drives HR-department permissions; businessUnit is the
+    // brand membership (NB Media / YT Labs) the sidebar gates tiles on.
+    employeeProfile: { select: { department: true, businessUnit: true } },
+} as const;
+
+async function loadAuthBundle(email: string): Promise<AuthBundle> {
+    const isDev = developerEmails.includes(email.toLowerCase());
+
+    // Identity + profile in one round-trip.
+    let dbUser = await prisma.user.findUnique({
+        where: { email },
+        select: userBundleSelect,
+    });
+
+    // Dev credentials login: ensure a DB row exists so APIs get dbId/orgLevel.
+    if (!dbUser && useDevLogin) {
+        dbUser = await prisma.user.upsert({
+            where: { email },
+            create: { email, name: "Dev Admin", role: "admin", orgLevel: "ceo" },
+            update: {},
+            select: userBundleSelect,
+        }).catch(() => null);
+    }
+
+    // Onboarding flag (recent column, raw so a stale client still works) +
+    // designation grants — all independent, so resolve in parallel.
+    const [onboardingRows, permissions, scorecardFunction, hasReportGrants] = await Promise.all([
+        prisma.$queryRawUnsafe<{ onboardingPending: boolean }[]>(
+            `SELECT "onboardingPending" FROM "User" WHERE email = $1 LIMIT 1`,
+            email,
+        ).catch(() => [] as { onboardingPending: boolean }[]),
+        getPermissionsByEmail(email),
+        getScorecardFunctionByEmail(email),
+        hasDesignationReportGrantsByEmail(email),
+    ]);
+
+    const profile = (dbUser as { employeeProfile?: { department?: string | null; businessUnit?: string | null } } | null)?.employeeProfile;
+
+    return {
+        dbId: dbUser?.id ?? null,
+        role: dbUser?.role ?? (useDevLogin ? "admin" : null),
+        // Developer emails get full visibility via special_access (NOT CEO —
+        // that title stays with the real CEO account).
+        orgLevel: isDev ? "special_access" : (dbUser?.orgLevel ?? null),
+        clickupUserId: dbUser?.clickupUserId != null ? dbUser.clickupUserId.toString() : null,
+        teamCapsule: (dbUser as { teamCapsule?: unknown } | null)?.teamCapsule ?? null,
+        dbName: dbUser?.name ?? null,
+        department: profile?.department ?? null,
+        businessUnit: profile?.businessUnit ?? null,
+        onboardingPending: !!onboardingRows?.[0]?.onboardingPending,
+        permissions,
+        scorecardFunction,
+        hasReportGrants,
+        isDeveloper: isDev || useDevLogin,
+    };
+}
+
+/** Cached per-user auth bundle (30s TTL). Key is lowercased email. */
+function getAuthBundle(email: string): Promise<AuthBundle> {
+    return cachedFetch(`auth:bundle:${email.toLowerCase()}`, () => loadAuthBundle(email), AUTH_BUNDLE_TTL_MS);
+}
 
 export const authOptions: NextAuthOptions = {
     providers: useDevLogin
@@ -87,149 +185,47 @@ export const authOptions: NextAuthOptions = {
             return true;
         },
 
-        async jwt({ token, user }) {
+        async jwt({ token }) {
+            // Refresh the middleware-critical claims (proxy.ts reads
+            // token.orgLevel / token.isDeveloper to gate admin routes) from the
+            // 30s-cached bundle — at most one DB fetch per user per 30s rather
+            // than one on every request.
             if (token.email) {
                 try {
-                    const dbUser = await prisma.user.findUnique({
-                        where: { email: token.email },
-                        select: { id: true, role: true, orgLevel: true },
-                    });
-                    if (dbUser) {
-                        token.dbId = dbUser.id;
-                        token.role = dbUser.role;
-                        token.orgLevel = dbUser.orgLevel;
-                    }
-                    if (developerEmails.includes(token.email.toLowerCase())) {
-                        token.isDeveloper = true;
-                        // Full visibility but NOT CEO — CEO is a named title
-                        // reserved for the actual CEO account in the DB.
-                        token.orgLevel = "special_access";
-                    }
-                } catch {}
-            }
-            // Credentials dev login: middleware reads JWT only — must match session `isDeveloper` for developer-only routes (e.g. YouTube dashboard).
-            if (useDevLogin && token.email) {
-                (token as any).isDeveloper = true;
+                    const b = await getAuthBundle(token.email);
+                    (token as any).dbId = b.dbId;
+                    (token as any).role = b.role;
+                    (token as any).orgLevel = b.orgLevel;
+                    (token as any).isDeveloper = b.isDeveloper;
+                } catch { /* keep prior token claims on transient DB failure */ }
             }
             return token;
         },
 
         async session({ session }) {
-            if (session.user?.email) {
+            const email = session.user?.email;
+            if (email) {
                 try {
-                    const dbUser = await prisma.user.findUnique({
-                        where: { email: session.user.email },
-                        select: {
-                            id: true,
-                            clickupUserId: true,
-                            role: true,
-                            orgLevel: true,
-                            teamCapsule: true,
-                            name: true,
-                            profilePictureUrl: true,
-                            // Department drives HR-department permissions (e.g. who
-                            // may back-date a leave) for staff whose orgLevel isn't
-                            // hr_manager but who sit in an HR department.
-                            // businessUnit is the brand membership (NB Media /
-                            // YT Labs) used by the sidebar to gate brand-specific
-                            // tiles (e.g. YouTube is NB Media-only).
-                            employeeProfile: { select: { department: true, businessUnit: true } },
-                        },
-                    });
-                    // Onboarding flag — fetched via raw SQL so this still works
-                    // when the typed Prisma client is stale (column is recent).
-                    let onboardingPending = false;
-                    try {
-                        const rows = await prisma.$queryRawUnsafe<{ onboardingPending: boolean }[]>(
-                            `SELECT "onboardingPending" FROM "User" WHERE email = $1 LIMIT 1`,
-                            session.user.email,
-                        );
-                        onboardingPending = !!rows?.[0]?.onboardingPending;
-                    } catch { /* column may not exist yet — treat as false */ }
-                    if (dbUser) {
-                        (session.user as any).dbId = dbUser.id;
-                        (session.user as any).role = dbUser.role;
-                        (session.user as any).orgLevel = dbUser.orgLevel;
-                        (session.user as any).teamCapsule = dbUser.teamCapsule;
-                        (session.user as any).dbName = dbUser.name;
-                        (session.user as any).onboardingPending = onboardingPending;
-                        (session.user as any).clickupUserId = dbUser.clickupUserId != null
-                            ? dbUser.clickupUserId.toString()
-                            : null;
-                        (session.user as any).department = (dbUser as any).employeeProfile?.department ?? null;
-                        (session.user as any).businessUnit = (dbUser as any).employeeProfile?.businessUnit ?? null;
-                    } else if (useDevLogin && session.user.email) {
-                        // Dev credentials login: ensure a DB row exists so APIs (e.g. feedback) get dbId + orgLevel.
-                        // No synthetic clickupUserId — it's nullable and will be backfilled by the ClickUp sync if/when
-                        // this email appears in the ClickUp workspace.
-                        const devRow = await prisma.user.upsert({
-                            where: { email: session.user.email },
-                            create: {
-                                email: session.user.email,
-                                name: session.user.name || "Dev Admin",
-                                profilePictureUrl: session.user.image ?? null,
-                                role: "admin",
-                                orgLevel: "ceo",
-                            },
-                            update: {
-                                name: session.user.name || undefined,
-                                profilePictureUrl: session.user.image ?? undefined,
-                            },
-                            select: {
-                                id: true,
-                                clickupUserId: true,
-                                role: true,
-                                orgLevel: true,
-                                teamCapsule: true,
-                                name: true,
-                                profilePictureUrl: true,
-                            },
-                        }).catch(() => null);
-                        if (devRow) {
-                            (session.user as any).dbId = devRow.id;
-                            (session.user as any).role = devRow.role;
-                            (session.user as any).orgLevel = devRow.orgLevel;
-                            (session.user as any).teamCapsule = devRow.teamCapsule;
-                            (session.user as any).dbName = devRow.name;
-                            (session.user as any).clickupUserId = devRow.clickupUserId != null
-                                ? devRow.clickupUserId.toString()
-                                : null;
-                        }
-                    }
-                    // Developer access from env — full visibility via
-                    // special_access, NOT CEO (CEO title stays with the real CEO).
-                    if (session.user?.email && developerEmails.includes(session.user.email.toLowerCase())) {
-                        (session.user as any).isDeveloper = true;
-                        (session.user as any).orgLevel = "special_access";
-                    }
-                    // Dev credentials login: same developer-only UI as production DEVELOPER_EMAILS (YouTube dashboard, etc.)
-                    if (useDevLogin && session.user?.email) {
-                        (session.user as any).isDeveloper = true;
-                    }
+                    const b = await getAuthBundle(email);
+                    const u = session.user as any;
+                    u.dbId = b.dbId;
+                    u.role = b.role;
+                    u.orgLevel = b.orgLevel;
+                    u.teamCapsule = b.teamCapsule;
+                    u.dbName = b.dbName;
+                    u.onboardingPending = b.onboardingPending;
+                    u.clickupUserId = b.clickupUserId;
+                    u.department = b.department;
+                    u.businessUnit = b.businessUnit;
+                    // Designation-based permissions for can() (writer/editor/qa/
+                    // researcher/manager scorecardFunction + report grants).
+                    u.permissions = b.permissions;
+                    u.scorecardFunction = b.scorecardFunction;
+                    u.hasReportGrants = b.hasReportGrants;
+                    u.isDeveloper = b.isDeveloper;
                 } catch {
                     if (useDevLogin) (session.user as any).role = "admin";
                 }
-            }
-            // Designation-based permissions for can(). Resolved per-request (no
-            // cookie bloat); a permission change takes effect on the next session
-            // fetch without re-login. Empty pre-migration or for users without a
-            // designation — can() then relies on the isDeveloper override only.
-            if (session.user?.email) {
-                // Resolved together so the three designation lookups share one
-                // round-trip's worth of latency rather than three serial awaits.
-                // scorecardFunction (writer/editor/qa/researcher/manager) from the
-                // user's designation replaces role-based branching in the
-                // rating/report/KPI engine (additive for now). hasReportGrants lets
-                // canSeeReports open the reports hub for a designation that holds
-                // per-owner report grants without the blanket VIEW_REPORTS.
-                const [permissions, scorecardFunction, hasReportGrants] = await Promise.all([
-                    getPermissionsByEmail(session.user.email),
-                    getScorecardFunctionByEmail(session.user.email),
-                    hasDesignationReportGrantsByEmail(session.user.email),
-                ]);
-                (session.user as any).permissions = permissions;
-                (session.user as any).scorecardFunction = scorecardFunction;
-                (session.user as any).hasReportGrants = hasReportGrants;
             }
             return session;
         },

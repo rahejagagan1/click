@@ -74,11 +74,10 @@ const JD_SANITIZE: sanitizeHtml.IOptions = {
   },
 };
 
-// Public JDs change rarely (only when HR edits / republishes), so serve a
-// cached render and revalidate every 5 minutes instead of querying the DB and
-// re-rendering on every visit. ISR: the page is built on first hit, then
-// served from cache. Safe here because the page reads only `params.slug` — no
-// cookies / headers / searchParams — so it's eligible for static generation.
+// ISR: the public JD page reads only `params.slug` (no cookies/headers), so it
+// can be statically rendered and revalidated every 5 minutes instead of running
+// a DB query + full render on every hit. This is the highest-traffic public page
+// (re-applies the perf fix from commit d596d34, which was lost off this branch).
 export const revalidate = 300;
 
 type PublicJob = {

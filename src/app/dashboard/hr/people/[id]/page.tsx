@@ -3513,6 +3513,10 @@ function EmployeeTimePanel({
   // three on-behalf POST endpoints (regularize, wfh, leaves). State below
   // is HR-admin only — guarded at each call site by isHRAdmin.
   const [menuOpenKey, setMenuOpenKey]   = useState<string | null>(null);
+  // Anchor rect of the open kebab button — the menu is portaled to <body> with
+  // fixed positioning so it escapes the attendance table's overflow-hidden card
+  // (otherwise the dropdown gets clipped, esp. on the last/only row).
+  const [menuRect, setMenuRect]         = useState<DOMRect | null>(null);
   const [wfhOpen,     setWfhOpen]       = useState(false);
   // Tab inside the Apply-Leave-on-behalf modal — switches between
   // submitting a Leave application and granting WFH for the same user
@@ -3603,8 +3607,17 @@ function EmployeeTimePanel({
       const t = e.target as HTMLElement | null;
       if (t && !t.closest("[data-hr-menu]")) setMenuOpenKey(null);
     };
+    // The menu is position:fixed (portaled), so it would drift on scroll —
+    // close it instead. `true` catches scrolls on inner scroll containers.
+    const dismiss = () => setMenuOpenKey(null);
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    window.addEventListener("scroll", dismiss, true);
+    window.addEventListener("resize", dismiss);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      window.removeEventListener("scroll", dismiss, true);
+      window.removeEventListener("resize", dismiss);
+    };
   }, [menuOpenKey]);
 
   const openWfhFor = (rec: any) => {
@@ -4433,17 +4446,30 @@ function EmployeeTimePanel({
                           <button
                             type="button"
                             data-hr-menu
-                            onClick={() => setMenuOpenKey(menuOpenKey === dateOnly ? null : dateOnly)}
+                            onClick={(e) => {
+                              if (menuOpenKey === dateOnly) { setMenuOpenKey(null); return; }
+                              setMenuRect(e.currentTarget.getBoundingClientRect());
+                              setMenuOpenKey(dateOnly);
+                            }}
                             title="HR actions"
                             aria-label="Open HR actions menu"
                             className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 transition hover:bg-sky-50 hover:text-sky-600"
                           >
                             <MoreVertical className="h-4 w-4" />
                           </button>
-                          {menuOpenKey === dateOnly ? (
+                          {menuOpenKey === dateOnly && menuRect && typeof document !== "undefined" ? createPortal(
                             <div
                               data-hr-menu
-                              className="absolute right-2 top-10 z-40 min-w-[160px] rounded-md border border-slate-200 bg-white shadow-lg text-left text-[12.5px]"
+                              className="fixed z-[100] min-w-[160px] rounded-md border border-slate-200 bg-white shadow-lg text-left text-[12.5px]"
+                              style={(() => {
+                                const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+                                const left = Math.max(8, menuRect.right - 160);
+                                // Flip up when the button sits low in the viewport
+                                // so the menu never spills below the fold.
+                                return menuRect.bottom > vh * 0.65
+                                  ? { bottom: vh - menuRect.top + 4, left }
+                                  : { top: menuRect.bottom + 4, left };
+                              })()}
                             >
                               <button
                                 type="button"
@@ -4473,7 +4499,8 @@ function EmployeeTimePanel({
                               >
                                 Leave
                               </button>
-                            </div>
+                            </div>,
+                            document.body,
                           ) : null}
                         </>
                       ) : null}

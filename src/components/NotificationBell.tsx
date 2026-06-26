@@ -82,7 +82,7 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const btnRef   = useRef<HTMLButtonElement>(null);
-  const { data } = useSWR("/api/hr/notifications?limit=10", fetcher, { refreshInterval: 30_000 });
+  const { data } = useSWR("/api/hr/notifications?limit=10", fetcher, { refreshInterval: 60_000, revalidateOnFocus: false });
   const items = (data?.items as any[]) || [];
   const unread = data?.unreadCount ?? 0;
 
