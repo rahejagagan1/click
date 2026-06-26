@@ -160,7 +160,7 @@ export default function Sidebar() {
     });
 
     // Inbox badge count
-    const { data: inboxData } = useSWR("/api/hr/inbox", fetcher, { refreshInterval: 30000 });
+    const { data: inboxData } = useSWR("/api/hr/inbox", fetcher, { refreshInterval: 60000, revalidateOnFocus: false });
 
     // Probation-review badge — the caller's reports whose probation is ending
     // and still need their feedback/recommendation.
@@ -174,7 +174,7 @@ export default function Sidebar() {
     const { data: approvalsSummary } = useSWR<{ byTab: Record<string, number>; total: number }>(
         isHRAdmin ? "/api/hr/approvals/summary" : null,
         fetcher,
-        { refreshInterval: 30000 }
+        { refreshInterval: 60000, revalidateOnFocus: false }
     );
     const approvalsCount = approvalsSummary?.total ?? 0;
 

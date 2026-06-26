@@ -74,7 +74,11 @@ const JD_SANITIZE: sanitizeHtml.IOptions = {
   },
 };
 
-export const dynamic = "force-dynamic";
+// ISR: the public JD page reads only `params.slug` (no cookies/headers), so it
+// can be statically rendered and revalidated every 5 minutes instead of running
+// a DB query + full render on every hit. This is the highest-traffic public page
+// (re-applies the perf fix from commit d596d34, which was lost off this branch).
+export const revalidate = 300;
 
 type PublicJob = {
   id: number;

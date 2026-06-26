@@ -211,6 +211,9 @@ model User {
   @@index([managerId])
   @@index([inlineManagerId])
   @@index([designationId])
+  // Pervasive `where: { isActive: true }` across org / managers / employees /
+  // payroll / attendance / scores — was an unindexed seq scan.
+  @@index([isActive])
 }
 
 // Effective-dated reporting-manager change. HR schedules a future
@@ -620,6 +623,9 @@ model MonthlyRating {
 
   @@unique([userId, month, roleType])
   @@index([month])
+  // Leaderboard + dashboard/company filter by roleType and order by
+  // overallRating desc — previously no supporting index.
+  @@index([roleType, overallRating])
 }
 
 model SyncLog {

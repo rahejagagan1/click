@@ -72,44 +72,46 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Inline manager — fetched via raw SQL so the route works even when
-    // `prisma generate` hasn't picked up the new column yet (same
-    // pattern we use for businessUnit / lastReminderAt).
-    let inlineManager: { id: number; name: string; profilePictureUrl: string | null; role: string } | null = null;
-    try {
-      const rows = await prisma.$queryRawUnsafe<Array<{ id: number; name: string; profilePictureUrl: string | null; role: string }>>(
+    // These auxiliary lookups are all keyed only by `id` and independent of
+    // each other, so they run in ONE parallel batch instead of ~6 serial
+    // round-trips (this is a hot profile page). Each keeps its own fallback
+    // so a stale typed client on the VPS (missing a recent column) can't
+    // fail the others. Raw SQL is used where `prisma generate` may be stale.
+    const sUserBadge = session?.user as any;
+    // Reuse callerId (resolved above) instead of a second resolveUserId call.
+    const isSelfForBadge = callerId === id;
+    const canSeeExitBadge =
+      isSelfForBadge ||
+      sUserBadge?.orgLevel === "hr_manager" ||
+      sUserBadge?.isDeveloper === true;
+
+    const today = istTodayDateOnly();
+
+    type DesignationRow = { designationId: number | null; designationLabel: string | null };
+    type ExitRow = {
+      id: number; status: string; exitType: string;
+      resignationDate: string | null; lastWorkingDay: string | null; noticePeriodDays: number | null;
+    };
+
+    const [inlineManager, designationRow, extended, pip, todayAtt, activeExit] = await Promise.all([
+      // Inline manager.
+      prisma.$queryRawUnsafe<Array<{ id: number; name: string; profilePictureUrl: string | null; role: string }>>(
         `SELECT m.id, m.name, m."profilePictureUrl", m.role::text AS role
            FROM "User" u
            LEFT JOIN "User" m ON m.id = u."inlineManagerId"
           WHERE u.id = $1 AND m.id IS NOT NULL`,
         id,
-      );
-      inlineManager = rows[0] ?? null;
-    } catch (e) {
-      console.warn("[people GET] inlineManager lookup failed:", e);
-    }
+      ).then(rows => rows[0] ?? null).catch(e => { console.warn("[people GET] inlineManager lookup failed:", e); return null; }),
 
-    // designationId + its RBAC designation label via raw SQL — the stale typed
-    // client may omit the column. designationLabel is what the header shows.
-    let designationId: number | null = null;
-    let designationLabel: string | null = null;
-    try {
-      const drows = await prisma.$queryRawUnsafe<Array<{ designationId: number | null; designationLabel: string | null }>>(
+      // designationId + its RBAC designation label (header label).
+      prisma.$queryRawUnsafe<Array<DesignationRow>>(
         `SELECT u."designationId", d."label" AS "designationLabel"
            FROM "User" u LEFT JOIN "Designation" d ON d."id" = u."designationId"
           WHERE u."id" = $1`, id,
-      );
-      designationId = drows[0]?.designationId ?? null;
-      designationLabel = drows[0]?.designationLabel ?? null;
-    } catch { /* column/table missing → null */ }
+      ).then(rows => rows[0] ?? null).catch(() => null),
 
-    // Extended onboarding fields — fetched via raw SQL so the GET
-    // returns them even when `prisma generate` is stale on the VPS.
-    // Merged onto profile below so EditProfilePanel can read them
-    // through the same `user.profile.foo` shape it uses for everything.
-    let extended: Record<string, unknown> = {};
-    try {
-      const erows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      // Extended onboarding fields (merged onto profile below).
+      prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
         `SELECT "secondaryJobTitle", "legalEntity", "jobLocation",
                 "probationPolicy", "probationStartDate", "probationEndDate", "probationReminderSentAt", "probationConfirmedAt",
                 "educationDetails",
@@ -129,36 +131,42 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
            FROM "EmployeeProfile"
           WHERE "userId" = $1`,
         id,
-      );
-      extended = erows[0] ?? {};
-    } catch (e) {
-      console.warn("[people GET] extended fields lookup failed:", e);
-    }
+      ).then(rows => rows[0] ?? {}).catch(e => { console.warn("[people GET] extended fields lookup failed:", e); return {} as Record<string, unknown>; }),
 
-    // PIP fields in a SEPARATE query so a missing column (e.g. before the
-    // performance_plan migration has applied) can't take down the rest of
-    // the extended profile fields above.
-    let pip: Record<string, unknown> = {};
-    try {
-      const prows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      // PIP fields — SEPARATE query so a missing column (pre performance_plan
+      // migration) can't take down the extended fields above.
+      prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
         `SELECT "pipStartedAt", "pipEndDate", "pipReason", "pipReportedById"
            FROM "EmployeeProfile" WHERE "userId" = $1`,
         id,
-      );
-      pip = prows[0] ?? {};
-    } catch (e) {
-      console.warn("[people GET] pip fields lookup failed:", e);
-    }
+      ).then(rows => rows[0] ?? {}).catch(e => { console.warn("[people GET] pip fields lookup failed:", e); return {} as Record<string, unknown>; }),
 
-    // Today's attendance + any currently-open session — drives the "IN /
-    // OUT / OFFLINE" presence badge in the page header. Re-sum the
-    // session secs so an open session counts as "IN" even if the parent
-    // Attendance.totalMinutes is stale from a prior clock-out.
-    const today = istTodayDateOnly();
-    const todayAtt = await prisma.attendance.findUnique({
-      where: { userId_date: { userId: id, date: today } },
-      select: { status: true, clockIn: true, clockOut: true, totalMinutes: true },
-    });
+      // Today's attendance — drives the IN / OUT / OFFLINE presence badge.
+      prisma.attendance.findUnique({
+        where: { userId_date: { userId: id, date: today } },
+        select: { status: true, clockIn: true, clockOut: true, totalMinutes: true },
+      }).catch(() => null),
+
+      // Exit row (notice-period / exited badge) — only for HR team,
+      // developers, and the profile owner (mirrors canViewExitBadge).
+      canSeeExitBadge
+        ? prisma.$queryRawUnsafe<Array<ExitRow>>(
+            `SELECT id, status, "exitType",
+                    to_char("resignationDate", 'YYYY-MM-DD') AS "resignationDate",
+                    to_char("lastWorkingDay",  'YYYY-MM-DD') AS "lastWorkingDay",
+                    "noticePeriodDays"
+               FROM "EmployeeExit"
+              WHERE "userId" = $1
+              LIMIT 1`,
+            id,
+          ).then(rows => rows[0] ?? null).catch(e => { console.warn("[people GET] activeExit lookup failed:", e); return null; })
+        : Promise.resolve(null as ExitRow | null),
+    ]);
+
+    const designationId: number | null = designationRow?.designationId ?? null;
+    const designationLabel: string | null = designationRow?.designationLabel ?? null;
+
+    // Open-session check depends on todayAtt, so it stays after the batch.
     let hasOpenSession = false;
     if (todayAtt) {
       const open = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
@@ -167,46 +175,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           WHERE a."userId" = $1 AND a."date" = $2 AND s."clockOut" IS NULL
           LIMIT 1`,
         id, today,
-      );
+      ).catch(() => []);
       hasOpenSession = open.length > 0;
-    }
-
-    // Exit row, if any. Drives the "On Notice Period" / "Exited"
-    // badge on the profile header. Visible only to HR team
-    // (orgLevel=hr_manager), developers, and the profile owner —
-    // mirrors canViewExitBadge in src/lib/access.ts. CEO and
-    // special_access / role=admin are intentionally excluded.
-    // Only one EmployeeExit row exists per user (userId is @unique).
-    const sUserBadge = session?.user as any;
-    const isSelfForBadge = (await resolveUserId(session)) === id;
-    const canSeeExitBadge =
-      isSelfForBadge ||
-      sUserBadge?.orgLevel === "hr_manager" ||
-      sUserBadge?.isDeveloper === true;
-    let activeExit: {
-      id: number;
-      status: string;
-      exitType: string;
-      resignationDate: string | null;
-      lastWorkingDay: string | null;
-      noticePeriodDays: number | null;
-    } | null = null;
-    if (canSeeExitBadge) {
-      try {
-        const exitRows = await prisma.$queryRawUnsafe<Array<any>>(
-          `SELECT id, status, "exitType",
-                  to_char("resignationDate", 'YYYY-MM-DD') AS "resignationDate",
-                  to_char("lastWorkingDay",  'YYYY-MM-DD') AS "lastWorkingDay",
-                  "noticePeriodDays"
-             FROM "EmployeeExit"
-            WHERE "userId" = $1
-            LIMIT 1`,
-          id,
-        );
-        if (exitRows[0]) activeExit = exitRows[0];
-      } catch (e) {
-        console.warn("[people GET] activeExit lookup failed:", e);
-      }
     }
 
     // Reshape to what the detail page reads.
