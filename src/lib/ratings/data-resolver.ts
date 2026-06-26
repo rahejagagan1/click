@@ -591,13 +591,13 @@ export async function resolveDataContext(
         const [yearStr, monthStr] = monthPeriod.split("-");
         const mStart = new Date(Date.UTC(parseInt(yearStr), parseInt(monthStr) - 1, 1));
 
-        teamQualityScores = await resolveTeamQualityScores(userId, mStart, roleType);
-        const teamRatingResult = await resolveTeamManagerRatings(userId, monthPeriod, teamManagerStarKeys);
-        teamManagerRatingsJson = teamRatingResult.ratingsJson;
-        teamManagerRatingCount = teamRatingResult.count;
-
-        try {
-            cmDirectReportCount = await prisma.user.count({
+        // These three are independent of each other — resolve in parallel
+        // instead of three serial round-trips (per CM/PM user). The count
+        // keeps its own fallback so a failure there still yields 0.
+        const [teamQ, teamRatingResult, directReportCount] = await Promise.all([
+            resolveTeamQualityScores(userId, mStart, roleType),
+            resolveTeamManagerRatings(userId, monthPeriod, teamManagerStarKeys),
+            prisma.user.count({
                 where: {
                     managerId: userId,
                     isActive: true,
@@ -606,11 +606,16 @@ export async function resolveDataContext(
                             ? "researcher"
                             : { in: ["writer", "editor"] },
                 },
-            });
-        } catch (err) {
-            console.error(`[DataResolver] cmDirectReportCount failed for user ${userId}:`, err);
-            cmDirectReportCount = 0;
-        }
+            }).catch((err) => {
+                console.error(`[DataResolver] cmDirectReportCount failed for user ${userId}:`, err);
+                return 0;
+            }),
+        ]);
+
+        teamQualityScores = teamQ;
+        teamManagerRatingsJson = teamRatingResult.ratingsJson;
+        teamManagerRatingCount = teamRatingResult.count;
+        cmDirectReportCount = directReportCount;
     }
 
     let rmPipelineRtc: number | null = null;
