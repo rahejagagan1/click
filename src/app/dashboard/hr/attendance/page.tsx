@@ -352,11 +352,13 @@ function DayLocationPin({ inRaw }: { inRaw?: string | null }) {
 // ── Timeline bar (same proportional grid as Keka) ────────────────────────────
 // Shift-progress bar: fills from 0 → 100% of a 9h shift based on elapsed minutes.
 // Orange < 50% · blue < 100% · green once the full 9h is met.
-function TimelineBar({ liveMins, firstIn, lastOut, isOpen }: {
+function TimelineBar({ liveMins, firstIn, lastOut, isOpen, sessions, isTodayRow }: {
   liveMins: number;
   firstIn?: Date | null;
   lastOut?: Date | null;
   isOpen?: boolean; // true when there's still an open session (no final clock-out yet)
+  sessions?: Array<{ clockIn: string | Date; clockOut?: string | Date | null }>;
+  isTodayRow?: boolean;
 }) {
   if (!liveMins || liveMins <= 0) return <span className="text-[11px] text-slate-400">—</span>;
   const SHIFT_LEN = 540; // 9h in minutes
@@ -389,15 +391,46 @@ function TimelineBar({ liveMins, firstIn, lastOut, isOpen }: {
           white card, soft shadow, slate text, coloured status dot.
           Positioned above the bar, centred horizontally. Pointer-events
           are disabled so it never blocks clicks on the bar / pin. */}
-      {tooltip && (
+      {(tooltip || (sessions && sessions.length > 1)) && (
         <div
           role="tooltip"
-          className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-20 whitespace-nowrap rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0a1526] px-2.5 py-1.5 text-[11.5px] font-medium text-slate-700 dark:text-slate-200 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+          className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-20 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0a1526] px-2.5 py-1.5 text-[11.5px] font-medium text-slate-700 dark:text-slate-200 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150"
         >
-          <div className="flex items-center gap-1.5">
-            <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
-            <span>Logged In <span className="font-semibold tabular-nums">{inLabel}</span> <span className="opacity-50">–</span> <span className="font-semibold tabular-nums">{outLabel}</span></span>
-          </div>
+          {sessions && sessions.length > 1 ? (
+            // Multiple clock-in/out segments → list each in/out so HR can see
+            // the breaks, not just the overall span.
+            <div className="space-y-1 whitespace-nowrap">
+              <div className="mb-0.5 flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
+                <span className="font-semibold">{sessions.length} sessions</span>
+              </div>
+              {sessions.map((s, i) => {
+                const open = !s.clockOut;
+                return (
+                  <div key={i} className="flex items-center gap-1 tabular-nums">
+                    <ArrowDownLeft size={12} strokeWidth={2.4} className="shrink-0 text-emerald-500" />
+                    <span className="font-semibold">{fmt(new Date(s.clockIn))}</span>
+                    <span className="px-0.5 opacity-40">–</span>
+                    {open && isTodayRow ? (
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">now</span>
+                    ) : open ? (
+                      <span className="font-semibold text-amber-600 dark:text-amber-400">missed</span>
+                    ) : (
+                      <>
+                        <ArrowUpRight size={12} strokeWidth={2.4} className="shrink-0 text-rose-500" />
+                        <span className="font-semibold">{fmt(new Date(s.clockOut!))}</span>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
+              <span>Logged In <span className="font-semibold tabular-nums">{inLabel}</span> <span className="opacity-50">–</span> <span className="font-semibold tabular-nums">{outLabel}</span></span>
+            </div>
+          )}
           {/* Little notch pointing down at the bar. Two stacked
               elements give it a border so it matches the card's edge. */}
           <span className="absolute left-1/2 -translate-x-1/2 -bottom-[5px] w-2.5 h-2.5 rotate-45 bg-white dark:bg-[#0a1526] border-r border-b border-slate-200 dark:border-white/10" />
@@ -1026,7 +1059,7 @@ export default function AttendancePage() {
       </div>
 
       {/* ── 3-Panel Header ── */}
-      <div className="grid grid-cols-3 bg-white dark:bg-[#001529] border-b border-slate-200 dark:border-white/[0.06]">
+      <div className="grid grid-cols-2 bg-white dark:bg-[#001529] border-b border-slate-200 dark:border-white/[0.06]">
 
         {/* ── Panel 1: Attendance Stats ── */}
         <div className="p-5 border-r border-slate-200 dark:border-white/[0.06]">
@@ -1092,113 +1125,48 @@ export default function AttendancePage() {
           </div>
         </div>
 
-        {/* ── Panel 2: Timings ── */}
-        <div className="p-5 border-r border-slate-200 dark:border-white/[0.06]">
-          <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-3">Timings</h3>
-
-          {/* Week day circles — past days render darker + slightly blurred
-              so "done" days visually recede and the eye lands on today. */}
-          <div className="flex items-center gap-1.5 mb-4">
-            {days.map((d, i) => {
-              const isToday = i === todayDow;
-              const isPast  = i < todayDow;
-              return (
-                <div
-                  key={i}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold transition-all ${
-                    isToday
-                      ? "bg-[#00BCD4] text-white shadow-sm shadow-[#00BCD4]/40"
-                      : isPast
-                      ? "bg-slate-300 dark:bg-[#05101c] text-slate-500 dark:text-slate-600 border border-slate-300 dark:border-white/[0.03] opacity-60 blur-[0.4px]"
-                      : "bg-slate-100 dark:bg-white/[0.07] text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-white/[0.06]"
-                  }`}
-                >{d}</div>
-              );
-            })}
-          </div>
-
-          {/* Shift info */}
-          <p className="text-[12px] font-medium text-slate-600 dark:text-slate-400 mb-3">Today ({fmtShiftTime(SHIFT_START)} - {fmtShiftTime(SHIFT_END)})</p>
-
-          {/* Timeline progress bar: grey track, yellow half-day bands where the
-              user missed a half, cyan fill = elapsed / 9 h. Progress starts at 0
-              and grows in real time from clock-in, independent of whether the
-              session falls inside or outside the 9:00–18:00 window. */}
-          {(() => {
-            const elapsedPct = todayRec?.clockIn
-              ? Math.min(100, (elapsedMins / SHIFT_LEN) * 100)
-              : 0;
-            return (
-              <div className="relative w-full h-3 bg-slate-100 dark:bg-white/[0.07] rounded-full overflow-hidden">
-                {missedFirstHalf && (
-                  <div className="absolute inset-y-0 bg-amber-400/80" style={{ left: "0%", width: `${MID_PCT}%` }} />
-                )}
-                {missedSecondHalf && (
-                  <div className="absolute inset-y-0 bg-amber-400/80" style={{ left: `${MID_PCT}%`, width: `${100 - MID_PCT}%` }} />
-                )}
-                {elapsedPct > 0 && (
-                  <div className="absolute inset-y-0 left-0 bg-[#00BCD4] transition-all duration-500" style={{ width: `${elapsedPct}%` }} />
-                )}
-                {/* Subtle 2 PM marker so the half-day boundary is readable. */}
-                <div className="absolute inset-y-0 w-px bg-slate-300/70 dark:bg-white/10" style={{ left: `${MID_PCT}%` }} />
-              </div>
-            );
-          })()}
-
-          <div className="flex items-center justify-between mt-2">
-            <p className="text-[11px] font-medium text-slate-500 dark:text-[#00BCD4]" suppressHydrationWarning>
-              Duration: {todayRec?.clockIn ? elapsedStr : "0h 0m"}
-            </p>
-            <div className="flex items-center gap-1 text-[11px] text-slate-500" suppressHydrationWarning>
-              <Clock3 size={11} strokeWidth={1.75} />
-              {remainingLabel}
-            </div>
-          </div>
-        </div>
-
         {/* ── Panel 3: Actions ── */}
         <div className="p-5">
-          <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-3">Actions</h3>
+          <h3 className="text-[13px] font-bold text-slate-800 dark:text-white mb-4">Actions</h3>
 
-          {/* 2-col layout: left = clock+date+totals, right = button+links+elapsed */}
-          <div className="flex items-start gap-3">
+          {/* Clock cluster on top, quick-action pills below it. */}
+          <div className="flex flex-col gap-4">
 
-            {/* Left column */}
-            <div className="flex flex-col gap-1 shrink-0">
-              {/* Clock box */}
-              <div className="bg-slate-50 dark:bg-[#0a1526] border border-slate-200 dark:border-white/[0.08] rounded-lg px-3 py-2 min-w-[148px]">
-                <p className="font-bold text-slate-800 dark:text-white leading-none whitespace-nowrap" suppressHydrationWarning
-                  style={{ fontSize: "1.25rem", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
-                  {clock
-                    ? clock.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: !use24 }).replace(/\s?(am|pm)/i, "")
-                    : "--:--:--"}
-                  {!use24 && clock && (
-                    <span className="text-[12px] font-bold ml-1.5">{clock.getHours() >= 12 ? "PM" : "AM"}</span>
-                  )}
-                </p>
-              </div>
+            {/* Top row aligned to the 4-pill grid below: clock in the first
+                column, totals centred in the middle, button right-aligned in
+                the last column. Fills the width without flinging items apart. */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 items-stretch">
 
-              {/* Date */}
-              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400" suppressHydrationWarning>
+            {/* Tile 1 — current time + date */}
+            <div className="flex flex-col justify-center rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-2">
+              <p className="font-bold text-slate-800 dark:text-white leading-none whitespace-nowrap" suppressHydrationWarning
+                style={{ fontSize: "1.15rem", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>
+                {clock
+                  ? clock.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: !use24 }).replace(/\s?(am|pm)/i, "")
+                  : "--:--:--"}
+                {!use24 && clock && (
+                  <span className="text-[11px] font-bold ml-1.5">{clock.getHours() >= 12 ? "PM" : "AM"}</span>
+                )}
+              </p>
+              <p className="mt-1 text-[10.5px] font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap" suppressHydrationWarning>
                 {clock ? clock.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "2-digit", month: "short", year: "numeric" }) : ""}
               </p>
-
-              {/* Total hours */}
-              <div className="mt-1">
-                <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase tracking-widest font-bold mb-1">
-                  TOTAL HOURS <Info size={10} strokeWidth={2} />
-                </div>
-                <p className="text-[12px] text-slate-600 dark:text-slate-400 leading-5">
-                  Effective: <span className="font-bold text-slate-800 dark:text-white">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</span>
-                </p>
-                <p className="text-[12px] text-slate-600 dark:text-slate-400 leading-5">
-                  Gross: <span className="font-bold text-slate-800 dark:text-white">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</span>
-                </p>
-              </div>
             </div>
 
-            {/* Right column: button → quick links → elapsed */}
-            <div className="flex flex-col gap-2">
+            {/* Tile 2 — effective hours */}
+            <div className="flex flex-col justify-center rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-2">
+              <p className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1.5">Effective <Info size={9} strokeWidth={2} /></p>
+              <p className="text-[15px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
+            </div>
+
+            {/* Tile 3 — gross hours */}
+            <div className="flex flex-col justify-center rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-2">
+              <p className="text-[9px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1.5">Gross</p>
+              <p className="text-[15px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
+            </div>
+
+            {/* Tile 4 — clock-in/out button, centred in the last column */}
+            <div className="flex flex-col gap-2 items-center justify-center">
               {/* Location permission warning — attendance requires location. */}
               {!todayRec?.clockIn && locPerm === "denied" && (
                 <div className="max-w-xs px-3 py-2 rounded-md bg-red-50 text-red-700 border border-red-200 text-[11px] leading-snug">
@@ -1383,23 +1351,25 @@ export default function AttendancePage() {
                 </div>
               )}
 
-              {/* Quick links */}
-              <div className="flex flex-col gap-1.5">
-                {[
-                  ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
-                  { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
-                  { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
-                  { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
-                ].map(({ label, Icon, onClick }) => (
-                  <button key={label} onClick={onClick}
-                    className="flex items-center gap-1.5 text-[12px] font-medium text-[#008CFF] hover:underline w-fit">
-                    <Icon size={12} strokeWidth={1.75} />
-                    {label}
-                  </button>
-                ))}
             </div>
           </div>
-        </div>
+
+          {/* Full-width quick-action row — 4 across, fills the panel width */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 border-t border-slate-100 dark:border-white/[0.06] pt-4">
+            {[
+              ...(canApplyWfh ? [{ label: "Work From Home", Icon: Home, onClick: () => openForm("wfh") }] : []),
+              { label: "On Duty",           Icon: Briefcase,  onClick: () => openForm("on_duty")   },
+              { label: "Regularization",    Icon: ShieldCheck,onClick: () => { setSubTab("requests"); setReqType("punch"); setShowRegModal(true); } },
+              { label: "Apply Leave",       Icon: Coffee,     onClick: () => openForm("leave")     },
+            ].map(({ label, Icon, onClick }) => (
+              <button key={label} onClick={onClick}
+                className="flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0a1526] px-3 text-[12px] font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap transition-colors hover:border-[#008CFF]/40 hover:text-[#008CFF] hover:bg-[#008CFF]/[0.04]">
+                <Icon size={13} strokeWidth={1.9} className="shrink-0 text-[#008CFF]" />
+                {label}
+              </button>
+            ))}
+          </div>
+          </div>{/* end actions stack */}
         </div>{/* end Panel 3 */}
       </div>{/* end 3-panel header */}
 
@@ -1805,6 +1775,8 @@ export default function AttendancePage() {
                                     return null;
                                   })()}
                                   isOpen={!!sessions.find((s) => !s.clockOut)}
+                                  sessions={sessions}
+                                  isTodayRow={isTodayRow}
                                 />
                                 <DayLocationPin
                                   inRaw={sessions[0]?.clockInLocation ?? rec.location}
@@ -1979,6 +1951,23 @@ export default function AttendancePage() {
                                         );
                                       })}
                                     </div>
+                                    {/* Door entries — every mid-day door-open scan (break /
+                                        washroom returns). Only present in the payload for
+                                        managers / HR / CEO / devs, so this never renders for a
+                                        regular employee viewing their own attendance. */}
+                                    {Array.isArray((rec as any).doorEntries) && (rec as any).doorEntries.length > 0 && (
+                                      <>
+                                        <p className="mt-2 border-t border-slate-200/60 dark:border-white/[0.06] pt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Door Entries</p>
+                                        <div className="mt-1 flex flex-wrap gap-x-2.5 gap-y-1 tabular-nums">
+                                          {((rec as any).doorEntries as Array<{ scannedAt: string }>).map((d, i) => (
+                                            <span key={i} className="inline-flex items-center gap-1 text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
+                                              <ArrowDownLeft size={12} strokeWidth={2.4} className="shrink-0 text-[#008CFF]" />
+                                              {fmtT(d.scannedAt)}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </>
+                                    )}
                                   </div>
                                 ) : (
                                   <span
