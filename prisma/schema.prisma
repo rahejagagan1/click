@@ -1496,6 +1496,20 @@ model CapsuleFieldPlan {
   updatedAt        DateTime @default(now())
 }
 
+/// Run history for the Missing Fields tool — one row per "Run check". Standalone,
+/// raw-SQL accessed. `results` stores the flagged cases so a past run can be reviewed.
+model MissingFieldsRun {
+  id        Int      @id @default(autoincrement())
+  runAt     DateTime @default(now())
+  runByName String?
+  scanned   Int      @default(0)
+  flagged   Int      @default(0)
+  summary   Json     @default("{}")
+  results   Json     @default("[]")
+
+  @@index([runAt])
+}
+
 /// Single-row global config for the Missing Fields tool (id is always 1).
 /// activeListIds = the ProductionList ids the tool manages + scans ("capsules").
 /// inScopeStatuses = the Case.status strings a run should scan (everything else
