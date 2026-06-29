@@ -552,7 +552,7 @@ export default function HRHomePage() {
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex gap-5">
                     {balances.slice(0, 2).map((b: any, i: number) => {
-                      const avail = Math.max(0, (b.totalDays || 0) - (b.usedDays || 0));
+                      const avail = Math.max(0, (b.totalDays || 0) - (b.usedDays || 0) - (b.pendingDays || 0));
                       return (
                         <div key={b.id} className="flex flex-col items-center gap-1.5">
                           <BalanceRing avail={avail} total={b.totalDays || 1} color={["#34b3d9", "#84d7ef"][i % 2]} />
