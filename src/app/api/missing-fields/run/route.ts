@@ -75,10 +75,25 @@ export async function GET() {
 
     results.sort((a, b) => b.missing.length - a.missing.length);
 
-    return NextResponse.json({
-      results,
-      summary: { scanned: active.length, flagged: results.length, noRule, excludedTerminal: cases.length - active.length },
-    });
+    const summary = { scanned: active.length, flagged: results.length, noRule, excludedTerminal: cases.length - active.length };
+
+    // Record this run in history (so the tool can show past runs with dates).
+    // Best-effort — never fail the run if the insert hiccups.
+    let runId: number | null = null;
+    let runAt: string | null = null;
+    try {
+      const u = session!.user as any;
+      const ins = await prisma.$queryRawUnsafe<Array<{ id: number; runAt: Date }>>(
+        `INSERT INTO "MissingFieldsRun" ("runByName","scanned","flagged","summary","results")
+           VALUES ($1,$2,$3,$4::jsonb,$5::jsonb) RETURNING id, "runAt"`,
+        u?.name ?? u?.dbName ?? null, summary.scanned, summary.flagged, JSON.stringify(summary), JSON.stringify(results),
+      );
+      runId = ins[0]?.id ?? null;
+      runAt = ins[0]?.runAt ? new Date(ins[0].runAt).toISOString() : null;
+      await prisma.$executeRawUnsafe(`DELETE FROM "MissingFieldsRun" WHERE id NOT IN (SELECT id FROM "MissingFieldsRun" ORDER BY "runAt" DESC LIMIT 50)`);
+    } catch { /* history is best-effort */ }
+
+    return NextResponse.json({ results, summary, runId, runAt });
   } catch (e) {
     return serverError(e, "GET /api/missing-fields/run");
   }
