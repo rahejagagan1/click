@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
 import { canUseFeedback, isAdmin as isAdminFn, isHRAdmin as isHRAdminFn, canSeeReports as canSeeReportsFn } from "@/lib/access";
 import { can } from "@/lib/permissions/can";
+import { canUseMissingFields } from "@/lib/missing-fields/access";
 
 import { userCanAccessYoutubeDashboard } from "@/lib/youtube-dashboard-access";
 import { Users, BarChart2, BarChart3, User, MessageCircle, Settings, Home, Building2, LayoutDashboard, FileText, Star, PlayCircle, CircleDollarSign, Wrench, Target, Package, Box, ClipboardList } from "lucide-react";
@@ -35,7 +36,7 @@ const NAV_ITEMS = [
     { label: "YouTube",   href: "/dashboard/youtube",  icon: icon(PlayCircle),     youtubeDashboardAccess: true                              },
     { label: "Feedback",  href: "/dashboard/feedback", icon: icon(MessageCircle)                                                             },
     { label: "Tools",     href: "/dashboard/tools",    icon: icon(Wrench)                                                                    },
-    { label: "Missing Fields", href: "/dashboard/missing-fields", icon: icon(ClipboardList),                              developerOnly: true },
+    { label: "Missing Fields", href: "/dashboard/missing-fields", icon: icon(ClipboardList),                              missingFieldsAccess: true },
     { label: "Admin",     href: "/admin",              icon: icon(Settings),       adminOnly: true                                           },
 ];
 
@@ -122,6 +123,8 @@ export default function Sidebar() {
         if ((item as any).managersOnly && !canSeeReports) return false;
         if ((item as any).adminOnly && !isAdmin) return false;
         if ((item as any).developerOnly && user?.isDeveloper !== true) return false;
+        // Missing Fields: developers + allowlisted designations (Executive Assistant).
+        if ((item as any).missingFieldsAccess && !canUseMissingFields(user)) return false;
         return true;
     });
 
