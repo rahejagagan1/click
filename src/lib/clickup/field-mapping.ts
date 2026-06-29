@@ -113,6 +113,12 @@ export const CUSTOM_FIELD_MAP: Record<string, { dbColumn: string; type: string; 
         type: "number",
         parseAs: "integer",
     },
+    // H1. Video Duration — whole-minute number on the task.
+    "078391c1-a0f9-40bc-9f8c-e3073e5dbb23": {
+        dbColumn: "videoDuration",
+        type: "number",
+        parseAs: "integer",
+    },
 
     // ═══ VIDEO QA PHASE ═══
     "d9e2cd06-8d50-4fda-bffd-d55a84816118": {
@@ -166,6 +172,13 @@ export const CUSTOM_FIELD_MAP: Record<string, { dbColumn: string; type: string; 
         dbColumn: "uploadDate",
         type: "date",
         parseAs: "timestamp",
+    },
+    // X. Youtube video link — also handled by a name-match special-case in
+    // sync-engine.ts; mapped here by UUID too so it's explicit + cross-checks clean.
+    "7994db7e-6b67-40eb-bb7c-96f2c6892fa6": {
+        dbColumn: "youtubeVideoUrl",
+        type: "url",
+        parseAs: "string",
     },
 
     // ═══ HELPER / FORMULA FIELDS ═══

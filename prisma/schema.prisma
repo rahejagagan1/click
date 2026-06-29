@@ -427,6 +427,7 @@ model Case {
 
   videoGcStartDate      DateTime?
   videoChangesCount     Int?
+  videoDuration         Int?
   qaVideoMeetingDate    DateTime?
   editorQualityScore    Int?
   editorDeliveryTime    String?
@@ -1475,6 +1476,35 @@ model DoorEntry {
 
   @@index([userId, scannedAt])
   @@index([attendanceId])
+}
+
+// ═══════════════════════════════════════════════════════
+// MISSING FIELDS — ClickUp case data-quality flagging
+// ═══════════════════════════════════════════════════════
+
+/// Per-"capsule" plan: which Case fields are mandatory for cases in a given
+/// ProductionList (the team calls each list a "capsule" — C1, C2, ...).
+/// requiredFields is a JSON array of field keys (Case column names from
+/// src/lib/missing-fields/catalog.ts). Standalone — no FK — so it's read/written
+/// via raw SQL (same approach as DoorEntry, avoids a prisma generate cycle).
+/// One row per production list.
+model CapsuleFieldPlan {
+  id               Int      @id @default(autoincrement())
+  productionListId Int      @unique
+  requiredFields   Json     @default("[]")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @default(now())
+}
+
+/// Single-row global config for the Missing Fields tool (id is always 1).
+/// activeListIds = the ProductionList ids the tool manages + scans ("capsules").
+/// inScopeStatuses = the Case.status strings a run should scan (everything else
+/// — rejected, published, etc. — is skipped).
+model MissingFieldsConfig {
+  id              Int      @id @default(autoincrement())
+  activeListIds   Json     @default("[]")
+  inScopeStatuses Json     @default("[]")
+  updatedAt       DateTime @default(now())
 }
 
 // ═══════════════════════════════════════════════════════
