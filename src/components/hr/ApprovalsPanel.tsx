@@ -129,7 +129,7 @@ function ApprovalCell({
     : "Awaiting";
 
   return (
-    <div className="min-w-[160px]">
+    <div className="min-w-[132px]">
       <div className="flex items-center gap-1.5">
         <span className={`w-1.5 h-1.5 rounded-full ${dotBg}`} />
         <span className={`text-[12px] font-semibold ${tone}`}>{label}</span>
@@ -590,7 +590,7 @@ export default function ApprovalsPanel({
   // picked. Approve / Reject expand grouped WFH-range leaders via
   // `_groupIds` so the action covers every underlying day.
   const bulkActionBar = picked.size > 0 ? (
-    <div className="flex items-center justify-between mb-3 rounded-lg border border-[#008CFF]/30 bg-[#008CFF]/[0.04] dark:bg-[#008CFF]/[0.08] px-4 py-2">
+    <div className="flex items-center justify-between mb-3 rounded-lg border border-[#008CFF]/30 bg-[#008CFF]/[0.04] dark:bg-[#008CFF]/[0.08] px-3 py-2">
       <span className="text-[12.5px] font-semibold text-slate-700 dark:text-slate-200">
         {picked.size} selected
       </span>
@@ -647,7 +647,7 @@ export default function ApprovalsPanel({
               <button
                 key={t.key}
                 onClick={() => { setTab(t.key); setPicked(new Set()); updateUrl(t.key); }}
-                className={`relative px-4 py-2 text-[12px] font-bold tracking-wider whitespace-nowrap transition-colors border-b-2 ${
+                className={`relative px-3 py-2 text-[12px] font-bold tracking-wider whitespace-nowrap transition-colors border-b-2 ${
                   active ? "border-[#008CFF] text-[#008CFF]"
                          : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
                 }`}
@@ -759,7 +759,7 @@ export default function ApprovalsPanel({
               <table className="w-full">
                 <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-[#0a1e3a]/95 backdrop-blur-sm">
                   <tr className="border-b border-slate-200 dark:border-white/[0.06]">
-                    <th className="px-4 py-2 text-left">
+                    <th className="px-3 py-2 text-left">
                       <input type="checkbox"
                         checked={filtered.length > 0 && filtered.every((r) => picked.has(r.id))}
                         onChange={toggleAllVisible}
@@ -771,7 +771,7 @@ export default function ApprovalsPanel({
                       // WFH / OD / Comp-off: two-stage L1 → L2.
                       : ["EMPLOYEE", tab === "comp_off" ? "WORKED DATE" : "DATE", "DETAILS", "REASON", "L1 APPROVAL", "L2 APPROVAL", "REQUEST STATUS"]
                     ).map((h) => (
-                      <th key={h} className="px-4 py-2 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
+                      <th key={h} className="px-3 py-2 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -827,14 +827,14 @@ export default function ApprovalsPanel({
                     };
                     return (
                       <tr key={`${r._kind ?? tab}-${r.id}`} className="border-b border-slate-100 dark:border-white/[0.04] hover:bg-slate-50/60 dark:hover:bg-white/[0.015]">
-                        <td className="px-4 py-2">
+                        <td className="px-3 py-2">
                           <input type="checkbox"
                             checked={picked.has(r.id)}
                             onChange={() => toggleRow(r.id)}
                             disabled={!canActOn(r)}
                             className="w-3.5 h-3.5 rounded border-slate-300 accent-[#008CFF] disabled:opacity-30" />
                         </td>
-                        <td className="px-4 py-2">
+                        <td className="px-3 py-2">
                           <div className="flex items-center gap-3">
                             <Avatar name={u.name || "?"} url={u.profilePictureUrl} size={32} />
                             <div className="min-w-0">
@@ -847,18 +847,18 @@ export default function ApprovalsPanel({
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-2 whitespace-nowrap">
+                        <td className="px-3 py-2 whitespace-nowrap">
                           <p className="text-[12.5px] text-slate-700 dark:text-slate-300">{dateCell}</p>
                           <p className="text-[10.5px] text-slate-400 mt-0.5">
                             <span className="font-semibold text-slate-500">Submitted</span> · {fmtDt(r.createdAt)}
                           </p>
                         </td>
-                        <td className="px-4 py-2 text-[12.5px] text-slate-700 dark:text-slate-300 whitespace-nowrap">{details}</td>
-                        <td className="px-4 py-2 text-[12.5px] text-slate-600 dark:text-slate-400 max-w-[260px] truncate" title={reason}>{reason}</td>
+                        <td className="px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-300 whitespace-nowrap">{details}</td>
+                        <td className="px-3 py-2 text-[12.5px] text-slate-600 dark:text-slate-400 max-w-[260px] truncate" title={reason}>{reason}</td>
 
                         {isTwoStage ? (
                           <>
-                            <td className="px-4 py-2 align-top">
+                            <td className="px-3 py-2 align-top">
                               <ApprovalCell
                                 stage="L1"
                                 row={stageRow}
@@ -868,7 +868,7 @@ export default function ApprovalsPanel({
                                 actioning={actioning}
                               />
                             </td>
-                            <td className="px-4 py-2 align-top">
+                            <td className="px-3 py-2 align-top">
                               <ApprovalCell
                                 stage="L2"
                                 row={stageRow}
@@ -878,15 +878,15 @@ export default function ApprovalsPanel({
                                 actioning={actioning}
                               />
                             </td>
-                            <td className="px-4 py-2"><StatusBadge status={r.status} /></td>
+                            <td className="px-3 py-2"><StatusBadge status={r.status} /></td>
                           </>
                         ) : (
                           <>
-                            <td className="px-4 py-2"><StatusBadge status={r.status} /></td>
-                            <td className="px-4 py-2 text-[12px] text-slate-600 dark:text-slate-400 max-w-[220px] truncate" title={r.approvalNote ?? ""}>
+                            <td className="px-3 py-2"><StatusBadge status={r.status} /></td>
+                            <td className="px-3 py-2 text-[12px] text-slate-600 dark:text-slate-400 max-w-[220px] truncate" title={r.approvalNote ?? ""}>
                               {r.approvalNote || <span className="text-slate-300">—</span>}
                             </td>
-                            <td className="px-4 py-2">
+                            <td className="px-3 py-2">
                               {canActOn(r) ? (
                                 <div className="flex items-center gap-1.5">
                                   <button
@@ -988,14 +988,14 @@ export default function ApprovalsPanel({
                 <table className="w-full">
                   <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-[#0a1e3a]/95 backdrop-blur-sm">
                     <tr className="border-b border-slate-200 dark:border-white/[0.06]">
-                      <th className="px-4 py-2 text-left">
+                      <th className="px-3 py-2 text-left">
                         <input type="checkbox"
                           checked={filtered.length > 0 && filtered.every((r) => picked.has(r.id))}
                           onChange={toggleAllVisible}
                           className="w-3.5 h-3.5 rounded border-slate-300 accent-[#008CFF]" />
                       </th>
                       {["EMPLOYEE","DEPARTMENT","LEAVE DATES","LEAVE TYPE","REASON","POC","L1 APPROVAL","L2 APPROVAL"].map((h) => (
-                        <th key={h} className="px-4 py-2 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
+                        <th key={h} className="px-3 py-2 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -1011,14 +1011,14 @@ export default function ApprovalsPanel({
 
                       return (
                         <tr key={r.id} className="border-b border-slate-100 dark:border-white/[0.04] hover:bg-slate-50/60 dark:hover:bg-white/[0.015]">
-                          <td className="px-4 py-2">
+                          <td className="px-3 py-2">
                             <input type="checkbox"
                               checked={picked.has(r.id)}
                               onChange={() => toggleRow(r.id)}
                               disabled={!actionable}
                               className="w-3.5 h-3.5 rounded border-slate-300 accent-[#008CFF] disabled:opacity-30" />
                           </td>
-                          <td className="px-4 py-2">
+                          <td className="px-3 py-2">
                             <div className="flex items-center gap-3">
                               <Avatar name={u.name || "?"} url={u.profilePictureUrl} size={36} />
                               <div className="min-w-0">
@@ -1032,8 +1032,8 @@ export default function ApprovalsPanel({
                               </div>
                             </div>
                           </td>
-                          <td className="px-4 py-2 text-[12.5px] text-slate-700 dark:text-slate-300 truncate max-w-[160px]">{profile.department || "—"}</td>
-                          <td className="px-4 py-2 whitespace-nowrap">
+                          <td className="px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-300 truncate max-w-[160px]">{profile.department || "—"}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">
                             <p className="text-[12.5px] text-slate-800 dark:text-white font-medium">
                               {same
                                 ? from.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
@@ -1049,27 +1049,27 @@ export default function ApprovalsPanel({
                           {/* Leave type — applied date moved to the hover
                               title so the cell stays narrow (it was forcing
                               the table wide and pushing L2 off-screen). */}
-                          <td className="px-4 py-2 whitespace-nowrap text-[12.5px] text-slate-800 dark:text-white"
+                          <td className="px-3 py-2 whitespace-nowrap text-[12.5px] text-slate-800 dark:text-white"
                               title={`Applied · ${fmtDt(r.appliedAt)}`}>
                             {r.leaveType?.name || "Leave"}
                           </td>
                           {/* Reason — truncated; full text on hover. */}
-                          <td className="px-4 py-2 text-[12.5px] text-slate-700 dark:text-slate-300 max-w-[190px] truncate"
+                          <td className="px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-300 max-w-[190px] truncate"
                               title={r.reason || ""}>
                             {r.reason ? r.reason : <span className="text-slate-400">—</span>}
                           </td>
                           {/* POC — the cover person the applicant named for
                               their absence. workStatus (handoff notes) shows
                               on hover. "—" when none was assigned. */}
-                          <td className="px-4 py-2 whitespace-nowrap" title={r.workStatus || ""}>
+                          <td className="px-3 py-2 max-w-[140px]" title={r.poc?.name ? `${r.poc.name}${r.workStatus ? ` · ${r.workStatus}` : ""}` : (r.workStatus || "")}>
                             {r.poc?.name ? (
-                              <span className="inline-flex items-center gap-1.5">
+                              <span className="inline-flex items-center gap-1.5 max-w-full">
                                 <Avatar name={r.poc.name} url={r.poc.profilePictureUrl} size={20} />
-                                <span className="text-[12.5px] text-slate-700 dark:text-slate-300">{r.poc.name}</span>
+                                <span className="min-w-0 truncate text-[12.5px] text-slate-700 dark:text-slate-300">{r.poc.name}</span>
                               </span>
                             ) : <span className="text-[12.5px] text-slate-400">—</span>}
                           </td>
-                          <td className="px-4 py-2 align-top">
+                          <td className="px-3 py-2 align-top">
                             <ApprovalCell
                               stage="L1"
                               row={r}
@@ -1079,7 +1079,7 @@ export default function ApprovalsPanel({
                               actioning={actioning}
                             />
                           </td>
-                          <td className="px-4 py-2 align-top">
+                          <td className="px-3 py-2 align-top">
                             <ApprovalCell
                               stage="L2"
                               row={r}
