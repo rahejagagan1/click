@@ -28,6 +28,7 @@ type AuthBundle = {
     teamCapsule: unknown;
     dbName: string | null;
     department: string | null;
+    designation: string | null;
     businessUnit: string | null;
     onboardingPending: boolean;
     permissions: string[];
@@ -45,7 +46,7 @@ const userBundleSelect = {
     name: true,
     // department drives HR-department permissions; businessUnit is the
     // brand membership (NB Media / YT Labs) the sidebar gates tiles on.
-    employeeProfile: { select: { department: true, businessUnit: true } },
+    employeeProfile: { select: { department: true, businessUnit: true, designation: true } },
 } as const;
 
 async function loadAuthBundle(email: string): Promise<AuthBundle> {
@@ -79,7 +80,7 @@ async function loadAuthBundle(email: string): Promise<AuthBundle> {
         hasDesignationReportGrantsByEmail(email),
     ]);
 
-    const profile = (dbUser as { employeeProfile?: { department?: string | null; businessUnit?: string | null } } | null)?.employeeProfile;
+    const profile = (dbUser as { employeeProfile?: { department?: string | null; businessUnit?: string | null; designation?: string | null } } | null)?.employeeProfile;
 
     return {
         dbId: dbUser?.id ?? null,
@@ -91,6 +92,7 @@ async function loadAuthBundle(email: string): Promise<AuthBundle> {
         teamCapsule: (dbUser as { teamCapsule?: unknown } | null)?.teamCapsule ?? null,
         dbName: dbUser?.name ?? null,
         department: profile?.department ?? null,
+        designation: profile?.designation ?? null,
         businessUnit: profile?.businessUnit ?? null,
         onboardingPending: !!onboardingRows?.[0]?.onboardingPending,
         permissions,
@@ -216,6 +218,7 @@ export const authOptions: NextAuthOptions = {
                     u.onboardingPending = b.onboardingPending;
                     u.clickupUserId = b.clickupUserId;
                     u.department = b.department;
+                    u.designation = b.designation;
                     u.businessUnit = b.businessUnit;
                     // Designation-based permissions for can() (writer/editor/qa/
                     // researcher/manager scorecardFunction + report grants).

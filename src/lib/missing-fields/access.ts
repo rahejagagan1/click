@@ -1,10 +1,18 @@
-// Server-side gate for the Missing Fields tool — developers only, mirroring
-// the sidebar's `developerOnly` nav gate and the page's client guard. Primary
-// signal is the session's isDeveloper flag (set by auth.ts from DEVELOPER_EMAILS);
-// we also fall back to the env list directly in case the flag didn't propagate.
-export function isMissingFieldsDeveloper(user: any): boolean {
+// Access gate for the Missing Fields tool. Used by the sidebar nav item, the
+// page guard, AND every API route so all three stay in sync. Visible to:
+//   • developers (session isDeveloper, or the DEVELOPER_EMAILS env fallback), and
+//   • an allowlist of designations (currently "Executive Assistant" — Palak
+//     Dhiman's designation). Reads user.designation, added to the session in auth.ts.
+// Add a designation here to grant the whole designation access (not by name).
+const MF_ALLOWED_DESIGNATIONS = new Set(["executive assistant"]);
+
+export function canUseMissingFields(user: any): boolean {
   if (!user) return false;
   if (user.isDeveloper === true) return true;
+  const designation = String(user.designation || "").trim().toLowerCase();
+  if (designation && MF_ALLOWED_DESIGNATIONS.has(designation)) return true;
+  // Dev-email fallback (resolves server-side; undefined on the client, where the
+  // isDeveloper / designation session fields already cover access).
   const allow = (process.env.DEVELOPER_EMAILS || "")
     .split(",")
     .map((s) => s.trim().toLowerCase())
