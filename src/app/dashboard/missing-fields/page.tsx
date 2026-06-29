@@ -11,6 +11,7 @@ import {
   type FieldPhase,
   type StatusPlan,
 } from "@/lib/missing-fields/catalog";
+import { canUseMissingFields } from "@/lib/missing-fields/access";
 
 type Capsule = {
   id: number;
@@ -49,12 +50,12 @@ const canonical = (plan: StatusPlan) =>
 export default function MissingFieldsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const isDeveloper = (session?.user as any)?.isDeveloper === true;
+  const canUse = canUseMissingFields(session?.user as any);
 
   useEffect(() => {
     if (status === "loading") return;
-    if (!isDeveloper) router.replace("/dashboard");
-  }, [status, isDeveloper, router]);
+    if (!canUse) router.replace("/dashboard");
+  }, [status, canUse, router]);
 
   const [tab, setTab] = useState<"plans" | "run">("plans");
   const [loading, setLoading] = useState(true);
@@ -65,7 +66,7 @@ export default function MissingFieldsPage() {
 
   // ── load config ──
   useEffect(() => {
-    if (!isDeveloper) return;
+    if (!canUse) return;
     let cancelled = false;
     setLoading(true);
     fetch("/api/missing-fields/config")
@@ -78,7 +79,7 @@ export default function MissingFieldsPage() {
       })
       .catch(() => { if (!cancelled) { setLoadError(true); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [isDeveloper]);
+  }, [canUse]);
 
   const selectedCapsule = capsules.find((c) => c.id === selectedCapsuleId) || null;
 
@@ -209,7 +210,7 @@ export default function MissingFieldsPage() {
     return runFilter === "all" ? runData.results : runData.results.filter((r) => r.capsule.id === runFilter);
   }, [runData, runFilter]);
 
-  if (status === "loading" || !isDeveloper) return null;
+  if (status === "loading" || !canUse) return null;
 
   const configuredStatuses = (c: Capsule) => Object.keys(c.plan).length;
 

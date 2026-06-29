@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
-import { isMissingFieldsDeveloper } from "@/lib/missing-fields/access";
+import { canUseMissingFields } from "@/lib/missing-fields/access";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function PUT(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
-  if (!isMissingFieldsDeveloper(session!.user)) {
+  if (!canUseMissingFields(session!.user)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   try {
