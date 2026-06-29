@@ -29,7 +29,10 @@ type RunData = {
   results: RunResult[];
   summary: { scanned: number; flagged: number; noRule: number; excludedTerminal?: number };
   note?: string;
+  runId?: number | null;
+  runAt?: string | null;
 };
+type HistoryRun = { id: number; runAt: string; runByName: string | null; scanned: number; flagged: number };
 
 const FIELDS_BY_PHASE: Record<FieldPhase, typeof FIELD_CATALOG> = PHASE_ORDER.reduce((acc, p) => {
   acc[p] = FIELD_CATALOG.filter((f) => f.phase === p);
@@ -189,21 +192,54 @@ export default function MissingFieldsPage() {
     return () => clearTimeout(t);
   }, [draft]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Run state ──
+  // ── Run state + history ──
   const [running, setRunning] = useState(false);
   const [runData, setRunData] = useState<RunData | null>(null);
   const [runFilter, setRunFilter] = useState<number | "all">("all");
+  const [history, setHistory] = useState<HistoryRun[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
+
+  async function loadHistory() {
+    try {
+      const res = await fetch("/api/missing-fields/runs");
+      if (res.ok) setHistory(((await res.json()).runs as HistoryRun[]) || []);
+    } catch { /* ignore */ }
+  }
+  // Load history when the Run tab is open.
+  useEffect(() => { if (canUse && tab === "run") loadHistory(); }, [canUse, tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function runCheck() {
     setRunning(true);
     try {
       const res = await fetch("/api/missing-fields/run");
       if (!res.ok) throw new Error();
-      setRunData(await res.json());
+      const data = await res.json();
+      setRunData(data);
+      setSelectedRunId(data.runId ?? null);
       setRunFilter("all");
+      loadHistory();
     } catch { alert("Run failed. Try again."); }
     finally { setRunning(false); }
   }
+
+  // Load a past run's stored results into the table.
+  async function viewRun(id: number) {
+    try {
+      const res = await fetch(`/api/missing-fields/runs?id=${id}`);
+      if (!res.ok) throw new Error();
+      const { run } = await res.json();
+      if (run) {
+        setRunData({ results: run.results || [], summary: run.summary || { scanned: 0, flagged: 0, noRule: 0 }, runAt: run.runAt });
+        setSelectedRunId(id);
+        setRunFilter("all");
+      }
+    } catch { alert("Couldn't load that run."); }
+  }
+
+  const fmtRunAt = (iso: string) => {
+    try { return new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true }); }
+    catch { return iso; }
+  };
 
   const filteredResults = useMemo(() => {
     if (!runData) return [];
@@ -402,8 +438,33 @@ export default function MissingFieldsPage() {
                     </button>
                   </div>
 
+                  {history.length > 0 && (
+                    <div className="mb-4 rounded-xl border border-slate-200 overflow-hidden">
+                      <div className="bg-slate-50 px-3 py-2 border-b border-slate-100 text-[11px] font-bold uppercase tracking-wider text-slate-500">Run history</div>
+                      <div className="max-h-[210px] overflow-auto divide-y divide-slate-100">
+                        {history.map((h) => (
+                          <button
+                            key={h.id}
+                            onClick={() => viewRun(h.id)}
+                            className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left transition-colors ${selectedRunId === h.id ? "bg-[#008CFF]/[0.06]" : "hover:bg-slate-50"}`}
+                          >
+                            <span className="flex items-baseline gap-2 min-w-0">
+                              <span className="text-[12.5px] text-slate-700 font-medium whitespace-nowrap">{fmtRunAt(h.runAt)}</span>
+                              {h.runByName ? <span className="text-[11px] text-slate-400 truncate">by {h.runByName}</span> : null}
+                            </span>
+                            <span className="flex items-center gap-2 shrink-0 text-[11.5px]">
+                              <span className="font-semibold text-rose-600">{h.flagged} flagged</span>
+                              <span className="text-slate-400">/ {h.scanned} scanned</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {runData && (
                     <>
+                      {runData.runAt && <p className="mb-2 text-[12px] text-slate-500">Showing run from <span className="font-semibold text-slate-700">{fmtRunAt(runData.runAt)}</span></p>}
                       <div className="flex flex-wrap gap-2 mb-4 text-[12px]">
                         <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-slate-600"><b className="text-slate-800">{runData.summary.scanned}</b> scanned</span>
                         <span className="rounded-lg bg-rose-50 px-3 py-1.5 text-rose-700"><b>{runData.summary.flagged}</b> flagged</span>
