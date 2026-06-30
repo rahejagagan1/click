@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
-import { notifyApprovers, notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
+import { notifyApprovers, notifyUsers, brandCeoIdForEmployee, brandScopedFinalApprovers } from "@/lib/notifications";
 import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
 import { istMonthRange } from "@/lib/ist-date";
 import { sendEmail } from "@/lib/email/sender";
 import { pocAssignmentEmail } from "@/lib/email/templates";
-import { devEmailRecipientsClause } from "@/lib/email/toggles";
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
 
 export const dynamic = "force-dynamic";
@@ -317,18 +316,7 @@ export async function PUT(req: NextRequest) {
       // Brand-CEO L2 routing: HR/Special Access (CEO excluded) +
       // the applicant's brand CEO. Keeps each CEO inside their brand.
       const [finalApprovers, brandCeoId] = await Promise.all([
-        prisma.user.findMany({
-          where: {
-            isActive: true,
-            orgLevel: { not: "ceo" },
-            OR: [
-              { orgLevel: "special_access" },
-              { role: "hr_manager" },
-              ...(await devEmailRecipientsClause()),
-            ],
-          },
-          select: { id: true },
-        }),
+        brandScopedFinalApprovers(record.userId),
         brandCeoIdForEmployee(record.userId),
       ]);
       await Promise.all([

@@ -3,12 +3,11 @@ import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
 import { getBrandScope } from "@/lib/hr/brand-scope";
 import { canApplyRestrictedLeave } from "@/lib/access";
-import { notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
+import { notifyUsers, brandCeoIdForEmployee, brandScopedFinalApprovers } from "@/lib/notifications";
 import { countWorkingDays } from "@/lib/hr/working-days";
 import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
 import { sendEmail } from "@/lib/email/sender";
 import { pocAssignmentEmail } from "@/lib/email/templates";
-import { devEmailRecipientsClause } from "@/lib/email/toggles";
 
 // GET /api/hr/leaves — list leave applications
 export async function GET(req: NextRequest) {
@@ -322,18 +321,7 @@ export async function POST(req: NextRequest) {
     // every NB Media leave (and vice versa) instead of the old
     // "every active CEO sees every leave" behaviour.
     const [finalApprovers, brandCeoId] = await Promise.all([
-      prisma.user.findMany({
-        where: {
-          isActive: true,
-          orgLevel: { not: "ceo" },
-          OR: [
-            { orgLevel: "special_access" },
-            { role: "hr_manager" },
-            ...(await devEmailRecipientsClause()),
-          ],
-        },
-        select: { id: true },
-      }),
+      brandScopedFinalApprovers(subjectUserId),
       brandCeoIdForEmployee(subjectUserId),
     ]);
     const dateLabel = `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}`;

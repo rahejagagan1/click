@@ -3,12 +3,11 @@ import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { parseBody } from "@/lib/validate";
-import { notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
+import { notifyUsers, brandCeoIdForEmployee, brandScopedFinalApprovers } from "@/lib/notifications";
 import { writeAuditLog } from "@/lib/audit-log";
 import { istTimeOnDate, istMonthRange, istTodayDateOnly, istDateOnlyFrom } from "@/lib/ist-date";
 import { isRegularizationWindowEnforced } from "@/app/api/hr/policy/regularization-window/route";
 import { isRegularizationUnlimited } from "@/app/api/hr/policy/regularization-unlimited/route";
-import { devEmailRecipientsClause } from "@/lib/email/toggles";
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
 import { refundLopLwp } from "@/lib/hr/lop-lwp";
 
@@ -271,18 +270,7 @@ export async function POST(req: NextRequest) {
     // target's brand CEO. Cleanly isolates each CEO to their own
     // brand's regularization queue.
     const [admins, brandCeoId] = await Promise.all([
-      prisma.user.findMany({
-        where: {
-          isActive: true,
-          orgLevel: { not: "ceo" },
-          OR: [
-            { orgLevel: "special_access" },
-            { role: "hr_manager" },
-            ...(await devEmailRecipientsClause()),
-          ],
-        },
-        select: { id: true },
-      }),
+      brandScopedFinalApprovers(targetUserId),
       brandCeoIdForEmployee(targetUserId),
     ]);
     const adminIds = [
@@ -454,18 +442,7 @@ export async function PUT(req: NextRequest) {
       });
       // Brand-CEO L2 routing for the L1→L2 transition.
       const [finalApprovers, brandCeoIdL2] = await Promise.all([
-        prisma.user.findMany({
-          where: {
-            isActive: true,
-            orgLevel: { not: "ceo" },
-            OR: [
-              { orgLevel: "special_access" },
-              { role: "hr_manager" },
-              ...(await devEmailRecipientsClause()),
-            ],
-          },
-          select: { id: true },
-        }),
+        brandScopedFinalApprovers(reg.userId),
         brandCeoIdForEmployee(reg.userId),
       ]);
       await notifyUsers({
