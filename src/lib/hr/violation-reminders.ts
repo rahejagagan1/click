@@ -10,6 +10,7 @@
 // independent of `prisma generate` cache state on dev machines.
 
 import prisma from "@/lib/prisma";
+import { brandBucket } from "@/lib/notifications";
 import { sendEmail } from "@/lib/email/sender";
 import { violationInProgressReminderEmail, violationFollowUpEmail } from "@/lib/email/templates";
 import { isDryRun } from "@/lib/email/transport";
@@ -84,17 +85,17 @@ export async function sendViolationInProgressReminders(): Promise<number> {
                 ...(await devEmailRecipientsClause()),
             ],
         },
-        select: { name: true, email: true, orgLevel: true, role: true },
+        select: { name: true, email: true, orgLevel: true, role: true, employeeProfile: { select: { businessUnit: true } } },
     });
     // Apply the per-role email-toggle filter — drops recipients whose
     // role-specific override for "violation_reminders" is OFF.
     const { rolesForUser, isEmailEnabledForRoles } = await import("@/lib/email/toggles");
-    const validRecipients: Array<{ name: string | null; email: string; orgLevel: string | null; role: string | null }> = [];
+    const validRecipients: Array<{ name: string | null; email: string; orgLevel: string | null; role: string | null; businessUnit: string | null }> = [];
     for (const r of recipients) {
         if (!r.email) continue;
         const roles = rolesForUser({ orgLevel: r.orgLevel, role: r.role });
         if (!(await isEmailEnabledForRoles("violation_reminders", roles))) continue;
-        validRecipients.push({ name: r.name ?? null, email: r.email, orgLevel: r.orgLevel, role: r.role });
+        validRecipients.push({ name: r.name ?? null, email: r.email, orgLevel: r.orgLevel, role: r.role, businessUnit: r.employeeProfile?.businessUnit ?? null });
     }
 
     // CEO-per-brand lookup: resolve each affected employee's brand and
@@ -103,6 +104,7 @@ export async function sendViolationInProgressReminders(): Promise<number> {
     // every NB Media one, regardless of reporting chain.
     const affectedIds = [...new Set(due.map((d) => d.userId).filter((id): id is number => id != null))];
     const ceoByEmployee = new Map<number, { name: string | null; email: string }>();
+    const brandByEmployee = new Map<number, "NB Media" | "YT Labs">();
     if (affectedIds.length) {
         const [emps, ceos] = await Promise.all([
             prisma.user.findMany({
@@ -125,6 +127,7 @@ export async function sendViolationInProgressReminders(): Promise<number> {
         }
         for (const e of emps) {
             const bu = e.employeeProfile?.businessUnit || "NB Media";
+            brandByEmployee.set(e.id, brandBucket(bu));
             const ceo = ceoByBrand.get(bu);
             if (ceo) ceoByEmployee.set(e.id, ceo);
         }
@@ -145,7 +148,10 @@ export async function sendViolationInProgressReminders(): Promise<number> {
         // admin recipients above ARE filtered by their per-role toggle
         // (see the validRecipients loop earlier in this file).
         const ceo = v.userId != null ? ceoByEmployee.get(v.userId) : undefined;
-        const violationRecipients = ceo ? [...validRecipients, ceo] : validRecipients;
+        // Brand-scope HR recipients to this violation's employee brand; CEO already per-brand.
+        const empBrand = v.userId != null ? (brandByEmployee.get(v.userId) ?? "NB Media") : "NB Media";
+        const brandRecipients = validRecipients.filter((r) => brandBucket(r.businessUnit) === empBrand);
+        const violationRecipients = ceo ? [...brandRecipients, ceo] : brandRecipients;
         // Send one mail per recipient — keeps the salutation personal
         // and avoids exposing the recipient list in the To header.
         for (const r of violationRecipients) {

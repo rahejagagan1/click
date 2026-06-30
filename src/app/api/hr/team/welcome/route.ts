@@ -104,9 +104,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // BCC every active employee so the team list isn't exposed; To = the
-    // sender (a single visible address).
-    const recipients = await emailsForAllActiveUsers();
+    // Brand-scope the welcome to the joiner's brand — resolved from their work
+    // email (their own profile), else their manager's brand. Falls back to
+    // all-staff only when the brand can't be determined. NB Media bucket
+    // includes null businessUnit / no profile; YT Labs is strict.
+    let joinerBrand: string | null = null;
+    if (workEmail) {
+      const u = await prisma.user.findUnique({ where: { email: workEmail }, select: { employeeProfile: { select: { businessUnit: true } } } });
+      joinerBrand = u?.employeeProfile?.businessUnit ?? null;
+    }
+    if (!joinerBrand && Number.isInteger(mid) && mid > 0) {
+      const m = await prisma.user.findUnique({ where: { id: mid }, select: { employeeProfile: { select: { businessUnit: true } } } });
+      joinerBrand = m?.employeeProfile?.businessUnit ?? null;
+    }
+    // BCC every active employee (in-brand) so the team list isn't exposed;
+    // To = the sender (a single visible address).
+    let recipients: string[];
+    if (joinerBrand) {
+      const brandWhere = joinerBrand === "YT Labs"
+        ? { employeeProfile: { businessUnit: "YT Labs" } }
+        : { OR: [ { employeeProfile: { businessUnit: "NB Media" } }, { employeeProfile: { businessUnit: null } }, { employeeProfile: null } ] };
+      const rows = await prisma.user.findMany({ where: { isActive: true, ...brandWhere }, select: { email: true } });
+      recipients = rows.map((u) => u.email).filter((e): e is string => !!e);
+    } else {
+      recipients = await emailsForAllActiveUsers();
+    }
     if (recipients.length === 0) {
       return NextResponse.json({ error: "No active employees to email" }, { status: 400 });
     }

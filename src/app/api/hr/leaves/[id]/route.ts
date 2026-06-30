@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
-import { notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
+import { notifyUsers, brandCeoIdForEmployee, brandScopedFinalApprovers } from "@/lib/notifications";
 import { writeAuditLog } from "@/lib/audit-log";
 import { countWorkingDays } from "@/lib/hr/working-days";
-import { devEmailRecipientsClause } from "@/lib/email/toggles";
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
 import { refundLopLwp } from "@/lib/hr/lop-lwp";
 
@@ -320,18 +319,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       // the "Notify developers" toggle. The CEO is pinged for final
       // approval only when the applicant is their OWN direct report
       // (added below) — otherwise HR handles it.
-      const finalApprovers = await prisma.user.findMany({
-        where: {
-          isActive: true,
-          orgLevel: { not: "ceo" },
-          OR: [
-            { orgLevel: "special_access" },
-            { role: "hr_manager" },
-            ...(await devEmailRecipientsClause()),
-          ],
-        },
-        select: { id: true },
-      });
+      const finalApprovers = await brandScopedFinalApprovers(application.userId);
       // Brand-CEO routing: every YT Labs applicant pulls in the YT
       // Labs CEO (Kunal) at L2, and every NB Media applicant pulls in
       // the NB Media CEO. Wider than the direct-manager-only
