@@ -23,6 +23,12 @@ import { platform } from "node:os";
 let browserPromise: Promise<Browser> | null = null;
 
 function findChromePath(): string | null {
+  // Explicit override wins — point PUPPETEER_EXECUTABLE_PATH at any
+  // Chrome / Chromium / Edge binary (handy on servers or non-standard installs).
+  const envPath = process.env.PUPPETEER_EXECUTABLE_PATH;
+  if (envPath) {
+    try { if (existsSync(envPath)) return envPath; } catch { /* ignore */ }
+  }
   // Common system Chrome / Chromium locations across the
   // platforms the dashboard runs on (Ubuntu VPS, dev macOS,
   // dev Windows). The first existing path wins.
@@ -30,7 +36,12 @@ function findChromePath(): string | null {
     ? [
         "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
         "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+        `${process.env.LOCALAPPDATA ?? ""}\\Google\\Chrome\\Application\\chrome.exe`,
         "C:\\Program Files\\Chromium\\Application\\chrome.exe",
+        // Edge is Chromium-based and ships on every Windows machine — a
+        // reliable fallback so local dev can render PDFs without installing Chrome.
+        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
       ]
     : platform() === "darwin"
     ? [
