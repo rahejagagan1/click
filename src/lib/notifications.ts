@@ -8,6 +8,13 @@ import {
   type EmailContent,
 } from "@/lib/email/templates";
 
+// Brand bucket for email routing: YT Labs is strict; everything else (incl.
+// null businessUnit / missing profile) falls into the NB Media parent brand —
+// matches brandCeoIdForEmployee + the probation/PIP/manager-change emails, so an
+// employee's notifications only reach HR/CEO of their own brand.
+export const brandBucket = (bu?: string | null): "NB Media" | "YT Labs" =>
+  bu === "YT Labs" ? "YT Labs" : "NB Media";
+
 export type NotificationType =
   | "regularization"
   | "wfh"
@@ -340,7 +347,11 @@ export async function brandCeoIdForEmployee(
 export async function exitStakeholderEmails(
   employee: { id: number; managerId: number | null },
 ): Promise<string[]> {
-  const [stakeholders, brandCeoId] = await Promise.all([
+  const [empRow, stakeholders, brandCeoId] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: employee.id },
+      select: { employeeProfile: { select: { businessUnit: true } } },
+    }),
     prisma.user.findMany({
       where: {
         isActive: true,
@@ -352,10 +363,16 @@ export async function exitStakeholderEmails(
           ...(employee.managerId ? [{ id: employee.managerId }] : []),
         ],
       },
-      select: { email: true },
+      select: { id: true, email: true, employeeProfile: { select: { businessUnit: true } } },
     }),
     brandCeoIdForEmployee(employee.id),
   ]);
+  const empBrand = brandBucket(empRow?.employeeProfile?.businessUnit);
+  // Brand-scope HR / special-access / admin / dev recipients to the exiting
+  // employee's brand; always keep their direct manager + the brand CEO.
+  const stakeholderEmails = stakeholders
+    .filter((u) => u.id === employee.managerId || brandBucket(u.employeeProfile?.businessUnit) === empBrand)
+    .map((u) => u.email);
   let brandCeoEmail: string | null = null;
   if (brandCeoId) {
     const ceo = await prisma.user.findUnique({
@@ -365,7 +382,7 @@ export async function exitStakeholderEmails(
     brandCeoEmail = ceo?.email ?? null;
   }
   return Array.from(
-    new Set(([...stakeholders.map((u) => u.email), brandCeoEmail].filter(Boolean)) as string[]),
+    new Set(([...stakeholderEmails, brandCeoEmail].filter(Boolean)) as string[]),
   );
 }
 
@@ -415,8 +432,12 @@ export async function approverIdsForUser(actorId: number): Promise<number[]> {
   // Emails Automation controls whether they're copied on the fan-out.
   // Default ON for backwards compatibility.
   const devClause = await devEmailRecipientsClause();
-  const [actor, admins, brandCeoId] = await Promise.all([
-    prisma.user.findUnique({ where: { id: actorId }, select: { managerId: true } }),
+  const actor = await prisma.user.findUnique({
+    where: { id: actorId },
+    select: { managerId: true, employeeProfile: { select: { businessUnit: true } } },
+  });
+  const actorBrand = brandBucket(actor?.employeeProfile?.businessUnit);
+  const [adminsRaw, brandCeoId] = await Promise.all([
     prisma.user.findMany({
       where: {
         isActive: true,
@@ -432,10 +453,14 @@ export async function approverIdsForUser(actorId: number): Promise<number[]> {
           ...devClause,
         ],
       },
-      select: { id: true },
+      select: { id: true, employeeProfile: { select: { businessUnit: true } } },
     }),
     brandCeoIdForEmployee(actorId),
   ]);
+  // Brand-scope the HR / special-access / dev fan-out to the actor's own brand,
+  // so (e.g.) NB Media HR never gets a YT Labs employee's request. The actor's
+  // direct manager + brand CEO are added unconditionally below.
+  const admins = adminsRaw.filter((u) => brandBucket(u.employeeProfile?.businessUnit) === actorBrand);
   const ids = new Set<number>(admins.map((u) => u.id));
   // Brand-CEO is added to the recipient list. The per-role CEO
   // toggle in Admin → Emails Automation gates whether they actually
@@ -447,6 +472,40 @@ export async function approverIdsForUser(actorId: number): Promise<number[]> {
   if (actor?.managerId) ids.add(actor.managerId);
   ids.delete(actorId);
   return Array.from(ids);
+}
+
+/**
+ * Brand-scoped L2 final-approver users for an employee's request: Special
+ * Access + HR Managers + (toggle-gated) developer recipients, filtered to the
+ * SAME brand as `employeeId` (NB Media bucket includes null businessUnit /
+ * missing profile; YT Labs strict). Excludes the CEO — callers add the brand
+ * CEO separately via brandCeoIdForEmployee. Drop-in replacement for the inlined
+ * HR fan-out the leave / WFH / OD / comp-off / regularize routes used to run.
+ */
+export async function brandScopedFinalApprovers(
+  employeeId: number,
+): Promise<{ id: number }[]> {
+  const devClause = await devEmailRecipientsClause();
+  const empRow = await prisma.user.findUnique({
+    where: { id: employeeId },
+    select: { employeeProfile: { select: { businessUnit: true } } },
+  });
+  const brand = brandBucket(empRow?.employeeProfile?.businessUnit);
+  const raw = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      orgLevel: { not: "ceo" },
+      OR: [
+        { orgLevel: "special_access" },
+        { role: "hr_manager" },
+        ...devClause,
+      ],
+    },
+    select: { id: true, employeeProfile: { select: { businessUnit: true } } },
+  });
+  return raw
+    .filter((u) => brandBucket(u.employeeProfile?.businessUnit) === brand)
+    .map((u) => ({ id: u.id }));
 }
 
 /**

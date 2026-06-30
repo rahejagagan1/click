@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
-import { notifyApprovers, notifyUsers, brandCeoIdForEmployee } from "@/lib/notifications";
+import { notifyApprovers, notifyUsers, brandCeoIdForEmployee, brandScopedFinalApprovers } from "@/lib/notifications";
 import { istTimeOnDate, istDateOnlyFrom, istMonthRange } from "@/lib/ist-date";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
 import { sendEmail } from "@/lib/email/sender";
 import { pocAssignmentEmail } from "@/lib/email/templates";
-import { devEmailRecipientsClause } from "@/lib/email/toggles";
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
 
 export const dynamic = "force-dynamic";
@@ -426,18 +425,7 @@ export async function PUT(req: NextRequest) {
       // approvals and vice versa. Developer accounts still flow
       // through via the "Notify developers" toggle.
       const [finalApprovers, brandCeoId] = await Promise.all([
-        prisma.user.findMany({
-          where: {
-            isActive: true,
-            orgLevel: { not: "ceo" },
-            OR: [
-              { orgLevel: "special_access" },
-              { role: "hr_manager" },
-              ...(await devEmailRecipientsClause()),
-            ],
-          },
-          select: { id: true },
-        }),
+        brandScopedFinalApprovers(record.userId),
         brandCeoIdForEmployee(record.userId),
       ]);
       await Promise.all([
