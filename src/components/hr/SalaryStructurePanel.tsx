@@ -206,6 +206,15 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
   const historyUrl = `/api/hr/payroll/salary-structure/history?userId=${userId}`;
   const { data: historyData } = useSWR<{ items: SalaryHistoryRow[] }>(historyUrl, fetcher);
   const history = historyData?.items ?? [];
+  // Bonuses for the same user — merged into the history timeline so HR sees
+  // salary revisions AND bonuses in one place. Re-fetched when a bonus is added.
+  const bonusUrl = `/api/hr/payroll/bonus?userId=${userId}`;
+  const { data: bonusData } = useSWR<{ items: any[] }>(bonusUrl, fetcher);
+  const bonuses = bonusData?.items ?? [];
+  const timeline = [
+    ...history.map((h) => ({ key: `s${h.id}`, kind: "salary" as const, date: h.effectiveFrom || h.changedAt, h, b: null as any })),
+    ...bonuses.map((b) => ({ key: `b${b.id}`, kind: "bonus" as const, date: b.effectiveDate, h: null as any, b })),
+  ].sort((a, z) => new Date(z.date).getTime() - new Date(a.date).getTime());
   const [showHistory, setShowHistory] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -610,8 +619,8 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
         )}
       </form>
 
-      {/* ── Salary history / revision timeline (old CTC → new CTC + dates) ── */}
-      {history.length > 0 && (
+      {/* ── Salary history + bonus timeline (revisions and bonuses, newest first) ── */}
+      {timeline.length > 0 && (
         <div className="border-t border-slate-200 px-6 py-4">
           <button
             type="button"
@@ -621,18 +630,35 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
             <span className="flex items-center gap-2 text-[12.5px] font-semibold text-slate-700">
               <TrendingUp size={14} className="text-emerald-600" />
               Salary history
-              <span className="font-normal text-slate-400">({history.length})</span>
+              <span className="font-normal text-slate-400">({timeline.length})</span>
             </span>
             <svg className={`h-4 w-4 text-slate-400 transition-transform ${showHistory ? "rotate-90" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
           </button>
           {showHistory && (
             <ol className="mt-3 space-y-2.5 border-l-2 border-slate-100 pl-4">
-              {history.map((h) => {
+              {timeline.map((t) => {
                 const fmtMoney = (v: string | null) => v == null ? "—" : `₹${Number(v).toLocaleString("en-IN")}`;
                 const fmtDate  = (d: string | null) => d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+                if (t.kind === "bonus") {
+                  const b = t.b;
+                  return (
+                    <li key={t.key} className="relative">
+                      <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" />
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <span className="text-[12.5px] font-semibold text-slate-800">
+                          Bonus{b.bonusType ? ` · ${b.bonusType}` : ""} · <span className="text-amber-700">{fmtMoney(String(b.amount))}</span>
+                        </span>
+                        <span className="text-[11px] text-slate-500">effective {fmtDate(b.effectiveDate)}</span>
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{b.paymentStatus === "paid_past" ? "paid" : "due"}</span>
+                      </div>
+                      {b.reason ? <p className="text-[10.5px] text-slate-400">{b.reason}</p> : null}
+                    </li>
+                  );
+                }
+                const h = t.h;
                 const isInitial = h.oldCtc == null;
                 return (
-                  <li key={h.id} className="relative">
+                  <li key={t.key} className="relative">
                     <span className={`absolute -left-[21px] top-1.5 h-2 w-2 rounded-full ring-2 ring-white ${isInitial ? "bg-slate-400" : "bg-emerald-500"}`} />
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                       {isInitial ? (
@@ -660,6 +686,7 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
       {showBonusModal && (
         <AddBonusModal
           userId={userId}
+          onSaved={() => { mutate(bonusUrl); setShowHistory(true); }}
           onClose={() => setShowBonusModal(false)}
         />
       )}
@@ -715,7 +742,7 @@ export default function SalaryStructurePanel({ userId, canEdit }: Props) {
 // Keka-style dialog: bonus type (with custom values), amount with INR
 // prefix, payment status (Due in future / Paid in past), payout date,
 // optional note. Saves to /api/hr/payroll/bonus.
-function AddBonusModal({ userId, onClose }: { userId: number; onClose: () => void }) {
+function AddBonusModal({ userId, onClose, onSaved }: { userId: number; onClose: () => void; onSaved?: () => void }) {
   const [bonusType, setBonusType]         = useState("");
   const [amount, setAmount]               = useState("");
   const [paymentStatus, setPaymentStatus] = useState<"due_future" | "paid_past">("due_future");
@@ -772,6 +799,7 @@ function AddBonusModal({ userId, onClose }: { userId: number; onClose: () => voi
       }
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Save failed");
+      onSaved?.();   // refresh the bonus list + auto-open Salary history
       onClose();
     } catch (e: any) {
       setError(e?.message || "Save failed");
