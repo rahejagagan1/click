@@ -107,31 +107,37 @@ function getAuthBundle(email: string): Promise<AuthBundle> {
     return cachedFetch(`auth:bundle:${email.toLowerCase()}`, () => loadAuthBundle(email), AUTH_BUNDLE_TTL_MS);
 }
 
+const googleProvider =
+    process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+        ? GoogleProvider({
+            clientId: process.env.GOOGLE_CLIENT_ID,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        })
+        : null;
+
+const devCredentialsProvider = CredentialsProvider({
+    // ─── Development: instant sign-in, no Google required ───
+    name: "Dev Login",
+    credentials: {},
+    async authorize() {
+        // Returns a mock admin user — auto-signed in on /login
+        return {
+            id: "dev",
+            name: "Dev Admin",
+            email: "dev@nbmediaproductions.com",
+            image: null,
+        };
+    },
+});
+
 export const authOptions: NextAuthOptions = {
     providers: useDevLogin
-        ? [
-            // ─── Development: instant sign-in, no Google required ───
-            CredentialsProvider({
-                name: "Dev Login",
-                credentials: {},
-                async authorize() {
-                    // Returns a mock admin user — auto-signed in on /login
-                    return {
-                        id: "dev",
-                        name: "Dev Admin",
-                        email: "dev@nbmediaproductions.com",
-                        image: null,
-                    };
-                },
-            }),
-        ]
-        : [
-            // ─── Production: Google OAuth only ───
-            GoogleProvider({
-                clientId: process.env.GOOGLE_CLIENT_ID!,
-                clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-            }),
-        ],
+        // ─── Development: instant dev admin AND real Google sign-in ───
+        // Google is included too (when credentials are set) so developers
+        // can sign in with their real account to debug as themselves.
+        ? [devCredentialsProvider, ...(googleProvider ? [googleProvider] : [])]
+        // ─── Production: Google OAuth only ───
+        : [googleProvider!],
 
     callbacks: {
         async signIn({ user, account }) {
