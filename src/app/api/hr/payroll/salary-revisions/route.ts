@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
-import { getBrandScope } from "@/lib/hr/brand-scope";
+import { resolveBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
     // entityType='SalaryStructure'. We pull only update/create rows whose
     // `after.ctc` differs from `before.ctc` (so unchanged-CTC patches
     // don't pollute the list).
-    const scope = getBrandScope(session!.user);
+    const scope = resolveBrandScope(session!.user, searchParams.get("brand"));
     if (!scope.allBrands && !scope.brand) return NextResponse.json({ items: [] });
 
     const brandClause = scope.allBrands ? "" : ` AND ep."businessUnit" = $3`;

@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
-import { getBrandScope } from "@/lib/hr/brand-scope";
+import { resolveBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
     const monthStart = new Date(Date.UTC(year, month, 1));
     const monthEnd   = new Date(Date.UTC(year, month + 1, 0));
 
-    const scope = getBrandScope(session!.user);
+    const scope = resolveBrandScope(session!.user, searchParams.get("brand"));
     if (!scope.allBrands && !scope.brand) return NextResponse.json({ thisMonth: [], alreadyExited: [] });
 
     const brandClause = scope.allBrands ? "" : `WHERE ep."businessUnit" = $1`;
