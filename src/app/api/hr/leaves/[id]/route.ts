@@ -6,6 +6,7 @@ import { writeAuditLog } from "@/lib/audit-log";
 import { countWorkingDays } from "@/lib/hr/working-days";
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
 import { refundLopLwp } from "@/lib/hr/lop-lwp";
+import { isSingleStageApprovalEmployee } from "@/lib/hr/single-stage-approval";
 
 function fmtRange(from: Date, to: Date, days: number) {
   return `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} (${days} day${days === 1 ? "" : "s"})`;
@@ -52,6 +53,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       self.role === "admin" ||
       self.role === "hr_manager";
     const isDirectManager = application.user?.managerId === myId;
+    // YT Labs: single-stage approval — any authorised approver (the direct
+    // manager OR HR/CEO) finalises the leave on the first approve instead
+    // of going through the L1 → L2 handoff. NB Media keeps two stages.
+    const singleStage = await isSingleStageApprovalEmployee(application.userId);
     const year = new Date(application.fromDate).getFullYear();
     const totalDays = parseFloat(application.totalDays.toString());
     const rangeLabel = fmtRange(new Date(application.fromDate), new Date(application.toDate), totalDays);
@@ -233,7 +238,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       // isDeveloper) still go through the normal two-step flow.
       const isCeo = self.orgLevel === "ceo";
       const isHrManager = self.orgLevel === "hr_manager" || self.role === "hr_manager";
-      const isFastPathFinalApprover = isCeo || isHrManager;
+      // YT Labs single-stage: ANY authorised approver (direct manager
+      // included) finalises here — so the same collapse-to-approved path
+      // runs on their first click, not just for CEO / HR Manager.
+      const isFastPathFinalApprover = isCeo || isHrManager || singleStage;
       if (isFastPathFinalApprover) {
         const result = await prisma.$transaction(async (tx) => {
           const { count } = await tx.leaveApplication.updateMany({
@@ -279,10 +287,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           cur.setUTCDate(cur.getUTCDate() + 1);
         }
 
-        const fastPathRole = isCeo ? "CEO" : "HR Manager";
+        // Label reflects WHO finalised: CEO / HR Manager keep their named
+        // roles; a YT Labs single-stage approver (e.g. the direct manager)
+        // is logged generically so the audit trail stays truthful.
+        const fastPathRole = isCeo ? "CEO" : isHrManager ? "HR Manager" : approverName;
         await writeAuditLog({
           req, actorId: myId, actorEmail: self?.email ?? null,
-          action: isCeo ? "leave.approve_ceo_direct" : "leave.approve_hr_direct",
+          action: isCeo ? "leave.approve_ceo_direct" : isHrManager ? "leave.approve_hr_direct" : "leave.approve_single_stage",
           entityType: "LeaveApplication", entityId: appId,
           before: { status: "pending" }, after: { status: "approved", approvalNote },
         });

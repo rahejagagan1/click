@@ -633,6 +633,12 @@ export default function ApprovalsPanel({
     </div>
   ) : null;
 
+  // YT Labs runs a single-stage approval flow (the first approver
+  // finalises), so there's no L2 step to show. Hide the "L2 Approval"
+  // column + cells when the view is scoped to YT Labs. NB Media and the
+  // combined "All" view keep both stages.
+  const hideL2 = companyTab === "YT Labs";
+
   const body = (
     <>
       {/* Approval module tabs */}
@@ -769,7 +775,7 @@ export default function ApprovalsPanel({
                       // Regularization: single-stage HR-only — no L1/L2 split.
                       ? ["EMPLOYEE", "DATE", "REQUESTED IN / OUT", "REASON", "STATUS", "APPROVAL NOTE", "ACTIONS"]
                       // WFH / OD / Comp-off: two-stage L1 → L2.
-                      : ["EMPLOYEE", tab === "comp_off" ? "WORKED DATE" : "DATE", "DETAILS", "REASON", "L1 APPROVAL", "L2 APPROVAL", "REQUEST STATUS"]
+                      : ["EMPLOYEE", tab === "comp_off" ? "WORKED DATE" : "DATE", "DETAILS", "REASON", "L1 APPROVAL", ...(hideL2 ? [] : ["L2 APPROVAL"]), "REQUEST STATUS"]
                     ).map((h) => (
                       <th key={h} className="px-3 py-2 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                     ))}
@@ -868,16 +874,18 @@ export default function ApprovalsPanel({
                                 actioning={actioning}
                               />
                             </td>
-                            <td className="px-3 py-2 align-top">
-                              <ApprovalCell
-                                stage="L2"
-                                row={stageRow}
-                                canAct={r.status === "partially_approved" && isFinalApprover}
-                                onApprove={() => actOne(r.id, "approve")}
-                                onReject={() => actOne(r.id, "reject")}
-                                actioning={actioning}
-                              />
-                            </td>
+                            {!hideL2 && (
+                              <td className="px-3 py-2 align-top">
+                                <ApprovalCell
+                                  stage="L2"
+                                  row={stageRow}
+                                  canAct={r.status === "partially_approved" && isFinalApprover}
+                                  onApprove={() => actOne(r.id, "approve")}
+                                  onReject={() => actOne(r.id, "reject")}
+                                  actioning={actioning}
+                                />
+                              </td>
+                            )}
                             <td className="px-3 py-2"><StatusBadge status={r.status} /></td>
                           </>
                         ) : (
@@ -994,7 +1002,7 @@ export default function ApprovalsPanel({
                           onChange={toggleAllVisible}
                           className="w-3.5 h-3.5 rounded border-slate-300 accent-[#008CFF]" />
                       </th>
-                      {["EMPLOYEE","DEPARTMENT","LEAVE DATES","LEAVE TYPE","REASON","POC","L1 APPROVAL","L2 APPROVAL"].map((h) => (
+                      {["EMPLOYEE","DEPARTMENT","LEAVE DATES","LEAVE TYPE","REASON","POC","L1 APPROVAL", ...(hideL2 ? [] : ["L2 APPROVAL"])].map((h) => (
                         <th key={h} className="px-3 py-2 text-left text-[10.5px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -1079,16 +1087,18 @@ export default function ApprovalsPanel({
                               actioning={actioning}
                             />
                           </td>
-                          <td className="px-3 py-2 align-top">
-                            <ApprovalCell
-                              stage="L2"
-                              row={r}
-                              canAct={r.status === "partially_approved" && isFinalApprover}
-                              onApprove={() => actOne(r.id, "approve")}
-                              onReject={() => actOne(r.id, "reject")}
-                              actioning={actioning}
-                            />
-                          </td>
+                          {!hideL2 && (
+                            <td className="px-3 py-2 align-top">
+                              <ApprovalCell
+                                stage="L2"
+                                row={r}
+                                canAct={r.status === "partially_approved" && isFinalApprover}
+                                onApprove={() => actOne(r.id, "approve")}
+                                onReject={() => actOne(r.id, "reject")}
+                                actioning={actioning}
+                              />
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
