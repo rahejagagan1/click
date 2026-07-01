@@ -9,6 +9,7 @@ import { istTimeOnDate, istMonthRange, istTodayDateOnly, istDateOnlyFrom } from 
 import { isRegularizationWindowEnforced } from "@/app/api/hr/policy/regularization-window/route";
 import { isRegularizationUnlimited } from "@/app/api/hr/policy/regularization-unlimited/route";
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
+import { isSingleStageApprovalEmployee } from "@/lib/hr/single-stage-approval";
 import { refundLopLwp } from "@/lib/hr/lop-lwp";
 
 // Schema covers both self-apply and admin-grant flavours of regularize POST.
@@ -363,6 +364,11 @@ export async function PUT(req: NextRequest) {
       if (crossBrand) return crossBrand;
     }
 
+    // YT Labs: single-stage — the first authorised approver (direct
+    // manager OR HR/CEO) finalises the regularization outright, running
+    // the attendance rewrite below. NB Media keeps the L1 → L2 flow.
+    const singleStage = await isSingleStageApprovalEmployee(reg.userId);
+
     // ── L1 / L2 flow (mirrors leaves / WFH / on-duty / comp-off) ───
     //   • Stage 1 (pending → partially_approved): direct manager OR HR
     //     admin can approve. Rejection allowed at this stage by manager
@@ -419,7 +425,8 @@ export async function PUT(req: NextRequest) {
     }
 
     // ── APPROVE — Stage 1: direct manager → partially_approved ─────
-    if (reg.status === "pending") {
+    // Skipped for YT Labs (single-stage): fall through to the finaliser.
+    if (reg.status === "pending" && !singleStage) {
       if (!isDirectManager && !admin) {
         return NextResponse.json({ error: "Not authorised" }, { status: 403 });
       }
@@ -467,16 +474,21 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json(await prisma.attendanceRegularization.findUnique({ where: { id } }));
     }
 
-    // ── APPROVE — Stage 2: HR finalises → falls through to the
-    // attendance rewrite block below. Only HR admin can finalise.
-    if (!admin) {
+    // ── APPROVE — Stage 2: finalises → falls through to the attendance
+    // rewrite block below. NB Media: HR admin only (partially_approved).
+    // YT Labs (single-stage): the direct manager may also finalise a
+    // still-"pending" row on the first approve.
+    const canFinalise = admin || (singleStage && isDirectManager);
+    if (!canFinalise) {
       return NextResponse.json({ error: "Only CEO / HR can finalise regularizations" }, { status: 403 });
     }
     const now = new Date();
     const { count } = await prisma.attendanceRegularization.updateMany({
-      where: { id, status: "partially_approved" },
+      where: { id, status: singleStage ? { in: ["pending", "partially_approved"] } : "partially_approved" },
       data: {
         status:            "approved",
+        approvedById:      reg.approvedById ?? myId,
+        approvedAt:        reg.approvedAt   ?? now,
         finalApprovedById: myId,
         finalApprovedAt:   now,
         finalApprovalNote: approvalNote,
@@ -489,7 +501,7 @@ export async function PUT(req: NextRequest) {
     await writeAuditLog({
       req, actorId: myId, actorEmail: callerUser?.email ?? null,
       action: "regularize.approve_l2", entityType: "AttendanceRegularization", entityId: id,
-      before: { status: "partially_approved" }, after: { status: "approved", approvalNote },
+      before: { status: reg.status }, after: { status: "approved", approvalNote },
     });
 
     // Apply approved punch correction. We've already gated to L2

@@ -575,7 +575,6 @@ function InitiateExitForm({
                   <DateField
                     value={lwdOther}
                     onChange={setLwdOther}
-                    min={new Date().toISOString().slice(0, 10)}
                     className="w-44"
                   />
                 )}

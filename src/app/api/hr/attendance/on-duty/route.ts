@@ -7,6 +7,7 @@ import { istMonthRange } from "@/lib/ist-date";
 import { sendEmail } from "@/lib/email/sender";
 import { pocAssignmentEmail } from "@/lib/email/templates";
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
+import { isSingleStageApprovalEmployee } from "@/lib/hr/single-stage-approval";
 
 export const dynamic = "force-dynamic";
 
@@ -263,6 +264,9 @@ export async function PUT(req: NextRequest) {
       if (crossBrand) return crossBrand;
     }
 
+    // YT Labs: single-stage — first authorised approver finalises outright.
+    const singleStage = await isSingleStageApprovalEmployee(record.userId);
+
     const dateLabel = new Date(record.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     const requesterName = record.user?.name || "An employee";
     const approver = await prisma.user.findUnique({ where: { id: myId }, select: { name: true } });
@@ -306,7 +310,8 @@ export async function PUT(req: NextRequest) {
     }
 
     // ── APPROVE STAGE 1 — manager → partially_approved ─────────────
-    if (record.status === "pending") {
+    // Skipped for YT Labs (single-stage): fall through to the finaliser.
+    if (record.status === "pending" && !singleStage) {
       const { count } = await prisma.onDutyRequest.updateMany({
         where: { id, status: "pending" },
         data:  { status: "partially_approved", approvedById: myId, approvalNote },
@@ -345,9 +350,11 @@ export async function PUT(req: NextRequest) {
     }
 
     // ── APPROVE STAGE 2 — HR/CEO/Dev → approved (final) ────────────
+    // For YT Labs (single-stage) this also finalises a still-"pending" row
+    // on the first approve, stamping the actor as approver.
     const { count } = await prisma.onDutyRequest.updateMany({
-      where: { id, status: "partially_approved" },
-      data:  { status: "approved", approvalNote: approvalNote ?? record.approvalNote },
+      where: { id, status: singleStage ? { in: ["pending", "partially_approved"] } : "partially_approved" },
+      data:  { status: "approved", approvedById: record.approvedById ?? myId, approvalNote: approvalNote ?? record.approvalNote },
     });
     if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
 

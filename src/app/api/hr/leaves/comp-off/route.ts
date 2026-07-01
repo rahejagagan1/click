@@ -5,6 +5,7 @@ import { notifyApprovers, notifyUsers, brandCeoIdForEmployee, brandScopedFinalAp
 import { sendEmail } from "@/lib/email/sender";
 import { pocAssignmentEmail } from "@/lib/email/templates";
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
+import { isSingleStageApprovalEmployee } from "@/lib/hr/single-stage-approval";
 
 export const dynamic = "force-dynamic";
 
@@ -169,6 +170,9 @@ export async function PUT(req: NextRequest) {
       if (crossBrand) return crossBrand;
     }
 
+    // YT Labs: single-stage — first authorised approver finalises outright.
+    const singleStage = await isSingleStageApprovalEmployee(record.userId);
+
     // Shared payload used by every notification path below.
     const approver = await prisma.user.findUnique({ where: { id: myId! }, select: { name: true } });
     const approverName = approver?.name || "An approver";
@@ -199,7 +203,8 @@ export async function PUT(req: NextRequest) {
     }
 
     // Stage 1 (manager) → partially_approved.
-    if (record.status === "pending") {
+    // Skipped for YT Labs (single-stage): fall through to the finaliser.
+    if (record.status === "pending" && !singleStage) {
       const updated = await prisma.compOffRequest.update({
         where: { id },
         data: { status: "partially_approved", approvedById: myId!, approvalNote },
@@ -238,10 +243,11 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json(updated);
     }
 
-    // Stage 2 (HR/CEO/Dev) → final approval.
+    // Stage 2 (HR/CEO/Dev) → final approval. For YT Labs (single-stage)
+    // this finalises a still-"pending" row on the first approve.
     const updated = await prisma.compOffRequest.update({
       where: { id },
-      data: { status: "approved", approvalNote: approvalNote ?? record.approvalNote },
+      data: { status: "approved", approvedById: record.approvedById ?? myId!, approvalNote: approvalNote ?? record.approvalNote },
     });
     const l1Approver = record.approvedById
       ? await prisma.user.findUnique({ where: { id: record.approvedById }, select: { name: true } })
