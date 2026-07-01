@@ -104,9 +104,9 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
   // so the new saturday* columns work before `prisma generate` picks them up.
   // Users with no shift are absent from the map → never auto-LOP'd (unchanged).
   const shiftRows = await prisma.$queryRawUnsafe<Array<{
-    userId: number; effectiveFrom: Date; workDays: unknown; saturdayPolicy: string; saturdayWeeks: number[];
+    userId: number; effectiveFrom: Date; workDays: unknown; saturdayPolicy: string; saturdayWeeks: number[]; shiftCreatedAt: Date;
   }>>(
-    `SELECT us."userId", us."effectiveFrom", s."workDays", s."saturdayPolicy", s."saturdayWeeks"
+    `SELECT us."userId", us."effectiveFrom", s."workDays", s."saturdayPolicy", s."saturdayWeeks", s."createdAt" AS "shiftCreatedAt"
        FROM "UserShift" us JOIN "Shift" s ON s.id = us."shiftId"`,
   );
   const shiftByUser = new Map(shiftRows.map((r) => [r.userId, r]));
@@ -163,7 +163,10 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
       // → skip (unchanged: a user with no shift is never auto-LOP'd).
       const sr = shiftByUser.get(u.id);
       if (!sr || !Array.isArray(sr.workDays)) continue;
-      if (!isWorkingDay(date, { workDays: sr.workDays, saturdayPolicy: sr.saturdayPolicy, saturdayWeeks: sr.saturdayWeeks }, sr.effectiveFrom)) continue;
+      // Alternate-Saturday phase is anchored on the SHIFT (createdAt) so it's
+      // uniform for everyone on the shift — a mid-cycle joiner no longer gets
+      // the opposite Saturdays. effectiveFrom stays as a fallback only.
+      if (!isWorkingDay(date, { workDays: sr.workDays, saturdayPolicy: sr.saturdayPolicy, saturdayWeeks: sr.saturdayWeeks, createdAt: sr.shiftCreatedAt }, sr.effectiveFrom)) continue;
 
       eligibleUserIds.push(u.id);
     }

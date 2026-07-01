@@ -29,6 +29,7 @@ export async function GET() {
       startTime: string | null;
       breakMinutes: number | null;
       effectiveFrom: Date;
+      shiftCreatedAt: Date;
     }>>(
       // startTime + breakMinutes feed the late-clock-in cutoff on the
       // attendance history page (HH:MM + grace). Without these fields
@@ -36,7 +37,8 @@ export async function GET() {
       // wrongly flagged YT Labs employees (11:00 start) and any NB
       // Media punch inside the 5-min grace window as LATE.
       `SELECT s."workDays", s."saturdayPolicy", s."saturdayWeeks",
-              s."startTime", s."breakMinutes", us."effectiveFrom"
+              s."startTime", s."breakMinutes", us."effectiveFrom",
+              s."createdAt" AS "shiftCreatedAt"
          FROM "UserShift" us
          JOIN "Shift" s ON s.id = us."shiftId"
         WHERE us."userId" = $1
@@ -53,6 +55,8 @@ export async function GET() {
         saturdayWeeks:  r.saturdayWeeks,
         startTime:      r.startTime,
         breakMinutes:   r.breakMinutes,
+        // Shift-level anchor for alternate-Saturday phase — see isWorkingDay.
+        createdAt:      r.shiftCreatedAt,
       },
       effectiveFrom: r.effectiveFrom,
     });
