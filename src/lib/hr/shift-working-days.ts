@@ -4,10 +4,16 @@
 // Saturday is special — `saturdayPolicy` decides which Saturdays work when
 // "Sat" is in `workDays`:
 //   • "all"       → every Saturday works (default / back-compat).
-//   • "alternate" → every OTHER Saturday. Anchored at `anchor` (the user's
-//                   UserShift.effectiveFrom): the Saturday of the anchor week
-//                   works, the next is off, then works, … continuously,
-//                   ignoring month boundaries and 5-Saturday months.
+//   • "alternate" → every OTHER Saturday. The phase is a property of the
+//                   SHIFT, not the user: it is anchored at the shift's own
+//                   `createdAt` (when the alternate policy was set up) so
+//                   every employee on the shift shares the SAME working
+//                   Saturdays regardless of when they were onboarded. The
+//                   Saturday of the anchor week works, the next is off, then
+//                   works, … continuously, ignoring month boundaries and
+//                   5-Saturday months. (A per-user `anchor` is still accepted
+//                   as a fallback for callers that don't load the shift's
+//                   createdAt, but createdAt takes precedence.)
 //   • "weeks"     → only the week-of-month ordinals in `saturdayWeeks`
 //                   (1..5; e.g. [1,3] = 1st & 3rd Saturday).
 //
@@ -23,6 +29,10 @@ export type ShiftWorkRule = {
   workDays: unknown;            // expected: array of "Mon".."Sun"; validated defensively
   saturdayPolicy?: string | null;   // "all" | "alternate" | "weeks"
   saturdayWeeks?: number[] | null;
+  // Shift-level anchor for the "alternate" Saturday phase. When present it
+  // is used INSTEAD of the per-user `anchor` arg so the pattern is uniform
+  // across everyone on the shift. Set this to the Shift row's createdAt.
+  createdAt?: Date | string | null;
 } | null | undefined;
 
 const DAY_MS = 86_400_000;
@@ -75,7 +85,11 @@ export function isWorkingDay(date: Date, shift: ShiftWorkRule, anchor?: Date | n
   if (dow === 6) {
     const policy = shift.saturdayPolicy ?? "all";
     if (policy === "alternate") {
-      return anchor ? alternateSaturdayWorking(date, anchor) : true;
+      // Prefer the SHIFT-level anchor (createdAt) so the phase is the same
+      // for every user on the shift; fall back to the per-user `anchor`
+      // only when the shift's createdAt wasn't loaded by the caller.
+      const phaseAnchor = shift.createdAt ? new Date(shift.createdAt) : anchor;
+      return phaseAnchor ? alternateSaturdayWorking(date, phaseAnchor) : true;
     }
     if (policy === "weeks") {
       const weeks = shift.saturdayWeeks;

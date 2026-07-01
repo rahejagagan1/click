@@ -189,7 +189,7 @@ export async function POST(req: NextRequest) {
     // without duplicating rows.
     const subjShift = await prisma.userShift.findUnique({
       where: { userId: subjectUserId },
-      include: { shift: { select: { workDays: true, saturdayPolicy: true, saturdayWeeks: true } } },
+      include: { shift: { select: { workDays: true, saturdayPolicy: true, saturdayWeeks: true, createdAt: true } } },
     });
     const shiftRule = subjShift?.shift ?? null;
     const anchor = subjShift?.effectiveFrom ?? null;
