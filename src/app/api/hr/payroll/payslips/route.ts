@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
-import { getBrandScope } from "@/lib/hr/brand-scope";
+import { resolveBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     // see only same-brand payslips unless they're allowlisted for
     // cross-brand. Closes the leak where YT Labs CEO could fetch
     // a NB Media-only PayrollRun's payslips by runId.
-    const scope = getBrandScope(user);
+    const scope = resolveBrandScope(user, searchParams.get("brand"));
     if (isAdmin && !scope.allBrands && !scope.brand) {
       return NextResponse.json([]);
     }

@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
-import { getBrandScope } from "@/lib/hr/brand-scope";
+import { resolveBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
     // Brand-scope: scope to caller's businessUnit unless they're a
     // developer or in the cross-brand allowlist. A YT Labs CEO
     // (canViewSalary) shouldn't see NB Media joiner salary data.
-    const scope = getBrandScope(session!.user);
+    const scope = resolveBrandScope(session!.user, searchParams.get("brand"));
     if (!scope.allBrands && !scope.brand) {
       // Caller has no brand set + isn't allowlisted — fail closed.
       return NextResponse.json({ items: [] });

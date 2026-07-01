@@ -756,7 +756,7 @@ export default function ApprovalsPanel({
                   : `No pending requests in ${companyTab === "all" ? "this view" : companyTab}`}
               </p>
             ) : (
-              <table className="w-full">
+              <table className="w-full min-w-[1050px]">
                 <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-[#0a1e3a]/95 backdrop-blur-sm">
                   <tr className="border-b border-slate-200 dark:border-white/[0.06]">
                     <th className="px-3 py-2 text-left">
@@ -985,7 +985,7 @@ export default function ApprovalsPanel({
               ) : filtered.length === 0 ? (
                 <p className="py-16 text-center text-[13px] text-slate-400">No pending leave approvals</p>
               ) : (
-                <table className="w-full">
+                <table className="w-full min-w-[1150px]">
                   <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-[#0a1e3a]/95 backdrop-blur-sm">
                     <tr className="border-b border-slate-200 dark:border-white/[0.06]">
                       <th className="px-3 py-2 text-left">

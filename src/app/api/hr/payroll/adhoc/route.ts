@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, canViewSalary, serverError } from "@/lib/api-auth";
-import { getBrandScope } from "@/lib/hr/brand-scope";
+import { resolveBrandScope } from "@/lib/hr/brand-scope";
 import { writeAuditLog } from "@/lib/audit-log";
 
 export const dynamic = "force-dynamic";
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "kind must be 'payment' or 'deduction'" }, { status: 400 });
     }
 
-    const scope = getBrandScope(session!.user);
+    const scope = resolveBrandScope(session!.user, searchParams.get("brand"));
     if (!scope.allBrands && !scope.brand) return NextResponse.json({ items: [] });
     const brandClause = scope.allBrands ? "" : ` AND ep."businessUnit" = $4`;
     const sql = `SELECT a.id, a."userId", a.month, a.year, a.kind, a.type, a.amount, a.comment,
