@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
+import { resolveBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,15 @@ export async function GET(req: NextRequest) {
     const monthStart = new Date(Date.UTC(year, month, 1));
     const monthEnd   = new Date(Date.UTC(year, month + 1, 0));
 
+    // Brand-scope: filter to the caller's brand, or — for a cross-brand /
+    // developer caller — to the brand chosen via the Run Payroll toggle
+    // (?brand=). Without this, Step 1 leaked the OTHER brand's attendance,
+    // LOP, and leave data. $3 carries the brand when scoped.
+    const scope = resolveBrandScope(session!.user, searchParams.get("brand"));
+    if (!scope.allBrands && !scope.brand) return NextResponse.json({ items: [] });
+    const brandClause = scope.allBrands ? "" : ` AND ep."businessUnit" = $3`;
+    const brandArgs = scope.allBrands ? [] : [scope.brand];
+
     if (kind === "no_attendance") {
       const rows = await prisma.$queryRawUnsafe<{
         userId: number; userName: string; employeeId: string | null;
@@ -44,13 +54,14 @@ export async function GET(req: NextRequest) {
            FROM "User" u
       LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
           WHERE u."isActive" = TRUE
+            ${brandClause}
             AND NOT EXISTS (
               SELECT 1 FROM "Attendance" a
                WHERE a."userId" = u.id
                  AND a.date >= $1 AND a.date <= $2
             )
           ORDER BY u.name ASC`,
-        monthStart, monthEnd,
+        monthStart, monthEnd, ...brandArgs,
       );
       return NextResponse.json({ items: rows });
     }
@@ -72,10 +83,11 @@ export async function GET(req: NextRequest) {
       LEFT JOIN "EmployeeProfile" ep ON ep."userId" = a."userId"
           WHERE a.date >= $1 AND a.date <= $2
             AND a.status IN ('absent', 'half_day')
+            ${brandClause}
           GROUP BY a."userId", u.name, ep."employeeId"
          HAVING SUM(CASE WHEN a.status IN ('absent','half_day') THEN 1 ELSE 0 END) > 0
           ORDER BY "lopDays" DESC`,
-        monthStart, monthEnd,
+        monthStart, monthEnd, ...brandArgs,
       );
       return NextResponse.json({ items: rows });
     }
@@ -96,8 +108,9 @@ export async function GET(req: NextRequest) {
           AND lt."isPaid" = TRUE
           AND la."fromDate" <= $2
           AND la."toDate"   >= $1
+          ${brandClause}
         ORDER BY la."fromDate" DESC`,
-      monthStart, monthEnd,
+      monthStart, monthEnd, ...brandArgs,
     );
     return NextResponse.json({ items: rows });
   } catch (e) { return serverError(e, "GET /api/hr/payroll/attendance-summary"); }

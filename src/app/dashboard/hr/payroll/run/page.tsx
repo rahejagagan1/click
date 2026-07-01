@@ -537,6 +537,7 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
           year={selected.year}
           month0={selected.month0}
           monthLabel={monthLabelShort}
+          brand={payrollEntity}
           onClose={() => setStep1Open(false)}
           onMarkedComplete={() => markStepComplete(1)}
         />
@@ -548,6 +549,7 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
           year={selected.year}
           month0={selected.month0}
           monthLabel={monthLabelShort}
+          brand={payrollEntity}
           onClose={() => setStep2Open(false)}
           onMarkedComplete={() => markStepComplete(2)}
         />
@@ -559,6 +561,7 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
           year={selected.year}
           month0={selected.month0}
           monthLabel={monthLabelShort}
+          brand={payrollEntity}
           onClose={() => setStep3Open(false)}
           onMarkedComplete={() => markStepComplete(3)}
         />
@@ -570,6 +573,7 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
           year={selected.year}
           month0={selected.month0}
           monthLabel={monthLabelShort}
+          brand={payrollEntity}
           onClose={() => setStep4Open(false)}
           onMarkedComplete={() => markStepComplete(4)}
         />
@@ -581,6 +585,7 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
           year={selected.year}
           month0={selected.month0}
           monthLabel={monthLabelShort}
+          brand={payrollEntity}
           onClose={() => setStep5Open(false)}
           onMarkedComplete={() => markStepComplete(5)}
         />
@@ -592,6 +597,7 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
           year={selected.year}
           month0={selected.month0}
           monthLabel={monthLabelShort}
+          brand={payrollEntity}
           onClose={() => setStep6Open(false)}
           onMarkedComplete={() => markStepComplete(6)}
         />
@@ -890,7 +896,7 @@ function RailCard({ title, children }: { title: string; children: React.ReactNod
 function PreCheckPanel({ runId, monthLabel, runStatus, brand, onClose }: { runId: number; monthLabel: string; runStatus: string | null; brand: "NB Media" | "YT Labs"; onClose: () => void }) {
   // Pull payslips for the run. The /api/hr/payroll/payslips route already
   // supports a runId filter via query string.
-  const { data: payslips = [] } = useSWR<any[]>(`/api/hr/payroll/payslips?runId=${runId}`, fetcher);
+  const { data: payslips = [] } = useSWR<any[]>(`/api/hr/payroll/payslips?runId=${runId}&brand=${encodeURIComponent(brand)}`, fetcher);
   const totalGross = payslips.reduce((s, p) => s + parseFloat(p.grossEarnings || 0), 0);
   const totalNet   = payslips.reduce((s, p) => s + parseFloat(p.netPay || 0), 0);
   const totalPf    = payslips.reduce((s, p) => s + parseFloat(p.pfEmployee || 0), 0);
@@ -1092,10 +1098,11 @@ const SUB_STEPS: { n: SubStep; label: string }[] = [
   { n: 4, label: "SHIFT\nALLOWANCE" },
 ];
 
-function Step3Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
+function Step3Panel({ year, month0, monthLabel, brand, onClose, onMarkedComplete }: {
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
   onClose: () => void;
   onMarkedComplete?: () => void | Promise<void>;
 }) {
@@ -1103,7 +1110,7 @@ function Step3Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
   const [showAdd, setShowAdd] = useState(false);
 
   // Bonus list (step 1) — only data wired with a real backend right now.
-  const bonusUrl = `/api/hr/payroll/bonus?month=${month0}&year=${year}`;
+  const bonusUrl = `/api/hr/payroll/bonus?month=${month0}&year=${year}&brand=${encodeURIComponent(brand)}`;
   const { data: bonusData } = useSWR<{ items: BonusItem[] }>(bonusUrl, fetcher);
   const bonusItems = bonusData?.items ?? [];
 
@@ -1205,9 +1212,9 @@ function Step3Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
                   onDelete={handleDelete}
                 />
               )}
-              {current === 2 && <SalaryRevisionSubStep   year={year} month0={month0} monthLabel={monthLabel} />}
-              {current === 3 && <OvertimePaymentSubStep  year={year} month0={month0} monthLabel={monthLabel} />}
-              {current === 4 && <ShiftAllowanceSubStep   year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 2 && <SalaryRevisionSubStep   year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
+              {current === 3 && <OvertimePaymentSubStep  year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
+              {current === 4 && <ShiftAllowanceSubStep   year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
             </div>
 
             {/* Help Resources rail — distinct content per sub-step */}
@@ -1224,6 +1231,7 @@ function Step3Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
           year={year}
           month0={month0}
           monthLabel={monthLabel}
+          brand={brand}
           onClose={() => setShowAdd(false)}
           onAdded={() => { mutate(bonusUrl); setShowAdd(false); }}
         />
@@ -1306,13 +1314,13 @@ function BonusSubStep({ items, monthLabel, onAdd, onDelete }: {
   );
 }
 
-function SalaryRevisionSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+function SalaryRevisionSubStep({ year, month0, monthLabel, brand }: { year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs" }) {
   type Row = {
     id: number; userId: number; userName: string | null; employeeId: string | null;
     oldCtc: string | null; newCtc: string | null; effectiveDate: string | null;
     changedAt: string; actorName: string | null;
   };
-  const url = `/api/hr/payroll/salary-revisions?month=${month0}&year=${year}`;
+  const url = `/api/hr/payroll/salary-revisions?month=${month0}&year=${year}&brand=${encodeURIComponent(brand)}`;
   const { data } = useSWR<{ items: Row[] }>(url, fetcher);
   const items = data?.items ?? [];
 
@@ -1355,11 +1363,11 @@ function SalaryRevisionSubStep({ year, month0, monthLabel }: { year: number; mon
 // Typed adhoc sub-step (overtime / shift_allowance / arrears) — reuses the
 // AdhocLineItem table with a fixed `type` value so the engine treats it the
 // same as a normal adhoc payment.
-function TypedAdhocSubStep({ year, month0, monthLabel, type, title, blurb }: {
-  year: number; month0: number; monthLabel: string;
+function TypedAdhocSubStep({ year, month0, monthLabel, brand, type, title, blurb }: {
+  year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs";
   type: string; title: string; blurb: string;
 }) {
-  const url = `/api/hr/payroll/adhoc?month=${month0}&year=${year}&kind=payment`;
+  const url = `/api/hr/payroll/adhoc?month=${month0}&year=${year}&kind=payment&brand=${encodeURIComponent(brand)}`;
   type AdhocRow = { id: number; userId: number; userName: string; type: string | null; amount: string; comment: string | null };
   const { data } = useSWR<{ items: AdhocRow[] }>(url, fetcher);
   const filtered = (data?.items ?? []).filter((r) => r.type === type);
@@ -1399,15 +1407,15 @@ function TypedAdhocSubStep({ year, month0, monthLabel, type, title, blurb }: {
   );
 }
 
-function OvertimePaymentSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
-  return <TypedAdhocSubStep year={year} month0={month0} monthLabel={monthLabel}
+function OvertimePaymentSubStep({ year, month0, monthLabel, brand }: { year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs" }) {
+  return <TypedAdhocSubStep year={year} month0={month0} monthLabel={monthLabel} brand={brand}
     type="overtime"
     title="Overtime Payment"
     blurb={`Approved overtime payments queued for ${monthLabel}. Engine adds these to gross pay.`} />;
 }
 
-function ShiftAllowanceSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
-  return <TypedAdhocSubStep year={year} month0={month0} monthLabel={monthLabel}
+function ShiftAllowanceSubStep({ year, month0, monthLabel, brand }: { year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs" }) {
+  return <TypedAdhocSubStep year={year} month0={month0} monthLabel={monthLabel} brand={brand}
     type="shift_allowance"
     title="Shift Allowance Payment"
     blurb={`Shift allowance entries for ${monthLabel}. Engine adds these to gross pay.`} />;
@@ -1529,14 +1537,15 @@ function HelpResources({ step }: { step: SubStep }) {
 
 // Add-bonus modal — employee picker + amount + type + reason. Posts
 // to /api/hr/payroll/bonus then mutates the parent list.
-function AddBonusModal({ year, month0, monthLabel, onClose, onAdded }: {
+function AddBonusModal({ year, month0, monthLabel, brand, onClose, onAdded }: {
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
   onClose: () => void;
   onAdded: () => void;
 }) {
-  const { data: empData } = useSWR<any[]>("/api/hr/employees", fetcher);
+  const { data: empData } = useSWR<any[]>(`/api/hr/employees?brand=${encodeURIComponent(brand)}`, fetcher);
   const employees = Array.isArray(empData) ? empData : (empData as any)?.employees ?? [];
 
   const [userId, setUserId]               = useState<number | "">("");
@@ -1689,10 +1698,11 @@ const STEP4_SUB_STEPS: { n: Step4SubStep; label: string }[] = [
   { n: 4, label: "ADHOC\nDEDUCTIONS" },
 ];
 
-function Step4Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
+function Step4Panel({ year, month0, monthLabel, brand, onClose, onMarkedComplete }: {
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
   onClose: () => void;
   onMarkedComplete?: () => void | Promise<void>;
 }) {
@@ -1784,14 +1794,15 @@ function Step4Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
         <div className="flex-1 overflow-y-auto bg-slate-50">
           <div className="flex gap-5 p-5">
             <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-5">
-              {current === 1 && <SalaryComponentClaimSubStep year={year} month0={month0} monthLabel={monthLabel} />}
-              {current === 2 && <ExpensesSubStep             year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 1 && <SalaryComponentClaimSubStep year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
+              {current === 2 && <ExpensesSubStep             year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
               {current === 3 && (
                 <AdhocLineItemsSubStep
                   kind="payment"
                   year={year}
                   month0={month0}
                   monthLabel={monthLabel}
+                  brand={brand}
                 />
               )}
               {current === 4 && (
@@ -1800,6 +1811,7 @@ function Step4Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
                   year={year}
                   month0={month0}
                   monthLabel={monthLabel}
+                  brand={brand}
                 />
               )}
             </div>
@@ -1815,14 +1827,14 @@ function Step4Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
 
 // ─── Step 4 sub-steps ──────────────────────────────────────────────────────
 
-function SalaryComponentClaimSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+function SalaryComponentClaimSubStep({ year, month0, monthLabel, brand }: { year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs" }) {
   // Salary-component claims live in the existing Expense table, but
   // distinguish themselves with category != travel/food/etc — for now
   // we expose any Expense row whose category is "component" or whose
   // title contains "FBP". When the dedicated FlexiBenefitClaim model lands
   // this query will switch over.
   type Row = { id: number; userId: number; userName: string; employeeId: string | null; title: string; category: string; amount: string; expenseDate: string; status: string };
-  const url = `/api/hr/payroll/expenses?month=${month0}&year=${year}`;
+  const url = `/api/hr/payroll/expenses?month=${month0}&year=${year}&brand=${encodeURIComponent(brand)}`;
   const { data } = useSWR<{ items: Row[] }>(url, fetcher);
   const items = (data?.items ?? []).filter((r) => r.category === "component" || /fbp|component/i.test(r.title));
 
@@ -1853,9 +1865,9 @@ function SalaryComponentClaimSubStep({ year, month0, monthLabel }: { year: numbe
   );
 }
 
-function ExpensesSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
+function ExpensesSubStep({ year, month0, monthLabel, brand }: { year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs" }) {
   type Row = { id: number; userId: number; userName: string; employeeId: string | null; title: string; category: string; amount: string; expenseDate: string; status: string };
-  const url = `/api/hr/payroll/expenses?month=${month0}&year=${year}`;
+  const url = `/api/hr/payroll/expenses?month=${month0}&year=${year}&brand=${encodeURIComponent(brand)}`;
   const { data } = useSWR<{ items: Row[] }>(url, fetcher);
   const items = (data?.items ?? []).filter((r) => r.category !== "component" && !/fbp|component/i.test(r.title));
 
@@ -1901,17 +1913,18 @@ type AdhocItem = {
   role?: string;
 };
 
-function AdhocLineItemsSubStep({ kind, year, month0, monthLabel }: {
+function AdhocLineItemsSubStep({ kind, year, month0, monthLabel, brand }: {
   kind: "payment" | "deduction";
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
 }) {
   const noun       = kind === "payment" ? "Payment"      : "Deduction";
   const nounLower  = kind === "payment" ? "payment"      : "deduction";
   const importThis = kind === "payment" ? "Import Adhoc Payments" : "Import Adhoc Deductions";
 
-  const url = `/api/hr/payroll/adhoc?month=${month0}&year=${year}&kind=${kind}`;
+  const url = `/api/hr/payroll/adhoc?month=${month0}&year=${year}&kind=${kind}&brand=${encodeURIComponent(brand)}`;
   const { data } = useSWR<{ items: AdhocItem[] }>(url, fetcher);
   const items = data?.items ?? [];
 
@@ -2125,6 +2138,7 @@ function AdhocLineItemsSubStep({ kind, year, month0, monthLabel }: {
           year={year}
           month0={month0}
           monthLabel={monthLabel}
+          brand={brand}
           existingUserIds={new Set(items.map((it) => it.userId))}
           onClose={() => setShowAdd(false)}
           onAdded={() => { mutate(url); setShowAdd(false); }}
@@ -2134,17 +2148,18 @@ function AdhocLineItemsSubStep({ kind, year, month0, monthLabel }: {
   );
 }
 
-function AddAdhocModal({ kind, year, month0, monthLabel, existingUserIds, onClose, onAdded }: {
+function AddAdhocModal({ kind, year, month0, monthLabel, brand, existingUserIds, onClose, onAdded }: {
   kind: "payment" | "deduction";
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
   existingUserIds: Set<number>;
   onClose: () => void;
   onAdded: () => void;
 }) {
   const noun = kind === "payment" ? "Payment" : "Deduction";
-  const { data: empData } = useSWR<any>("/api/hr/employees", fetcher);
+  const { data: empData } = useSWR<any>(`/api/hr/employees?brand=${encodeURIComponent(brand)}`, fetcher);
   const employees: any[] = Array.isArray(empData) ? empData : (empData as any)?.employees ?? [];
 
   const [userId, setUserId]   = useState<number | "">("");
@@ -2363,10 +2378,11 @@ const STEP5_SUB_STEPS: { n: Step5SubStep; label: string }[] = [
   { n: 3, label: "ARREARS" },
 ];
 
-function Step5Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
+function Step5Panel({ year, month0, monthLabel, brand, onClose, onMarkedComplete }: {
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
   onClose: () => void;
   onMarkedComplete?: () => void | Promise<void>;
 }) {
@@ -2431,9 +2447,9 @@ function Step5Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
         <div className="flex-1 overflow-y-auto bg-slate-50">
           <div className="flex gap-5 p-5">
             <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-5">
-              {current === 1 && <SalaryHoldSubStep kind="processing" year={year} month0={month0} monthLabel={monthLabel} />}
-              {current === 2 && <SalaryHoldSubStep kind="payout"     year={year} month0={month0} monthLabel={monthLabel} />}
-              {current === 3 && <ArrearsSubStep year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 1 && <SalaryHoldSubStep kind="processing" year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
+              {current === 2 && <SalaryHoldSubStep kind="payout"     year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
+              {current === 3 && <ArrearsSubStep year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
             </div>
             <aside className="hidden lg:block w-[280px] shrink-0">
               <HelpResourcesStep5 step={current} />
@@ -2459,17 +2475,18 @@ type SalaryHoldItem = {
   role?: string;
 };
 
-function SalaryHoldSubStep({ kind, year, month0, monthLabel }: {
+function SalaryHoldSubStep({ kind, year, month0, monthLabel, brand }: {
   kind: "processing" | "payout";
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
 }) {
   const titleNoun    = kind === "processing" ? "Salary Processing on hold" : "Salary payout on hold";
   const importLabel  = kind === "processing" ? "Import Processing on Holds" : "Import Payout on Holds";
   const showAmount   = kind === "processing";
 
-  const url = `/api/hr/payroll/salary-hold?month=${month0}&year=${year}&kind=${kind}`;
+  const url = `/api/hr/payroll/salary-hold?month=${month0}&year=${year}&kind=${kind}&brand=${encodeURIComponent(brand)}`;
   const { data } = useSWR<{ items: SalaryHoldItem[] }>(url, fetcher);
   const items = data?.items ?? [];
 
@@ -2568,6 +2585,7 @@ function SalaryHoldSubStep({ kind, year, month0, monthLabel }: {
           year={year}
           month0={month0}
           monthLabel={monthLabel}
+          brand={brand}
           existingUserIds={new Set(items.map((it) => it.userId))}
           onClose={() => setShowAdd(false)}
           onAdded={() => { mutate(url); setShowAdd(false); }}
@@ -2577,17 +2595,18 @@ function SalaryHoldSubStep({ kind, year, month0, monthLabel }: {
   );
 }
 
-function AddSalaryHoldModal({ kind, year, month0, monthLabel, existingUserIds, onClose, onAdded }: {
+function AddSalaryHoldModal({ kind, year, month0, monthLabel, brand, existingUserIds, onClose, onAdded }: {
   kind: "processing" | "payout";
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
   existingUserIds: Set<number>;
   onClose: () => void;
   onAdded: () => void;
 }) {
   const noun = kind === "processing" ? "Salary Processing on Hold" : "Salary Payout on Hold";
-  const { data: empData } = useSWR<any>("/api/hr/employees", fetcher);
+  const { data: empData } = useSWR<any>(`/api/hr/employees?brand=${encodeURIComponent(brand)}`, fetcher);
   const employees: any[] = Array.isArray(empData) ? empData : (empData as any)?.employees ?? [];
 
   const [userId, setUserId]       = useState<number | "">("");
@@ -2684,8 +2703,8 @@ function AddSalaryHoldModal({ kind, year, month0, monthLabel, existingUserIds, o
   );
 }
 
-function ArrearsSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
-  return <TypedAdhocSubStep year={year} month0={month0} monthLabel={monthLabel}
+function ArrearsSubStep({ year, month0, monthLabel, brand }: { year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs" }) {
+  return <TypedAdhocSubStep year={year} month0={month0} monthLabel={monthLabel} brand={brand}
     type="arrears"
     title="Arrears"
     blurb={`Past-dated dues being paid in ${monthLabel}. Engine adds these to gross pay. Source: AdhocLineItem with type=arrears.`} />;
@@ -2707,10 +2726,11 @@ const STEP6_SUB_STEPS: { n: Step6SubStep; label: string; kind: TaxKind }[] = [
   { n: 4, label: "LWF OVERRIDE", kind: "LWF" },
 ];
 
-function Step6Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
+function Step6Panel({ year, month0, monthLabel, brand, onClose, onMarkedComplete }: {
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
   onClose: () => void;
   onMarkedComplete?: () => void | Promise<void>;
 }) {
@@ -2782,6 +2802,7 @@ function Step6Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
                 year={year}
                 month0={month0}
                 monthLabel={monthLabel}
+                brand={brand}
               />
             </div>
             <aside className="hidden lg:block w-[280px] shrink-0">
@@ -2808,13 +2829,14 @@ type TaxOverrideItem = {
   employeeId?: string | null;
 };
 
-function TaxOverrideSubStep({ kind, year, month0, monthLabel }: {
+function TaxOverrideSubStep({ kind, year, month0, monthLabel, brand }: {
   kind: TaxKind;
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
 }) {
-  const url = `/api/hr/payroll/tax-override?month=${month0}&year=${year}&kind=${kind}`;
+  const url = `/api/hr/payroll/tax-override?month=${month0}&year=${year}&kind=${kind}&brand=${encodeURIComponent(brand)}`;
   const { data } = useSWR<{ items: TaxOverrideItem[] }>(url, fetcher);
   const items = data?.items ?? [];
   const [search, setSearch] = useState("");
@@ -2942,6 +2964,7 @@ function TaxOverrideSubStep({ kind, year, month0, monthLabel }: {
           year={year}
           month0={month0}
           monthLabel={monthLabel}
+          brand={brand}
           existingUserIds={new Set(items.map((it) => it.userId))}
           onClose={() => setShowAdd(false)}
           onAdded={() => { mutate(url); setShowAdd(false); }}
@@ -2951,17 +2974,18 @@ function TaxOverrideSubStep({ kind, year, month0, monthLabel }: {
   );
 }
 
-function AddTaxOverrideModal({ kind, year, month0, monthLabel, existingUserIds, onClose, onAdded }: {
+function AddTaxOverrideModal({ kind, year, month0, monthLabel, brand, existingUserIds, onClose, onAdded }: {
   kind: TaxKind;
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
   existingUserIds: Set<number>;
   onClose: () => void;
   onAdded: () => void;
 }) {
   const dual = kind === "ESI" || kind === "LWF";
-  const { data: empData } = useSWR<any>("/api/hr/employees", fetcher);
+  const { data: empData } = useSWR<any>(`/api/hr/employees?brand=${encodeURIComponent(brand)}`, fetcher);
   const employees: any[] = Array.isArray(empData) ? empData : (empData as any)?.employees ?? [];
 
   const [userId, setUserId]     = useState<number | "">("");
@@ -3137,10 +3161,11 @@ const STEP1_SUB_STEPS: { n: Step1SubStep; label: string }[] = [
   { n: 4, label: "LOP\nREVERSAL" },
 ];
 
-function Step1Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
+function Step1Panel({ year, month0, monthLabel, brand, onClose, onMarkedComplete }: {
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
   onClose: () => void;
   onMarkedComplete?: () => void | Promise<void>;
 }) {
@@ -3204,10 +3229,10 @@ function Step1Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
         <div className="flex-1 overflow-y-auto bg-slate-50">
           <div className="flex gap-5 p-5">
             <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-5">
-              {current === 1 && <LeaveAppliedSubStep year={year} month0={month0} monthLabel={monthLabel} />}
-              {current === 2 && <NoAttendanceSubStep year={year} month0={month0} monthLabel={monthLabel} />}
-              {current === 3 && <LopSummarySubStep    year={year} month0={month0} monthLabel={monthLabel} />}
-              {current === 4 && <LopReversalSubStep   year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 1 && <LeaveAppliedSubStep year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
+              {current === 2 && <NoAttendanceSubStep year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
+              {current === 3 && <LopSummarySubStep    year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
+              {current === 4 && <LopReversalSubStep   year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
             </div>
             <aside className="hidden lg:block w-[280px] shrink-0">
               <HelpResourcesStep1 step={current} />
@@ -3235,12 +3260,13 @@ type CycleLeave = {
   approverName?: string | null;
 };
 
-function LeaveAppliedSubStep({ year, month0, monthLabel }: {
+function LeaveAppliedSubStep({ year, month0, monthLabel, brand }: {
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
 }) {
-  const url = `/api/hr/payroll/cycle-leaves?month=${month0}&year=${year}`;
+  const url = `/api/hr/payroll/cycle-leaves?month=${month0}&year=${year}&brand=${encodeURIComponent(brand)}`;
   const { data } = useSWR<{ items: CycleLeave[] }>(url, fetcher);
   const items = data?.items ?? [];
 
@@ -3472,8 +3498,8 @@ function StatusPill({ status }: { status: string }) {
 
 // ─── Step 1 sub-step 2: No Attendance ───────────────────────────────────────
 
-function NoAttendanceSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
-  const url = `/api/hr/payroll/attendance-summary?month=${month0}&year=${year}&kind=no_attendance`;
+function NoAttendanceSubStep({ year, month0, monthLabel, brand }: { year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs" }) {
+  const url = `/api/hr/payroll/attendance-summary?month=${month0}&year=${year}&kind=no_attendance&brand=${encodeURIComponent(brand)}`;
   const { data } = useSWR<{ items: { userId: number; userName: string; employeeId: string | null }[] }>(url, fetcher);
   const items = data?.items ?? [];
   return (
@@ -3502,8 +3528,8 @@ function NoAttendanceSubStep({ year, month0, monthLabel }: { year: number; month
 
 // ─── Step 1 sub-step 3: LOP Summary ─────────────────────────────────────────
 
-function LopSummarySubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
-  const url = `/api/hr/payroll/attendance-summary?month=${month0}&year=${year}&kind=lop`;
+function LopSummarySubStep({ year, month0, monthLabel, brand }: { year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs" }) {
+  const url = `/api/hr/payroll/attendance-summary?month=${month0}&year=${year}&kind=lop&brand=${encodeURIComponent(brand)}`;
   const { data } = useSWR<{ items: { userId: number; userName: string; employeeId: string | null; absentDays: string; halfDays: string; lopDays: string }[] }>(url, fetcher);
   const items = data?.items ?? [];
   return (
@@ -3535,8 +3561,8 @@ function LopSummarySubStep({ year, month0, monthLabel }: { year: number; month0:
 
 // ─── Step 1 sub-step 4: LOP Reversal ────────────────────────────────────────
 
-function LopReversalSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
-  const url = `/api/hr/payroll/attendance-summary?month=${month0}&year=${year}&kind=lop_reversal`;
+function LopReversalSubStep({ year, month0, monthLabel, brand }: { year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs" }) {
+  const url = `/api/hr/payroll/attendance-summary?month=${month0}&year=${year}&kind=lop_reversal&brand=${encodeURIComponent(brand)}`;
   const { data } = useSWR<{ items: { id: number; userId: number; userName: string; employeeId: string | null; leaveType: string; fromDate: string; toDate: string; totalDays: string }[] }>(url, fetcher);
   const items = data?.items ?? [];
   return (
@@ -3581,10 +3607,11 @@ const STEP2_SUB_STEPS: { n: Step2SubStep; label: string }[] = [
   { n: 3, label: "FULL & FINAL\nSETTLEMENT" },
 ];
 
-function Step2Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
+function Step2Panel({ year, month0, monthLabel, brand, onClose, onMarkedComplete }: {
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
   onClose: () => void;
   onMarkedComplete?: () => void | Promise<void>;
 }) {
@@ -3648,9 +3675,9 @@ function Step2Panel({ year, month0, monthLabel, onClose, onMarkedComplete }: {
         <div className="flex-1 overflow-y-auto bg-slate-50">
           <div className="flex gap-5 p-5">
             <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-5">
-              {current === 1 && <NewJoineesSubStep year={year} month0={month0} monthLabel={monthLabel} />}
-              {current === 2 && <ExitProcessSubStep  year={year} month0={month0} monthLabel={monthLabel} />}
-              {current === 3 && <FullAndFinalSubStep year={year} month0={month0} monthLabel={monthLabel} />}
+              {current === 1 && <NewJoineesSubStep year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
+              {current === 2 && <ExitProcessSubStep  year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
+              {current === 3 && <FullAndFinalSubStep year={year} month0={month0} monthLabel={monthLabel} brand={brand} />}
             </div>
             <aside className="hidden lg:block w-[280px] shrink-0">
               <HelpResourcesStep2 step={current} />
@@ -3693,12 +3720,13 @@ function payActionToHold(s: string): { kind: "processing" | "payout"; payAction:
   return null;
 }
 
-function NewJoineesSubStep({ year, month0, monthLabel }: {
+function NewJoineesSubStep({ year, month0, monthLabel, brand }: {
   year: number;
   month0: number;
   monthLabel: string;
+  brand: "NB Media" | "YT Labs";
 }) {
-  const url = `/api/hr/payroll/new-joinees?month=${month0}&year=${year}`;
+  const url = `/api/hr/payroll/new-joinees?month=${month0}&year=${year}&brand=${encodeURIComponent(brand)}`;
   const { data } = useSWR<{ items: NewJoinee[] }>(url, fetcher);
   const items = data?.items ?? [];
 
@@ -3827,8 +3855,8 @@ function NewJoineesSubStep({ year, month0, monthLabel }: {
 
 // ─── Step 2 sub-step 2: Employee in Exit Process (placeholder) ──────────────
 
-function ExitProcessSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
-  const url = `/api/hr/payroll/exits?month=${month0}&year=${year}`;
+function ExitProcessSubStep({ year, month0, monthLabel, brand }: { year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs" }) {
+  const url = `/api/hr/payroll/exits?month=${month0}&year=${year}&brand=${encodeURIComponent(brand)}`;
   type ExitRow = {
     id: number; userId: number; userName: string; employeeId: string | null;
     designation: string | null; department: string | null;
@@ -3880,8 +3908,8 @@ function ExitProcessSubStep({ year, month0, monthLabel }: { year: number; month0
 
 // ─── Step 2 sub-step 3: Full & Final Settlement (placeholder) ───────────────
 
-function FullAndFinalSubStep({ year, month0, monthLabel }: { year: number; month0: number; monthLabel: string }) {
-  const url = `/api/hr/payroll/exits?month=${month0}&year=${year}`;
+function FullAndFinalSubStep({ year, month0, monthLabel, brand }: { year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs" }) {
+  const url = `/api/hr/payroll/exits?month=${month0}&year=${year}&brand=${encodeURIComponent(brand)}`;
   type ExitRow = {
     id: number; userId: number; userName: string; employeeId: string | null;
     exitType: string; lastWorkingDay: string; status: string;

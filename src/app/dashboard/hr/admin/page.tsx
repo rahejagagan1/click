@@ -741,7 +741,11 @@ export default function HRAdminPage() {
         </div>
 
         {/* Content */}
-        <div className="flex-1 p-6 space-y-4">
+        {/* min-w-0 lets this flex column shrink to the available width instead
+            of growing to its content's intrinsic size — without it, wide inner
+            tables (e.g. the Approvals leave list) push past the viewport and
+            get clipped rather than scrolling inside their own box. */}
+        <div className="flex-1 min-w-0 p-6 space-y-4">
 
           {/* ── Attendance Dashboard ── */}
           {tab === "attendance-dashboard" && <AttendanceDashboardPanel initialBrand={initialBrand} />}
