@@ -4168,6 +4168,11 @@ function EmployeeTimePanel({
                       {isWfhApproved && !isLeaveRow ? <span className="inline-flex items-center rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-700">WFH</span> : null}
                       {/* New tags (matches Me-section) */}
                       {isLop ? <span className="inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-red-700">{isHalfDayLop ? "½ Day LOP" : "LOP"}</span> : null}
+                      {/* Under-9h day that clocked out but wasn't regularised —
+                          payroll counts it as ½ day (0.5 LOP). Surface it loudly
+                          so HR doesn't mistake the "completed punch" ✓ for a full
+                          day. Suppressed while a request is pending / for today. */}
+                      {rec.status === "half_day" && !isToday && !hasPendingAny ? <span title="Worked under 9h — counts as ½ day (0.5 LOP) in payroll unless regularized" className="inline-flex items-center gap-0.5 rounded bg-orange-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-orange-700"><AlertCircle size={10} strokeWidth={2.5} /> ½ Half day</span> : null}
                       {missedClockOut && !hasPendingAny && !isLop ? <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">Missed</span> : null}
                       {isLateFirstIn && !!rec.clockIn && !hasPendingAny && !isLeaveRow ? <span className="inline-flex items-center rounded bg-orange-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-orange-700">Late</span> : null}
                       {isOnBreak ? <span className="inline-flex items-center rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-700">On break</span> : null}
@@ -4375,6 +4380,31 @@ function EmployeeTimePanel({
                         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                         Reg.
                       </span>
+                    ) : rec.status === "half_day" && !isToday ? (
+                      // Clocked out under 9h and not regularised → payroll docks
+                      // 0.5 LOP. Show an amber "½ Day" flag instead of the same
+                      // green ✓ a full day gets, so HR spots it at a glance. For
+                      // admins it doubles as a one-click regularize affordance.
+                      isHRAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => openRegFor(rec)}
+                          title="Worked under 9h — counts as ½ day (0.5 LOP) in payroll. Click to regularize."
+                          aria-label="Half day — regularize this day"
+                          className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-orange-700 ring-1 ring-inset ring-orange-200 shadow-[0_1px_2px_rgba(245,158,11,0.18)] transition hover:bg-orange-100 hover:ring-orange-300"
+                        >
+                          <AlertCircle className="h-3.5 w-3.5" strokeWidth={2.5} />
+                          ½ Day
+                        </button>
+                      ) : (
+                        <span
+                          title="Worked under 9h — counts as ½ day (0.5 LOP) in payroll unless regularized"
+                          className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-orange-700 ring-1 ring-inset ring-orange-200"
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
+                          ½ Day
+                        </span>
+                      )
                     ) : isPresent ? (
                       <span
                         title="Clock-in completed"

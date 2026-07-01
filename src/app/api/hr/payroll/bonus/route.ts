@@ -6,7 +6,7 @@ import { extname } from "node:path";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, canViewSalary, serverError } from "@/lib/api-auth";
 import { writeAuditLog } from "@/lib/audit-log";
-import { getBrandScope } from "@/lib/hr/brand-scope";
+import { resolveBrandScope } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 // Node runtime needed for Buffer / multipart file reads (Edge can't).
@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
       }
       const start = new Date(Date.UTC(year, month, 1));
       const end   = new Date(Date.UTC(year, month + 1, 1));
-      const scope = getBrandScope(session!.user);
+      const scope = resolveBrandScope(session!.user, searchParams.get("brand"));
       if (!scope.allBrands && !scope.brand) return NextResponse.json({ items: [] });
       const brandClause = scope.allBrands ? "" : ` AND ep."businessUnit" = $3`;
       const sql = `SELECT b.id, b."userId", b.amount, b.reason, b."effectiveDate",
