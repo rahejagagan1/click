@@ -27,7 +27,6 @@ import {
   ListChecks, MessageSquare, Paperclip, ExternalLink,
 } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
-import ExitFinaliseWizard from "./ExitFinaliseWizard";
 import ExitSurveyTab from "@/components/hr/ExitSurveyTab";
 
 type ExitDetail = {
@@ -156,7 +155,6 @@ export default function ExitDetailDrawer({
     { refreshInterval: 0 },
   );
   const [tab, setTab] = useState<TabKey>("summary");
-  const [wizardOpen, setWizardOpen] = useState(false);
 
   // Lock background scroll while the drawer is open.
   useEffect(() => {
@@ -218,7 +216,7 @@ export default function ExitDetailDrawer({
           ) : (
             <>
               {tab === "summary"  && <SummaryTab  data={data} onChanged={() => { refetch(); onChanged(); }} />}
-              {tab === "finances" && <FinancesTab data={data} onOpenWizard={() => setWizardOpen(true)} />}
+              {tab === "finances" && <FinancesTab data={data} onRefresh={() => { refetch(); onChanged(); }} />}
               {tab === "survey"   && <SurveyTab   data={data} onChanged={() => { refetch(); onChanged(); }} />}
               {tab === "tasks"    && <TasksTab    data={data} onChanged={() => { refetch(); onChanged(); }} />}
               {tab === "leave"    && <LeaveTab    data={data} onJumpFinances={() => setTab("finances")} />}
@@ -227,16 +225,6 @@ export default function ExitDetailDrawer({
           )}
         </div>
       </aside>
-
-      {wizardOpen && data && (
-        <ExitFinaliseWizard
-          exit={data.exit}
-          settlement={data.settlement}
-          lines={data.settlementLines}
-          onClose={() => setWizardOpen(false)}
-          onSaved={() => { refetch(); onChanged(); }}
-        />
-      )}
     </div>
   );
 }
@@ -666,10 +654,30 @@ function ClearanceRow({
 /* ── Finances tab ─────────────────────────────────────────────────────── */
 
 function FinancesTab({
-  data, onOpenWizard,
-}: { data: ExitDetail; onOpenWizard: () => void }) {
+  data, onRefresh,
+}: { data: ExitDetail; onRefresh: () => void }) {
   const s = data.settlement;
   const lines = data.settlementLines;
+  const [busy, setBusy] = useState(false);
+
+  // The F&F Letter IS the finalization: generating it marks the exit's
+  // settlement as finalised (auto-creating a minimal settlement row) and
+  // opens the Full & Final Settlement Letter template pre-filled for the
+  // employee. No separate line-item wizard.
+  const letterHref = `/dashboard/hr/admin/templates/fnf_settlement?employeeId=${data.exit.userId}`;
+  async function generateAndFinalise() {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/hr/exits/${data.exit.id}/settlement/finalise`, { method: "POST" });
+      window.open(letterHref, "_blank", "noopener,noreferrer");
+      if (res.ok || res.status === 409) onRefresh();
+      else { const j = await res.json().catch(() => ({})); alert(j?.error || "Could not finalise the settlement"); }
+    } catch {
+      window.open(letterHref, "_blank", "noopener,noreferrer");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const totals = useMemo(() => {
     let pay = 0, recover = 0, hold = 0, carry = 0;
@@ -688,33 +696,42 @@ function FinancesTab({
       <section className="bg-white border border-slate-200 rounded-xl p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-[13px] font-bold text-slate-800">Review &amp; Finalise Payables</h3>
-          {s?.finalised ? (
-            <span className="inline-flex items-center gap-1 px-2.5 h-7 rounded-full ring-1 ring-inset ring-emerald-200 bg-emerald-50 text-emerald-700 text-[11px] font-semibold">
-              <CheckCircle2 size={12} /> Finalised {fmtDateTime(s.finalisedAt)}
-            </span>
-          ) : (
+          <div className="flex items-center gap-2">
+            {s?.finalised && (
+              <span className="inline-flex items-center gap-1 px-2.5 h-7 rounded-full ring-1 ring-inset ring-emerald-200 bg-emerald-50 text-emerald-700 text-[11px] font-semibold">
+                <CheckCircle2 size={12} /> Finalised {fmtDateTime(s.finalisedAt)}
+              </span>
+            )}
             <button
-              onClick={onOpenWizard}
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-[#0f6ecd] hover:bg-[#0a5fb3] text-white text-[12.5px] font-semibold"
+              onClick={generateAndFinalise}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-[#0f6ecd] hover:bg-[#0a5fb3] text-white text-[12.5px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <ClipboardList size={13} />
-              {s ? "Edit settlement" : "Start finalisation"}
+              <FileText size={13} />
+              {busy ? "Working…" : s?.finalised ? "Open F&F Letter" : "Generate F&F Letter"}
             </button>
-          )}
+          </div>
         </div>
 
-        {!s ? (
+        {!s?.finalised ? (
           <p className="text-[12.5px] text-slate-500">
-            No settlement recorded yet. Open the wizard to build the F&amp;F statement.
+            Generate the F&amp;F Letter to finalise this settlement — it marks the exit as settled and opens the letter for this employee.
           </p>
         ) : (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Stat label="To pay"      value={inr(totals.pay)}     tone="emerald" />
-              <Stat label="To recover"  value={inr(totals.recover)} tone="rose"    />
-              <Stat label="Net payable" value={inr(totals.net)}     tone="sky"     />
-              <Stat label="Carry over"  value={inr(totals.carry)}   tone="slate"   />
-            </div>
+            <p className="text-[12.5px] text-slate-600">
+              Settlement finalised. The amounts are carried by the F&amp;F Letter — click <strong>Open F&amp;F Letter</strong> to view or re-generate it.
+            </p>
+            {/* Legacy line-item settlements (created via the old wizard) still
+                show their totals. New F&F-letter finalisations have no lines. */}
+            {lines.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+                <Stat label="To pay"      value={inr(totals.pay)}     tone="emerald" />
+                <Stat label="To recover"  value={inr(totals.recover)} tone="rose"    />
+                <Stat label="Net payable" value={inr(totals.net)}     tone="sky"     />
+                <Stat label="Carry over"  value={inr(totals.carry)}   tone="slate"   />
+              </div>
+            )}
 
             {s.settlementDate && (
               <p className="mt-3 text-[12px] text-slate-600">
