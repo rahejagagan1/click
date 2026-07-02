@@ -39,7 +39,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         // Statement template auto-fill, payroll exports, etc.)
         // get CTC + PF eligibility + salary type (intern vs
         // regular) without a second roundtrip.
-        salaryStructure: { select: { ctc: true, pfEligible: true, salaryType: true } },
+        salaryStructure: { select: { ctc: true, pfEligible: true, salaryType: true, professionalTax: true } },
         manager: { select: { id: true, name: true, profilePictureUrl: true, role: true, employeeProfile: { select: { designation: true } } } },
         // Reporting team excludes deactivated / exited / offboarded reports
         // (isActive=false) — only currently-active direct reports show.

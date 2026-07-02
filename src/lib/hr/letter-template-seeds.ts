@@ -622,27 +622,13 @@ ${SIGNOFF_HTML_YT_LABS}
         <p style="margin:0 0 6pt 0;"><strong>EARNINGS</strong></p>
         <table style="width:100%; border:none;">
           <tbody>
-            <tr><td style="border:none; padding:3pt 0;">Basic</td>                  <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.Basic}}</td></tr>
-            <tr><td style="border:none; padding:3pt 0;">HRA</td>                    <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.HRA}}</td></tr>
-            <tr><td style="border:none; padding:3pt 0;">Medical Allowance</td>      <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.MedicalAllowance}}</td></tr>
-            <tr><td style="border:none; padding:3pt 0;">Conveyance Allowance</td>   <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.ConveyanceAllowance}}</td></tr>
-            <tr><td style="border:none; padding:3pt 0;">Special Allowance</td>      <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.SpecialAllowance}}</td></tr>
-            <tr><td style="border:none; padding:3pt 0;">Dearness Allowance</td>     <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.DearnessAllowance}}</td></tr>
-            <tr><td style="border:none; padding:3pt 0;">Leave Encashment</td>       <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.LeaveEncashmentAmount}}</td></tr>
-            <tr><td style="border:none; padding:3pt 0;">Advance Salary</td>         <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.AdvanceSalaryAmount}}</td></tr>
+            {{ExitSettlement.EarningsRows}}
             <tr style="border-top:1pt solid #1f2937;"><td style="border:none; padding:6pt 0;"><strong>Total Earnings (A)</strong></td><td style="border:none; text-align:right; padding:6pt 0;"><strong>{{ExitSettlement.TotalEarnings}}</strong></td></tr>
           </tbody>
         </table>
       </td>
       <td style="border:none; width:50%; vertical-align:top; padding-left:14pt; border-left:1pt solid #e5e7eb;">
-        <p style="margin:0 0 6pt 0;"><strong>TAXES &amp; DEDUCTIONS</strong></p>
-        <table style="width:100%; border:none;">
-          <tbody>
-            <tr><td style="border:none; padding:3pt 0;">Professional Tax</td>      <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.ProfessionalTax}}</td></tr>
-            {{ExitSettlement.PfRow}}
-            <tr style="border-top:1pt solid #1f2937;"><td style="border:none; padding:6pt 0;"><strong>Total Taxes &amp; Deductions (B)</strong></td><td style="border:none; text-align:right; padding:6pt 0;"><strong>{{ExitSettlement.TotalDeductions}}</strong></td></tr>
-          </tbody>
-        </table>
+        {{ExitSettlement.DeductionsColumn}}
       </td>
     </tr>
   </tbody>
