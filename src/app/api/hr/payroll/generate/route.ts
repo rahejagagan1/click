@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
+import { normaliseBrandParam } from "@/lib/hr/brand-scope";
+import { readBrandStatus, materializeBrandStatus } from "@/lib/hr/payroll-run-status";
 
 // POST /api/hr/payroll/generate — produce draft payslips for a payroll run.
 // Math model:
@@ -31,14 +33,51 @@ export async function POST(req: NextRequest) {
 
     const run = await prisma.payrollRun.findUnique({ where: { id: runId } });
     if (!run) return NextResponse.json({ error: "Payroll run not found" }, { status: 404 });
-    if (run.status === "locked" || run.status === "paid")
+
+    // Per-brand status: generation is scoped to `brand`'s employees, so the
+    // lock guard and the status writes act on that brand's slice only. A
+    // null brand (whole-org generate) falls back to the legacy top-level
+    // column, matching the old behaviour.
+    const brandNorm = normaliseBrandParam(brand);
+    const curStatus = readBrandStatus(run, brandNorm).status;
+    if (curStatus === "locked" || curStatus === "paid")
       return NextResponse.json({ error: "Run is locked — re-open it before regenerating" }, { status: 409 });
 
-    await prisma.payrollRun.update({ where: { id: runId }, data: { status: "processing" } });
+    // Writes the run's status for the current brand slice (or the legacy
+    // top-level column when no brand). Reuses/mutates `brandStatusMap` so
+    // the two calls in this request don't need to re-read the row. When a
+    // brand is set we seed BOTH brands' slices (materialize) so the other
+    // brand freezes to its own status and never falls back to the legacy
+    // column — generating one brand can't move the other's lock state.
+    const brandStatusMap: Record<string, any> = brandNorm
+      ? (materializeBrandStatus(run) as Record<string, any>)
+      : { ...((run.brandStatus as Record<string, any>) ?? {}) };
+    const setRunStatus = async (status: string, extra: Record<string, any> = {}) => {
+      if (brandNorm) {
+        brandStatusMap[brandNorm] = { ...(brandStatusMap[brandNorm] ?? {}), status };
+        return prisma.payrollRun.update({ where: { id: runId }, data: { brandStatus: brandStatusMap, ...extra } });
+      }
+      return prisma.payrollRun.update({ where: { id: runId }, data: { status, ...extra } });
+    };
+
+    await setRunStatus("processing");
 
     const structures = await prisma.salaryStructure.findMany({
       include: { user: { select: { id: true, isActive: true, employeeProfile: { select: { businessUnit: true } } } } },
     });
+
+    const firstDay = new Date(Date.UTC(run.year, run.month, 1));
+    const lastDay  = new Date(Date.UTC(run.year, run.month + 1, 0));
+    const daysInMonth = lastDay.getUTCDate();
+
+    // Exited/offboarded employees (isActive=false) who still worked part of
+    // this run month must be paid too. Pull their last working day so we can
+    // (a) include them despite isActive=false and (b) prorate up to the LWD.
+    const exitRows = await prisma.$queryRawUnsafe<{ userId: number; lastWorkingDay: Date }[]>(
+      `SELECT "userId", "lastWorkingDay" FROM "EmployeeExit" WHERE "lastWorkingDay" IS NOT NULL`,
+    );
+    const exitLwdByUser = new Map<number, Date>(exitRows.map(r => [r.userId, new Date(r.lastWorkingDay)]));
+
     // Brand scope: when "NB Media" / "YT Labs" is passed (the Run Payroll brand
     // dropdown), only that brand's employees are processed — so each brand's
     // payroll runs independently. brandOf semantics: YT Labs is exact; NB Media
@@ -46,16 +85,15 @@ export async function POST(req: NextRequest) {
     // skipped. Payslips are upserted per-user, so generating one brand never
     // wipes the other's payslips in the same run.
     const activeStructures = structures.filter(s => {
-      if (!s.user.isActive) return false;
       const bu = (s.user as any).employeeProfile?.businessUnit ?? null;
-      if (brand === "YT Labs")  return bu === "YT Labs";
-      if (brand === "NB Media") return bu !== "YT Labs";
-      return true;
+      const brandOk = brand === "YT Labs" ? bu === "YT Labs" : brand === "NB Media" ? bu !== "YT Labs" : true;
+      if (!brandOk) return false;
+      if (s.user.isActive) return true;
+      // Inactive → include only if they exited in/after this run month, i.e.
+      // their last working day is on/after the 1st (they worked part of it).
+      const lwd = exitLwdByUser.get(s.userId);
+      return !!lwd && lwd.getTime() >= firstDay.getTime();
     });
-
-    const firstDay = new Date(Date.UTC(run.year, run.month, 1));
-    const lastDay  = new Date(Date.UTC(run.year, run.month + 1, 0));
-    const daysInMonth = lastDay.getUTCDate();
 
     // Bulk-fetch all cycle-scoped overrides once and bucket by userId so
     // the per-employee block stays a hash lookup, not N+1 queries.
@@ -72,10 +110,15 @@ export async function POST(req: NextRequest) {
       bonusRows.map(r => [r.userId, parseFloat(r.amount) || 0]),
     );
 
+    // Exclude the legacy "ff_settlement" lump adhoc: for an F&F-month
+    // employee the settlement IS the component breakdown (base + advance +
+    // leave encashment + other), so adding a separate F&F lump would
+    // double-count. Advance Salary and other adhoc types are kept.
     const adhocRows = await prisma.$queryRawUnsafe<{ userId: number; kind: string; amount: string }[]>(
       `SELECT "userId", kind, SUM(amount)::text AS amount
          FROM "AdhocLineItem"
         WHERE month = $1 AND year = $2
+          AND (type IS NULL OR type <> 'ff_settlement')
         GROUP BY "userId", kind`,
       run.month, run.year,
     );
@@ -131,6 +174,27 @@ export async function POST(req: NextRequest) {
       attnByUser.set(g.userId, bucket);
     }
 
+    // Carry Over Leave balances → leave encashment for employees whose F&F
+    // falls in this run month (part of "components ARE the F&F"). Remaining
+    // days = total − used − pending; encashed at (Basic + DA) per day / 30.
+    const carryByUser = new Map<number, number>();
+    try {
+      const carryType = await prisma.leaveType.findFirst({
+        where: { name: { contains: "Carry Over", mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (carryType && userIds.length) {
+        const balances = await prisma.leaveBalance.findMany({
+          where: { leaveTypeId: carryType.id, userId: { in: userIds } },
+          select: { userId: true, totalDays: true, usedDays: true, pendingDays: true },
+        });
+        for (const b of balances) {
+          const days = Math.max(0, parseFloat(String(b.totalDays)) - parseFloat(String(b.usedDays)) - parseFloat(String(b.pendingDays)));
+          if (days > 0) carryByUser.set(b.userId, (carryByUser.get(b.userId) ?? 0) + days);
+        }
+      }
+    } catch { /* no carry-over leave type — skip encashment */ }
+
     const unpaidLeaveRows = userIds.length ? await prisma.leaveApplication.findMany({
       where: {
         userId:   { in: userIds },
@@ -183,7 +247,14 @@ export async function POST(req: NextRequest) {
       }
 
       const lopDays    = absentCount + lopCount + (halfDayCount + halfDayLopCount) * 0.5 + unpaidLeaveDays;
-      const paidDays   = Math.max(0, daysInMonth - lopDays);
+      // Cap the paid-day ceiling at the last working day for anyone exiting
+      // this run month — days after the LWD are not worked, so they're unpaid.
+      // (LWD in a later month → full month; no exit → full month.)
+      const lwd = exitLwdByUser.get(s.userId) ?? null;
+      const ceiling = (lwd && lwd.getTime() >= firstDay.getTime() && lwd.getTime() <= lastDay.getTime())
+        ? lwd.getUTCDate()
+        : daysInMonth;
+      const paidDays   = Math.max(0, ceiling - lopDays);
       const lopFactor  = paidDays / daysInMonth;
 
       // All CTC components are stored as ANNUAL — divide by 12 for the
@@ -202,7 +273,13 @@ export async function POST(req: NextRequest) {
       const bonus     = bonusByUser.get(s.userId) || 0;
       const adhocPay  = adhocPayByUser.get(s.userId) || 0;
       const adhocDed  = adhocDedByUser.get(s.userId) || 0;
-      const gross     = monthlyEarnings * lopFactor + bonus + adhocPay;
+      // Leave encashment — only for employees whose F&F is THIS month (last
+      // working day in the run month). (Basic + DA) per day / 30 × carry-over
+      // days. Part of "components ARE the F&F"; regular months add nothing.
+      const isFnFMonth = !!lwd && lwd.getTime() >= firstDay.getTime() && lwd.getTime() <= lastDay.getTime();
+      const carryDays  = isFnFMonth ? (carryByUser.get(s.userId) || 0) : 0;
+      const leaveEncashment = carryDays > 0 ? ((basic + da) / 12 / 30) * carryDays : 0;
+      const gross     = monthlyEarnings * lopFactor + bonus + adhocPay + leaveEncashment;
 
       // Computed statutory amounts, then per-(user,kind) override replaces.
       // pfEmployee / esiEmployee are stored ANNUAL (matching other CTC
@@ -276,9 +353,9 @@ export async function POST(req: NextRequest) {
       ));
     }
 
-    const updated = await prisma.payrollRun.update({
-      where: { id: runId },
-      data:  { status: "generated", totalCTC: totalCTC.toFixed(2), totalNetPay: totalNetPay.toFixed(2) },
+    const updated = await setRunStatus("generated", {
+      totalCTC: totalCTC.toFixed(2),
+      totalNetPay: totalNetPay.toFixed(2),
     });
 
     return NextResponse.json({ run: updated, payslipsGenerated: payslipsData.length, skipped });

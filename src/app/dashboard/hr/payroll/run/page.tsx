@@ -5,9 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { canViewSalary } from "@/lib/access";
+import { canViewSalary, isSalaryDeveloper } from "@/lib/access";
 import { useSearchParams } from "next/navigation";
 import { brandFromSlug } from "@/lib/hr-brand-scope";
+import { readBrandStatus } from "@/lib/hr/payroll-run-status";
 import { DateField } from "@/components/ui/date-field";
 import {
   ChevronLeft, ChevronRight, Calendar,
@@ -61,7 +62,10 @@ type PayrollRun = {
   id: number;
   month: number;   // 0-indexed (Jan=0)
   year: number;
+  // Legacy whole-run status (fallback). The real per-brand status lives in
+  // `brandStatus` — read it via readBrandStatus(run, brand).
   status: "draft" | "generated" | "processing" | "locked" | "paid";
+  brandStatus?: Record<string, any> | null;
   _count?: { payslips: number };
 };
 
@@ -74,7 +78,7 @@ type MonthCell = {
   status: "completed" | "current" | "upcoming";
 };
 
-function buildStrip(today: Date, runs: PayrollRun[]): MonthCell[] {
+function buildStrip(today: Date, runs: PayrollRun[], brand: string): MonthCell[] {
   const cells: MonthCell[] = [];
   const curY = today.getFullYear();
   const curM = today.getMonth();
@@ -85,10 +89,13 @@ function buildStrip(today: Date, runs: PayrollRun[]): MonthCell[] {
     const m = d.getMonth();
     const run = runs.find((r) => r.year === y && r.month === m) ?? null;
     const isCurrent = offset === 0;
+    // Completion is per-brand — a shared run may be locked for NB Media but
+    // still open for YT Labs, so read the selected brand's slice.
+    const runStatus = run ? readBrandStatus(run, brand).status : null;
     const status: MonthCell["status"] =
-      run?.status === "paid" || run?.status === "locked" ? "completed" :
-      isCurrent                                           ? "current"   :
-                                                            "upcoming";
+      runStatus === "paid" || runStatus === "locked" ? "completed" :
+      isCurrent                                       ? "current"   :
+                                                        "upcoming";
     cells.push({ key: `${y}-${String(m + 1).padStart(2, "0")}`, year: y, month0: m, isCurrent, run, status });
   }
   return cells;
@@ -139,6 +146,10 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
   const [entityOpen, setEntityOpen] = useState(false);
 
   const isAdmin = !!user && canViewSalary(user);
+  // Unlocking a locked payroll is restricted to the salary-trusted developer
+  // (gagan). HR / CEO can lock and mark paid, but only gagan can reopen a
+  // locked run — the server enforces the same rule on the transition route.
+  const canUnlock = !!user && isSalaryDeveloper(user);
 
   const { data: runsRaw } = useSWR<PayrollRun[]>(isAdmin ? "/api/hr/payroll/runs" : null, fetcher);
   const runs = Array.isArray(runsRaw) ? runsRaw : [];
@@ -146,10 +157,15 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
   const { data: empData } = useSWR<any>(isAdmin ? `/api/hr/employees?count=1&brand=${encodeURIComponent(payrollEntity)}` : null, fetcher);
   const totalEmployees = (Array.isArray(empData) ? empData.length : empData?.total) ?? 0;
 
-  const cells = useMemo(() => buildStrip(today, runs), [today, runs]);
+  const cells = useMemo(() => buildStrip(today, runs, payrollEntity), [today, runs, payrollEntity]);
   const selected = cells.find((c) => c.key === selectedKey)
                 ?? cells.find((c) => c.isCurrent)
                 ?? cells[0];
+
+  // Effective status of the selected run FOR THE SELECTED BRAND. All the
+  // gating below (steps, action buttons, badge, exports) reads this instead
+  // of the shared run.status, so NB Media and YT Labs lock independently.
+  const selectedRunStatus = selected?.run ? readBrandStatus(selected.run, payrollEntity).status : null;
 
   // Phase 2 — totals (real aggregates from the payslip rows).
   const totalsUrl = selected?.run ? `/api/hr/payroll/runs/${selected.run.id}/totals?brand=${encodeURIComponent(payrollEntity)}` : null;
@@ -190,8 +206,9 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
   const monthRangeText  = selected ? `(${MONTHS_LONG[selected.month0]} 1 - ${MONTHS_LONG[selected.month0]} ${monthDayCount}, ${monthDayCount} days)` : "";
 
   // statusForSteps still gates the Process / Lock / Mark-Paid buttons in
-  // the bottom action row — those buttons mutate run.status, not stepStates.
-  const statusForSteps = selected?.run?.status ?? null;
+  // the bottom action row — those buttons mutate the brand's status slice,
+  // not stepStates. Reads the selected brand's status (per-brand lock).
+  const statusForSteps = selectedRunStatus;
 
   // Step completion now reads from PayrollRun.stepStates (per-step
   // "complete"/"pending" set by Mark-as-Complete buttons). Engine-status
@@ -208,8 +225,7 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
   // need a separate "Mark Reviewed" toggle.
   const stepDone = (n: number) => {
     if (n === 7) {
-      const s = selected?.run?.status;
-      return s === "locked" || s === "paid";
+      return selectedRunStatus === "locked" || selectedRunStatus === "paid";
     }
     return stepStates[String(n)] === "complete";
   };
@@ -300,7 +316,8 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
       const res = await fetch(`/api/hr/payroll/runs/${selected.run.id}/transition`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        // brand scopes lock / mark_paid / reopen to this brand's slice only.
+        body: JSON.stringify({ action, brand: payrollEntity }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Transition failed");
       setBanner({ kind: "ok", text: `Run ${action === "reopen" ? "reopened" : action + "ed"}.` });
@@ -396,7 +413,7 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
           <span className="text-[12.5px] text-slate-500">{monthRangeText}</span>
           {selected?.run && (
             <span className="ml-auto inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-600">
-              {selected.run.status}
+              {selectedRunStatus}
             </span>
           )}
         </div>
@@ -482,6 +499,21 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
               >
                 {busyStep === "run-salary" ? "Processing…" : statusForSteps === "generated" ? "Re-process Payroll" : "Process Payroll"}
               </button>
+              {/* Unlock — only while THIS brand's run is locked (not paid),
+                  and only for the salary-trusted developer (gagan). Reopens
+                  locked → generated for the selected brand so payslips can be
+                  fixed and re-locked; the other brand is untouched. */}
+              {statusForSteps === "locked" && canUnlock && (
+                <button
+                  onClick={() => doTransition("reopen")}
+                  disabled={busyStep === "pre-check"}
+                  title={`Unlock ${payrollEntity} — return to generated so payslips can be edited before paying`}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-amber-300 bg-amber-50 text-[12.5px] font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Lock size={13} />
+                  {busyStep === "pre-check" ? "Unlocking…" : "Unlock Payroll"}
+                </button>
+              )}
               <button
                 onClick={() => statusForSteps === "locked" ? doTransition("mark_paid") : doTransition("lock")}
                 disabled={!selected?.run || busyStep === "finalize" || (totals?.payslipCount ?? 0) === 0 || statusForSteps === "paid"}
@@ -527,7 +559,7 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
         <PreCheckPanel
           runId={selected.run.id}
           monthLabel={monthLabelShort}
-          runStatus={selected.run.status ?? null}
+          runStatus={selectedRunStatus}
           brand={payrollEntity}
           onClose={() => setPreCheckOpen(false)}
         />

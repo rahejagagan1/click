@@ -2095,12 +2095,24 @@ model PayrollRun {
   // draft -> generated -> locked -> paid. `locked` means HR has frozen
   // the numbers and sent the batch to finance. `paid` means finance has
   // confirmed money is out — only then do employees see their payslips.
+  //
+  // NOTE: these top-level lifecycle columns are now the LEGACY / whole-run
+  // baseline. A PayrollRun is one row per month shared by both brands, so
+  // the real per-brand lifecycle lives in `brandStatus` (below). These
+  // columns are only read as a fallback when a brand has no slice yet.
   status      String    @default("draft")
   runBy       Int
   lockedAt    DateTime?
   lockedBy    Int?
   paidAt      DateTime?
   paidBy      Int?
+  // Per-brand lock lifecycle — { "NB Media": { status, lockedAt, lockedBy,
+  // paidAt, paidBy }, "YT Labs": {...} }. One PayrollRun row is shared by
+  // both brands (payslips + stepStates are per-brand slices), so the
+  // status/lock must be per-brand too — else locking one brand would lock
+  // the other. Read via lib/hr/payroll-run-status.readBrandStatus, which
+  // falls back to the legacy top-level columns when a brand slice is absent.
+  brandStatus Json      @default("{}")
   totalCTC    Decimal   @default(0) @db.Decimal(14, 2)
   totalNetPay Decimal   @default(0) @db.Decimal(14, 2)
   // Per-outer-step completion state for the 6-card Run Payroll wizard.

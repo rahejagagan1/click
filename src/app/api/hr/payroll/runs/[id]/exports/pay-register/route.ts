@@ -1,9 +1,12 @@
 // Keka PayRegister_YT Money Productions Pvt. Ltd ({Entity})_{Mon-YYYY}.xlsx
 //
-// Master pay register — 35 columns mirroring Keka's existing export exactly.
-// Bookkeepers reconcile against the column positions, so adding / reordering
-// columns would break their workflow. The "Aganist" typo in column 33 is
-// intentional and preserved (matches Keka's source).
+// Master pay register — the Keka columns plus two breakdown columns,
+// "Advance Salary" and "Leave Encashment", INSERTED right after Gross(A)
+// (positions 27–28) per HR's request. They split an exited employee's F&F out
+// of Gross(A). This shifts PF Employee onward by two positions vs Keka's
+// source, so downstream parsers keyed on the old positions for columns 27+
+// must be updated. The "Aganist" typo (now column 35) is intentional and
+// preserved (matches Keka's source).
 
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
@@ -12,6 +15,7 @@ import {
   loadExportRows, frozenMonthlyComponents, monYearDash, monShort, HEADERS_PAY_REGISTER,
   brandParam, filterRowsByBrand, COMPANY_BY_BRAND,
 } from "@/lib/payroll-exports";
+import { readBrandStatus } from "@/lib/hr/payroll-run-status";
 
 export const dynamic = "force-dynamic";
 
@@ -28,8 +32,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!Number.isFinite(runId)) return NextResponse.json({ error: "Bad runId" }, { status: 400 });
 
     const { run, rows } = await loadExportRows(runId);
-    if (run.status !== "locked" && run.status !== "paid") {
-      return NextResponse.json({ error: `Lock the run first — currently '${run.status}'` }, { status: 409 });
+    const runStatus = readBrandStatus(run, brandParam(req)).status;
+    if (runStatus !== "locked" && runStatus !== "paid") {
+      return NextResponse.json({ error: `Lock the run first — currently '${runStatus}'` }, { status: 409 });
     }
 
     // PayRegister includes EVERY processed payslip — including on-hold
@@ -95,6 +100,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       const totalReimb = 0;
       const totalNet = netPay + cashAdvance + settlement + totalReimb;
 
+      // F&F breakdown for exited employees, split into its two parts:
+      //   • Advance Salary — from the "Advance Salary" adhoc.
+      //   • Leave Encashment — computed in loadExportRows exactly as
+      //     payroll/generate does (carry-over days × (basic+DA)/12/30).
+      // Both are already inside Gross(A), so these are breakdown columns (not
+      // extra money), like Referral Bonus / Business Expense. 0 for non-exits.
+      const advanceSalary   = r.adhocPayByType["Advance Salary"] ?? 0;
+      const leaveEncashment = r.leaveEncashment;
+      // Gross(A1) is the regular gross ONLY — advance (A2) and leave
+      // encashment (A3) are shown as separate additive columns, so pull them
+      // out of A1. Net Pay = A1 + A2 + A3 − B − C keeps the same value as the
+      // old A − B − C because A1 + A2 + A3 == the full grossEarnings.
+      const grossA1 = grossA - advanceSalary - leaveEncashment;
+
       const statusLabel = r.status === "on_hold" ? "OnHold" : "ExecutedAsSalary";
       const payableUnits = `${r.presentDays}/${workingDays} Days`;
 
@@ -125,24 +144,26 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       ws.getCell(row, 23).value = round2(stipend);
       ws.getCell(row, 24).value = round2(referralBonus);
       ws.getCell(row, 25).value = round2(businessExpense);
-      ws.getCell(row, 26).value = round2(grossA);
-      ws.getCell(row, 27).value = round2(pfEmployee);
-      ws.getCell(row, 28).value = round2(totalContribB);
-      ws.getCell(row, 29).value = round2(profTax);
-      ws.getCell(row, 30).value = round2(totalDeductionC);
-      ws.getCell(row, 31).value = round2(netPay);
-      ws.getCell(row, 32).value = round2(cashAdvance);
-      ws.getCell(row, 33).value = round2(settlement);
-      ws.getCell(row, 34).value = round2(totalReimb);
-      ws.getCell(row, 35).value = round2(totalNet);
+      ws.getCell(row, 26).value = round2(grossA1);
+      ws.getCell(row, 27).value = round2(advanceSalary);
+      ws.getCell(row, 28).value = round2(leaveEncashment);
+      ws.getCell(row, 29).value = round2(pfEmployee);
+      ws.getCell(row, 30).value = round2(totalContribB);
+      ws.getCell(row, 31).value = round2(profTax);
+      ws.getCell(row, 32).value = round2(totalDeductionC);
+      ws.getCell(row, 33).value = round2(netPay);
+      ws.getCell(row, 34).value = round2(cashAdvance);
+      ws.getCell(row, 35).value = round2(settlement);
+      ws.getCell(row, 36).value = round2(totalReimb);
+      ws.getCell(row, 37).value = round2(totalNet);
     });
 
     // Column widths roughly matching the Keka source — wide for names /
     // titles / departments, narrow for numeric columns.
     [12, 28, 22, 32, 28, 12, 14, 12, 18, 18,
      14, 12, 14, 14, 16, 22, 12, 12, 14, 16,
-     16, 14, 12, 14, 22, 12, 14, 18, 14, 16,
-     14, 14, 18, 18, 18].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+     16, 14, 12, 14, 22, 12, 16, 16, 14, 18,
+     14, 16, 14, 14, 18, 18, 18].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
     const buf = await wb.xlsx.writeBuffer();
     const filename = `NbStudio PayRegister_${company}_${monYearDash(run.month, run.year)}.xlsx`;
