@@ -15,6 +15,7 @@ import "react-quill-new/dist/quill.snow.css";
 import { fetcher } from "@/lib/swr";
 import { useSession } from "next-auth/react";
 import { isLeadershipOrHR } from "@/lib/access";
+import { computeExitSettlement } from "@/lib/hr/exit-settlement-calc";
 import { DateField } from "@/components/ui/date-field";
 // NOTE: previously imported JOB_TITLES from @/lib/job-titles — a stale
 // 28-entry hardcoded list that was missing 40+ designations HR had added
@@ -206,17 +207,17 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
         const carryDays = carry
           ? Math.max(0, (Number(carry.totalDays) || 0) - (Number(carry.usedDays) || 0) - (Number(carry.pendingDays) || 0))
           : undefined;
+        // Advance Salary already paid in payroll (adhoc) → Exit Statement
+        // earnings + the days shown for reference.
+        const adv = (u as any)?.advanceSalary ?? null;
+        const advDays   = adv?.days   ? Number(adv.days)   : 0;
+        const advAmount = adv?.amount ? Number(adv.amount) : 0;
         // Working Days + Loss of Pay for the Exit Statement — reuse the SAME
         // final-month proration the F&F wizard uses (worked days up to the
         // last working day, and LOP within that window). Only when the
         // employee has an active exit and the exit month isn't already paid.
         let workingDaysFill: string | undefined;
         let lopDaysFill: string | undefined;
-        // Net settlement ("final amount") from the exit form → auto-fills the
-        // F&F letter's FnFAmount. Same net the F&F wizard shows:
-        // Σ(pay lines) + buyout + gratuity − Σ(recover lines); hold/carryover
-        // are excluded.
-        let fnfAmountFill: string | undefined;
         const activeExit = (u as any)?.activeExit;
         if (activeExit?.id) {
           try {
@@ -227,36 +228,33 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
               if (pj?.breakdown?.lopInPeriod != null) lopDaysFill = String(pj.breakdown.lopInPeriod);
             }
           } catch { /* network blip — HR can still type manually */ }
-          try {
-            const st = await fetch(`/api/hr/exits/${activeExit.id}/settlement`);
-            if (st.ok) {
-              const sj = await st.json();
-              const lines: any[] = Array.isArray(sj?.lines) ? sj.lines : [];
-              const s = sj?.settlement;
-              if (s && lines.length >= 0) {
-                let pay = 0, recover = 0;
-                for (const l of lines) {
-                  const v = Number(l?.amount) || 0;
-                  if (l?.payAction === "recover") recover += v;
-                  else if (l?.payAction === "hold" || l?.payAction === "carryover") { /* excluded from net */ }
-                  else pay += v;
-                }
-                if (s.buyoutEligible)   pay += Number(s.buyoutAmount)   || 0;
-                if (s.gratuityEligible) pay += Number(s.gratuityAmount) || 0;
-                const net = pay - recover;
-                fnfAmountFill = net.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-              }
-            }
-          } catch { /* network blip — HR can still type manually */ }
+        }
+        // F&F amount = the Exit Statement's Net Payable, computed with the
+        // SAME shared formula the letter renders (earnings incl. leave
+        // encashment − PF/PT). This keeps the F&F letter's FnF Amount equal
+        // to the Exit Statement's net for the same employee.
+        let fnfAmountFill: string | undefined;
+        {
+          const net = computeExitSettlement({
+            AnnualPackage:       s?.ctc != null ? String(s.ctc) : "",
+            WorkingDays:         workingDaysFill ?? "",
+            LeaveEncashmentDays: carryDays != null ? String(carryDays) : "",
+            AdvanceSalaryAmount: advAmount > 0 ? String(advAmount) : "",
+            EnablePf:            isIntern ? "false" : (s?.pfEligible ? "true" : "false"),
+          }).net;
+          if (net > 0) fnfAmountFill = net.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
         if (cancelled) return;
         const fillMap: Record<string, string | null | undefined> = {
           // Auto-picked from the employee's Carry Over Leave balance.
           LeaveEncashmentDays: carryDays != null ? String(carryDays) : undefined,
+          // Auto-picked from the employee's Advance Salary payroll entries.
+          AdvanceSalaryDays:   advDays > 0 ? String(advDays) : undefined,
+          AdvanceSalaryAmount: advAmount > 0 ? String(advAmount) : undefined,
           // Auto-picked from the exit month's attendance (worked days / LOP).
           WorkingDays:   workingDaysFill,
           LossOfPayDays: lopDaysFill,
-          // Auto-picked net settlement from the exit form (F&F letter amount).
+          // F&F letter amount = the Exit Statement's Net Payable (same formula).
           FnFAmount:     fnfAmountFill,
           BankAccount:   p?.bankAccountNumber,
           BankIFSC:      p?.bankIfsc,
