@@ -76,6 +76,9 @@ export async function GET(req: NextRequest) {
           ? true
           : { select: { department: true, designation: true } },
         manager: { select: { id: true, name: true } },
+        // RBAC designation (User.designationId → Designation.label) so pickers
+        // can show the human-friendly designation instead of the raw role enum.
+        designation: { select: { label: true } },
         // Conditional include — see canSeeExitBadge above.
         ...(canSeeExitBadge
           ? { employeeExit: { select: { id: true, status: true, lastWorkingDay: true } } }
