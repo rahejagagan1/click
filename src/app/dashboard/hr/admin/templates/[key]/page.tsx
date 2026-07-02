@@ -278,7 +278,8 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
           // Auto-picked from the employee's Carry Over Leave balance.
           LeaveEncashmentDays: carryDays != null ? String(carryDays) : undefined,
           // Auto-picked from the employee's Advance Salary payroll entries.
-          AdvanceSalaryDays:   advDays > 0 ? String(advDays) : undefined,
+          // Days always show a number (0 when the employee has none).
+          AdvanceSalaryDays:   String(advDays),
           AdvanceSalaryAmount: advAmount > 0 ? String(advAmount) : undefined,
           // Auto-picked from the exit month's attendance (worked days / LOP).
           WorkingDays:   workingDaysFill,

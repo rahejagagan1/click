@@ -483,8 +483,10 @@ function resolveExitSettlement(field: string, customFields: Record<string, strin
     case "MedicalAllowance":    return annual > 0 ? fmtRs2(final.MedicalAllowance) : "";
     case "SpecialAllowance":    return annual > 0 ? fmtRs2(final.SpecialAllowance) : "";
     case "ProvidentFund":       return annual > 0 ? fmtRs2(final.ProvidentFund) : "";
-    case "LeaveEncashmentAmount": return final.LeaveEncashmentAmount > 0 ? fmtRs2(final.LeaveEncashmentAmount) : "";
-    case "AdvanceSalaryAmount":  return s.AdvanceSalaryAmount > 0 ? fmtRs2(s.AdvanceSalaryAmount) : "";
+    // Show 0.00 (not blank) when the amount is zero, as long as a package is
+    // entered — matches the other earnings rows, which all render a figure.
+    case "LeaveEncashmentAmount": return annual > 0 ? fmtRs2(final.LeaveEncashmentAmount) : "";
+    case "AdvanceSalaryAmount":  return annual > 0 ? fmtRs2(s.AdvanceSalaryAmount) : "";
     case "ProfessionalTax":     return profTax > 0 ? fmtRs2(profTax) : "0.00";
     // PF row visibility — single placeholder that resolves to the
     // <tr> only when EnablePf is true. Lets the same body template
