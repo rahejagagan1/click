@@ -198,7 +198,66 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
         const salaryType = s?.salaryType ?? null;
         setEmployeeSalaryType(salaryType);
         const isIntern = salaryType === "intern";
+        // Carry Over Leave → auto-fills Leave Encashment Days on the Exit
+        // Statement. Match the balance-only "Carry Over Leave" leave type by
+        // name and take its remaining days (total − used − pending).
+        const balances: any[] = Array.isArray((u as any)?.leaveBalances) ? (u as any).leaveBalances : [];
+        const carry = balances.find((b) => /carry\s*over/i.test(String(b?.leaveType?.name ?? "")));
+        const carryDays = carry
+          ? Math.max(0, (Number(carry.totalDays) || 0) - (Number(carry.usedDays) || 0) - (Number(carry.pendingDays) || 0))
+          : undefined;
+        // Working Days + Loss of Pay for the Exit Statement — reuse the SAME
+        // final-month proration the F&F wizard uses (worked days up to the
+        // last working day, and LOP within that window). Only when the
+        // employee has an active exit and the exit month isn't already paid.
+        let workingDaysFill: string | undefined;
+        let lopDaysFill: string | undefined;
+        // Net settlement ("final amount") from the exit form → auto-fills the
+        // F&F letter's FnFAmount. Same net the F&F wizard shows:
+        // Σ(pay lines) + buyout + gratuity − Σ(recover lines); hold/carryover
+        // are excluded.
+        let fnfAmountFill: string | undefined;
+        const activeExit = (u as any)?.activeExit;
+        if (activeExit?.id) {
+          try {
+            const ps = await fetch(`/api/hr/exits/${activeExit.id}/settlement/pending-salary`);
+            if (ps.ok) {
+              const pj = await ps.json();
+              if (!pj?.alreadyPaid && Number(pj?.paidDays) > 0) workingDaysFill = String(pj.paidDays);
+              if (pj?.breakdown?.lopInPeriod != null) lopDaysFill = String(pj.breakdown.lopInPeriod);
+            }
+          } catch { /* network blip — HR can still type manually */ }
+          try {
+            const st = await fetch(`/api/hr/exits/${activeExit.id}/settlement`);
+            if (st.ok) {
+              const sj = await st.json();
+              const lines: any[] = Array.isArray(sj?.lines) ? sj.lines : [];
+              const s = sj?.settlement;
+              if (s && lines.length >= 0) {
+                let pay = 0, recover = 0;
+                for (const l of lines) {
+                  const v = Number(l?.amount) || 0;
+                  if (l?.payAction === "recover") recover += v;
+                  else if (l?.payAction === "hold" || l?.payAction === "carryover") { /* excluded from net */ }
+                  else pay += v;
+                }
+                if (s.buyoutEligible)   pay += Number(s.buyoutAmount)   || 0;
+                if (s.gratuityEligible) pay += Number(s.gratuityAmount) || 0;
+                const net = pay - recover;
+                fnfAmountFill = net.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              }
+            }
+          } catch { /* network blip — HR can still type manually */ }
+        }
+        if (cancelled) return;
         const fillMap: Record<string, string | null | undefined> = {
+          // Auto-picked from the employee's Carry Over Leave balance.
+          LeaveEncashmentDays: carryDays != null ? String(carryDays) : undefined,
+          // Auto-picked from the exit month's attendance (worked days / LOP).
+          WorkingDays:   workingDaysFill,
+          LossOfPayDays: lopDaysFill,
+          // Auto-picked net settlement from the exit form (F&F letter amount).
+          FnFAmount:     fnfAmountFill,
           BankAccount:   p?.bankAccountNumber,
           BankIFSC:      p?.bankIfsc,
           Bank:          p?.bankName,

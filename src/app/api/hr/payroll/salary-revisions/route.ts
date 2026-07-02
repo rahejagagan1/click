@@ -1,8 +1,9 @@
 // GET /api/hr/payroll/salary-revisions?month=N&year=YYYY
 //
-// Lists SalaryStructure rows that changed during the cycle month, used
-// by Run Payroll Step 3 sub-step 2 (Salary Revisions). Source of truth
-// is AuditLog rows with entityType='SalaryStructure' (we don't keep a
+// Lists SalaryStructure changes EFFECTIVE in the cycle month (by
+// after.effectiveFrom, not by when the edit was entered), used by Run
+// Payroll Step 3 sub-step 2 (Salary Revisions). Source of truth is
+// AuditLog rows with entityType='SalaryStructure' (we don't keep a
 // separate history table — the audit log carries before/after blobs).
 //
 // HR-admin only.
@@ -47,28 +48,40 @@ export async function GET(req: NextRequest) {
     // entityType='SalaryStructure'. We pull only update/create rows whose
     // `after.ctc` differs from `before.ctc` (so unchanged-CTC patches
     // don't pollute the list).
+    //
+    // Cycle membership is by EFFECTIVE DATE (after.effectiveFrom in the month),
+    // NOT by when the edit was entered (al.createdAt). A raise effective 9-Jun
+    // belongs to the June cycle even if HR keyed it in on 2-Jul. Because
+    // effective-date filtering can match several historical re-saves for the
+    // same employee (each audited), DISTINCT ON keeps only that employee's
+    // most recent edit among the rows effective in the month.
     const scope = resolveBrandScope(session!.user, searchParams.get("brand"));
     if (!scope.allBrands && !scope.brand) return NextResponse.json({ items: [] });
 
     const brandClause = scope.allBrands ? "" : ` AND ep."businessUnit" = $3`;
-    const sql = `SELECT al.id,
-                        (al.after->>'userId')::int                AS "userId",
-                        u.name                                    AS "userName",
-                        ep."employeeId",
-                        (al.before->>'ctc')                       AS "oldCtc",
-                        (al.after->>'ctc')                        AS "newCtc",
-                        NULLIF(al.after->>'effectiveFrom','')::timestamp AS "effectiveDate",
-                        al."createdAt"                            AS "changedAt",
-                        actor.name                                AS "actorName"
-                   FROM "AuditLog" al
-                   LEFT JOIN "User" u ON u.id = (al.after->>'userId')::int
-                   LEFT JOIN "EmployeeProfile" ep ON ep."userId" = (al.after->>'userId')::int
-                   LEFT JOIN "User" actor ON actor.id = al."actorId"
-                  WHERE al."entityType" = 'SalaryStructure'
-                    AND al."createdAt" >= $1 AND al."createdAt" < $2
-                    AND (al.before IS NULL OR (al.before->>'ctc') IS DISTINCT FROM (al.after->>'ctc'))
-                    ${brandClause}
-                  ORDER BY al."createdAt" DESC`;
+    const sql = `SELECT * FROM (
+                   SELECT DISTINCT ON ((al.after->>'userId')::int)
+                          al.id,
+                          (al.after->>'userId')::int                AS "userId",
+                          u.name                                    AS "userName",
+                          ep."employeeId",
+                          (al.before->>'ctc')                       AS "oldCtc",
+                          (al.after->>'ctc')                        AS "newCtc",
+                          NULLIF(al.after->>'effectiveFrom','')::timestamp AS "effectiveDate",
+                          al."createdAt"                            AS "changedAt",
+                          actor.name                                AS "actorName"
+                     FROM "AuditLog" al
+                     LEFT JOIN "User" u ON u.id = (al.after->>'userId')::int
+                     LEFT JOIN "EmployeeProfile" ep ON ep."userId" = (al.after->>'userId')::int
+                     LEFT JOIN "User" actor ON actor.id = al."actorId"
+                    WHERE al."entityType" = 'SalaryStructure'
+                      AND NULLIF(al.after->>'effectiveFrom','')::timestamp >= $1
+                      AND NULLIF(al.after->>'effectiveFrom','')::timestamp <  $2
+                      AND (al.before IS NULL OR (al.before->>'ctc') IS DISTINCT FROM (al.after->>'ctc'))
+                      ${brandClause}
+                    ORDER BY (al.after->>'userId')::int, al."createdAt" DESC
+                 ) t
+                 ORDER BY t."effectiveDate" DESC, t."changedAt" DESC`;
     const rows = scope.allBrands
       ? await prisma.$queryRawUnsafe<Row[]>(sql, monthStart, monthEnd)
       : await prisma.$queryRawUnsafe<Row[]>(sql, monthStart, monthEnd, scope.brand);

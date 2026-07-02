@@ -8,12 +8,26 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, resolveUserId, serverError } from "@/lib/api-auth";
 import { writeAuditLog } from "@/lib/audit-log";
+import { normaliseBrandParam } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-type RunRow = { id: number; status: string; stepStates: Record<string, string> | null };
+// stepStates is stored per-brand — { "NB Media": { "1": "complete" },
+// "YT Labs": {...} } — because a PayrollRun is one row per month shared by
+// both brands. Without the brand namespace, NB completing a step would show
+// as complete on the YT run too. Legacy flat rows ({ "1": "complete" }) are
+// ignored on read, so completion resets once per brand and is then correct.
+type RunRow = { id: number; status: string; stepStates: Record<string, any> | null };
+
+function brandKey(raw: string | null | undefined): "NB Media" | "YT Labs" {
+  return normaliseBrandParam(raw) ?? "NB Media";
+}
+function brandSlice(all: Record<string, any> | null, brand: string): Record<string, string> {
+  const slice = all?.[brand];
+  return slice && typeof slice === "object" ? slice as Record<string, string> : {};
+}
 
 async function loadRun(idStr: string): Promise<RunRow | null> {
   const id = parseInt(idStr);
@@ -25,7 +39,7 @@ async function loadRun(idStr: string): Promise<RunRow | null> {
   return rows[0] ?? null;
 }
 
-export async function GET(_req: NextRequest, ctx: Ctx) {
+export async function GET(req: NextRequest, ctx: Ctx) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
   if (!canViewSalary(session!.user)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -33,7 +47,8 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     const { id } = await ctx.params;
     const run = await loadRun(id);
     if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
-    return NextResponse.json({ states: (run as any).stepStates ?? {} });
+    const brand = brandKey(new URL(req.url).searchParams.get("brand"));
+    return NextResponse.json({ states: brandSlice((run as any).stepStates, brand) });
   } catch (e) { return serverError(e, "GET /api/hr/payroll/runs/[id]/step-state"); }
 }
 
@@ -52,6 +67,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const body = await req.json();
     const step  = parseInt(body?.step);
     const state = String(body?.state ?? "");
+    const brand = brandKey(body?.brand);
     if (!Number.isFinite(step) || step < 1 || step > 6) {
       return NextResponse.json({ error: "step must be 1..6" }, { status: 400 });
     }
@@ -59,12 +75,16 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       return NextResponse.json({ error: "state must be complete|pending" }, { status: 400 });
     }
 
-    const next: Record<string, string> = { ...(run.stepStates ?? {}) };
-    next[String(step)] = state;
+    // Merge into the caller's brand slice only — the other brand's slice
+    // (and any legacy flat keys) are preserved untouched.
+    const all: Record<string, any> = { ...(run.stepStates ?? {}) };
+    const slice: Record<string, string> = { ...brandSlice(all, brand) };
+    slice[String(step)] = state;
+    all[brand] = slice;
 
     await prisma.$executeRawUnsafe(
       `UPDATE "PayrollRun" SET "stepStates" = $1::jsonb, "updatedAt" = NOW() WHERE id = $2`,
-      JSON.stringify(next), run.id,
+      JSON.stringify(all), run.id,
     );
 
     const actorId = await resolveUserId(session);
@@ -75,9 +95,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       action: `payroll.step.${state}`,
       entityType: "PayrollRun",
       entityId: run.id,
-      after: { step, state },
+      after: { step, state, brand },
     });
 
-    return NextResponse.json({ states: next });
+    return NextResponse.json({ states: slice });
   } catch (e) { return serverError(e, "PATCH /api/hr/payroll/runs/[id]/step-state"); }
 }

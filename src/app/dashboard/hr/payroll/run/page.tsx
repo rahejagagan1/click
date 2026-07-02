@@ -197,7 +197,9 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
   // "complete"/"pending" set by Mark-as-Complete buttons). Engine-status
   // is no longer the source of truth — the 6 outer cards are prep steps,
   // and the lock/pay actions live below the grid.
-  const stepStateUrl = selected?.run?.id ? `/api/hr/payroll/runs/${selected.run.id}/step-state` : null;
+  // Step completion is per-brand — a shared PayrollRun holds both brands'
+  // slices, so scope the read/write to the selected brand.
+  const stepStateUrl = selected?.run?.id ? `/api/hr/payroll/runs/${selected.run.id}/step-state?brand=${encodeURIComponent(payrollEntity)}` : null;
   const { data: stepStateData } = useSWR<{ states: Record<string, string> }>(stepStateUrl, fetcher);
   const stepStates: Record<string, string> = stepStateData?.states ?? {};
   // Step 7 (Review & Finalise) is the only step not stored in stepStates —
@@ -223,14 +225,14 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
       const res = await fetch(`/api/hr/payroll/runs/${run.id}/step-state`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ step, state: "complete" }),
+        body: JSON.stringify({ step, state: "complete", brand: payrollEntity }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         setBanner({ kind: "err", text: j?.error || "Could not mark step complete" });
         return;
       }
-      await mutate(`/api/hr/payroll/runs/${run.id}/step-state`);
+      await mutate(`/api/hr/payroll/runs/${run.id}/step-state?brand=${encodeURIComponent(payrollEntity)}`);
       await mutate("/api/hr/payroll/runs");
       setBanner({ kind: "ok", text: `Step ${step} marked as complete.` });
     } catch (e: any) {
@@ -1335,7 +1337,7 @@ function SalaryRevisionSubStep({ year, month0, monthLabel, brand }: { year: numb
     <>
       <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Salary Revision</h4>
       <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
-        SalaryStructure changes (CTC modified) during {monthLabel}. Source: AuditLog. Edit individual structures via the employee profile's Finances tab.
+        SalaryStructure changes (CTC modified) effective in {monthLabel} — by effective date, regardless of when the edit was entered. Source: AuditLog. Edit individual structures via the employee profile's Finances tab.
       </p>
       <div className="flex items-center justify-end mb-3"><SearchBox /></div>
       <KekaTable columns={["Employee Number", "Employee Name", "Old CTC", "New CTC", "Change %", "Effective From", "By"]}>
