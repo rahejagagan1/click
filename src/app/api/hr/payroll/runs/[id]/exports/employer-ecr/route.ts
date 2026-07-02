@@ -10,6 +10,7 @@ import ExcelJS from "exceljs";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 import { loadExportRows, monYearDash, EPF_CEILING, EDLI_CEILING,
   brandParam, filterRowsByBrand, BRAND_SLUG } from "@/lib/payroll-exports";
+import { readBrandStatus } from "@/lib/hr/payroll-run-status";
 
 export const dynamic = "force-dynamic";
 
@@ -24,12 +25,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!Number.isFinite(runId)) return NextResponse.json({ error: "Bad runId" }, { status: 400 });
 
     const { run, rows } = await loadExportRows(runId);
-    if (run.status !== "locked" && run.status !== "paid") {
-      return NextResponse.json({ error: `Lock the run first — currently '${run.status}'` }, { status: 409 });
-    }
-
     // Brand split: ?brand= exports only that brand's employees; no brand => all.
     const brand = brandParam(req);
+    const runStatus = readBrandStatus(run, brand).status;
+    if (runStatus !== "locked" && runStatus !== "paid") {
+      return NextResponse.json({ error: `Lock the run first — currently '${runStatus}'` }, { status: 409 });
+    }
     const scoped = filterRowsByBrand(rows, brand);
     if (brand && scoped.length === 0) {
       return NextResponse.json({ error: `No ${brand} employees in this payroll run.` }, { status: 422 });

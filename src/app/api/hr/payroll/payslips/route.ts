@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 import { resolveBrandScope } from "@/lib/hr/brand-scope";
+import { readBrandStatus, brandOfBusinessUnit } from "@/lib/hr/payroll-run-status";
 
 export const dynamic = "force-dynamic";
 
@@ -37,28 +38,35 @@ export async function GET(req: NextRequest) {
       : { user: { employeeProfile: { businessUnit: scope.brand! } } };
 
     // Non-admin: only payslips whose parent PayrollRun has been marked
-    // 'paid' are visible. Lock + finance-confirm is a manual two-step,
-    // so the employee shouldn't see a payslip until the second step is
-    // done. Admins always see everything (including drafts) for review.
+    // 'paid' FOR THE EMPLOYEE'S BRAND are visible. Lock + finance-confirm is
+    // a manual two-step, so the employee shouldn't see a payslip until the
+    // second step is done — and a run is shared by both brands, so the check
+    // is per-brand (marking NB Media paid must not reveal YT Labs slips).
+    // Admins always see everything (including drafts) for review.
     const payslips = await prisma.payslip.findMany({
       where: {
         ...(runIdParam ? { payrollRunId: runIdParam } : { userId }),
-        ...(isAdmin ? {} : { payrollRun: { status: "paid" } }),
         ...brandFilter,
       },
       orderBy: [{ year: "desc" }, { month: "desc" }],
       include: {
-        payrollRun: { select: { id: true, status: true } },
+        payrollRun: { select: { id: true, status: true, brandStatus: true } },
         salaryStructure: { select: { ctc: true, basic: true, hra: true, salaryType: true, specialAllowance: true } },
-        user: { select: { id: true, name: true, email: true } },
+        user: { select: { id: true, name: true, email: true, employeeProfile: { select: { businessUnit: true } } } },
       },
+    });
+
+    // Per-brand "paid" gate for non-admins (admins bypass — they review drafts).
+    const visiblePayslips = isAdmin ? payslips : payslips.filter((p) => {
+      const brand = brandOfBusinessUnit((p.user as any)?.employeeProfile?.businessUnit);
+      return readBrandStatus(p.payrollRun as any, brand).status === "paid";
     });
 
     // Attach adhoc PAYMENT line items (reimbursements, travel, arrears, etc.)
     // per payslip so the slip can itemise them by type instead of absorbing
     // them into base earnings. Bonuses are itemised separately via
     // EmployeeBonus; adhoc deductions are handled in the deductions column.
-    const uids = Array.from(new Set(payslips.map((p) => p.userId)));
+    const uids = Array.from(new Set(visiblePayslips.map((p) => p.userId)));
     const adhoc = uids.length
       ? await prisma.$queryRawUnsafe<{ userId: number; month: number; year: number; type: string | null; amount: string }[]>(
           `SELECT "userId", month, year, type, SUM(amount)::text AS amount
@@ -76,7 +84,7 @@ export async function GET(req: NextRequest) {
       arr.push({ type: a.type || "Other", amount: parseFloat(a.amount) });
       adhocMap.set(k, arr);
     }
-    const withAdhoc = payslips.map((p) => ({
+    const withAdhoc = visiblePayslips.map((p) => ({
       ...p,
       adhocPayments: adhocMap.get(adhocKey(p.userId, p.month, p.year)) ?? [],
     }));

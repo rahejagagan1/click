@@ -76,6 +76,11 @@ export type ExportRow = {
   additionalTax: number;
   tds: number;
   status: string;
+  // Leave encashment paid this cycle — non-zero only for employees whose F&F
+  // month is this run month. Computed the same way payroll/generate does:
+  // (basicAnnual + daAnnual)/12/30 × carry-over days. Baked into grossEarnings
+  // but NOT stored as an adhoc, so the exports recompute it here.
+  leaveEncashment: number;
   // Adhoc line items for this cycle, summed by kind+typeLabel
   adhocPayByType: Record<string, number>;
   adhocDedByType: Record<string, number>;
@@ -85,12 +90,12 @@ export type ExportRow = {
 // everything in 2 queries (payslips + adhoc) and decrypts PII inline.
 // Throws if the run is missing.
 export async function loadExportRows(runId: number): Promise<{
-  run: { id: number; month: number; year: number; status: string };
+  run: { id: number; month: number; year: number; status: string; brandStatus: Record<string, any> | null };
   rows: ExportRow[];
 }> {
   const run = await prisma.payrollRun.findUnique({
     where: { id: runId },
-    select: { id: true, month: true, year: true, status: true },
+    select: { id: true, month: true, year: true, status: true, brandStatus: true },
   });
   if (!run) throw new Error(`PayrollRun ${runId} not found`);
 
@@ -148,6 +153,36 @@ export async function loadExportRows(runId: number): Promise<{
     target.set(a.userId, bucket);
   }
 
+  // Leave encashment inputs — mirrors payroll/generate. An employee's F&F is
+  // "this month" when their last working day falls inside the run month; only
+  // then is unused Carry Over Leave encashed. Kept OUT of adhoc so the base
+  // breakdown and the exports agree with the payslip's inline computation.
+  const firstDay = new Date(Date.UTC(run.year, run.month, 1));
+  const lastDay  = new Date(Date.UTC(run.year, run.month + 1, 0));
+  const exitRows = await prisma.$queryRawUnsafe<{ userId: number; lastWorkingDay: Date }[]>(
+    `SELECT "userId", "lastWorkingDay" FROM "EmployeeExit"
+      WHERE "lastWorkingDay" IS NOT NULL AND "userId" = ANY($1::int[])`,
+    userIds,
+  );
+  const lwdByUser = new Map<number, Date>(exitRows.map(r => [r.userId, new Date(r.lastWorkingDay)]));
+  const carryByUser = new Map<number, number>();
+  try {
+    const carryType = await prisma.leaveType.findFirst({
+      where: { name: { contains: "Carry Over", mode: "insensitive" } },
+      select: { id: true },
+    });
+    if (carryType && userIds.length) {
+      const balances = await prisma.leaveBalance.findMany({
+        where: { leaveTypeId: carryType.id, userId: { in: userIds } },
+        select: { userId: true, totalDays: true, usedDays: true, pendingDays: true },
+      });
+      for (const b of balances) {
+        const days = Math.max(0, num(b.totalDays) - num(b.usedDays) - num(b.pendingDays));
+        if (days > 0) carryByUser.set(b.userId, (carryByUser.get(b.userId) ?? 0) + days);
+      }
+    }
+  } catch { /* no carry-over leave type — no encashment */ }
+
   const rows: ExportRow[] = payslips.map(p => {
     const prof = profileByUserId.get(p.userId);
     const s = p.salaryStructure;
@@ -191,12 +226,18 @@ export async function loadExportRows(runId: number): Promise<{
       additionalTax: num((p as any).additionalTax),
       tds: num(p.tds),
       status: p.status,
+      leaveEncashment: (() => {
+        const lwd = lwdByUser.get(p.userId);
+        const isFnFMonth = !!lwd && lwd.getTime() >= firstDay.getTime() && lwd.getTime() <= lastDay.getTime();
+        const carryDays = isFnFMonth ? (carryByUser.get(p.userId) ?? 0) : 0;
+        return carryDays > 0 ? ((num(s.basic) + num(s.dearnessAllowance)) / 12 / 30) * carryDays : 0;
+      })(),
       adhocPayByType: payByUser.get(p.userId) ?? {},
       adhocDedByType: dedByUser.get(p.userId) ?? {},
     };
   });
 
-  return { run, rows };
+  return { run: { ...run, brandStatus: (run.brandStatus as Record<string, any> | null) ?? null }, rows };
 }
 
 // ── Frozen-anchored monthly salary breakdown ─────────────────────────────
@@ -223,16 +264,23 @@ export function frozenMonthlyComponents(r: ExportRow) {
   let special = isIntern ? 0 : m(r.specialAnnual) + m(r.pfEmployeeAnnual);
 
   const computedSalary = basic + hra + medical + conv + da + special;
-  const adhocPay = Object.values(r.adhocPayByType).reduce((s, v) => s + v, 0);
-  const targetSalary = Math.max(0, r.grossEarnings - r.bonus - adhocPay);
+  // adhocPay EXCLUDES the legacy "ff_settlement" lump — payroll/generate does
+  // not add it to gross (the component breakdown IS the F&F), so counting it
+  // here would wrongly shrink the base. Advance Salary / Reimbursement / etc.
+  // stay, as they're genuine gross additions shown in their own columns.
+  const adhocPay = Object.entries(r.adhocPayByType)
+    .reduce((s, [type, v]) => (type === "ff_settlement" ? s : s + v), 0);
+  // Leave encashment is also a gross addition with its own column, so subtract
+  // it too — otherwise the base components inflate to absorb it.
+  const targetSalary = Math.max(0, r.grossEarnings - r.bonus - adhocPay - r.leaveEncashment);
   const scale = computedSalary > 1 ? targetSalary / computedSalary : 1;
   if (Math.abs(scale - 1) > 1e-9) {
     basic *= scale; hra *= scale; medical *= scale; conv *= scale; da *= scale; special *= scale;
   }
   // Interns: the whole monthly salary is a stipend (basic / HRA stay zero).
-  // Exclude bonus + adhoc payments so they remain their own columns and the
-  // breakdown still sums to the frozen gross.
-  const stipend = isIntern ? Math.max(0, r.grossEarnings - r.bonus - adhocPay) : 0;
+  // Exclude bonus + adhoc payments + leave encashment so they remain their own
+  // columns and the breakdown still sums to the frozen gross.
+  const stipend = isIntern ? Math.max(0, r.grossEarnings - r.bonus - adhocPay - r.leaveEncashment) : 0;
   return { lopFactor, basic, hra, medical, conv, da, special, stipend };
 }
 
@@ -290,8 +338,17 @@ export const HEADERS_PAY_REGISTER = [
   "Basic", "HRA", "Medical Allowance", "Conveyance Allowance",
   "Special Allowance", "Dearness Allowance",
   "Stipend", "Referral Bonus", "Business Expense Reimbursement",
-  "Gross(A)", "PF Employee", "Total Contributions(B)",
-  "Professional Tax", "Total Deductions(C)", "Net Pay(A-B-C)",
+  "Gross(A1)",
+  // Advance Salary (A2) + Leave Encashment (A3) are split out AFTER Gross so
+  // the three earning buckets are additive: A1 is the regular gross (base +
+  // bonus + reimbursement) and NO LONGER includes advance / leave encashment;
+  // A2 and A3 carry those. Net Pay = A1 + A2 + A3 − B − C. NOTE: this shifts
+  // "PF Employee" onward by two positions vs Keka's source, so downstream
+  // parsers keyed on the original column positions for columns 27+ must be
+  // updated.
+  "Advance Salary(A2)", "Leave Encashment(A3)",
+  "PF Employee", "Total Contributions(B)",
+  "Professional Tax", "Total Deductions(C)", "Net Pay(A1+A2+A3-B-C)",
   "Cash Advance(D)", "Settlement Aganist Advance(E)",
-  "Total Reimbursements(F)", "Total Net Pay(A-B-C+D+E+F)",
+  "Total Reimbursements(F)", "Total Net Pay(A1+A2+A3-B-C+D+E+F)",
 ];

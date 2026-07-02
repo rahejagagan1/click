@@ -1,9 +1,12 @@
 // GET /api/hr/exits/[id]/settlement/final-amount
 //
-// Returns the exiting employee's provisional Full & Final NET PAYABLE — the
-// SAME figure the Exit Statement letter prints and the template editor's F&F
-// auto-fill uses. Pre-fills the "Settle F&F" modal's Settlement Amount so HR
-// doesn't retype the exit statement's net.
+// Returns the exiting employee's F&F PAYOUT = LEAVE ENCASHMENT (+ gratuity)
+// ONLY. Base salary for worked days, advance, and PF/PT are paid via the
+// employee's regular payslip (the payroll engine includes mid-month exits and
+// prorates to the last working day), so the F&F adhoc must cover only the
+// leave encashment — otherwise the worked-days salary is paid twice. Pre-fills
+// the "Settle F&F" modal's Settlement Amount. `fullSettlementNet` (the total
+// across payslip + F&F) is also returned for reference / the Exit Statement.
 //
 // Mirrors the gathering in templates/[key]/page.tsx (employee pick auto-fill):
 //   AnnualPackage       ← SalaryStructure.ctc
@@ -94,8 +97,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       ProfessionalTax:     professionalTax,
     });
 
+    // F&F PAYOUT = LEAVE ENCASHMENT ONLY. Base salary (worked days), advance,
+    // and PF/PT all flow through the exiting employee's regular payslip now, so
+    // the F&F adhoc must NOT re-include them (that was the double-pay). `net` is
+    // therefore the leave-encashment amount; `fullSettlementNet` is retained for
+    // reference (the total across payslip + F&F, i.e. the Exit Statement's net).
     return NextResponse.json({
-      net: settlement.net,
+      net: settlement.LeaveEncashmentAmount,
+      leaveEncashment: settlement.LeaveEncashmentAmount,
+      fullSettlementNet: settlement.net,
       breakdown: settlement,
       inputs: {
         annualPackage: structure.ctc != null ? Number(structure.ctc) : 0,

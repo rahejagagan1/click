@@ -10,9 +10,11 @@
 // gated by the HR Dashboard's `hr_admin_payroll` tab permission.
 
 import { useMemo, useState } from "react";
+import { useSession } from "next-auth/react";
 import useSWR, { mutate } from "swr";
 import Link from "next/link";
 import { fetcher } from "@/lib/swr";
+import { isSalaryDeveloper } from "@/lib/access";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import SelectField from "@/components/ui/SelectField";
 import { DateField } from "@/components/ui/date-field";
@@ -47,6 +49,11 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function PayrollAdminPanel() {
+  const { data: session } = useSession();
+  // Unlocking a locked run is restricted to the salary-trusted developer
+  // (gagan) — the transition API enforces the same, so hide the button for
+  // everyone else rather than show one that 403s.
+  const canUnlock = isSalaryDeveloper((session?.user ?? null) as any);
   const [adminTab, setAdminTab] = useUrlTab<"runs" | "structures">("payroll", "runs", ["runs", "structures"] as const);
   const [showNewRun, setShowNewRun] = useState(false);
   const [showNewStructure, setShowNewStructure] = useState(false);
@@ -186,11 +193,13 @@ export default function PayrollAdminPanel() {
                             className="flex items-center gap-1 h-7 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded text-[11px] font-semibold transition-colors">
                             <Banknote className="w-3 h-3" />Mark Paid
                           </button>
-                          <button onClick={() => transitionRun(r.id, "reopen")}
-                            title="Unlock — return to generated state to fix payslips before paying"
-                            className="flex items-center gap-1 h-7 px-2 text-slate-500 hover:text-slate-700 rounded text-[11px] font-semibold transition-colors">
-                            <RotateCcw className="w-3 h-3" />
-                          </button>
+                          {canUnlock && (
+                            <button onClick={() => transitionRun(r.id, "reopen")}
+                              title="Unlock — return to generated state to fix payslips before paying"
+                              className="flex items-center gap-1 h-7 px-2 text-slate-500 hover:text-slate-700 rounded text-[11px] font-semibold transition-colors">
+                              <RotateCcw className="w-3 h-3" />
+                            </button>
+                          )}
                         </>
                       )}
                       {(r.status === "paid" || r.status === "completed") && (
