@@ -36,11 +36,33 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const id = parseInt(idParam);
     if (!Number.isFinite(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
-    const rows = await prisma.$queryRawUnsafe<Array<{ id: number; finalised: boolean }>>(
+    // Confirm the exit exists.
+    const exitRows = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+      `SELECT id FROM "EmployeeExit" WHERE id = $1`, id,
+    );
+    if (exitRows.length === 0) return NextResponse.json({ error: "Exit not found" }, { status: 404 });
+
+    let rows = await prisma.$queryRawUnsafe<Array<{ id: number; finalised: boolean }>>(
       `SELECT id, finalised FROM "ExitSettlement" WHERE "exitId" = $1`, id,
     );
+    // F&F-Letter-as-finalization flow: HR finalises straight from the F&F
+    // Letter action without going through the line-item wizard. Create a
+    // minimal settlement header on the fly so there's a row to lock.
     if (rows.length === 0) {
-      return NextResponse.json({ error: "Settlement not found — save it first" }, { status: 404 });
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "ExitSettlement" ("exitId", "paymentMode", "settlementMode",
+            "actualNoticeDays", "noticeServingDays", "buyoutEligible", "gratuityEligible",
+            "settlementDate", "updatedAt")
+         VALUES ($1, 'pay', 'at_once', 0, 0, false, false, now(), now())
+         ON CONFLICT ("exitId") DO NOTHING`,
+        id,
+      );
+      rows = await prisma.$queryRawUnsafe<Array<{ id: number; finalised: boolean }>>(
+        `SELECT id, finalised FROM "ExitSettlement" WHERE "exitId" = $1`, id,
+      );
+    }
+    if (rows.length === 0) {
+      return NextResponse.json({ error: "Could not create settlement" }, { status: 500 });
     }
     if (rows[0].finalised) {
       return NextResponse.json({ error: "Already finalised" }, { status: 409 });

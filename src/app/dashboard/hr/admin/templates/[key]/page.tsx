@@ -132,6 +132,35 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
   });
 
   const [employee, setEmployee] = useState<Employee | null>(null);
+  // Deep-link support: ?employeeId=N pre-selects that employee (used by the
+  // offboarding drawer's "Generate F&F Letter" button so HR lands here with
+  // the person already picked and all fields auto-filled). Runs once.
+  const preEmployeeId = searchParams?.get("employeeId") ?? null;
+  useEffect(() => {
+    if (!preEmployeeId) return;
+    const idN = Number(preEmployeeId);
+    if (!Number.isInteger(idN) || idN <= 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/hr/people/${idN}`);
+        if (!res.ok) return;
+        const j = await res.json();
+        const u = j?.user ?? j;
+        if (cancelled) return;
+        setMode("employee");
+        setEmployee({
+          id: idN,
+          name: u?.name ?? `User ${idN}`,
+          email: u?.email ?? "",
+          profilePictureUrl: u?.profilePictureUrl ?? null,
+          isActive: u?.isActive,
+          employeeProfile: (u?.profile ?? u?.employeeProfile) ?? null,
+        });
+      } catch { /* HR can still pick manually */ }
+    })();
+    return () => { cancelled = true; };
+  }, [preEmployeeId]);
   const [customValues, setCustomValues] = useState<Record<string, string>>({});
   // Letter-issue date — drives every {{*.ShortDate}} placeholder. Empty
   // string means "today" (legacy behaviour). HR sets this when they
