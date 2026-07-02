@@ -11,8 +11,11 @@
 //   WorkingDays         ← exit-month pending-salary paidDays (blank if already paid)
 //   LeaveEncashmentDays ← Carry Over Leave balance (total − used − pending)
 //   AdvanceSalaryAmount ← sum of AdhocLineItem rows with type='Advance Salary'
+//   ProfessionalTax     ← ₹200 flat for non-interns, ₹0 for interns (the NB
+//                         Media standard the Exit Statement prints)
 // then feeds computeExitSettlement() — the single source of truth for the net.
-// (ProfessionalTax is intentionally not passed, matching the letter auto-fill.)
+// The result equals the Exit Statement's "Net Salary Payable (A − B)", which
+// deducts BOTH Provident Fund and Professional Tax.
 //
 // HR-admin (salary-view) only.
 
@@ -77,12 +80,18 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       ? String(pending.paidDays)
       : "";
 
+    // Professional Tax: ₹200 flat for non-interns (₹0 for interns) — the NB
+    // Media standard shown on the Exit Statement. Deducting it (in addition to
+    // PF) makes this net equal the statement's "Net Salary Payable (A − B)".
+    const professionalTax = isIntern ? "0" : "200";
+
     const settlement = computeExitSettlement({
       AnnualPackage:       structure.ctc != null ? String(structure.ctc) : "",
       WorkingDays:         workingDays,
       LeaveEncashmentDays: carryDays != null ? String(carryDays) : "",
       AdvanceSalaryAmount: advAmount > 0 ? String(advAmount) : "",
       EnablePf:            isIntern ? "false" : (structure.pfEligible ? "true" : "false"),
+      ProfessionalTax:     professionalTax,
     });
 
     return NextResponse.json({
@@ -94,6 +103,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         leaveEncashmentDays: carryDays ?? null,
         advanceSalaryAmount: advAmount,
         enablePf: !isIntern && structure.pfEligible === true,
+        professionalTax: Number(professionalTax),
       },
     });
   } catch (e) {

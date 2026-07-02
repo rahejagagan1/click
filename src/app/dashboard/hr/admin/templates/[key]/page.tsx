@@ -300,6 +300,12 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
           // Interns NEVER get PF — force the checkbox off.
           // Regular employees inherit from salaryStructure.pfEligible.
           EnablePf:      isIntern ? "false" : (s?.pfEligible ? "true" : undefined),
+          // Professional Tax deduction — auto-filled for regular employees:
+          // the salary structure's monthly PT when set, else the standard
+          // ₹200/month (most structures leave PT at 0). Interns have none.
+          ProfessionalTax: isIntern ? undefined : String((Number(s?.professionalTax) || 0) > 0 ? Number(s.professionalTax) : 200),
+          // Salary type drives the intern vs regular exit-statement layout.
+          SalaryType:    salaryType ?? undefined,
         };
         setCustomValues((curr) => {
           // On EMPLOYEE CHANGE we always OVERWRITE the profile-

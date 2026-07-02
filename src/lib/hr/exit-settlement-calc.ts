@@ -82,7 +82,9 @@ export function computeExitSettlement(cf: ExitSettlementFields): ExitSettlementR
                         final.ConveyanceAllowance + final.SpecialAllowance +
                         final.DearnessAllowance + final.LeaveEncashmentAmount +
                         advanceSalary;
-  const totalDeductions = num(cf.ProfessionalTax) + final.ProvidentFund;
+  // Interns are paid a flat stipend — no statutory deductions (PT / PF).
+  const isIntern = String(cf.SalaryType ?? "").toLowerCase() === "intern";
+  const totalDeductions = isIntern ? 0 : (num(cf.ProfessionalTax) + final.ProvidentFund);
   const net = totalEarnings - totalDeductions;
 
   return { ...final, AdvanceSalaryAmount: advanceSalary, totalEarnings, totalDeductions, net };
