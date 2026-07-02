@@ -31,7 +31,7 @@ import { DateField } from "@/components/ui/date-field";
 /* ── Types from drawer ────────────────────────────────────────────────── */
 
 type ExitHeader = {
-  id: number; userName: string; lastWorkingDay: string;
+  id: number; userId: number; userName: string; lastWorkingDay: string;
   noticePeriodDays: number;
   designation?: string | null;
   department?: string | null;
@@ -181,6 +181,7 @@ export default function ExitFinaliseWizard({
 
   // ── Persistence helpers ────────────────────────────────────────
   const [error, setError] = useState("");
+  const [downloading, setDownloading] = useState(false);
 
   const buildBody = () => ({
     paymentMode, settlementMode,
@@ -238,32 +239,43 @@ export default function ExitFinaliseWizard({
     } finally { setSavingKey(null); }
   };
 
-  const downloadStatement = () => {
-    const rows: string[][] = [
-      ["Section", "Sub-section", "Item", "Days", "Amount (INR)", "Action"],
-      ...items.map(l => [
-        l.section, l.subsection, l.label,
-        l.days != null ? String(l.days) : "",
-        String(Number(l.amount) || 0),
-        l.payAction,
-      ]),
-    ];
-    if (buyoutEligible)   rows.push(["others", "buyout",   "Notice period buyout", "",  String(buyoutAmount),   "pay"]);
-    if (gratuityEligible) rows.push(["others", "gratuity", "Gratuity payment",     "",  String(gratuityAmount), "pay"]);
-    rows.push([]);
-    rows.push(["Total payable",   "", "", "", String(totals.pay), ""]);
-    rows.push(["Total recovered", "", "", "", String(totals.recover), ""]);
-    rows.push(["Net payable",     "", "", "", String(totals.net), ""]);
-    const csv = rows
-      .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
-    a.href     = url;
-    a.download = `FF-Statement-${exit.userName.replace(/\s+/g, "_")}.csv`;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  // Generate the branded "Full & Final Settlement Letter" (fnf_settlement
+  // template) as a PDF — the same letter Admin → Templates produces, with
+  // the employee's brand chrome (NB Media → YT Money Productions letterhead
+  // + Nikit Bassi; YT Labs → BILLION FILMS + Kunal Lall) resolved
+  // server-side. The net payable is passed as the FnF amount; resignation /
+  // last-working-day are pulled from the employee record by the renderer.
+  const downloadStatement = async () => {
+    setDownloading(true); setError("");
+    try {
+      const fnfAmount = Number(totals.net || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const res = await fetch(`/api/hr/letter-templates/fnf_settlement/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          employeeId: exit.userId,
+          action: "pdf",
+          customFields: { FnFAmount: fnfAmount },
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Could not generate the F&F letter");
+      }
+      const ct = res.headers.get("content-type") || "";
+      const isPdf = ct.includes("pdf");
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `FF-Settlement-${exit.userName.replace(/\s+/g, "_")}.${isPdf ? "pdf" : "html"}`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e: any) {
+      setError(e?.message || "Could not generate the F&F letter");
+    } finally {
+      setDownloading(false);
+    }
   };
 
   /* ── Render ──────────────────────────────────────────────────── */
@@ -355,6 +367,7 @@ export default function ExitFinaliseWizard({
               settlementDate={settlementDate} setSettlementDate={setSettlementDate}
               settlementNotes={settlementNotes} setSettlementNotes={setSettlementNotes}
               onDownload={downloadStatement}
+              downloading={downloading}
               isFinalised={isFinalised}
             />
           )}
@@ -1022,7 +1035,7 @@ function Step2({
   paymentMode, setPaymentMode,
   settlementDate, setSettlementDate,
   settlementNotes, setSettlementNotes,
-  onDownload,
+  onDownload, downloading,
   isFinalised,
 }: {
   totals: { pay: number; recover: number; hold: number; carry: number; net: number };
@@ -1030,7 +1043,7 @@ function Step2({
   paymentMode: string; setPaymentMode: (v: string) => void;
   settlementDate: string; setSettlementDate: (v: string) => void;
   settlementNotes: string; setSettlementNotes: (v: string) => void;
-  onDownload: () => void;
+  onDownload: () => void; downloading: boolean;
   isFinalised: boolean;
 }) {
   const lwdMonth = new Date(exit.lastWorkingDay).toLocaleString("en-IN", { month: "short", year: "numeric" });
@@ -1105,9 +1118,11 @@ function Step2({
       <div className="flex justify-center">
         <button
           onClick={onDownload}
-          className="inline-flex items-center gap-2 h-10 px-5 rounded-md bg-white border border-slate-300 hover:bg-slate-50 text-[12.5px] font-semibold text-slate-700"
+          disabled={downloading}
+          className="inline-flex items-center gap-2 h-10 px-5 rounded-md bg-white border border-slate-300 hover:bg-slate-50 text-[12.5px] font-semibold text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <Download size={14} /> Download F&amp;F Statement
+          {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          {downloading ? "Generating…" : "Download F&F Statement"}
         </button>
       </div>
 

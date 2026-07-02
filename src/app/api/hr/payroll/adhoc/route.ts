@@ -23,6 +23,7 @@ type Row = {
   createdBy: number | null;
   name?: string;
   role?: string;
+  designationLabel?: string | null;
 };
 
 function parseKind(s: string | null): "payment" | "deduction" | null {
@@ -58,10 +59,11 @@ export async function GET(req: NextRequest) {
     const brandClause = scope.allBrands ? "" : ` AND ep."businessUnit" = $4`;
     const sql = `SELECT a.id, a."userId", a.month, a.year, a.kind, a.type, a.amount, a.comment,
                         a."createdAt", a."createdBy",
-                        u.name, u.role::text AS role
+                        u.name, u.role::text AS role, d.label AS "designationLabel"
                    FROM "AdhocLineItem" a
                    JOIN "User" u ON u.id = a."userId"
               LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
+              LEFT JOIN "Designation" d ON d.id = u."designationId"
                   WHERE a.month = $1 AND a.year = $2 AND a.kind = $3
                     ${brandClause}
                   ORDER BY a.id ASC`;
@@ -145,11 +147,20 @@ export async function POST(req: NextRequest) {
     // ── Single row create path ───────────────────────────────────────
     const month  = parseInt(body?.month);
     const year   = parseInt(body?.year);
-    const kind   = parseKind(body?.kind);
+    let   kind   = parseKind(body?.kind);
     const userId = parseInt(body?.userId);
-    const amount = Number(body?.amount);
-    const type   = body?.type    ? String(body.type).slice(0, 80)    : null;
-    const comment = body?.comment ? String(body.comment).slice(0, 500) : null;
+    let   amount = Number(body?.amount);
+    let   type   = body?.type    ? String(body.type).slice(0, 80)    : null;
+    let   comment = body?.comment ? String(body.comment).slice(0, 500) : null;
+
+    // "Advance Salary" (NB Media relieving top-up): HR sends a number of
+    // `days` instead of an amount. We compute it server-side from the
+    // employee's CTC at (CTC / 12) / 30 per day so the rate is authoritative
+    // (can't be spoofed from the client). It's always booked as a normal
+    // adhoc PAYMENT so the payroll engine adds it to gross unchanged.
+    const daysRaw = body?.days;
+    const hasDays = daysRaw !== undefined && daysRaw !== null && String(daysRaw).trim() !== "";
+    const days = hasDays ? Number(daysRaw) : null;
 
     if (!Number.isFinite(month) || month < 0 || month > 11) {
       return NextResponse.json({ error: "Bad month" }, { status: 400 });
@@ -157,10 +168,39 @@ export async function POST(req: NextRequest) {
     if (!Number.isFinite(year)) {
       return NextResponse.json({ error: "Bad year" }, { status: 400 });
     }
-    if (!kind) return NextResponse.json({ error: "Bad kind" }, { status: 400 });
     if (!Number.isFinite(userId) || userId <= 0) {
       return NextResponse.json({ error: "userId required" }, { status: 400 });
     }
+
+    if (days !== null) {
+      if (!Number.isFinite(days) || days <= 0 || days > 366) {
+        return NextResponse.json({ error: "days must be between 1 and 366" }, { status: 400 });
+      }
+      const ss = await prisma.salaryStructure.findUnique({ where: { userId }, select: { ctc: true } });
+      const ctc = ss?.ctc ? parseFloat(ss.ctc.toString()) : 0;
+      if (!ctc || ctc <= 0) {
+        return NextResponse.json({ error: "This employee has no CTC set — cannot compute advance salary." }, { status: 400 });
+      }
+      // Per-day is (CTC / 12) ÷ (days in the month being advanced), so a
+      // FULL month's worth of days = exactly one month's salary — a 31-day
+      // month divides by 31, a 30-day month by 30, Feb by 28/29. The target
+      // month defaults to the run month when the client doesn't send one.
+      const forMonth = Number.isInteger(Number(body?.forMonth)) ? Number(body.forMonth) : month;
+      const forYear  = Number.isInteger(Number(body?.forYear))  ? Number(body.forYear)  : year;
+      if (forMonth < 0 || forMonth > 11) {
+        return NextResponse.json({ error: "Bad advance-salary month" }, { status: 400 });
+      }
+      const daysInForMonth = new Date(Date.UTC(forYear, forMonth + 1, 0)).getUTCDate();
+      const perDay = (ctc / 12) / daysInForMonth;
+      amount  = Math.round(perDay * days);
+      kind    = "payment";                 // advance salary is always a payment
+      type    = "Advance Salary";
+      const monLabel = new Date(Date.UTC(forYear, forMonth, 1)).toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" });
+      const reason = comment;
+      comment = `${days}/${daysInForMonth} day(s) advance salary for ${monLabel}${reason ? ` — ${reason}` : ""}`.slice(0, 500);
+    }
+
+    if (!kind) return NextResponse.json({ error: "Bad kind" }, { status: 400 });
     if (!Number.isFinite(amount) || amount <= 0) {
       return NextResponse.json({ error: "amount must be a positive number" }, { status: 400 });
     }
