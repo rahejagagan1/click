@@ -12,6 +12,7 @@
 
 import prisma from "@/lib/prisma";
 import { decryptPII } from "@/lib/pii-crypto";
+import { getMonthSalary, type SalaryComponents } from "@/lib/hr/salary-periods";
 
 // Standard EPFO statutory ceilings — used to compute EPF/EPS wages.
 export const EPF_CEILING = 15_000;       // monthly basic+DA cap for EPF
@@ -81,6 +82,11 @@ export type ExportRow = {
   // (basicAnnual + daAnnual)/12/30 × carry-over days. Baked into grossEarnings
   // but NOT stored as an adhoc, so the exports recompute it here.
   leaveEncashment: number;
+  // Blended MONTHLY (pre-LOP) component breakdown when this employee had a
+  // mid-month salary revision this cycle — old-rate days + new-rate days summed
+  // per component (intern days land in `stipend`). null when there's no split,
+  // in which case the breakdown is derived from the current structure as before.
+  splitComponents: SalaryComponents | null;
   // Adhoc line items for this cycle, summed by kind+typeLabel
   adhocPayByType: Record<string, number>;
   adhocDedByType: Record<string, number>;
@@ -183,6 +189,22 @@ export async function loadExportRows(runId: number): Promise<{
     }
   } catch { /* no carry-over leave type — no encashment */ }
 
+  // Mid-month salary splits — only for employees with a superseded structure.
+  // Their component breakdown blends the old-rate and new-rate days (see
+  // lib/hr/salary-periods); everyone else derives components as before.
+  const splitByUser = new Map<number, SalaryComponents>();
+  try {
+    const histUserIds = new Set(
+      (await prisma.salaryStructureHistory.findMany({
+        where: { userId: { in: userIds } }, select: { userId: true },
+      })).map(h => h.userId),
+    );
+    for (const uid of histUserIds) {
+      const ms = await getMonthSalary(uid, run.year, run.month);
+      if (ms?.hasSplit) splitByUser.set(uid, ms.components);
+    }
+  } catch { /* history table absent (pre-migration) — no splits */ }
+
   const rows: ExportRow[] = payslips.map(p => {
     const prof = profileByUserId.get(p.userId);
     const s = p.salaryStructure;
@@ -232,6 +254,7 @@ export async function loadExportRows(runId: number): Promise<{
         const carryDays = isFnFMonth ? (carryByUser.get(p.userId) ?? 0) : 0;
         return carryDays > 0 ? ((num(s.basic) + num(s.dearnessAllowance)) / 12 / 30) * carryDays : 0;
       })(),
+      splitComponents: splitByUser.get(p.userId) ?? null,
       adhocPayByType: payByUser.get(p.userId) ?? {},
       adhocDedByType: dedByUser.get(p.userId) ?? {},
     };
@@ -252,6 +275,21 @@ export async function loadExportRows(runId: number): Promise<{
 export function frozenMonthlyComponents(r: ExportRow) {
   const wd = r.workingDays || 30;
   const lopFactor = wd > 0 ? Math.max(0, (wd - r.lopDays) / wd) : 1;
+
+  // Mid-month revision: use the blended per-component split directly (it already
+  // sums to the base gross for the cycle), applying only the LOP factor. This
+  // shows, e.g., an intern→regular employee's regular days in the salary columns
+  // and their intern days in Stipend.
+  if (r.splitComponents) {
+    const c = r.splitComponents;
+    return {
+      lopFactor,
+      basic: c.basic * lopFactor, hra: c.hra * lopFactor, medical: c.medical * lopFactor,
+      conv: c.conv * lopFactor, da: c.da * lopFactor, special: c.special * lopFactor,
+      stipend: c.stipend * lopFactor,
+    };
+  }
+
   const m = (annual: number) => (annual / 12) * lopFactor;
   const isIntern = r.salaryType === "intern";
 

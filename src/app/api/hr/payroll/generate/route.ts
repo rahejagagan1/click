@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 import { normaliseBrandParam } from "@/lib/hr/brand-scope";
 import { readBrandStatus, materializeBrandStatus } from "@/lib/hr/payroll-run-status";
+import { getMonthSalary } from "@/lib/hr/salary-periods";
 
 // POST /api/hr/payroll/generate — produce draft payslips for a payroll run.
 // Math model:
@@ -216,6 +217,15 @@ export async function POST(req: NextRequest) {
 
     const payslipsData: any[] = [];
 
+    // Which employees have a superseded salary structure? Only these can have a
+    // mid-month split, so we blend earnings only for them — everyone else takes
+    // the unchanged single-structure path (zero behaviour change).
+    const historyUserIds = new Set(
+      (await prisma.salaryStructureHistory.findMany({
+        where: { userId: { in: userIds } }, select: { userId: true },
+      })).map(h => h.userId),
+    );
+
     for (const s of activeStructures) {
       // processing-hold employees skip payslip generation entirely.
       if (holdByUser.get(s.userId) === "processing") { skipped += 1; continue; }
@@ -279,7 +289,18 @@ export async function POST(req: NextRequest) {
       const isFnFMonth = !!lwd && lwd.getTime() >= firstDay.getTime() && lwd.getTime() <= lastDay.getTime();
       const carryDays  = isFnFMonth ? (carryByUser.get(s.userId) || 0) : 0;
       const leaveEncashment = carryDays > 0 ? ((basic + da) / 12 / 30) * carryDays : 0;
-      const gross     = monthlyEarnings * lopFactor + bonus + adhocPay + leaveEncashment;
+
+      // Mid-month salary revision: if a prior structure covered earlier days of
+      // this run month, pay each day-range at its own rate (blended monthly
+      // earnings). Only consulted for employees who actually have history, and
+      // only overrides when the month is genuinely split — otherwise the
+      // single-structure `monthlyEarnings` above is used unchanged.
+      let effectiveMonthly = monthlyEarnings;
+      if (historyUserIds.has(s.userId)) {
+        const ms = await getMonthSalary(s.userId, run.year, run.month);
+        if (ms?.hasSplit) effectiveMonthly = ms.blendedMonthlyEarnings;
+      }
+      const gross     = effectiveMonthly * lopFactor + bonus + adhocPay + leaveEncashment;
 
       // Computed statutory amounts, then per-(user,kind) override replaces.
       // pfEmployee / esiEmployee are stored ANNUAL (matching other CTC

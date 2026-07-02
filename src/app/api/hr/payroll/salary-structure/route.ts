@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 import { writeAuditLog } from "@/lib/audit-log";
 import { getBrandScope } from "@/lib/hr/brand-scope";
+import { getMonthSalary } from "@/lib/hr/salary-periods";
 
 export const dynamic = "force-dynamic";
 
@@ -100,6 +101,32 @@ export async function POST(req: NextRequest) {
       pfEligible:    pfEligible    ?? false,
     };
 
+    // Snapshot the OLD structure into history BEFORE overwriting it, so the
+    // prior rate survives for mid-month proration (see lib/hr/salary-periods).
+    // Its window is [old effectiveFrom, new effectiveFrom). Only when the
+    // effective date actually moves forward (a real revision) — re-saving with
+    // the same date isn't a new period, so skip it to avoid zero-width rows.
+    if (before && new Date(effectiveFrom).getTime() > new Date(before.effectiveFrom).getTime()) {
+      await prisma.salaryStructureHistory.create({
+        data: {
+          userId: parseInt(userId),
+          salaryType:          before.salaryType,
+          ctc:                 before.ctc,
+          basic:               before.basic,
+          hra:                 before.hra,
+          dearnessAllowance:   before.dearnessAllowance,
+          conveyanceAllowance: before.conveyanceAllowance,
+          medicalAllowance:    before.medicalAllowance,
+          specialAllowance:    before.specialAllowance,
+          pfEmployee:          before.pfEmployee,
+          pfEligible:          before.pfEligible,
+          professionalTax:     before.professionalTax,
+          effectiveFrom:       before.effectiveFrom,
+          effectiveTo:         new Date(effectiveFrom),
+        },
+      });
+    }
+
     const structure = await prisma.salaryStructure.upsert({
       where: { userId: parseInt(userId) },
       create: { userId: parseInt(userId), ...data },
@@ -180,7 +207,16 @@ export async function POST(req: NextRequest) {
           for (const p of slips) {
             const wd = num(p.workingDays) || 1;
             const factor = num(p.presentDays) / wd;          // = that month's lopFactor
-            const correctBase = newMonthlyBase * factor;
+            // For the EFFECTIVE month itself, "correct" pay is the MID-MONTH
+            // blend (old rate before the effective date + new rate after), not
+            // the full new rate — otherwise arrears would undo the mid-month
+            // split. Later, fully-post-revision months use the full new base.
+            let baseMonthly = newMonthlyBase;
+            if (p.month === effM && p.year === effY) {
+              const ms = await getMonthSalary(uid, p.year, p.month);
+              if (ms?.hasSplit) baseMonthly = ms.blendedMonthlyEarnings;
+            }
+            const correctBase = baseMonthly * factor;
             const paidBase = num(p.grossEarnings) - num(p.bonus) - (adhocByYm.get(ymIndex(p.month, p.year)) || 0);
             const diff = Math.round((correctBase - paidBase) * 100) / 100;
             if (diff > 0) { total += diff; parts.push(`${MONTHS[p.month]} ${p.year}: +₹${Math.round(diff)}`); }
