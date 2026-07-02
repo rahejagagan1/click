@@ -2088,6 +2088,39 @@ model SalaryStructure {
   @@index([userId])
 }
 
+/// Superseded SalaryStructure snapshots — one row per PAST structure, written
+/// when HR revises a salary (the CURRENT structure still lives in
+/// SalaryStructure, unchanged). Enables mid-month proration: for a run month
+/// that contains a revision's effectiveFrom, the days BEFORE it are paid at the
+/// history row whose [effectiveFrom, effectiveTo) window covers them, and the
+/// days on/after at the current structure. Purely ADDITIVE — no existing table
+/// or row is touched, so payroll for anyone without history behaves exactly as
+/// before. Not linked via a Prisma relation (plain userId + index) to keep the
+/// change isolated to this model.
+model SalaryStructureHistory {
+  id                  Int      @id @default(autoincrement())
+  userId              Int
+  salaryType          String   @default("regular")
+  ctc                 Decimal  @db.Decimal(12, 2)
+  basic               Decimal  @db.Decimal(12, 2)
+  hra                 Decimal  @db.Decimal(12, 2)
+  dearnessAllowance   Decimal  @default(0) @db.Decimal(12, 2)
+  conveyanceAllowance Decimal  @default(0) @db.Decimal(12, 2)
+  medicalAllowance    Decimal  @default(0) @db.Decimal(12, 2)
+  specialAllowance    Decimal  @default(0) @db.Decimal(12, 2)
+  pfEmployee          Decimal  @default(0) @db.Decimal(12, 2)
+  pfEligible          Boolean  @default(false)
+  professionalTax     Decimal  @default(0) @db.Decimal(10, 2)
+  /// The [effectiveFrom, effectiveTo) window this structure was in force.
+  /// effectiveTo = the succeeding structure's effectiveFrom (exclusive).
+  effectiveFrom       DateTime @db.Date
+  effectiveTo         DateTime @db.Date
+  createdAt           DateTime @default(now())
+
+  @@index([userId, effectiveFrom])
+  @@index([userId, effectiveTo])
+}
+
 model PayrollRun {
   id          Int       @id @default(autoincrement())
   month       Int // 0-11
