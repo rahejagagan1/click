@@ -204,8 +204,26 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         delete (mergedProfile as any)[k];
       }
     }
+    // Advance Salary (adhoc, type='Advance Salary') already paid to the
+    // employee in payroll — summed for the Exit Statement (amount adds to
+    // earnings; days are shown for reference). Days live in the comment
+    // ("N/M day(s) advance salary …"), so parse the leading number.
+    let advanceSalary = { days: 0, amount: 0 };
+    try {
+      const asRows = await prisma.$queryRawUnsafe<Array<{ amount: string; comment: string | null }>>(
+        `SELECT amount::text AS amount, comment FROM "AdhocLineItem" WHERE "userId" = $1 AND type = 'Advance Salary'`,
+        id,
+      );
+      for (const r of asRows) {
+        advanceSalary.amount += parseFloat(r.amount) || 0;
+        const m = /(\d+(?:\.\d+)?)/.exec(String(r.comment ?? ""));
+        if (m) advanceSalary.days += parseFloat(m[1]) || 0;
+      }
+    } catch { /* older DB / no adhoc rows — leave zeros */ }
+
     const payload = {
       ...rest,
+      advanceSalary,
       // Salary (CTC) is the most sensitive field — HR / CEO / developer
       // only. Stripped for a direct manager or the employee themselves on
       // this route. `...rest` carries salaryStructure, so override after.

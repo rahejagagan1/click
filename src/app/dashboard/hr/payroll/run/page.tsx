@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
@@ -197,7 +197,9 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
   // "complete"/"pending" set by Mark-as-Complete buttons). Engine-status
   // is no longer the source of truth — the 6 outer cards are prep steps,
   // and the lock/pay actions live below the grid.
-  const stepStateUrl = selected?.run?.id ? `/api/hr/payroll/runs/${selected.run.id}/step-state` : null;
+  // Step completion is per-brand — a shared PayrollRun holds both brands'
+  // slices, so scope the read/write to the selected brand.
+  const stepStateUrl = selected?.run?.id ? `/api/hr/payroll/runs/${selected.run.id}/step-state?brand=${encodeURIComponent(payrollEntity)}` : null;
   const { data: stepStateData } = useSWR<{ states: Record<string, string> }>(stepStateUrl, fetcher);
   const stepStates: Record<string, string> = stepStateData?.states ?? {};
   // Step 7 (Review & Finalise) is the only step not stored in stepStates —
@@ -223,14 +225,14 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
       const res = await fetch(`/api/hr/payroll/runs/${run.id}/step-state`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ step, state: "complete" }),
+        body: JSON.stringify({ step, state: "complete", brand: payrollEntity }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         setBanner({ kind: "err", text: j?.error || "Could not mark step complete" });
         return;
       }
-      await mutate(`/api/hr/payroll/runs/${run.id}/step-state`);
+      await mutate(`/api/hr/payroll/runs/${run.id}/step-state?brand=${encodeURIComponent(payrollEntity)}`);
       await mutate("/api/hr/payroll/runs");
       setBanner({ kind: "ok", text: `Step ${step} marked as complete.` });
     } catch (e: any) {
@@ -1335,7 +1337,7 @@ function SalaryRevisionSubStep({ year, month0, monthLabel, brand }: { year: numb
     <>
       <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Salary Revision</h4>
       <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
-        SalaryStructure changes (CTC modified) during {monthLabel}. Source: AuditLog. Edit individual structures via the employee profile's Finances tab.
+        SalaryStructure changes (CTC modified) effective in {monthLabel} — by effective date, regardless of when the edit was entered. Source: AuditLog. Edit individual structures via the employee profile's Finances tab.
       </p>
       <div className="flex items-center justify-end mb-3"><SearchBox /></div>
       <KekaTable columns={["Employee Number", "Employee Name", "Old CTC", "New CTC", "Change %", "Effective From", "By"]}>
@@ -4202,11 +4204,44 @@ function SettleFFModal({ row, year, month0, monthLabel, onClose, onSettled }: {
   onClose: () => void;
   onSettled: () => void;
 }) {
-  const defaultAmount = row.ctc ? Math.round(parseFloat(row.ctc) / 12).toString() : "";
-  const [amount, setAmount] = useState(defaultAmount);
+  // Fallback if the exit-statement net can't be resolved: one month's CTC.
+  const fallbackAmount = row.ctc ? Math.round(parseFloat(row.ctc) / 12).toString() : "";
+  const [amount, setAmount] = useState("");
+  const [amountSource, setAmountSource] = useState<"loading" | "exit-statement" | "fallback">("loading");
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Pre-fill the settlement amount with the Exit Statement's Net Payable — the
+  // same figure the F&F letter prints — so HR doesn't retype it. Falls back to
+  // one month's CTC if the net can't be computed. Stays fully editable.
+  useEffect(() => {
+    let cancelled = false;
+    // Hard timeout so a slow/unreachable server can never leave the modal
+    // stuck on "loading" with a disabled button — fall back to editable CTC/12.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    (async () => {
+      try {
+        const res = await fetch(`/api/hr/exits/${row.id}/settlement/final-amount`, { signal: controller.signal });
+        if (res.ok) {
+          const j = await res.json();
+          const net = Number(j?.net);
+          if (!cancelled && Number.isFinite(net) && net > 0) {
+            setAmount(String(Math.round(net)));
+            setAmountSource("exit-statement");
+            return;
+          }
+        }
+      } catch { /* network blip / timeout — fall back below */ }
+      if (!cancelled) {
+        setAmount(fallbackAmount);
+        setAmountSource("fallback");
+      }
+    })().finally(() => clearTimeout(timer));
+    return () => { cancelled = true; controller.abort(); clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row.id]);
 
   async function submit() {
     setBusy(true); setError(null);
@@ -4230,15 +4265,24 @@ function SettleFFModal({ row, year, month0, monthLabel, onClose, onSettled }: {
         <h3 className="text-[15px] font-semibold text-slate-800 mb-1">Settle F&amp;F — {row.userName}</h3>
         <p className="text-[11.5px] text-slate-500 mb-4">Cycle: {monthLabel}. Settlement is added as an adhoc payment so the engine picks it up.</p>
         <label className="block text-[11.5px] font-semibold text-slate-600 mb-1">Settlement Amount (₹)</label>
-        <input type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)}
-          className="w-full mb-3 px-3 py-2 border border-slate-300 rounded-md text-[13px]" />
+        <input type="number" min={0} value={amount} onChange={(e) => { setAmount(e.target.value); setAmountSource("fallback"); }}
+          placeholder={amountSource === "loading" ? "Loading exit statement net…" : ""}
+          disabled={amountSource === "loading"}
+          className="w-full mb-1 px-3 py-2 border border-slate-300 rounded-md text-[13px] disabled:bg-slate-50 disabled:text-slate-400" />
+        <p className="mb-3 text-[11px] text-slate-500">
+          {amountSource === "loading"
+            ? "Fetching the Exit Statement net payable…"
+            : amountSource === "exit-statement"
+              ? "Auto-filled from the Exit Statement net payable. Editable."
+              : "Auto-fill unavailable — showing one month's CTC. Please verify."}
+        </p>
         <label className="block text-[11.5px] font-semibold text-slate-600 mb-1">Comment</label>
         <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
           className="w-full mb-3 px-3 py-2 border border-slate-300 rounded-md text-[13px]" />
         {error && <p className="mb-3 text-[12px] text-rose-600">{error}</p>}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 rounded-md border border-slate-300 text-[12.5px] font-semibold text-slate-700">Cancel</button>
-          <button onClick={submit} disabled={busy || !amount}
+          <button onClick={submit} disabled={busy || !amount || amountSource === "loading"}
             className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold disabled:opacity-50">
             {busy ? "Settling…" : "Settle F&F"}
           </button>

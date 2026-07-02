@@ -20,6 +20,7 @@ import prisma from "@/lib/prisma";
 import sanitizeHtml from "sanitize-html";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { computeExitSettlement } from "@/lib/hr/exit-settlement-calc";
 
 // Lazy-cache logos as base64 data URLs so the preview iframe
 // (sandboxed with default-src 'none' + img-src data:) can render
@@ -450,64 +451,25 @@ function resolveExitSettlement(field: string, customFields: Record<string, strin
     const v = Number(raw);
     return Number.isFinite(v) ? v : 0;
   };
-  const numOrUndef = (key: string): number | undefined => {
-    const raw = String(customFields?.[key] ?? "").trim();
-    if (!raw) return undefined;
-    const v = Number(raw.replace(/[^\d.\-]/g, ""));
-    return Number.isFinite(v) ? v : undefined;
-  };
-  // ── Compute the pro-rated salary block ──────────────────────
-  const annual      = num("AnnualPackage");
-  const workingDays = num("WorkingDays");
-  const enablePf    = String(customFields?.EnablePf ?? "false") === "true";
-  const monthly     = annual > 0 ? annual / 12 : 0;
-  const proRata     = workingDays > 0 ? (workingDays / 30) : 1; // 1 = full month
-  // Full-month monetary values per the offer-letter formula.
-  const mBasic = monthly * 0.50;
-  const mHRA   = monthly * 0.20;
-  const mDA    = monthly * 0.10;
-  const mConv  = monthly * 0.075;
-  const mMed   = 1250;
-  const mPF    = enablePf ? 1800 : 0;
-  const mFixed = mBasic + mHRA + mDA + mConv + mMed + mPF;
-  const mSpecial = Math.max(0, Math.round(monthly) - Math.round(mFixed));
-  // Pro-rate each by working days / 30.
-  const calc = {
-    Basic:               mBasic   * proRata,
-    HRA:                 mHRA     * proRata,
-    DearnessAllowance:   mDA      * proRata,
-    ConveyanceAllowance: mConv    * proRata,
-    MedicalAllowance:    mMed     * proRata,
-    ProvidentFund:       mPF      * proRata,
-    SpecialAllowance:    mSpecial * proRata,
-  };
-  // Leave encashment: (Basic + DA) / 30 × days, using the FULL-month
-  // Basic + DA (50% + 10% of monthly), NOT pro-rated. So a ₹30,000 month
-  // → (₹15,000 + ₹3,000) / 30 = ₹600/day (7 days → ₹4,200). Falls back to
-  // 0 when no encashment days are entered (no implicit encashment).
-  const leDays = num("LeaveEncashmentDays");
-  const dailyBasicDa = (mBasic + mDA) / 30;
-  const calcLE = leDays > 0 ? dailyBasicDa * leDays : 0;
-  // Manual overrides take precedence — HR can type any line and
-  // the typed value wins over the computed one.
+  // Shared, single-source-of-truth math (mirrored by the template editor's
+  // F&F auto-fill so the F&F letter amount == this Net Payable).
+  const annual = num("AnnualPackage");
+  const s = computeExitSettlement(customFields);
   const final = {
-    Basic:                  numOrUndef("Basic")                  ?? calc.Basic,
-    HRA:                    numOrUndef("HRA")                    ?? calc.HRA,
-    MedicalAllowance:       numOrUndef("MedicalAllowance")       ?? calc.MedicalAllowance,
-    ConveyanceAllowance:    numOrUndef("ConveyanceAllowance")    ?? calc.ConveyanceAllowance,
-    SpecialAllowance:       numOrUndef("SpecialAllowance")       ?? calc.SpecialAllowance,
-    DearnessAllowance:      numOrUndef("DearnessAllowance")      ?? calc.DearnessAllowance,
-    ProvidentFund:          numOrUndef("ProvidentFund")          ?? calc.ProvidentFund,
-    LeaveEncashmentAmount:  numOrUndef("LeaveEncashmentAmount")  ?? calcLE,
+    Basic:                 s.Basic,
+    HRA:                   s.HRA,
+    MedicalAllowance:      s.MedicalAllowance,
+    ConveyanceAllowance:   s.ConveyanceAllowance,
+    SpecialAllowance:      s.SpecialAllowance,
+    DearnessAllowance:     s.DearnessAllowance,
+    ProvidentFund:         s.ProvidentFund,
+    LeaveEncashmentAmount: s.LeaveEncashmentAmount,
   };
-  const totalEarnings = final.Basic + final.HRA + final.MedicalAllowance +
-                        final.ConveyanceAllowance + final.SpecialAllowance +
-                        final.DearnessAllowance + final.LeaveEncashmentAmount;
-  // Provident Fund counts as a deduction in payslip-style
-  // statements (employee contribution).
-  const profTax = num("ProfessionalTax");
-  const totalDeductions = profTax + final.ProvidentFund;
-  const net = totalEarnings - totalDeductions;
+  const enablePf = String(customFields?.EnablePf ?? "false") === "true";
+  const totalEarnings   = s.totalEarnings;
+  const profTax         = num("ProfessionalTax");
+  const totalDeductions = s.totalDeductions;
+  const net             = s.net;
   const fmtRs2 = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtRs0 = (n: number) => Math.round(n).toLocaleString("en-IN");
   switch (field) {
@@ -521,14 +483,21 @@ function resolveExitSettlement(field: string, customFields: Record<string, strin
     case "MedicalAllowance":    return annual > 0 ? fmtRs2(final.MedicalAllowance) : "";
     case "SpecialAllowance":    return annual > 0 ? fmtRs2(final.SpecialAllowance) : "";
     case "ProvidentFund":       return annual > 0 ? fmtRs2(final.ProvidentFund) : "";
-    case "LeaveEncashmentAmount": return final.LeaveEncashmentAmount > 0 ? fmtRs2(final.LeaveEncashmentAmount) : "";
+    // Show 0.00 (not blank) when the amount is zero, as long as a package is
+    // entered — matches the other earnings rows, which all render a figure.
+    case "LeaveEncashmentAmount": return annual > 0 ? fmtRs2(final.LeaveEncashmentAmount) : "";
+    case "AdvanceSalaryAmount":  return annual > 0 ? fmtRs2(s.AdvanceSalaryAmount) : "";
     case "ProfessionalTax":     return profTax > 0 ? fmtRs2(profTax) : "0.00";
     // PF row visibility — single placeholder that resolves to the
     // <tr> only when EnablePf is true. Lets the same body template
     // cover both PF / no-PF cases without duplicating HTML.
     case "PfRow":
+      // Match the sanitized sibling rows (Professional Tax / totals): the
+      // stored body has border:none stripped, so it shows the table's default
+      // border. This row is substituted AFTER sanitization, so we must emit
+      // the same border-less style here or the PF row renders without a border.
       return enablePf
-        ? `<tr><td style="border:none; padding:3pt 0;">Provident Fund (PF)</td><td style="border:none; text-align:right; padding:3pt 0;">${fmtRs2(final.ProvidentFund)}</td></tr>`
+        ? `<tr><td style="padding:3pt 0">Provident Fund (PF)</td><td style="text-align:right;padding:3pt 0">${fmtRs2(final.ProvidentFund)}</td></tr>`
         : "";
     // Totals
     case "TotalEarnings":       return fmtRs2(totalEarnings);

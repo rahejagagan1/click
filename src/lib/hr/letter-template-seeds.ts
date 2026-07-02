@@ -555,6 +555,10 @@ ${SIGNOFF_HTML_YT_LABS}
       { key: "LossOfPayDays",       label: "Loss of Pay Days",     type: "number", required: false, placeholder: "0" },
       { key: "LeaveEncashmentDays", label: "Leave Encashment Days",type: "number", required: false, placeholder: "0",
         help: "Adds (Basic + DA per day) × this many days to earnings. Leave blank or 0 to skip." },
+      { key: "AdvanceSalaryDays",   label: "Advance Salary Days",  type: "number", required: false, placeholder: "0",
+        help: "Auto-filled from the employee's Advance Salary entries in payroll (informational — days paid in advance)." },
+      { key: "AdvanceSalaryAmount", label: "Advance Salary (₹)",   type: "number", required: false, placeholder: "0.00",
+        help: "Auto-filled from the employee's Advance Salary payroll entries. Added to Total Earnings." },
       { key: "LastSalaryProcessed", label: "Last Salary Processed",type: "text",   required: false, placeholder: "Apr-2026" },
       { key: "FnFProcessed",        label: "F&F Processed",        type: "text",   required: false, placeholder: "May-2026" },
 
@@ -601,11 +605,12 @@ ${SIGNOFF_HTML_YT_LABS}
 <table style="border:none; width:100%;">
   <tbody>
     <tr>
-      <td style="border:none; width:20%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Working Days</span><br/><strong>{{CustomAttributes.WorkingDays}}</strong></td>
-      <td style="border:none; width:20%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Loss of Pay Days</span><br/><strong>{{CustomAttributes.LossOfPayDays}}</strong></td>
-      <td style="border:none; width:20%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Leave Encashment Days</span><br/><strong>{{CustomAttributes.LeaveEncashmentDays}}</strong></td>
-      <td style="border:none; width:20%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Last Salary Processed</span><br/><strong>{{CustomAttributes.LastSalaryProcessed}}</strong></td>
-      <td style="border:none; width:20%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">F &amp; F Processed</span><br/><strong>{{CustomAttributes.FnFProcessed}}</strong></td>
+      <td style="border:none; width:16%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Working Days</span><br/><strong>{{CustomAttributes.WorkingDays}}</strong></td>
+      <td style="border:none; width:16%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Loss of Pay Days</span><br/><strong>{{CustomAttributes.LossOfPayDays}}</strong></td>
+      <td style="border:none; width:16%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Leave Encashment Days</span><br/><strong>{{CustomAttributes.LeaveEncashmentDays}}</strong></td>
+      <td style="border:none; width:16%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Advance Salary Days</span><br/><strong>{{CustomAttributes.AdvanceSalaryDays}}</strong></td>
+      <td style="border:none; width:16%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">Last Salary Processed</span><br/><strong>{{CustomAttributes.LastSalaryProcessed}}</strong></td>
+      <td style="border:none; width:16%; vertical-align:top;"><span style="font-size:9pt; color:#64748b;">F &amp; F Processed</span><br/><strong>{{CustomAttributes.FnFProcessed}}</strong></td>
     </tr>
   </tbody>
 </table>
@@ -624,6 +629,7 @@ ${SIGNOFF_HTML_YT_LABS}
             <tr><td style="border:none; padding:3pt 0;">Special Allowance</td>      <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.SpecialAllowance}}</td></tr>
             <tr><td style="border:none; padding:3pt 0;">Dearness Allowance</td>     <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.DearnessAllowance}}</td></tr>
             <tr><td style="border:none; padding:3pt 0;">Leave Encashment</td>       <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.LeaveEncashmentAmount}}</td></tr>
+            <tr><td style="border:none; padding:3pt 0;">Advance Salary</td>         <td style="border:none; text-align:right; padding:3pt 0;">{{ExitSettlement.AdvanceSalaryAmount}}</td></tr>
             <tr style="border-top:1pt solid #1f2937;"><td style="border:none; padding:6pt 0;"><strong>Total Earnings (A)</strong></td><td style="border:none; text-align:right; padding:6pt 0;"><strong>{{ExitSettlement.TotalEarnings}}</strong></td></tr>
           </tbody>
         </table>
