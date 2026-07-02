@@ -472,6 +472,11 @@ function resolveExitSettlement(field: string, customFields: Record<string, strin
   const net             = s.net;
   const fmtRs2 = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtRs0 = (n: number) => Math.round(n).toLocaleString("en-IN");
+  // Interns get a flat stipend (single earnings line, no statutory
+  // deductions); regular employees get the full component breakdown.
+  const isIntern = String(customFields?.SalaryType ?? "").toLowerCase() === "intern";
+  const row = (label: string, amount: number) =>
+    `<tr><td style="padding:3pt 0">${label}</td><td style="text-align:right;padding:3pt 0">${fmtRs2(amount)}</td></tr>`;
   switch (field) {
     // Computed line items (resolve to "" instead of "0.00" when
     // package not entered — keeps the form looking clean before
@@ -499,6 +504,36 @@ function resolveExitSettlement(field: string, customFields: Record<string, strin
       return enablePf
         ? `<tr><td style="padding:3pt 0">Provident Fund (PF)</td><td style="text-align:right;padding:3pt 0">${fmtRs2(final.ProvidentFund)}</td></tr>`
         : "";
+    // Whole EARNINGS row block — intern: one "Stipend" line (= total);
+    // regular: the full component breakdown. Empty until a package is set.
+    case "EarningsRows": {
+      if (annual <= 0) return "";
+      if (isIntern) return row("Stipend", totalEarnings);
+      return [
+        row("Basic", final.Basic),
+        row("HRA", final.HRA),
+        row("Medical Allowance", final.MedicalAllowance),
+        row("Conveyance Allowance", final.ConveyanceAllowance),
+        row("Special Allowance", final.SpecialAllowance),
+        row("Dearness Allowance", final.DearnessAllowance),
+        row("Leave Encashment", final.LeaveEncashmentAmount),
+        row("Advance Salary", s.AdvanceSalaryAmount),
+      ].join("");
+    }
+    // Whole right-hand TAXES & DEDUCTIONS column — hidden for interns
+    // (no statutory deductions); full table for regular employees.
+    case "DeductionsColumn": {
+      if (isIntern) return "";
+      const pfRow = enablePf
+        ? `<tr><td style="padding:3pt 0">Provident Fund (PF)</td><td style="text-align:right;padding:3pt 0">${fmtRs2(final.ProvidentFund)}</td></tr>`
+        : "";
+      return `<p style="margin:0 0 6pt 0;"><strong>TAXES &amp; DEDUCTIONS</strong></p>`
+        + `<table style="width:100%;"><tbody>`
+        + `<tr><td style="padding:3pt 0">Professional Tax</td><td style="text-align:right;padding:3pt 0">${fmtRs2(profTax)}</td></tr>`
+        + pfRow
+        + `<tr><td style="padding:6pt 0"><strong>Total Taxes &amp; Deductions (B)</strong></td><td style="text-align:right;padding:6pt 0"><strong>${fmtRs2(totalDeductions)}</strong></td></tr>`
+        + `</tbody></table>`;
+    }
     // Totals
     case "TotalEarnings":       return fmtRs2(totalEarnings);
     case "TotalDeductions":     return fmtRs2(totalDeductions);
@@ -627,11 +662,26 @@ export async function renderLetterHtml(
     profile = { ...(user.employeeProfile ?? {}), ...extended };
   }
 
+  // Inject the employee's salary type so the Exit Statement can render an
+  // intern layout (Stipend, no taxes) vs the regular breakdown. HR can
+  // override via a SalaryType custom field; otherwise pull it from the
+  // SalaryStructure. Manual (new-joiner) mode keeps whatever was typed.
+  const injectedFields: Record<string, string> = { ...(ctx.customFields ?? {}) };
+  if (!ctx.manual && !injectedFields.SalaryType) {
+    try {
+      const sr = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT "salaryType" FROM "SalaryStructure" WHERE "userId" = $1 LIMIT 1`,
+        ctx.employeeId,
+      );
+      if (sr[0]?.salaryType) injectedFields.SalaryType = String(sr[0].salaryType);
+    } catch { /* older DB / no structure — treat as regular */ }
+  }
+
   const renderCtx = {
     user,
     profile,
     exit,
-    customFields: ctx.customFields ?? {},
+    customFields: injectedFields,
     letterDate: ctx.letterDate ?? null,
   };
 
@@ -698,6 +748,8 @@ export async function renderLetterHtml(
 const SAFE_HTML_PLACEHOLDERS = new Set<string>([
   "Salary.PfRow",
   "ExitSettlement.PfRow",
+  "ExitSettlement.EarningsRows",
+  "ExitSettlement.DeductionsColumn",
 ]);
 
 /**
