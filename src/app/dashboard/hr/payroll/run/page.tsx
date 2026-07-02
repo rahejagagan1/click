@@ -1690,13 +1690,16 @@ function AddBonusModal({ year, month0, monthLabel, brand, onClose, onAdded }: {
 // search + columns + empty state + pagination) so HR sees the expected
 // shape; backend wiring is per-step TODO.
 
-type Step4SubStep = 1 | 2 | 3 | 4;
+type Step4SubStep = 1 | 2 | 3 | 4 | 5;
 const STEP4_SUB_STEPS: { n: Step4SubStep; label: string }[] = [
   { n: 1, label: "SALARY\nCOMPONENT\nCLAIM" },
   { n: 2, label: "EXPENSES" },
   { n: 3, label: "ADHOC\nPAYMENTS" },
   { n: 4, label: "ADHOC\nDEDUCTIONS" },
 ];
+// Advance Salary is an NB-Media-only sub-step (relieving top-up). Appended
+// to the wizard only when the run is scoped to NB Media.
+const STEP4_ADVANCE_SALARY: { n: Step4SubStep; label: string } = { n: 5, label: "ADVANCE\nSALARY" };
 
 function Step4Panel({ year, month0, monthLabel, brand, onClose, onMarkedComplete }: {
   year: number;
@@ -1708,8 +1711,12 @@ function Step4Panel({ year, month0, monthLabel, brand, onClose, onMarkedComplete
 }) {
   const [current, setCurrent] = useState<Step4SubStep>(1);
 
+  // Advance Salary sub-step only exists for NB Media runs.
+  const subSteps = brand === "NB Media" ? [...STEP4_SUB_STEPS, STEP4_ADVANCE_SALARY] : STEP4_SUB_STEPS;
+  const maxStep = subSteps.length;
+
   function goBack()   { setCurrent((c) => (c > 1 ? ((c - 1) as Step4SubStep) : c)); }
-  function goNext()   { setCurrent((c) => (c < 4 ? ((c + 1) as Step4SubStep) : c)); }
+  function goNext()   { setCurrent((c) => (c < maxStep ? ((c + 1) as Step4SubStep) : c)); }
   async function complete() { try { await onMarkedComplete?.(); } finally { onClose(); } }
 
   // Avoid "unused parameter" TS warnings — these are reserved for when
@@ -1731,7 +1738,7 @@ function Step4Panel({ year, month0, monthLabel, brand, onClose, onMarkedComplete
         {/* Wizard indicator + nav buttons */}
         <div className="flex items-center justify-between px-8 py-4 border-b border-slate-100">
           <div className="flex-1 flex items-center justify-center gap-10">
-            {STEP4_SUB_STEPS.map((s) => {
+            {subSteps.map((s) => {
               const active = s.n === current;
               return (
                 <div key={s.n} className="flex items-center gap-2">
@@ -1764,7 +1771,7 @@ function Step4Panel({ year, month0, monthLabel, brand, onClose, onMarkedComplete
                 Back
               </button>
             )}
-            {current < 4 ? (
+            {current < maxStep ? (
               <button
                 onClick={goNext}
                 className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499]"
@@ -1799,6 +1806,14 @@ function Step4Panel({ year, month0, monthLabel, brand, onClose, onMarkedComplete
               {current === 3 && (
                 <AdhocLineItemsSubStep
                   kind="payment"
+                  year={year}
+                  month0={month0}
+                  monthLabel={monthLabel}
+                  brand={brand}
+                />
+              )}
+              {current === 5 && brand === "NB Media" && (
+                <AdvanceSalarySubStep
                   year={year}
                   month0={month0}
                   monthLabel={monthLabel}
@@ -2326,6 +2341,213 @@ function ImportToolbar({ addLabel, importPrev, importThis }: {
   );
 }
 
+// ─── Step 4 sub-step 5: Advance Salary (NB Media only) ───────────────────────
+// Relieving top-up: HR enters a number of days; the server computes
+// days × (CTC / 12 / 30) and books it as an adhoc PAYMENT of type
+// "Advance Salary", so the payroll engine adds it to that month's gross
+// unchanged. Listed here filtered to that type.
+type AdvanceSalaryItem = { id: number; userId: number; type: string | null; amount: string; comment: string | null; name?: string; role?: string; designationLabel?: string | null };
+
+function AdvanceSalarySubStep({ year, month0, monthLabel, brand }: {
+  year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs";
+}) {
+  const url = `/api/hr/payroll/adhoc?month=${month0}&year=${year}&kind=payment&brand=${encodeURIComponent(brand)}`;
+  const { data } = useSWR<{ items: AdvanceSalaryItem[] }>(url, fetcher);
+  const items = (data?.items ?? []).filter((r) => r.type === "Advance Salary");
+  const [showAdd, setShowAdd] = useState(false);
+
+  async function remove(id: number) {
+    if (!confirm("Remove this advance salary entry?")) return;
+    const res = await fetch(`/api/hr/payroll/adhoc?id=${id}`, { method: "DELETE" });
+    if (res.ok) mutate(url);
+    else alert((await res.json().catch(() => ({})))?.error || "Delete failed");
+  }
+
+  return (
+    <>
+      <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Advance Salary</h4>
+      <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
+        Pay a resigning / relieved employee some extra days&apos; salary for {monthLabel}. Computed at
+        (CTC ÷ 12) ÷ 30 per day and added to that month&apos;s gross. It shows on the payslip as an Advance Salary line.
+      </p>
+      <div className="flex items-center gap-2 mb-3">
+        <button
+          onClick={() => setShowAdd(true)}
+          className="px-3 py-1.5 rounded-md border border-[#6f42c1]/40 text-[#6f42c1] text-[12px] font-semibold hover:bg-[#6f42c1]/5"
+        >
+          + Add advance salary
+        </button>
+      </div>
+      <KekaTable columns={["Employee", "Days / Reason", "Amount", "Action"]} rightAlignedColumns={[2]}>
+        {items.length === 0 ? (
+          <EmptyRow colSpan={4} text={`No advance salary entries for ${monthLabel}.`} />
+        ) : (
+          items.map((r) => (
+            <tr key={r.id} className="border-t border-slate-100">
+              <td className="px-3 py-2 text-[12.5px] text-slate-800">
+                {r.name ?? `User ${r.userId}`}
+                <span className="block text-[10.5px] text-slate-400">{r.designationLabel ?? r.role ?? "—"}</span>
+              </td>
+              <td className="px-3 py-2 text-[12.5px] text-slate-600">{r.comment || "—"}</td>
+              <td className="px-3 py-2 text-[12.5px] text-right tabular-nums font-semibold">{fmtInr(parseFloat(r.amount))}</td>
+              <td className="px-3 py-2"><button onClick={() => remove(r.id)} className="text-[11px] text-rose-500 hover:underline">Remove</button></td>
+            </tr>
+          ))
+        )}
+      </KekaTable>
+      <Pagination count={items.length} />
+      {showAdd && (
+        <AddAdvanceSalaryModal
+          year={year}
+          month0={month0}
+          monthLabel={monthLabel}
+          brand={brand}
+          onClose={() => setShowAdd(false)}
+          onAdded={() => { mutate(url); setShowAdd(false); }}
+        />
+      )}
+    </>
+  );
+}
+
+function AddAdvanceSalaryModal({ year, month0, monthLabel, brand, onClose, onAdded }: {
+  year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs";
+  onClose: () => void; onAdded: () => void;
+}) {
+  const { data: empData } = useSWR<any>(`/api/hr/employees?brand=${encodeURIComponent(brand)}`, fetcher);
+  const employees: any[] = Array.isArray(empData) ? empData : (empData as any)?.employees ?? [];
+
+  const [userId, setUserId] = useState<number | "">("");
+  // Month the advance is FOR — defaults to the month AFTER the run month
+  // (you settle June, advance July). The per-day divisor = days in THIS
+  // month, so a full month's days = exactly one month's salary.
+  const defY = month0 === 11 ? year + 1 : year;
+  const defM = month0 === 11 ? 0 : month0 + 1;
+  const [forYm, setForYm] = useState<string>(`${defY}-${String(defM + 1).padStart(2, "0")}`);
+  const ty = Number(forYm.split("-")[0]) || year;
+  const tm = (Number(forYm.split("-")[1]) || 1) - 1;
+  const daysInTarget = daysInMonth(ty, tm + 1);
+  const forMonthLabel = new Date(Date.UTC(ty, tm, 1)).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
+  // Default the days to a FULL month of the target so the common
+  // "advance one whole month" case is a single click.
+  const [days, setDays]     = useState<string>(String(daysInMonth(defY, defM + 1)));
+  const [reason, setReason] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState<string | null>(null);
+
+  // Live preview — pull the selected employee's CTC so HR sees the amount
+  // before saving. The server recomputes authoritatively on submit.
+  const { data: ss } = useSWR<any>(userId ? `/api/hr/payroll/salary-structure?userId=${userId}` : null, fetcher);
+  const ctc    = ss?.ctc ? parseFloat(String(ss.ctc)) : 0;
+  const perDay = ctc > 0 ? (ctc / 12) / daysInTarget : 0;
+  const daysNum = parseFloat(days);
+  const hasDays = Number.isFinite(daysNum) && daysNum > 0;
+  const preview = perDay > 0 && hasDays ? Math.round(perDay * daysNum) : 0;
+
+  async function submit() {
+    setError(null);
+    if (!userId) { setError("Pick an employee"); return; }
+    if (!hasDays) { setError("Enter a positive number of days"); return; }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/hr/payroll/adhoc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, month: month0, year, kind: "payment", days: daysNum, forMonth: tm, forYear: ty, comment: reason }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Could not add");
+      }
+      onAdded();
+    } catch (e: any) {
+      setError(e?.message || "Could not add");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-slate-900/60 z-[60]" onClick={onClose} />
+      <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 pointer-events-none">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 pointer-events-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-[14px] font-semibold text-slate-800">Advance Salary — {monthLabel}</h3>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={16} /></button>
+          </div>
+          {error && (
+            <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11.5px] text-rose-700">{error}</div>
+          )}
+          <div className="space-y-3">
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Employee</label>
+              <select
+                value={userId}
+                onChange={(e) => setUserId(e.target.value ? Number(e.target.value) : "")}
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+              >
+                <option value="">Select…</option>
+                {employees.map((u: any) => (
+                  <option key={u.id} value={u.id}>{u.name} ({u.designation?.label ?? u.role})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Advance for month</label>
+              <input
+                type="month" value={forYm}
+                onChange={(e) => setForYm(e.target.value)}
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Days</label>
+              <input
+                type="number" min="0" step="0.5" value={days}
+                onChange={(e) => setDays(e.target.value)}
+                placeholder="e.g. 5"
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+              />
+              <p className="mt-1 text-[11px] text-slate-400">Full {forMonthLabel} = {daysInTarget} days.</p>
+            </div>
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Reason</label>
+              <input
+                value={reason} onChange={(e) => setReason(e.target.value)}
+                placeholder="e.g. Relieving adjustment"
+                className="mt-1 w-full px-3 py-2 text-[13px] rounded-md border border-slate-200 bg-white"
+              />
+            </div>
+            {/* Live amount preview */}
+            <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-[12px] text-slate-600">
+              {userId && perDay > 0 ? (
+                <>Per day (CTC/12 ÷ {daysInTarget}): <span className="font-semibold text-slate-800">{fmtInr(Math.round(perDay))}</span>
+                  {hasDays && <> · Amount: <span className="font-semibold text-slate-800">{fmtInr(preview)}</span></>}
+                </>
+              ) : userId ? (
+                <span className="text-rose-500">No CTC set for this employee — cannot compute.</span>
+              ) : (
+                <span className="text-slate-400">Select an employee to see the per-day rate.</span>
+              )}
+            </div>
+          </div>
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <button onClick={onClose} className="px-4 py-2 rounded-md border border-slate-300 bg-white text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+            <button
+              onClick={submit}
+              disabled={saving || !userId || !hasDays || perDay <= 0}
+              className="px-4 py-2 rounded-md bg-[#6f42c1] text-white text-[12.5px] font-semibold hover:bg-[#5a3499] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? "Saving…" : "Add advance salary"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function HelpResourcesStep4({ step }: { step: Step4SubStep }) {
   const sets: Record<Step4SubStep, { question: string }[]> = {
     1: [
@@ -2344,6 +2566,10 @@ function HelpResourcesStep4({ step }: { step: Step4SubStep }) {
       { question: "How can I import adhoc deductions from a CSV?" },
       { question: "Can a deduction reduce net pay below zero?" },
     ],
+    5: [
+      { question: "How is Advance Salary calculated?" },
+      { question: "Does Advance Salary attract PF / ESI / TDS?" },
+    ],
   };
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-4">
@@ -2353,7 +2579,7 @@ function HelpResourcesStep4({ step }: { step: Step4SubStep }) {
       </h5>
       <p className="text-[11.5px] text-slate-500 mb-3">If you have questions talk to us, we're here for you.</p>
       <ul className="space-y-2.5">
-        {sets[step].map((q) => (
+        {(sets[step] ?? []).map((q) => (
           <li key={q.question} className="flex items-start gap-2">
             <a href="#" className="text-[12px] text-slate-700 hover:text-[#6f42c1] hover:underline flex-1">{q.question}</a>
             <span className="text-slate-400">↗</span>
@@ -3305,7 +3531,7 @@ function LeaveAppliedSubStep({ year, month0, monthLabel, brand }: {
       let okCount = 0;
       for (const id of ids) {
         const r = await fetch(`/api/hr/leaves/${id}`, {
-          method: "POST",
+          method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action }),
         });
@@ -3327,7 +3553,7 @@ function LeaveAppliedSubStep({ year, month0, monthLabel, brand }: {
     setBusy(true); setError(null);
     try {
       const r = await fetch(`/api/hr/leaves/${id}`, {
-        method: "POST",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
