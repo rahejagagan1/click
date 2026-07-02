@@ -477,7 +477,35 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     const appId = Number(idParam);
     if (!Number.isInteger(appId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
-    await prisma.leaveApplication.delete({ where: { id: appId } });
+    // Refund the balance debit this leave still holds BEFORE deleting it.
+    // A raw delete leaves usedDays (approved) / pendingDays (pending or
+    // partially_approved) stranded on the LeaveBalance row — phantom usage
+    // that no application backs. Mirror the cancel path's refund so the
+    // counters stay correct. rejected/cancelled leaves already refunded, so
+    // they get nothing. All atomic: refund + delete succeed or fail together.
+    const application = await prisma.leaveApplication.findUnique({
+      where: { id: appId },
+      select: { userId: true, leaveTypeId: true, fromDate: true, totalDays: true, status: true },
+    });
+    if (!application) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    const year = new Date(application.fromDate).getFullYear();
+    const totalDays = parseFloat(application.totalDays.toString());
+
+    await prisma.$transaction(async (tx) => {
+      if (application.status === "approved") {
+        await tx.leaveBalance.updateMany({
+          where: { userId: application.userId, leaveTypeId: application.leaveTypeId, year },
+          data: { usedDays: { decrement: totalDays } },
+        });
+      } else if (application.status === "pending" || application.status === "partially_approved") {
+        await tx.leaveBalance.updateMany({
+          where: { userId: application.userId, leaveTypeId: application.leaveTypeId, year },
+          data: { pendingDays: { decrement: totalDays } },
+        });
+      }
+      await tx.leaveApplication.delete({ where: { id: appId } });
+    });
     return NextResponse.json({ success: true });
   } catch (e) { return serverError(e, "DELETE /api/hr/leaves/[id]"); }
 }
