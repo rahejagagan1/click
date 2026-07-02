@@ -9,6 +9,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, resolveUserId, serverError } from "@/lib/api-auth";
 import { writeAuditLog } from "@/lib/audit-log";
 import { normaliseBrandParam } from "@/lib/hr/brand-scope";
+import { readBrandStatus } from "@/lib/hr/payroll-run-status";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,7 @@ type Ctx = { params: Promise<{ id: string }> };
 // both brands. Without the brand namespace, NB completing a step would show
 // as complete on the YT run too. Legacy flat rows ({ "1": "complete" }) are
 // ignored on read, so completion resets once per brand and is then correct.
-type RunRow = { id: number; status: string; stepStates: Record<string, any> | null };
+type RunRow = { id: number; status: string; stepStates: Record<string, any> | null; brandStatus: Record<string, any> | null };
 
 function brandKey(raw: string | null | undefined): "NB Media" | "YT Labs" {
   return normaliseBrandParam(raw) ?? "NB Media";
@@ -33,7 +34,7 @@ async function loadRun(idStr: string): Promise<RunRow | null> {
   const id = parseInt(idStr);
   if (!Number.isFinite(id)) return null;
   const rows = await prisma.$queryRawUnsafe<RunRow[]>(
-    `SELECT id, status, "stepStates" FROM "PayrollRun" WHERE id = $1`,
+    `SELECT id, status, "stepStates", "brandStatus" FROM "PayrollRun" WHERE id = $1`,
     id,
   );
   return rows[0] ?? null;
@@ -60,14 +61,17 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const { id } = await ctx.params;
     const run = await loadRun(id);
     if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
-    if (run.status === "locked" || run.status === "paid") {
-      return NextResponse.json({ error: "Run is locked" }, { status: 409 });
-    }
 
     const body = await req.json();
     const step  = parseInt(body?.step);
     const state = String(body?.state ?? "");
     const brand = brandKey(body?.brand);
+
+    // Lock check is per-brand: a locked NB Media run must not freeze YT Labs'
+    // step editing (and vice versa).
+    if (["locked", "paid"].includes(readBrandStatus(run, brand).status)) {
+      return NextResponse.json({ error: "Run is locked" }, { status: 409 });
+    }
     if (!Number.isFinite(step) || step < 1 || step > 6) {
       return NextResponse.json({ error: "step must be 1..6" }, { status: 400 });
     }

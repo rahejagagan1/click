@@ -43,19 +43,22 @@ NB Media`;
   return { subject, html, text };
 }
 
-export async function emailPayslipsForRun(runId: number): Promise<{ sent: number; failed: number; skipped: number }> {
+export async function emailPayslipsForRun(
+  runId: number,
+  brand?: "NB Media" | "YT Labs",
+): Promise<{ sent: number; failed: number; skipped: number }> {
   const result = { sent: 0, failed: 0, skipped: 0 };
   const run = await prisma.payrollRun.findUnique({ where: { id: runId } });
   if (!run) return result;
 
-  const payslips = await prisma.payslip.findMany({
+  const allPayslips = await prisma.payslip.findMany({
     where: { payrollRunId: runId },
     include: {
       user: { select: { id: true, name: true, email: true, isActive: true } },
       salaryStructure: true,
     },
   });
-  const uids = payslips.map((p) => p.userId);
+  const uids = allPayslips.map((p) => p.userId);
 
   const profiles = await prisma.employeeProfile.findMany({
     where: { userId: { in: uids } },
@@ -63,10 +66,20 @@ export async function emailPayslipsForRun(runId: number): Promise<{ sent: number
       userId: true, employeeId: true, firstName: true, middleName: true, lastName: true,
       department: true, designation: true, joiningDate: true, dateOfBirth: true,
       jobLocation: true, city: true, bankName: true, bankIfsc: true,
-      bankAccountNumber: true, panNumber: true, legalEntity: true,
+      bankAccountNumber: true, panNumber: true, legalEntity: true, businessUnit: true,
     },
   });
   const profMap = new Map(profiles.map((p) => [p.userId, p]));
+
+  // When a brand is given, only email that brand's employees — a PayrollRun
+  // is shared by both brands, so marking NB Media paid must not mail YT Labs.
+  // brandOf: YT Labs is exact; everything else (incl. null/legacy) is NB Media.
+  const payslips = brand
+    ? allPayslips.filter((p) => {
+        const bu = profMap.get(p.userId)?.businessUnit ?? null;
+        return (bu === "YT Labs" ? "YT Labs" : "NB Media") === brand;
+      })
+    : allPayslips;
 
   const bonusRows = await prisma.employeeBonus.findMany({
     where: { userId: { in: uids } },
