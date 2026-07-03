@@ -58,17 +58,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       }, { status: 422 });
     }
 
-    // Bucket by bank. Use the raw bankName (Title Case as stored) as the
-    // key — sheet names will be lowercased separately. Empty strings have
-    // already been filtered out above.
-    const byBank = new Map<string, typeof payable>();
+    // Bucket by bank, CASE-INSENSITIVELY — different capitalisations of the
+    // same bank ("Punjab National Bank" vs "Punjab national bank") must merge
+    // into one bucket, otherwise they'd produce two sheets whose lowercased
+    // names collide and ExcelJS throws "duplicate worksheet name". Keep the
+    // first-seen spelling as the display label.
+    const byBank = new Map<string, { display: string; items: typeof payable }>();
     for (const r of payable) {
-      const k = r.bankName!.trim();
-      const arr = byBank.get(k) ?? [];
-      arr.push(r);
-      byBank.set(k, arr);
+      const key = r.bankName!.trim().toLowerCase();
+      const entry = byBank.get(key) ?? { display: r.bankName!.trim(), items: [] as typeof payable };
+      entry.items.push(r);
+      byBank.set(key, entry);
     }
-    const bankList = Array.from(byBank.keys()).sort((a, b) => a.localeCompare(b));
+    const bankList = Array.from(byBank.values()).sort((a, b) => a.display.localeCompare(b.display));
 
     const monthYearTitle = `${monShort(run.month)}, ${run.year}`;
 
@@ -94,9 +96,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     let r = 5;
     for (const bank of bankList) {
-      const items = byBank.get(bank)!;
+      const items = bank.items;
       const sum = items.reduce((s, i) => s + i.netPay, 0);
-      summary.getCell(`B${r}`).value = bank.toUpperCase();
+      summary.getCell(`B${r}`).value = bank.display.toUpperCase();
       summary.getCell(`C${r}`).value = items.length;
       summary.getCell(`D${r}`).value = Math.round(sum * 100) / 100; // actual value, with paise
       r += 1;
@@ -107,9 +109,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     summary.getColumn(4).width = 16;
 
     // ── Sheets 2..N: one per bank ───────────────────────────────────
+    const usedSheetNames = new Set<string>(["payment summary"]);
     for (const bank of bankList) {
-      const items = byBank.get(bank)!;
-      const ws = wb.addWorksheet(safeSheetName(bank.toLowerCase()));
+      const items = bank.items;
+      // Guard the rare case where two distinct banks sanitize/truncate to the
+      // same 31-char sheet name — append a counter so addWorksheet is unique.
+      let sheetName = safeSheetName(bank.display.toLowerCase());
+      if (usedSheetNames.has(sheetName.toLowerCase())) {
+        let n = 2;
+        while (usedSheetNames.has(`${safeSheetName(bank.display.toLowerCase()).slice(0, 28)} ${n}`.toLowerCase())) n++;
+        sheetName = `${safeSheetName(bank.display.toLowerCase()).slice(0, 28)} ${n}`;
+      }
+      usedSheetNames.add(sheetName.toLowerCase());
+      const ws = wb.addWorksheet(sheetName);
 
       ws.mergeCells("B1:H1");
       ws.getCell("B1").value = `Bank Transfer Statement for the month of ${monthYearTitle}`;
