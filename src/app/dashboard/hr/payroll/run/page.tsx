@@ -82,7 +82,18 @@ function buildStrip(today: Date, runs: PayrollRun[], brand: string): MonthCell[]
   const cells: MonthCell[] = [];
   const curY = today.getFullYear();
   const curM = today.getMonth();
-  const PAST = 1, FUTURE = 10;
+  const FUTURE = 10;
+  // Extend the strip back to the EARLIEST payroll run so past cycles stay
+  // reachable no matter the current month — payroll began May 2026 here, so
+  // opening it in (say) Dec 2026 must still let HR scroll back to May 2026.
+  // At least 1 past month is always shown even before any run exists.
+  const curIdx = curY * 12 + curM;
+  let earliestIdx = curIdx - 1;
+  for (const r of runs) {
+    const idx = r.year * 12 + r.month;
+    if (idx < earliestIdx) earliestIdx = idx;
+  }
+  const PAST = Math.max(1, curIdx - earliestIdx);
   for (let offset = -PAST; offset <= FUTURE; offset++) {
     const d = new Date(curY, curM + offset, 1);
     const y = d.getFullYear();
