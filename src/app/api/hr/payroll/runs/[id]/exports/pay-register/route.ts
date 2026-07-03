@@ -90,7 +90,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       const grossA = r.grossEarnings;
       const pfEmployee = r.pfEmployee;
       const totalContribB = pfEmployee; // ESI not yet wired
-      const profTax = r.professionalTax + r.additionalTax;
+      const profTax = r.professionalTax;   // additionalTax is folded into professionalTax in loadExportRows
       const totalDeductionC = Math.max(0, r.totalDeductions - r.pfEmployee);
       const netPay = r.netPay;
       // D / E / F kept at zero — the cash-advance + settlement flows

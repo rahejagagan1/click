@@ -244,8 +244,13 @@ export async function loadExportRows(runId: number): Promise<{
       netPay: num(p.netPay),
       bonus: num(p.bonus),
       pfEmployee: num(p.pfEmployee),
-      professionalTax: num(p.professionalTax),
-      additionalTax: num((p as any).additionalTax),
+      // Professional Tax = the structure's PT PLUS the flat monthly PT the
+      // engine stores as `additionalTax` (₹200 for non-interns, ₹0 for
+      // interns). Folded here so EVERY export sheet reports the true PT via
+      // `professionalTax` alone; `additionalTax` is now always 0 (kept only
+      // for shape/back-compat). Without this the PT Statement filed ₹0.
+      professionalTax: num(p.professionalTax) + num((p as any).additionalTax),
+      additionalTax: 0,
       tds: num(p.tds),
       status: p.status,
       leaveEncashment: (() => {
@@ -326,7 +331,11 @@ export function frozenMonthlyComponents(r: ExportRow) {
 // cap is hard. Banks like "kotak mahindra bank limited" (27 chars) fit
 // but a long name could go over.
 export function safeSheetName(name: string): string {
-  return name.slice(0, 31);
+  // Excel worksheet names can't contain \ / ? * : [ ] and are capped at 31
+  // chars. Strip the invalid chars (Keka names occasionally carry a slash)
+  // and collapse whitespace so ExcelJS.addWorksheet never throws.
+  const cleaned = name.replace(/[\\/?*:[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 31).trim();
+  return cleaned || "Sheet";
 }
 
 // ── Brand split ───────────────────────────────────────────────────────
