@@ -48,20 +48,16 @@ export async function computeExitPendingSalary(exitId: number): Promise<ExitPend
   const lwdDay = lwd.getUTCDate();
   const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   const firstDay = new Date(Date.UTC(year, month, 1));
+  const monthLabel = `${MONTHS[month]} ${year}`;
 
-  // Already paid? If a payslip exists for the exit month, nothing is pending
-  // here — HR settles any over/under-payment manually.
+  // Does a payslip already exist for the exit month? If so, nothing is PENDING
+  // (the amount is 0 — HR settles any over/under-payment manually), but we
+  // STILL compute the real worked-days / LOP below so the Exit Statement can
+  // display them for an already-paid exited employee.
   const existingPayslip = await prisma.payslip.findFirst({
     where: { userId: exit.userId, month, year },
     select: { id: true },
   });
-  const monthLabel = `${MONTHS[month]} ${year}`;
-  if (existingPayslip) {
-    return {
-      amount: 0, paidDays: 0, daysInMonth, monthLabel, alreadyPaid: true,
-      label: `Salary for ${monthLabel} (already paid in payroll)`,
-    };
-  }
 
   // LOP within the WORKED window [1st .. LWD] only. (Days after the LWD are
   // unpaid by virtue of the proration base being the full month, not LOP.)
@@ -93,6 +89,20 @@ export async function computeExitPendingSalary(exitId: number): Promise<ExitPend
   const lopInPeriod = absent + lop + (half + halfLop) * 0.5 + unpaidLeaveDays;
   const paidDays = Math.max(0, lwdDay - lopInPeriod);
   const lopFactor = daysInMonth > 0 ? paidDays / daysInMonth : 0;
+
+  // Already paid: nothing pending, but return the REAL worked-days / LOP so the
+  // Exit Statement fills Working Days / Loss of Pay for the exited employee.
+  if (existingPayslip) {
+    return {
+      amount: 0,
+      paidDays: Number(paidDays.toFixed(1)),
+      daysInMonth,
+      monthLabel,
+      alreadyPaid: true,
+      label: `Salary for ${monthLabel} (already paid in payroll)`,
+      breakdown: { gross: 0, deductions: 0, lopInPeriod: Number(lopInPeriod.toFixed(1)), salaryType: structure.salaryType },
+    };
+  }
 
   // Full-month figures (all CTC components stored ANNUAL → /12). PF (Emp) is a
   // CTC component that flows back out as a deduction, so it's in earnings.

@@ -172,6 +172,10 @@ export async function PUT(req: NextRequest) {
 
     // YT Labs: single-stage — first authorised approver finalises outright.
     const singleStage = await isSingleStageApprovalEmployee(record.userId);
+    // Fast-path: only the CEO approving at L1 collapses straight to approved
+    // instead of parking at partially_approved. HR Managers still finalise at L2.
+    const isCeo = user.orgLevel === "ceo";
+    const fastPath = singleStage || isCeo;
 
     // Shared payload used by every notification path below.
     const approver = await prisma.user.findUnique({ where: { id: myId! }, select: { name: true } });
@@ -204,7 +208,7 @@ export async function PUT(req: NextRequest) {
 
     // Stage 1 (manager) → partially_approved.
     // Skipped for YT Labs (single-stage): fall through to the finaliser.
-    if (record.status === "pending" && !singleStage) {
+    if (record.status === "pending" && !fastPath) {
       const updated = await prisma.compOffRequest.update({
         where: { id },
         data: { status: "partially_approved", approvedById: myId!, approvalNote },

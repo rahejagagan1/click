@@ -253,7 +253,9 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
             const ps = await fetch(`/api/hr/exits/${activeExit.id}/settlement/pending-salary`);
             if (ps.ok) {
               const pj = await ps.json();
-              if (!pj?.alreadyPaid && Number(pj?.paidDays) > 0) workingDaysFill = String(pj.paidDays);
+              // Fill worked-days / LOP even when the exit month is already paid
+              // (exited employees) — pending-salary now returns the real days.
+              if (Number(pj?.paidDays) > 0) workingDaysFill = String(pj.paidDays);
               if (pj?.breakdown?.lopInPeriod != null) lopDaysFill = String(pj.breakdown.lopInPeriod);
             }
           } catch { /* network blip — HR can still type manually */ }

@@ -238,10 +238,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       // isDeveloper) still go through the normal two-step flow.
       const isCeo = self.orgLevel === "ceo";
       const isHrManager = self.orgLevel === "hr_manager" || self.role === "hr_manager";
-      // YT Labs single-stage: ANY authorised approver (direct manager
-      // included) finalises here — so the same collapse-to-approved path
-      // runs on their first click, not just for CEO / HR Manager.
-      const isFastPathFinalApprover = isCeo || isHrManager || singleStage;
+      // L2 auto-approval is CEO ONLY: a CEO approving at L1 collapses straight
+      // to approved. HR Managers go through the normal two-step L1 → L2 flow.
+      // YT Labs single-stage still collapses for any authorised approver.
+      const isFastPathFinalApprover = isCeo || singleStage;
       if (isFastPathFinalApprover) {
         const result = await prisma.$transaction(async (tx) => {
           const { count } = await tx.leaveApplication.updateMany({
