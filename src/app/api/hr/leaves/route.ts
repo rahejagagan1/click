@@ -259,7 +259,11 @@ export async function POST(req: NextRequest) {
     const newHalf = leaveHalf(reason);
     const newSingleDay = from.toDateString() === to.toDateString();
     const overlaps = await prisma.leaveApplication.findMany({
-      where: { userId: subjectUserId, status: { in: ["pending", "approved"] }, fromDate: { lte: to }, toDate: { gte: from } },
+      // Include "partially_approved" — a leave that's cleared L1 but not yet L2
+      // is still a live booking. Omitting it left a blind spot where a second
+      // overlapping leave could be filed in the L1→L2 window (produced real
+      // duplicate LWP double-counted in payroll).
+      where: { userId: subjectUserId, status: { in: ["pending", "partially_approved", "approved"] }, fromDate: { lte: to }, toDate: { gte: from } },
       select: { fromDate: true, toDate: true, reason: true },
     });
     const realConflict = overlaps.some((o) => {

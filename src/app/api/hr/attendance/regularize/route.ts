@@ -368,6 +368,11 @@ export async function PUT(req: NextRequest) {
     // manager OR HR/CEO) finalises the regularization outright, running
     // the attendance rewrite below. NB Media keeps the L1 → L2 flow.
     const singleStage = await isSingleStageApprovalEmployee(reg.userId);
+    // Fast-path: only the CEO approving at L1 collapses straight to approved
+    // (running the attendance rewrite) instead of parking at partially_approved.
+    // HR Managers still finalise at L2.
+    const isCeo = callerUser.orgLevel === "ceo";
+    const fastPath = singleStage || isCeo;
 
     // ── L1 / L2 flow (mirrors leaves / WFH / on-duty / comp-off) ───
     //   • Stage 1 (pending → partially_approved): direct manager OR HR
@@ -426,7 +431,7 @@ export async function PUT(req: NextRequest) {
 
     // ── APPROVE — Stage 1: direct manager → partially_approved ─────
     // Skipped for YT Labs (single-stage): fall through to the finaliser.
-    if (reg.status === "pending" && !singleStage) {
+    if (reg.status === "pending" && !fastPath) {
       if (!isDirectManager && !admin) {
         return NextResponse.json({ error: "Not authorised" }, { status: 403 });
       }
@@ -484,7 +489,7 @@ export async function PUT(req: NextRequest) {
     }
     const now = new Date();
     const { count } = await prisma.attendanceRegularization.updateMany({
-      where: { id, status: singleStage ? { in: ["pending", "partially_approved"] } : "partially_approved" },
+      where: { id, status: fastPath ? { in: ["pending", "partially_approved"] } : "partially_approved" },
       data: {
         status:            "approved",
         approvedById:      reg.approvedById ?? myId,

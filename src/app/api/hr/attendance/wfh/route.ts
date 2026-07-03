@@ -383,6 +383,12 @@ export async function PUT(req: NextRequest) {
     // (manager OR HR/CEO) finalises outright — no L2. NB Media keeps the
     // two-stage L1 → L2 flow below.
     const singleStage = await isSingleStageApprovalEmployee(record.userId);
+    // Final-approver fast-path: when the CEO approves at L1, collapse straight
+    // to approved instead of parking at partially_approved — no point making
+    // them finalise their own decision at L2. CEO only (HR Managers still go
+    // through the two-step flow). YT Labs single-stage collapses for everyone.
+    const isCeo = user.orgLevel === "ceo";
+    const fastPath = singleStage || isCeo;
 
     const dateLabel = new Date(record.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     const requesterName = record.user?.name || "An employee";
@@ -419,8 +425,9 @@ export async function PUT(req: NextRequest) {
     }
 
     // ── APPROVE STAGE 1 — manager → partially_approved ─────────────
-    // Skipped for YT Labs (single-stage): fall through to the finaliser.
-    if (record.status === "pending" && !singleStage) {
+    // Skipped for the fast-path (YT Labs, or a CEO / HR Manager approving):
+    // fall through to the finaliser so their L1 click also completes L2.
+    if (record.status === "pending" && !fastPath) {
       const { count } = await prisma.wFHRequest.updateMany({
         where: { id, status: "pending" },
         data:  { status: "partially_approved", approvedById: myId, approvalNote },
@@ -465,7 +472,7 @@ export async function PUT(req: NextRequest) {
     // the row is still "pending"; approvedById is stamped to the actor
     // since there was no separate L1 approver.
     const { count } = await prisma.wFHRequest.updateMany({
-      where: { id, status: singleStage ? { in: ["pending", "partially_approved"] } : "partially_approved" },
+      where: { id, status: fastPath ? { in: ["pending", "partially_approved"] } : "partially_approved" },
       data:  { status: "approved", approvedById: record.approvedById ?? myId, approvalNote: approvalNote ?? record.approvalNote },
     });
     if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });

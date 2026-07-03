@@ -266,6 +266,10 @@ export async function PUT(req: NextRequest) {
 
     // YT Labs: single-stage — first authorised approver finalises outright.
     const singleStage = await isSingleStageApprovalEmployee(record.userId);
+    // Fast-path: only the CEO approving at L1 collapses straight to approved
+    // instead of parking at partially_approved. HR Managers still finalise at L2.
+    const isCeo = user.orgLevel === "ceo";
+    const fastPath = singleStage || isCeo;
 
     const dateLabel = new Date(record.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     const requesterName = record.user?.name || "An employee";
@@ -311,7 +315,7 @@ export async function PUT(req: NextRequest) {
 
     // ── APPROVE STAGE 1 — manager → partially_approved ─────────────
     // Skipped for YT Labs (single-stage): fall through to the finaliser.
-    if (record.status === "pending" && !singleStage) {
+    if (record.status === "pending" && !fastPath) {
       const { count } = await prisma.onDutyRequest.updateMany({
         where: { id, status: "pending" },
         data:  { status: "partially_approved", approvedById: myId, approvalNote },
@@ -353,7 +357,7 @@ export async function PUT(req: NextRequest) {
     // For YT Labs (single-stage) this also finalises a still-"pending" row
     // on the first approve, stamping the actor as approver.
     const { count } = await prisma.onDutyRequest.updateMany({
-      where: { id, status: singleStage ? { in: ["pending", "partially_approved"] } : "partially_approved" },
+      where: { id, status: fastPath ? { in: ["pending", "partially_approved"] } : "partially_approved" },
       data:  { status: "approved", approvedById: record.approvedById ?? myId, approvalNote: approvalNote ?? record.approvalNote },
     });
     if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
