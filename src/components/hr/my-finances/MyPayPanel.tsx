@@ -89,12 +89,25 @@ function companyHeader(legalEntity?: string | null) {
   return (legalEntity && COMPANY_HEADERS[legalEntity]) || COMPANY_HEADERS["NB Media Productions"];
 }
 
-// Contractual monthly pay for THIS payslip's month. Derived from the frozen
-// payslip (base earnings ÷ LOP factor) rather than the live structure's
-// CTC/12, so a later salary revision doesn't retro-change a past month's
-// "Monthly Salary" header. For an unrevised employee this equals CTC/12;
-// falls back to CTC/12 when the payslip has no usable base figure.
+// "Monthly Salary" header = the employee's full monthly CTC total, i.e. the
+// sum of the monthly earning components. Mirrors the `monthlyEarnings` figure
+// payroll generation uses (generate/route.ts) and the earnings rows rendered
+// below, so the header always shows the month's total salary regardless of LOP
+// or a missing/stale `ctc` value. Falls back to the frozen payslip base (÷ LOP)
+// or CTC/12 only when the structure has no usable component split.
 function monthlyBaseSalary(p: any, structure: any): number {
+  if (structure) {
+    const monthly = (
+      (parseFloat(structure.basic               || 0) || 0)
+      + (parseFloat(structure.hra               || 0) || 0)
+      + (parseFloat(structure.dearnessAllowance || 0) || 0)
+      + (parseFloat(structure.conveyanceAllowance || 0) || 0)
+      + (parseFloat(structure.medicalAllowance  || 0) || 0)
+      + (parseFloat(structure.specialAllowance  || 0) || 0)
+      + (parseFloat(structure.pfEmployee        || 0) || 0)
+    ) / 12;
+    if (monthly > 0) return Math.round(monthly);
+  }
   const gross = parseFloat(p?.grossEarnings || 0) || 0;
   const bonus = parseFloat(p?.bonus || 0) || 0;
   const adhoc = (Array.isArray(p?.adhocPayments) ? p.adhocPayments : [])
@@ -931,28 +944,61 @@ function renderEarnings(p: any, structure: any, bonuses: BonusRow[] = []): { lab
   // Per-payslip type wins over the (current) structure type, so a month that
   // was paid as an intern stipend stays a single Stipend line even after the
   // employee is converted to a regular structure.
+  // Prorate the monthly components by the paid-days factor so each row reflects
+  // the days actually paid this month — matching how payroll scales gross. At
+  // full attendance the factor is 1 and the rows equal the full monthly split;
+  // with loss of pay they shrink so the breakdown still sums to baseEarnings.
+  const wd = parseFloat(p?.workingDays || 0) || 0;
+  const lop = parseFloat(p?.lopDays || 0) || 0;
+  const lopFactor = wd > 0 ? Math.max(0, Math.min(1, (wd - lop) / wd)) : 1;
+
+  // Regular monthly gross from the structure, scaled to paid days. Anything in
+  // baseEarnings ABOVE this is a non-salary addition baked into gross by payroll
+  // (leave encashment on an exit month — generate/route.ts adds it to gross but
+  // doesn't itemise it). Split it out so Special Allowance stays the real
+  // component instead of a catch-all, and the extra shows on its own line.
+  // Only for regular structures — interns show a single Stipend line.
   const effType = p?.salaryType ?? structure?.salaryType;
-  if (!structure || effType === "intern") {
+  const isRegular = !!structure && effType !== "intern";
+  const monthlyRegular = isRegular
+    ? (
+        (parseFloat(structure.basic               || 0) || 0)
+        + (parseFloat(structure.hra               || 0) || 0)
+        + (parseFloat(structure.dearnessAllowance || 0) || 0)
+        + (parseFloat(structure.conveyanceAllowance || 0) || 0)
+        + (parseFloat(structure.medicalAllowance  || 0) || 0)
+        + (parseFloat(structure.specialAllowance  || 0) || 0)
+        + (parseFloat(structure.pfEmployee        || 0) || 0)
+      ) / 12 * lopFactor
+    : baseEarnings;
+  // Only carve out a material remainder (ignore sub-rupee rounding so normal
+  // months reconcile exactly and don't sprout a spurious encashment line).
+  const extra = baseEarnings - monthlyRegular;
+  const leaveEncashment = extra >= 0.5 ? extra : 0;
+  const regularBase = baseEarnings - leaveEncashment;
+
+  if (!isRegular) {
     rows.push({ label: "Monthly Stipend", value: fmtInr(baseEarnings) });
   } else {
-    const basic   = parseFloat(structure.basic               || 0) / 12;
-    const hra     = parseFloat(structure.hra                 || 0) / 12;
-    const da      = parseFloat(structure.dearnessAllowance   || 0) / 12;
-    const conv    = parseFloat(structure.conveyanceAllowance || 0) / 12;
-    const medical = parseFloat(structure.medicalAllowance    || 0) / 12;
-    // Special soaks up whatever's left after the fixed components — keeps the
-    // row total equal to baseEarnings even when older rows are missing a
-    // component.
+    const basic   = (parseFloat(structure.basic               || 0) / 12) * lopFactor;
+    const hra     = (parseFloat(structure.hra                 || 0) / 12) * lopFactor;
+    const da      = (parseFloat(structure.dearnessAllowance   || 0) / 12) * lopFactor;
+    const conv    = (parseFloat(structure.conveyanceAllowance || 0) / 12) * lopFactor;
+    const medical = (parseFloat(structure.medicalAllowance    || 0) / 12) * lopFactor;
+    // Special is the real component (whatever balances to the regular scaled
+    // salary after the fixed rows) — leave encashment is itemised separately
+    // below rather than being absorbed here.
     const fixed   = basic + hra + da + conv + medical;
-    const special = Math.max(0, baseEarnings - fixed);
+    const special = Math.max(0, regularBase - fixed);
     if (basic)   rows.push({ label: "Basic Salary",         value: fmtInr(basic)   });
     if (hra)     rows.push({ label: "House Rent Allowance", value: fmtInr(hra)     });
     if (da)      rows.push({ label: "Dearness Allowance",   value: fmtInr(da)      });
     if (conv)    rows.push({ label: "Conveyance Allowance", value: fmtInr(conv)    });
     if (medical) rows.push({ label: "Medical Allowance",    value: fmtInr(medical) });
     if (special) rows.push({ label: "Special Allowance",    value: fmtInr(special) });
-    if (rows.length === 0) rows.push({ label: "Monthly Stipend", value: fmtInr(baseEarnings) });
+    if (rows.length === 0) rows.push({ label: "Monthly Stipend", value: fmtInr(regularBase) });
   }
+  if (leaveEncashment > 0) rows.push({ label: "Leave Encashment", value: fmtInr(leaveEncashment) });
 
   // Itemise bonuses by their actual bonusType. Only when the month's bonus
   // rows reconcile with the bonus baked into gross — otherwise fall back to a
