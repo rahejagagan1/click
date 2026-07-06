@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
 
         const body = await request.json();
         const {
-            name, email, role, orgLevel, clickupUserId, teamCapsule, managerId,
+            name, email: rawEmail, role, orgLevel, clickupUserId, teamCapsule, managerId,
             inlineManagerId,            // optional secondary / dotted-line manager
             inviteToLogin,              // boolean: if true, email a welcome / sign-in link
             enableOnboarding,           // boolean: if true, gate first login behind /onboarding
@@ -118,6 +118,13 @@ export async function POST(request: NextRequest) {
             leaveBalances,              // optional: [{ leaveTypeId, totalDays }] for current year
             compensation,               // optional SalaryStructure payload (regular | intern)
         } = body;
+
+        // Normalise the email to lowercase — Google OAuth always sends the
+        // address in lowercase, so a stray capital typed by HR here would make
+        // the login lookup miss (case-sensitive unique). Store it lowercased so
+        // that can't happen. (Auth also matches case-insensitively as a safety
+        // net, but keeping the DB clean avoids duplicate-casing rows entirely.)
+        const email = typeof rawEmail === "string" ? rawEmail.trim().toLowerCase() : rawEmail;
 
         if (!name || !email) {
             return NextResponse.json({ error: "Name and email are required" }, { status: 400 });
