@@ -1877,7 +1877,7 @@ function Input({ v, set, type = "text", placeholder, disabled, onBlur }: {
   disabled?: boolean;
   onBlur?: () => void;
 }) {
-  return <input type={type} value={v} disabled={disabled} onChange={e => set(e.target.value)} onBlur={onBlur} placeholder={placeholder} className={`${C.input} disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed`} />;
+  return <input type={type} value={v} disabled={disabled} onChange={e => set(type === "email" ? e.target.value.toLowerCase() : e.target.value)} onBlur={onBlur} placeholder={placeholder} className={`${C.input} disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed`} />;
 }
 
 function Select({ v, set, opts }: { v: string; set: (v: string) => void; opts: (string | { value: string; label: string })[] }) {

@@ -67,29 +67,95 @@ export async function GET(req: NextRequest) {
     }
 
     if (kind === "lop") {
-      const rows = await prisma.$queryRawUnsafe<{
+      type LopRow = {
+        userId: number; userName: string; employeeId: string | null;
+        absentDays: number; halfDays: number; lwpDays: number; lopDays: number;
+      };
+      // 1) Attendance-based LOP. Include ALL loss-of-pay statuses so every LOP
+      // employee shows — 'lop'/'half_day_lop' come from the auto-LOP job and
+      // were previously missing. Mirrors payroll/generate: full-day = absent +
+      // lop (1.0 each); half-day = half_day + half_day_lop (0.5 each).
+      const attRows = await prisma.$queryRawUnsafe<{
         userId: number; userName: string; employeeId: string | null;
         absentDays: string; halfDays: string; lopDays: string;
       }[]>(
         `SELECT a."userId",
                 u.name AS "userName",
                 ep."employeeId",
-                SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END)::text         AS "absentDays",
-                SUM(CASE WHEN a.status = 'half_day' THEN 1 ELSE 0 END)::text       AS "halfDays",
-                (SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END)
-                 + SUM(CASE WHEN a.status = 'half_day' THEN 0.5 ELSE 0 END))::text AS "lopDays"
+                SUM(CASE WHEN a.status IN ('absent','lop') THEN 1 ELSE 0 END)::text            AS "absentDays",
+                SUM(CASE WHEN a.status IN ('half_day','half_day_lop') THEN 1 ELSE 0 END)::text AS "halfDays",
+                (SUM(CASE WHEN a.status IN ('absent','lop') THEN 1 ELSE 0 END)
+                 + SUM(CASE WHEN a.status IN ('half_day','half_day_lop') THEN 0.5 ELSE 0 END))::text AS "lopDays"
            FROM "Attendance" a
            JOIN "User" u ON u.id = a."userId"
       LEFT JOIN "EmployeeProfile" ep ON ep."userId" = a."userId"
           WHERE a.date >= $1 AND a.date <= $2
-            AND a.status IN ('absent', 'half_day')
+            AND a.status IN ('absent', 'lop', 'half_day', 'half_day_lop')
             ${brandClause}
-          GROUP BY a."userId", u.name, ep."employeeId"
-         HAVING SUM(CASE WHEN a.status IN ('absent','half_day') THEN 1 ELSE 0 END) > 0
-          ORDER BY "lopDays" DESC`,
+          GROUP BY a."userId", u.name, ep."employeeId"`,
         monthStart, monthEnd, ...brandArgs,
       );
-      return NextResponse.json({ items: rows });
+      const byUser = new Map<number, LopRow>();
+      for (const r of attRows) {
+        byUser.set(r.userId, {
+          userId: r.userId, userName: r.userName, employeeId: r.employeeId,
+          absentDays: parseFloat(r.absentDays) || 0,
+          halfDays:   parseFloat(r.halfDays) || 0,
+          lwpDays:    0,
+          lopDays:    parseFloat(r.lopDays) || 0,
+        });
+      }
+
+      // 2) Unpaid-leave (LWP) days — approved leaves on an UNPAID leave type
+      // that overlap the cycle. Payroll counts these weekdays as LOP too, so
+      // include them here (as an LWP column, added into the final LOP) to give
+      // HR the full picture of what was deducted.
+      const lwpRows = await prisma.$queryRawUnsafe<{
+        userId: number; userName: string; employeeId: string | null; fromDate: Date; toDate: Date;
+      }[]>(
+        `SELECT la."userId", u.name AS "userName", ep."employeeId", la."fromDate", la."toDate"
+           FROM "LeaveApplication" la
+           JOIN "User" u ON u.id = la."userId"
+      LEFT JOIN "EmployeeProfile" ep ON ep."userId" = la."userId"
+           JOIN "LeaveType" lt ON lt.id = la."leaveTypeId"
+          WHERE la.status = 'approved' AND lt."isPaid" = FALSE
+            AND la."fromDate" <= $2 AND la."toDate" >= $1
+            ${brandClause}`,
+        monthStart, monthEnd, ...brandArgs,
+      );
+      for (const lv of lwpRows) {
+        const from = new Date(lv.fromDate), to = new Date(lv.toDate);
+        const start = from > monthStart ? from : monthStart;
+        const end   = to   < monthEnd   ? to   : monthEnd;
+        const cur = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+        const stop = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()));
+        let days = 0;
+        while (cur.getTime() <= stop.getTime()) {
+          const dow = cur.getUTCDay();
+          if (dow !== 0 && dow !== 6) days += 1; // weekdays only, like payroll
+          cur.setUTCDate(cur.getUTCDate() + 1);
+        }
+        if (days <= 0) continue;
+        const existing = byUser.get(lv.userId) ?? {
+          userId: lv.userId, userName: lv.userName, employeeId: lv.employeeId,
+          absentDays: 0, halfDays: 0, lwpDays: 0, lopDays: 0,
+        };
+        existing.lwpDays += days;
+        existing.lopDays += days;
+        byUser.set(lv.userId, existing);
+      }
+
+      const items = Array.from(byUser.values())
+        .filter(r => r.lopDays > 0)
+        .sort((a, b) => b.lopDays - a.lopDays)
+        .map(r => ({
+          userId: r.userId, userName: r.userName, employeeId: r.employeeId,
+          absentDays: String(r.absentDays),
+          halfDays:   String(r.halfDays),
+          lwpDays:    String(r.lwpDays),
+          lopDays:    String(r.lopDays),
+        }));
+      return NextResponse.json({ items });
     }
 
     // lop_reversal — leaves approved on a paid LeaveType during the cycle

@@ -1430,8 +1430,10 @@ export default function EmployeeDetailPage() {
           <SectionEditModal
             userId={userId}
             title="Contact Details"
+            hint="Login Email is the Google address this employee signs in with. Leaving it unchanged is safe; a valid new address updates their sign-in."
             onClose={close}
             values={{
+              workEmail:     user.email ?? "",
               personalEmail: p.personalEmail ?? "",
               phone:         p.phone ?? "",
               workPhone:     p.workPhone ?? "",
@@ -1440,6 +1442,7 @@ export default function EmployeeDetailPage() {
               emergencyRelationship: p.emergencyRelationship ?? "",
             }}
             fields={[
+              { key: "workEmail", label: "Login Email (Google sign-in)", type: "email", fullWidth: true },
               { key: "personalEmail", label: "Personal Email", type: "email", fullWidth: true },
               { key: "phone",         label: "Mobile Number",  type: "tel" },
               { key: "workPhone",     label: "Work Number",    type: "tel" },
@@ -2208,7 +2211,7 @@ function SectionEditModal({
               ) : f.type === "textarea" ? (
                 <textarea
                   value={form[f.key] ?? ""}
-                  onChange={(e) => set(f.key, e.target.value)}
+                  onChange={(e) => set(f.key, f.type === "email" ? e.target.value.toLowerCase() : e.target.value)}
                   rows={2}
                   placeholder={f.placeholder}
                   className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-800 placeholder-slate-400 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 resize-none"
@@ -2217,7 +2220,7 @@ function SectionEditModal({
                 <input
                   type={f.type ?? "text"}
                   value={form[f.key] ?? ""}
-                  onChange={(e) => set(f.key, e.target.value)}
+                  onChange={(e) => set(f.key, f.type === "email" ? e.target.value.toLowerCase() : e.target.value)}
                   placeholder={f.placeholder}
                   className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-800 placeholder-slate-400 focus:border-[#3b82f6] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15"
                 />
@@ -2968,7 +2971,7 @@ function ProfileEditModal({
                 <input
                   type={f.type ?? "text"}
                   value={form[f.key] ?? ""}
-                  onChange={(e) => set(f.key, e.target.value)}
+                  onChange={(e) => set(f.key, f.type === "email" ? e.target.value.toLowerCase() : e.target.value)}
                   className="w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]"
                 />
               )}

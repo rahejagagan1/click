@@ -253,7 +253,9 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
             const ps = await fetch(`/api/hr/exits/${activeExit.id}/settlement/pending-salary`);
             if (ps.ok) {
               const pj = await ps.json();
-              if (!pj?.alreadyPaid && Number(pj?.paidDays) > 0) workingDaysFill = String(pj.paidDays);
+              // Fill worked-days / LOP even when the exit month is already paid
+              // (exited employees) — pending-salary now returns the real days.
+              if (Number(pj?.paidDays) > 0) workingDaysFill = String(pj.paidDays);
               if (pj?.breakdown?.lopInPeriod != null) lopDaysFill = String(pj.breakdown.lopInPeriod);
             }
           } catch { /* network blip — HR can still type manually */ }
@@ -629,7 +631,7 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <ManualInput label="Full name" required value={manualFields.name} onChange={(v) => { setManualFields((s) => ({ ...s, name: v })); setPreview(null); }} placeholder="e.g. Priya Sharma" />
-                  <ManualInput label="Email" required value={manualFields.email} onChange={(v) => { setManualFields((s) => ({ ...s, email: v })); setPreview(null); }} placeholder="priya@example.com" />
+                  <ManualInput label="Email" required lowercase value={manualFields.email} onChange={(v) => { setManualFields((s) => ({ ...s, email: v })); setPreview(null); }} placeholder="priya@example.com" />
                   <ManualInput label="Designation / Job title" value={manualFields.designation} onChange={(v) => setManualFields((s) => ({ ...s, designation: v }))} placeholder="e.g. Content Writer" />
                   <ManualInput label="Department" value={manualFields.department} onChange={(v) => setManualFields((s) => ({ ...s, department: v }))} placeholder="e.g. Content" />
                   <div>
@@ -915,8 +917,8 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
 
 // Plain labelled text input for the new-joiner manual form.
 function ManualInput({
-  label, value, onChange, placeholder, required,
-}: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; required?: boolean }) {
+  label, value, onChange, placeholder, required, lowercase,
+}: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; required?: boolean; lowercase?: boolean }) {
   return (
     <div>
       <label className="text-[11.5px] text-slate-600 mb-1 inline-flex items-center gap-1">
@@ -924,7 +926,7 @@ function ManualInput({
       </label>
       <input
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => onChange(lowercase ? e.target.value.toLowerCase() : e.target.value)}
         placeholder={placeholder}
         className="w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:border-[#008CFF]"
       />

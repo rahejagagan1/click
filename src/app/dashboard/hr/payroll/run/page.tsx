@@ -3801,18 +3801,18 @@ function NoAttendanceSubStep({ year, month0, monthLabel, brand }: { year: number
 
 function LopSummarySubStep({ year, month0, monthLabel, brand }: { year: number; month0: number; monthLabel: string; brand: "NB Media" | "YT Labs" }) {
   const url = `/api/hr/payroll/attendance-summary?month=${month0}&year=${year}&kind=lop&brand=${encodeURIComponent(brand)}`;
-  const { data } = useSWR<{ items: { userId: number; userName: string; employeeId: string | null; absentDays: string; halfDays: string; lopDays: string }[] }>(url, fetcher);
+  const { data } = useSWR<{ items: { userId: number; userName: string; employeeId: string | null; absentDays: string; halfDays: string; lwpDays?: string; lopDays: string }[] }>(url, fetcher);
   const items = data?.items ?? [];
   return (
     <>
       <h4 className="text-[15px] font-semibold text-slate-800 mb-3">Loss of Pay</h4>
       <p className="mb-4 rounded-md bg-sky-50 border border-sky-100 px-3 py-2 text-[12px] text-slate-700">
-        Per-employee LOP for {monthLabel}: absent days + 0.5 × half-days. The engine subtracts these from paid days when computing the payslip.
+        Per-employee LOP for {monthLabel}: absent + auto-LOP days + 0.5 × half-days + unpaid-leave (LWP) days. The engine subtracts these from paid days when computing the payslip.
       </p>
       <div className="flex items-center justify-end mb-3"><SearchBox /></div>
-      <KekaTable columns={["Employee Number", "Employee Name", "Absent", "Half-Days", "Final LOP"]}>
+      <KekaTable columns={["Employee Number", "Employee Name", "Absent", "Half-Days", "LWP", "Final LOP"]}>
         {items.length === 0 ? (
-          <EmptyRow colSpan={5} text={`No LOP entries for ${monthLabel}.`} />
+          <EmptyRow colSpan={6} text={`No LOP entries for ${monthLabel}.`} />
         ) : (
           items.map((r) => (
             <tr key={r.userId} className="border-t border-slate-100">
@@ -3820,6 +3820,7 @@ function LopSummarySubStep({ year, month0, monthLabel, brand }: { year: number; 
               <td className="px-3 py-2 text-[12.5px] text-slate-800">{r.userName}</td>
               <td className="px-3 py-2 text-[12.5px] text-rose-600 font-semibold">{r.absentDays}</td>
               <td className="px-3 py-2 text-[12.5px] text-amber-600 font-semibold">{r.halfDays}</td>
+              <td className="px-3 py-2 text-[12.5px] text-orange-600 font-semibold">{r.lwpDays ?? "0"}</td>
               <td className="px-3 py-2 text-[12.5px] text-slate-800 font-semibold">{r.lopDays}</td>
             </tr>
           ))
