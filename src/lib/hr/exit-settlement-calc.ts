@@ -44,7 +44,12 @@ export function computeExitSettlement(cf: ExitSettlementFields): ExitSettlementR
   const mConv  = monthly * 0.075;
   const mMed   = 1250;
   const mPF    = enablePf ? 1800 : 0;
-  const mFixed = mBasic + mHRA + mDA + mConv + mMed + mPF;
+  // PF is a DEDUCTION only — it must NOT reduce the earnings side. If PF were
+  // included in mFixed the Special Allowance would shrink by PF, quietly
+  // removing PF from gross earnings; PF then getting deducted again would
+  // subtract it twice and understate the net. So Special fills the gross
+  // WITHOUT PF, keeping total earnings = full gross and PF deducted exactly once.
+  const mFixed = mBasic + mHRA + mDA + mConv + mMed;
   const mSpecial = Math.max(0, Math.round(monthly) - Math.round(mFixed));
 
   const calc = {
