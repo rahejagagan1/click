@@ -213,7 +213,25 @@ function TemplateEditorPageInner({ params }: { params: Promise<{ key: string }> 
   useEffect(() => {
     let cancelled = false;
     if (!employee?.id) {
+      // Employee deselected (HR pressed the ✕) → clear everything the
+      // auto-fill populated, so the form returns to a clean slate instead
+      // of keeping the previous person's bank / PAN / package / F&F figures.
+      // These are exactly the keys written by `fillMap` below — keep in sync.
       setEmployeeSalaryType(null);
+      const AUTO_FILLED_KEYS = [
+        "LeaveEncashmentDays", "AdvanceSalaryDays", "AdvanceSalaryAmount",
+        "WorkingDays", "LossOfPayDays", "FnFAmount", "BankAccount", "BankIFSC",
+        "Bank", "PANNumber", "AnnualPackage", "PaymentMode", "EnablePf",
+        "ProfessionalTax", "SalaryType",
+      ];
+      setCustomValues((curr) => {
+        const next = { ...curr };
+        let changed = false;
+        for (const k of AUTO_FILLED_KEYS) {
+          if (k in next && next[k] !== "") { next[k] = ""; changed = true; }
+        }
+        return changed ? next : curr;
+      });
       return;
     }
     (async () => {
