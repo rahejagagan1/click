@@ -52,9 +52,11 @@ const userBundleSelect = {
 async function loadAuthBundle(email: string): Promise<AuthBundle> {
     const isDev = developerEmails.includes(email.toLowerCase());
 
-    // Identity + profile in one round-trip.
-    let dbUser = await prisma.user.findUnique({
-        where: { email },
+    // Identity + profile in one round-trip. Case-insensitive match so a
+    // record stored with a stray capital (e.g. "Aditi@…") still resolves to
+    // the right user — otherwise they'd log in but load a null role/profile.
+    let dbUser = await prisma.user.findFirst({
+        where: { email: { equals: email, mode: "insensitive" } },
         select: userBundleSelect,
     });
 
@@ -72,7 +74,7 @@ async function loadAuthBundle(email: string): Promise<AuthBundle> {
     // designation grants — all independent, so resolve in parallel.
     const [onboardingRows, permissions, scorecardFunction, hasReportGrants] = await Promise.all([
         prisma.$queryRawUnsafe<{ onboardingPending: boolean }[]>(
-            `SELECT "onboardingPending" FROM "User" WHERE email = $1 LIMIT 1`,
+            `SELECT "onboardingPending" FROM "User" WHERE LOWER(email) = LOWER($1) LIMIT 1`,
             email,
         ).catch(() => [] as { onboardingPending: boolean }[]),
         getPermissionsByEmail(email),
@@ -166,11 +168,16 @@ export const authOptions: NextAuthOptions = {
                 }
                 return true;
             }
-            // Only allow users that already exist in the DB and are active
+            // Only allow users that already exist in the DB and are active.
+            // Match the email CASE-INSENSITIVELY: Google always sends the
+            // address in lowercase, but a record created by HR may carry a
+            // stray capital (e.g. "Aditi@…"). A case-sensitive match would
+            // miss it and wrongly deny access. findFirst + insensitive mode
+            // tolerates any stored casing; we then act on the row's id.
             if (!user.email) return false;
-            const existingUser = await prisma.user.findUnique({
-                where: { email: user.email },
-                select: { isActive: true },
+            const existingUser = await prisma.user.findFirst({
+                where: { email: { equals: user.email, mode: "insensitive" } },
+                select: { id: true, isActive: true },
             });
             if (!existingUser) {
                 return false; // User not in DB — must be added via admin first
@@ -178,10 +185,11 @@ export const authOptions: NextAuthOptions = {
             if (!existingUser.isActive) {
                 return false; // User was deactivated — block login
             }
-            // Update profile picture on login
+            // Update profile picture on login (by id — the stored email may be
+            // cased differently than what Google sent).
             try {
                 await prisma.user.update({
-                    where: { email: user.email },
+                    where: { id: existingUser.id },
                     data: {
                         name: user.name || undefined,
                         profilePictureUrl: user.image || undefined,

@@ -272,7 +272,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       displayName,
       employeeId,
       firstName, middleName, lastName,
-      phone, workPhone, personalEmail,
+      phone, workPhone, personalEmail, workEmail,
       dateOfBirth, gender, bloodGroup, maritalStatus,
       emergencyPhone,
       address, city, state, profilePictureUrl,
@@ -510,6 +510,37 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         : parseInt(String(leavePolicyId), 10);
     }
 
+    // Login (official work) email — the address Google OAuth matches on to
+    // sign the user in. Only doc-viewers (HR / CEO / developer) may change a
+    // login credential. A BLANK value is a deliberate no-op: we never wipe an
+    // account's email, since that would lock them out of sign-in. On change we
+    // normalise (trim + lowercase) and pre-check uniqueness for a clean 409.
+    if (workEmail !== undefined && workEmail !== null && String(workEmail).trim()) {
+      if (!putIsDocViewer) {
+        return NextResponse.json(
+          { error: "Only HR / CEO / developers can change an employee's login email." },
+          { status: 403 },
+        );
+      }
+      const normalised = String(workEmail).trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalised)) {
+        return NextResponse.json({ error: "Enter a valid login email address." }, { status: 400 });
+      }
+      if (normalised !== (target?.email ?? "").toLowerCase()) {
+        const clash = await prisma.user.findUnique({
+          where: { email: normalised },
+          select: { id: true },
+        });
+        if (clash && clash.id !== id) {
+          return NextResponse.json(
+            { error: `Login email "${normalised}" already belongs to another account.` },
+            { status: 409 },
+          );
+        }
+        userPatch.email = normalised;
+      }
+    }
+
     const txOps: any[] = [];
     if (Object.keys(userPatch).length > 0) {
       txOps.push(prisma.user.update({ where: { id }, data: userPatch }));
@@ -528,6 +559,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         if (e?.code === "P2002" && Array.isArray(e?.meta?.target) && e.meta.target.includes("employeeId")) {
           return NextResponse.json(
             { error: `HRM No. is already used by another employee.` },
+            { status: 409 },
+          );
+        }
+        if (e?.code === "P2002" && Array.isArray(e?.meta?.target) && e.meta.target.includes("email")) {
+          return NextResponse.json(
+            { error: `Login email already belongs to another account.` },
             { status: 409 },
           );
         }

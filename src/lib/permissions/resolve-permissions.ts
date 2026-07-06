@@ -50,9 +50,10 @@ async function rawPerms(whereClause: string, arg: string | number): Promise<Perm
   }
 }
 
-/** Permissions for the user with this email (used by the auth session callback). */
+/** Permissions for the user with this email (used by the auth session callback).
+ *  Case-insensitive so a record stored with a stray capital still resolves. */
 export function getPermissionsByEmail(email: string): Promise<Permission[]> {
-  return rawPerms(`u."email" = $1`, email);
+  return rawPerms(`LOWER(u."email") = LOWER($1)`, email);
 }
 
 /** Permissions for a user id (used by server code that has the numeric id). */
@@ -74,12 +75,12 @@ export async function hasDesignationReportGrantsByEmail(email: string): Promise<
          EXISTS (
            SELECT 1 FROM "User" u
            JOIN "DesignationReportAccess" dra ON dra."designationId" = u."designationId"
-           WHERE u."email" = $1
+           WHERE LOWER(u."email") = LOWER($1)
          )
          OR EXISTS (
            SELECT 1 FROM "User" u
            JOIN "DesignationReportTemplate" drt ON drt."designationId" = u."designationId"
-           WHERE u."email" = $1
+           WHERE LOWER(u."email") = LOWER($1)
          )
        ) AS "ok"`,
       email
@@ -97,7 +98,7 @@ export async function getScorecardFunctionByEmail(email: string): Promise<string
     const rows = await prisma.$queryRawUnsafe<{ scorecardFunction: string | null }[]>(
       `SELECT dg."scorecardFunction" AS "scorecardFunction"
        FROM "User" u JOIN "Designation" dg ON dg."id" = u."designationId"
-       WHERE u."email" = $1`,
+       WHERE LOWER(u."email") = LOWER($1)`,
       email
     );
     return rows[0]?.scorecardFunction ?? null;
