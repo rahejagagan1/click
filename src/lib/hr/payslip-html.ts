@@ -58,10 +58,19 @@ function companyHeader(legalEntity?: string | null) {
   return (legalEntity && COMPANY_HEADERS[legalEntity]) || COMPANY_HEADERS["NB Media Productions"];
 }
 
-// Contractual monthly pay for THIS payslip's month — derived from the frozen
-// payslip (base earnings ÷ LOP factor) so a later salary revision doesn't
-// retro-change a past month. Equals CTC/12 for an unrevised employee.
+// "Monthly Salary" header = the employee's full monthly CTC total, i.e. the
+// sum of the monthly earning components. Mirrors the `monthlyEarnings` figure
+// payroll generation uses (generate/route.ts) and the earnings rows rendered
+// below, so the header always shows the month's total salary regardless of LOP
+// or a missing/stale `ctc` value. Falls back to the frozen payslip base (÷ LOP)
+// or CTC/12 only when the structure has no usable component split.
 function monthlyBaseSalary(p: any, structure: any): number {
+  if (structure) {
+    const monthly = (N(structure.basic) + N(structure.hra) + N(structure.dearnessAllowance)
+      + N(structure.conveyanceAllowance) + N(structure.medicalAllowance)
+      + N(structure.specialAllowance) + N(structure.pfEmployee)) / 12;
+    if (monthly > 0) return Math.round(monthly);
+  }
   const gross = N(p?.grossEarnings);
   const bonus = N(p?.bonus);
   const adhoc = (Array.isArray(p?.adhocPayments) ? p.adhocPayments : [])
@@ -111,25 +120,80 @@ function renderEarnings(p: any, structure: any, bonuses: BonusRow[] = []): { lab
   const baseEarnings = Math.max(0, gross - bonusInGross - adhocTotal);
   const rows: { label: string; value: string }[] = [];
 
+  // Prorate the monthly components by the paid-days factor so each row reflects
+  // the days actually paid this month — matching how payroll scales gross. At
+  // full attendance the factor is 1 and the rows equal the full monthly split;
+  // with loss of pay they shrink so the breakdown still sums to baseEarnings.
+  const wd = N(p?.workingDays);
+  const lop = N(p?.lopDays);
+  const lopFactor = wd > 0 ? Math.max(0, Math.min(1, (wd - lop) / wd)) : 1;
+
   const effType = p?.salaryType ?? structure?.salaryType;
-  if (!structure || effType === "intern") {
+  const isRegular = !!structure && effType !== "intern";
+
+  // Full & Final (exit) payslip: it carries an "ff_settlement" adhoc that lumps
+  // the exit-month worked-days salary + leave encashment together. Decompose it
+  // EXACTLY like the Exit Statement (exit-settlement-calc.ts) — prorate the
+  // salary components by the WORKED days (presentDays, since exit months set
+  // presentDays to days worked up to the last working day with lopDays left at
+  // 0) and show Leave Encashment on its own line — so the payslip earnings
+  // match the F&F letter instead of showing one opaque "Ff Settlement" lump.
+  const isFfType = (t: any) => /ff.?settlement|full.?and.?final|f\s*&\s*f/i.test(String(t ?? ""));
+  const isFnF = isRegular && adhocItems.some((a) => isFfType(a.type));
+
+  const componentsMonthly = isRegular
+    ? (N(structure.basic) + N(structure.hra) + N(structure.dearnessAllowance)
+       + N(structure.conveyanceAllowance) + N(structure.medicalAllowance)
+       + N(structure.specialAllowance) + N(structure.pfEmployee)) / 12
+    : 0;
+
+  let leaveEncashment = 0;
+
+  if (!isRegular) {
     rows.push({ label: "Monthly Stipend", value: fmtInr(baseEarnings) });
-  } else {
-    const basic   = N(structure.basic) / 12;
-    const hra     = N(structure.hra) / 12;
-    const da      = N(structure.dearnessAllowance) / 12;
-    const conv    = N(structure.conveyanceAllowance) / 12;
-    const medical = N(structure.medicalAllowance) / 12;
+  } else if (isFnF) {
+    const worked  = wd > 0 ? Math.max(0, Math.min(1, N(p.presentDays) / wd)) : lopFactor;
+    const basic   = (N(structure.basic) / 12) * worked;
+    const hra     = (N(structure.hra) / 12) * worked;
+    const da      = (N(structure.dearnessAllowance) / 12) * worked;
+    const conv    = (N(structure.conveyanceAllowance) / 12) * worked;
+    const medical = (N(structure.medicalAllowance) / 12) * worked;
+    const regularWorked = componentsMonthly * worked;
     const fixed   = basic + hra + da + conv + medical;
-    const special = Math.max(0, baseEarnings - fixed);
+    const special = Math.max(0, regularWorked - fixed);
+    // Everything in gross beyond the worked salary and any NON-F&F adhocs
+    // (advance salary / reimbursements — still itemised below) is encashment.
+    const adhocExFf = adhocItems.filter((a) => !isFfType(a.type)).reduce((s, a) => s + N(a.amount), 0);
+    leaveEncashment = Math.max(0, gross - bonusInGross - regularWorked - adhocExFf);
     if (basic)   rows.push({ label: "Basic Salary",         value: fmtInr(basic)   });
     if (hra)     rows.push({ label: "House Rent Allowance", value: fmtInr(hra)     });
     if (da)      rows.push({ label: "Dearness Allowance",   value: fmtInr(da)      });
     if (conv)    rows.push({ label: "Conveyance Allowance", value: fmtInr(conv)    });
     if (medical) rows.push({ label: "Medical Allowance",    value: fmtInr(medical) });
     if (special) rows.push({ label: "Special Allowance",    value: fmtInr(special) });
-    if (rows.length === 0) rows.push({ label: "Monthly Stipend", value: fmtInr(baseEarnings) });
+  } else {
+    // Non-exit month: prorate by paid days (workingDays − lopDays); anything in
+    // baseEarnings above the regular scaled salary is itemised as encashment.
+    const monthlyRegular = componentsMonthly * lopFactor;
+    const extra = baseEarnings - monthlyRegular;
+    leaveEncashment = extra >= 0.5 ? extra : 0;
+    const regularBase = baseEarnings - leaveEncashment;
+    const basic   = (N(structure.basic) / 12) * lopFactor;
+    const hra     = (N(structure.hra) / 12) * lopFactor;
+    const da      = (N(structure.dearnessAllowance) / 12) * lopFactor;
+    const conv    = (N(structure.conveyanceAllowance) / 12) * lopFactor;
+    const medical = (N(structure.medicalAllowance) / 12) * lopFactor;
+    const fixed   = basic + hra + da + conv + medical;
+    const special = Math.max(0, regularBase - fixed);
+    if (basic)   rows.push({ label: "Basic Salary",         value: fmtInr(basic)   });
+    if (hra)     rows.push({ label: "House Rent Allowance", value: fmtInr(hra)     });
+    if (da)      rows.push({ label: "Dearness Allowance",   value: fmtInr(da)      });
+    if (conv)    rows.push({ label: "Conveyance Allowance", value: fmtInr(conv)    });
+    if (medical) rows.push({ label: "Medical Allowance",    value: fmtInr(medical) });
+    if (special) rows.push({ label: "Special Allowance",    value: fmtInr(special) });
+    if (rows.length === 0) rows.push({ label: "Monthly Stipend", value: fmtInr(regularBase) });
   }
+  if (leaveEncashment > 0) rows.push({ label: "Leave Encashment", value: fmtInr(leaveEncashment) });
 
   const sumMonth = bonuses.reduce((s, b) => s + N(b.amount), 0);
   if (bonuses.length && Math.abs(sumMonth - bonusInGross) < 0.5) {
@@ -141,6 +205,7 @@ function renderEarnings(p: any, structure: any, bonuses: BonusRow[] = []): { lab
   for (const a of adhocItems) {
     const amt = N(a.amount);
     if (amt === 0) continue;
+    if (isFnF && isFfType(a.type)) continue; // decomposed into components + encashment above
     rows.push({ label: adhocLabel(a.type), value: fmtInr(amt) });
   }
   return rows;
