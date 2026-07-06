@@ -982,7 +982,8 @@ function renderEarnings(p: any, structure: any, bonuses: BonusRow[] = []): { lab
   // 0) and show Leave Encashment on its own line — so the payslip earnings
   // match the F&F letter instead of showing one opaque "Ff Settlement" lump.
   const isFfType = (t: any) => /ff.?settlement|full.?and.?final|f\s*&\s*f/i.test(String(t ?? ""));
-  const isFnF = isRegular && adhocItems.some((a) => isFfType(a.type));
+  const hasFfSettlement = adhocItems.some((a) => isFfType(a.type));
+  const isFnF = isRegular && hasFfSettlement;
 
   const componentsMonthly = isRegular
     ? (
@@ -999,7 +1000,16 @@ function renderEarnings(p: any, structure: any, bonuses: BonusRow[] = []): { lab
   let leaveEncashment = 0;
 
   if (!isRegular) {
-    rows.push({ label: "Monthly Stipend", value: fmtInr(baseEarnings) });
+    if (hasFfSettlement) {
+      // Intern F&F: gross bundles the stipend + advance salary into the
+      // ff_settlement lump. Show the stipend (the residual after the advance /
+      // other adhocs, which stay itemised below) instead of the opaque lump.
+      const adhocExFf = adhocItems.filter((a) => !isFfType(a.type)).reduce((s, a) => s + (parseFloat(String(a.amount)) || 0), 0);
+      const stipend = Math.max(0, gross - bonusInGross - adhocExFf);
+      if (stipend > 0) rows.push({ label: "Monthly Stipend", value: fmtInr(stipend) });
+    } else {
+      rows.push({ label: "Monthly Stipend", value: fmtInr(baseEarnings) });
+    }
   } else if (isFnF) {
     const worked  = wd > 0 ? Math.max(0, Math.min(1, (parseFloat(p?.presentDays || 0) || 0) / wd)) : lopFactor;
     const basic   = (parseFloat(structure.basic               || 0) / 12) * worked;
@@ -1060,7 +1070,7 @@ function renderEarnings(p: any, structure: any, bonuses: BonusRow[] = []): { lab
   for (const a of adhocItems) {
     const amt = parseFloat(String(a.amount) || "0");
     if (amt === 0) continue;
-    if (isFnF && isFfType(a.type)) continue; // decomposed into components + encashment above
+    if (hasFfSettlement && isFfType(a.type)) continue; // decomposed into components/stipend + encashment above
     rows.push({ label: adhocLabel(a.type), value: fmtInr(amt) });
   }
   return rows;
