@@ -2009,7 +2009,11 @@ export default function AttendancePage() {
                             // exactly the case the user needs to
                             // regularize. Only suppress when the day was
                             // clocked cleanly end-to-end.
-                            else if (met9h && !missedClockOut) disableReason = "9 hours already completed — nothing to regularize";
+                            // …UNLESS the day is flagged LATE: the employee did
+                            // 9h but the first clock-in was past the shift cutoff,
+                            // and they may legitimately need to regularize a
+                            // wrong/late punch to correct it (HR still approves).
+                            else if (met9h && !missedClockOut && !isLateFirstIn) disableReason = "9 hours already completed — nothing to regularize";
                             return (
                               <RowMenu
                                 onRegularize={() => { setRegPrefillDate(dateIso); setShowRegModal(true); }}

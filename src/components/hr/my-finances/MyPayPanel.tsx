@@ -299,7 +299,11 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
 
   const qs = userId ? `?userId=${userId}` : "";
   const { data: myPayslips = [] } = useSWR<any[]>(`/api/hr/payroll/payslips${qs}`, fetcher);
-  const { data: myStructure }     = useSWR<any>(`/api/hr/payroll/salary-structure${qs}`, fetcher);
+  // Capture the structure's initial-load state: the payslip breakdown is
+  // computed FROM this structure, so rendering a payslip before it arrives
+  // shows a wrong (structure-less) breakdown that then snaps to the correct
+  // one. PaySlipsView holds the payslip behind a spinner until this resolves.
+  const { data: myStructure, isLoading: structureLoading } = useSWR<any>(`/api/hr/payroll/salary-structure${qs}`, fetcher);
   // Bonuses surface inline on the Salary Revision row (+ BONUS = TOTAL)
   // and as itemised rows in the expanded view. Hidden entirely when the
   // user has no recorded bonuses.
@@ -506,7 +510,7 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
 
         {/* ══════════════════════  Pay Slips  ══════════════════════ */}
         {subTab === "pay-slips" && canSeePayslips && (
-          <PaySlipsView payslips={myPayslips} structure={myStructure} userId={userId} />
+          <PaySlipsView payslips={myPayslips} structure={myStructure} structureLoading={structureLoading} userId={userId} />
         )}
 
         {/* ══════════════════════  Income Tax  ══════════════════════ */}
@@ -618,15 +622,21 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
 // payslips list. The "userId" prop scopes the summary fetch so HR-side
 // rendering pulls the viewed employee's profile, not the logged-in HR user's.
 // ──────────────────────────────────────────────────────────────────────────────
-function PaySlipsView({ payslips, structure, userId }: { payslips: any[]; structure: any; userId?: number }) {
+function PaySlipsView({ payslips, structure, structureLoading, userId }: { payslips: any[]; structure: any; structureLoading?: boolean; userId?: number }) {
   const summaryUrl = userId ? `/api/hr/payroll/summary?userId=${userId}` : "/api/hr/payroll/summary";
-  const { data: summary } = useSWR<{ profile: any }>(summaryUrl, fetcher);
+  const { data: summary, isLoading: summaryLoading } = useSWR<{ profile: any }>(summaryUrl, fetcher);
   const profile = summary?.profile ?? null;
 
   // Bonuses (with their bonusType) — itemised onto the payslip earnings.
   const bonusUrl = userId ? `/api/hr/payroll/bonus?userId=${userId}` : "/api/hr/payroll/bonus";
-  const { data: bonusData } = useSWR<{ items: BonusRow[] }>(bonusUrl, fetcher);
+  const { data: bonusData, isLoading: bonusLoading } = useSWR<{ items: BonusRow[] }>(bonusUrl, fetcher);
   const allBonuses = bonusData?.items ?? [];
+
+  // The payslip breakdown is derived from the structure, profile and bonuses.
+  // Until all three finish their initial load, a rendered payslip would show
+  // stale/structure-less numbers that then snap to the correct values — a
+  // confusing flash. Hold the payslip behind a spinner until they're ready.
+  const dataLoading = !!structureLoading || summaryLoading || bonusLoading;
 
   const header = companyHeader(profile?.legalEntity);
 
@@ -683,7 +693,7 @@ function PaySlipsView({ payslips, structure, userId }: { payslips: any[]; struct
               Here you can manage all generated payslips for applicable years.
             </p>
           </div>
-          {active ? (
+          {active && !dataLoading ? (
             <button
               onClick={() => downloadPayslip(active, structure, profile, activeBonuses, header)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sky-300 text-sky-600 hover:bg-sky-50 text-[13px] font-semibold"
@@ -738,6 +748,14 @@ function PaySlipsView({ payslips, structure, userId }: { payslips: any[]; struct
 
         <section className="col-span-12 md:col-span-9">
           {active ? (
+            dataLoading ? (
+              <div className="flex min-h-[280px] items-center justify-center rounded-lg border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.03)]">
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <div className="h-7 w-7 border-2 border-[#008CFF] border-t-transparent rounded-full animate-spin" />
+                  <p className="text-[12.5px] text-slate-500">Loading payslip…</p>
+                </div>
+              </div>
+            ) : (
             <>
               <div className="rounded-t-lg bg-[#3c4656] px-6 py-3 text-white text-[13px] font-medium">
                 {`${MONTHS_FULL[active.month]} ${active.year}`}
@@ -838,6 +856,7 @@ function PaySlipsView({ payslips, structure, userId }: { payslips: any[]; struct
                 </div>
               </div>
             </>
+            )
           ) : (
             <div className="flex min-h-[280px] items-center justify-center rounded-lg border border-dashed border-slate-200 bg-white px-6 py-10 text-center shadow-[0_1px_3px_rgba(15,23,42,0.03)]">
               <div>
@@ -952,15 +971,20 @@ function renderEarnings(p: any, structure: any, bonuses: BonusRow[] = []): { lab
   const lop = parseFloat(p?.lopDays || 0) || 0;
   const lopFactor = wd > 0 ? Math.max(0, Math.min(1, (wd - lop) / wd)) : 1;
 
-  // Regular monthly gross from the structure, scaled to paid days. Anything in
-  // baseEarnings ABOVE this is a non-salary addition baked into gross by payroll
-  // (leave encashment on an exit month — generate/route.ts adds it to gross but
-  // doesn't itemise it). Split it out so Special Allowance stays the real
-  // component instead of a catch-all, and the extra shows on its own line.
-  // Only for regular structures — interns show a single Stipend line.
   const effType = p?.salaryType ?? structure?.salaryType;
   const isRegular = !!structure && effType !== "intern";
-  const monthlyRegular = isRegular
+
+  // Full & Final (exit) payslip: it carries an "ff_settlement" adhoc that lumps
+  // the exit-month worked-days salary + leave encashment together. Decompose it
+  // EXACTLY like the Exit Statement (exit-settlement-calc.ts) — prorate the
+  // salary components by the WORKED days (presentDays, since exit months set
+  // presentDays to days worked up to the last working day with lopDays left at
+  // 0) and show Leave Encashment on its own line — so the payslip earnings
+  // match the F&F letter instead of showing one opaque "Ff Settlement" lump.
+  const isFfType = (t: any) => /ff.?settlement|full.?and.?final|f\s*&\s*f/i.test(String(t ?? ""));
+  const isFnF = isRegular && adhocItems.some((a) => isFfType(a.type));
+
+  const componentsMonthly = isRegular
     ? (
         (parseFloat(structure.basic               || 0) || 0)
         + (parseFloat(structure.hra               || 0) || 0)
@@ -969,25 +993,45 @@ function renderEarnings(p: any, structure: any, bonuses: BonusRow[] = []): { lab
         + (parseFloat(structure.medicalAllowance  || 0) || 0)
         + (parseFloat(structure.specialAllowance  || 0) || 0)
         + (parseFloat(structure.pfEmployee        || 0) || 0)
-      ) / 12 * lopFactor
-    : baseEarnings;
-  // Only carve out a material remainder (ignore sub-rupee rounding so normal
-  // months reconcile exactly and don't sprout a spurious encashment line).
-  const extra = baseEarnings - monthlyRegular;
-  const leaveEncashment = extra >= 0.5 ? extra : 0;
-  const regularBase = baseEarnings - leaveEncashment;
+      ) / 12
+    : 0;
+
+  let leaveEncashment = 0;
 
   if (!isRegular) {
     rows.push({ label: "Monthly Stipend", value: fmtInr(baseEarnings) });
+  } else if (isFnF) {
+    const worked  = wd > 0 ? Math.max(0, Math.min(1, (parseFloat(p?.presentDays || 0) || 0) / wd)) : lopFactor;
+    const basic   = (parseFloat(structure.basic               || 0) / 12) * worked;
+    const hra     = (parseFloat(structure.hra                 || 0) / 12) * worked;
+    const da      = (parseFloat(structure.dearnessAllowance   || 0) / 12) * worked;
+    const conv    = (parseFloat(structure.conveyanceAllowance || 0) / 12) * worked;
+    const medical = (parseFloat(structure.medicalAllowance    || 0) / 12) * worked;
+    const regularWorked = componentsMonthly * worked;
+    const fixed   = basic + hra + da + conv + medical;
+    const special = Math.max(0, regularWorked - fixed);
+    // Everything in gross beyond the worked salary and any NON-F&F adhocs
+    // (advance salary / reimbursements — still itemised below) is encashment.
+    const adhocExFf = adhocItems.filter((a) => !isFfType(a.type)).reduce((s, a) => s + (parseFloat(String(a.amount)) || 0), 0);
+    leaveEncashment = Math.max(0, gross - bonusInGross - regularWorked - adhocExFf);
+    if (basic)   rows.push({ label: "Basic Salary",         value: fmtInr(basic)   });
+    if (hra)     rows.push({ label: "House Rent Allowance", value: fmtInr(hra)     });
+    if (da)      rows.push({ label: "Dearness Allowance",   value: fmtInr(da)      });
+    if (conv)    rows.push({ label: "Conveyance Allowance", value: fmtInr(conv)    });
+    if (medical) rows.push({ label: "Medical Allowance",    value: fmtInr(medical) });
+    if (special) rows.push({ label: "Special Allowance",    value: fmtInr(special) });
   } else {
+    // Non-exit month: prorate by paid days (workingDays − lopDays); anything in
+    // baseEarnings above the regular scaled salary is itemised as encashment.
+    const monthlyRegular = componentsMonthly * lopFactor;
+    const extra = baseEarnings - monthlyRegular;
+    leaveEncashment = extra >= 0.5 ? extra : 0;
+    const regularBase = baseEarnings - leaveEncashment;
     const basic   = (parseFloat(structure.basic               || 0) / 12) * lopFactor;
     const hra     = (parseFloat(structure.hra                 || 0) / 12) * lopFactor;
     const da      = (parseFloat(structure.dearnessAllowance   || 0) / 12) * lopFactor;
     const conv    = (parseFloat(structure.conveyanceAllowance || 0) / 12) * lopFactor;
     const medical = (parseFloat(structure.medicalAllowance    || 0) / 12) * lopFactor;
-    // Special is the real component (whatever balances to the regular scaled
-    // salary after the fixed rows) — leave encashment is itemised separately
-    // below rather than being absorbed here.
     const fixed   = basic + hra + da + conv + medical;
     const special = Math.max(0, regularBase - fixed);
     if (basic)   rows.push({ label: "Basic Salary",         value: fmtInr(basic)   });
@@ -1016,6 +1060,7 @@ function renderEarnings(p: any, structure: any, bonuses: BonusRow[] = []): { lab
   for (const a of adhocItems) {
     const amt = parseFloat(String(a.amount) || "0");
     if (amt === 0) continue;
+    if (isFnF && isFfType(a.type)) continue; // decomposed into components + encashment above
     rows.push({ label: adhocLabel(a.type), value: fmtInr(amt) });
   }
   return rows;
