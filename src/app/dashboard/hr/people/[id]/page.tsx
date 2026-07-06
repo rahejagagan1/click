@@ -1430,8 +1430,10 @@ export default function EmployeeDetailPage() {
           <SectionEditModal
             userId={userId}
             title="Contact Details"
+            hint="Login Email is the Google address this employee signs in with. Leaving it unchanged is safe; a valid new address updates their sign-in."
             onClose={close}
             values={{
+              workEmail:     user.email ?? "",
               personalEmail: p.personalEmail ?? "",
               phone:         p.phone ?? "",
               workPhone:     p.workPhone ?? "",
@@ -1440,6 +1442,7 @@ export default function EmployeeDetailPage() {
               emergencyRelationship: p.emergencyRelationship ?? "",
             }}
             fields={[
+              { key: "workEmail", label: "Login Email (Google sign-in)", type: "email", fullWidth: true },
               { key: "personalEmail", label: "Personal Email", type: "email", fullWidth: true },
               { key: "phone",         label: "Mobile Number",  type: "tel" },
               { key: "workPhone",     label: "Work Number",    type: "tel" },
