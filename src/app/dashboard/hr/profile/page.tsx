@@ -157,7 +157,7 @@ function EditModal({ title, fields, values, onSave, onClose }: {
                 <input
                   type={f.type ?? "text"}
                   value={form[f.key] ?? ""}
-                  onChange={e => set(f.key, f.transform ? f.transform(e.target.value) : e.target.value)}
+                  onChange={e => set(f.key, f.transform ? f.transform(e.target.value) : (f.type === "email" ? e.target.value.toLowerCase() : e.target.value))}
                   min={f.min}
                   max={f.max}
                   maxLength={f.maxLength}

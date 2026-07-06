@@ -1264,7 +1264,7 @@ function Plain({
       <input
         type={type}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => onChange(type === "email" ? e.target.value.toLowerCase() : e.target.value)}
         required={required}
         placeholder={placeholder}
         className="w-full h-10 px-3 bg-white border border-slate-200 rounded-md text-[13.5px] text-slate-800 placeholder-slate-400 transition-colors focus:outline-none focus:border-[#3b82f6] focus:ring-2 focus:ring-[#3b82f6]/15 hover:border-slate-300"

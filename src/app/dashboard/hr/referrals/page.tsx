@@ -421,7 +421,7 @@ function ReferModal({
               <input
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => setEmail(e.target.value.toLowerCase())}
                 placeholder="candidate@example.com"
                 className="w-full h-9 px-3 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:border-[#008CFF]"
               />
