@@ -613,7 +613,7 @@ export default function EditProfilePanel({ userId, user, managers, canSeeSalary 
           <div className="sm:col-span-2">
             <label className={cls.label}>Personal Email</label>
             <input type="email" className={cls.field} value={contact.personalEmail}
-              onChange={(e) => setContact({ ...contact, personalEmail: e.target.value })} />
+              onChange={(e) => setContact({ ...contact, personalEmail: e.target.value.toLowerCase() })} />
           </div>
           <div>
             <label className={cls.label}>Mobile Number</label>

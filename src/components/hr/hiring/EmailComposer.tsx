@@ -231,7 +231,7 @@ export default function EmailComposer({
           <div className="relative">
             <input
               value={to}
-              onChange={(e) => setTo(e.target.value)}
+              onChange={(e) => setTo(e.target.value.toLowerCase())}
               type="email"
               className="w-full h-10 pl-3 pr-24 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]"
             />
@@ -244,13 +244,13 @@ export default function EmailComposer({
       )}
       {showCc && (
         <Field label="CC">
-          <input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="email1, email2"
+          <input value={cc} onChange={(e) => setCc(e.target.value.toLowerCase())} placeholder="email1, email2"
             className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
         </Field>
       )}
       {showBcc && (
         <Field label="BCC">
-          <input value={bcc} onChange={(e) => setBcc(e.target.value)} placeholder="email1, email2"
+          <input value={bcc} onChange={(e) => setBcc(e.target.value.toLowerCase())} placeholder="email1, email2"
             className="w-full h-10 px-3 rounded-lg border border-slate-200 text-[13px] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/15 focus:border-[#3b82f6]" />
         </Field>
       )}

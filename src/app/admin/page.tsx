@@ -1072,7 +1072,7 @@ export default function AdminPage() {
                             </div>
                             <div className="col-span-2 sm:col-span-1">
                                 <label className="text-[11px] text-slate-400 mb-1 block">Email *</label>
-                                <input type="email" value={newUser.email} onChange={e => setNewUser(p => ({ ...p, email: e.target.value }))}
+                                <input type="email" value={newUser.email} onChange={e => setNewUser(p => ({ ...p, email: e.target.value.toLowerCase() }))}
                                     className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
                                     placeholder="email@example.com" />
                             </div>
