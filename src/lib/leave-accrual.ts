@@ -13,6 +13,7 @@
 
 import prisma from "@/lib/prisma";
 import { istTodayDateOnly } from "@/lib/ist-date";
+import { reconcileConversionLeaveForUser } from "@/lib/hr/conversion-leave";
 
 function ymKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -39,6 +40,15 @@ export async function accrueLeavesForUser(userId: number): Promise<number> {
   const now = new Date();
   const currentYm = ymKey(now);
   const year = istTodayDateOnly().getUTCFullYear();
+
+  // Intern/probation → regular conversion FIRST: if this user's internship or
+  // probation has completed but they're still on the Intern Leave Plan (no CL),
+  // move them to the regular policy and seed the completion-month CL (full if
+  // the end date is on/before the 15th, else half). Runs before the policy read
+  // below so the freshly-switched policy's CL entry is picked up and the months
+  // after the completion month accrue in the same pass. Fail-safe — a hiccup
+  // here must never block the normal accrual. See lib/hr/conversion-leave.
+  await reconcileConversionLeaveForUser(userId, currentYm, year).catch(() => {});
 
   // Find every (leaveType × monthlyAccrual > 0) entry for this user's policy.
   // No rows = no policy assigned OR policy has no accruing types → no-op.
