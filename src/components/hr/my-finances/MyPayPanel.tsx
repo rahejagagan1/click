@@ -282,13 +282,15 @@ function downloadPayslip(
 export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) {
   const [subTab, setSubTab] = useState<SubTab>(initialSub);
 
-  // Pay Slips is still in development — surface it only to developers + salary
-  // admins (CEO / HR Manager / salary-dev) for now; regular employees don't see
-  // the tab yet. (The API also withholds payslip data until the run is "paid".)
-  // TODO: remove this gate once the payslip is production-ready.
+  // Pay Slips visibility:
+  //   • Self-view (no `userId`) — every employee sees their OWN payslips. The
+  //     API pins non-admins to their own id and only exposes runs marked "paid",
+  //     so this is safe for regular employees.
+  //   • Viewing SOMEONE ELSE (`userId` set, HR-side Finances tab) still requires
+  //     salary permission — a non-admin can't view another person's payslips.
   const { data: session, status } = useSession();
   const viewer = session?.user as any;
-  const canSeePayslips = viewer?.isDeveloper === true || canViewSalary(viewer);
+  const canSeePayslips = !userId || viewer?.isDeveloper === true || canViewSalary(viewer);
   useEffect(() => {
     if (status !== "loading" && subTab === "pay-slips" && !canSeePayslips) setSubTab("my-salary");
   }, [status, canSeePayslips, subTab]);
