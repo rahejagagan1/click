@@ -384,9 +384,18 @@ export async function POST(request: NextRequest) {
             }
 
             if (shiftId) {
+                // Anchor the UserShift at the SHIFT's createdAt, not the default
+                // now(). The alternate-Saturday phase falls back to
+                // UserShift.effectiveFrom when a caller doesn't load the shift's
+                // createdAt (e.g. the leave-day counter), so a new joiner
+                // defaulting to their join date can land out of phase with
+                // everyone else on the shift — wrong Saturdays show as working
+                // only for them (see HRM161/162/164). Using the shift's own
+                // anchor keeps every user on the shift on the same phase.
+                const sh = await tx.shift.findUnique({ where: { id: Number(shiftId) }, select: { createdAt: true } });
                 await tx.userShift.upsert({
                     where:  { userId: created.id },
-                    create: { userId: created.id, shiftId: Number(shiftId) },
+                    create: { userId: created.id, shiftId: Number(shiftId), ...(sh ? { effectiveFrom: sh.createdAt } : {}) },
                     update: { shiftId: Number(shiftId) },
                 });
             }
