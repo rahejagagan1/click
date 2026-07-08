@@ -471,7 +471,6 @@ function resolveExitSettlement(field: string, customFields: Record<string, strin
   const totalDeductions = s.totalDeductions;
   const net             = s.net;
   const fmtRs2 = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const fmtRs0 = (n: number) => Math.round(n).toLocaleString("en-IN");
   // Interns get a flat stipend (single earnings line, no statutory
   // deductions); regular employees get the full component breakdown.
   const isIntern = String(customFields?.SalaryType ?? "").toLowerCase() === "intern";
@@ -537,7 +536,11 @@ function resolveExitSettlement(field: string, customFields: Record<string, strin
     // Totals
     case "TotalEarnings":       return fmtRs2(totalEarnings);
     case "TotalDeductions":     return fmtRs2(totalDeductions);
-    case "NetPayable":          return fmtRs0(net);
+    // Net Payable is precise (2dp) like the line items + totals, so it equals
+    // the displayed Total Earnings (A) − Total Deductions (B) exactly, and its
+    // rupee part matches the words below. (Was fmtRs0/Math.round, which made
+    // the number round up while the words truncated — e.g. 21,605 vs 21,604.)
+    case "NetPayable":          return fmtRs2(net);
     case "NetInWords":          return rupeesInWords(net);
     default:                    return "";
   }

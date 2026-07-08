@@ -50,7 +50,11 @@ export function computeExitSettlement(cf: ExitSettlementFields): ExitSettlementR
   // subtract it twice and understate the net. So Special fills the gross
   // WITHOUT PF, keeping total earnings = full gross and PF deducted exactly once.
   const mFixed = mBasic + mHRA + mDA + mConv + mMed;
-  const mSpecial = Math.max(0, Math.round(monthly) - Math.round(mFixed));
+  // Precise (not rounded) so total earnings = monthly exactly, and the exit
+  // statement ties to the paise with the actual payslip (which prorates the
+  // stored structure components without rounding). Rounding Special here made
+  // the statement ~₹0.50 short of the paid payslip.
+  const mSpecial = Math.max(0, monthly - mFixed);
 
   const calc = {
     Basic:               mBasic   * proRata,
