@@ -4,6 +4,7 @@ import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 import { writeAuditLog } from "@/lib/audit-log";
 import { getBrandScope } from "@/lib/hr/brand-scope";
 import { getMonthSalary } from "@/lib/hr/salary-periods";
+import { regularSplit } from "@/lib/hr/salary-split";
 
 export const dynamic = "force-dynamic";
 
@@ -100,6 +101,29 @@ export async function POST(req: NextRequest) {
       structureType: structureType ?? null,
       pfEligible:    pfEligible    ?? false,
     };
+
+    // SAFETY NET — server owns the component split for REGULAR employees.
+    // Every regular structure is (re)derived from CTC via the shared
+    // regularSplit(), so no caller can ever store an incomplete/monthly
+    // breakdown. The profile salary form already sends these exact values (so
+    // this is a no-op for it); the Payroll-admin "Assign Structure" form omits
+    // DA/Conveyance/Medical and doesn't auto-split — this fills them in. CTC is
+    // the single input; PF eligibility is honoured whether it arrived as the
+    // pfEligible flag or as a non-zero PF amount. Interns keep their flat
+    // stipend shape untouched.
+    if ((data.salaryType ?? "regular") === "regular" && Number(data.ctc) > 0) {
+      const pfElig = data.pfEligible === true || Number(pfEmployee) > 0 || Number(pfEmployer) > 0;
+      const s = regularSplit(Number(data.ctc), pfElig);
+      data.basic = s.basic;
+      data.hra = s.hra;
+      data.dearnessAllowance = s.da;
+      data.conveyanceAllowance = s.conv;
+      data.medicalAllowance = s.medical;
+      data.specialAllowance = s.special;
+      data.pfEmployee = s.pfEmp;
+      data.pfEmployer = s.pfEmpr;
+      data.pfEligible = pfElig;
+    }
 
     // Snapshot the OLD structure into history BEFORE overwriting it, so the
     // prior rate survives for mid-month proration (see lib/hr/salary-periods).
