@@ -1,22 +1,36 @@
 // Intern / probation → regular conversion: Casual Leave crediting rule.
 //
-// The org rule (not otherwise encoded in flat monthly accrual):
+// The org rule (not expressible in flat monthly accrual):
 //   • CL eligibility begins the month an employee's internship OR probation
-//     COMPLETES — not when someone happens to flip their leave policy.
+//     COMPLETES — NOT at joining, and not while still on probation.
 //   • The COMPLETION MONTH is credited a full CL if the completion date is on
 //     or before the 15th, else HALF (0.5). Every month AFTER accrues 1 as usual.
-//   • Interns sit on the "Intern Leave Plan" (SL only, no CL). On completion
-//     they must move to the regular policy so CL starts accruing at all.
+//   • While an employee is still serving probation/internship, CL is WITHHELD
+//     (0) — the flat accrual engine would otherwise credit it from joining.
+//   • Interns sit on the "Intern Leave Plan" (SL only, no CL). Once actually
+//     made regular they must also move onto the regular policy.
 //
-// This module does BOTH on demand + idempotently:
-//   1. moves a completed intern off the Intern Leave Plan onto the regular one,
-//   2. seeds the CL balance for the completion month (full/half), stamping
-//      lastAccrualMonth = completion month so the normal monthly accrual engine
-//      (lib/leave-accrual) adds 1 for each subsequent month with no double-count.
+// Because the amount owed is a pure function of the completion date and the
+// current month, this module OWNS the CL balance for any regular employee whose
+// internship/probation completes in the CURRENT accrual year. On every accrual
+// pass it (re)computes the earned figure and writes it, stamping
+// lastAccrualMonth = current month so the flat accrual engine
+// (lib/leave-accrual) adds nothing on top (no double-count). It is therefore
+// fully idempotent — running it repeatedly converges on the same number.
 //
-// It runs from accrueLeavesForUser (so every accrual — monthly cron or the lazy
-// on-page-read trigger — self-heals a missed conversion) and can be invoked
-// directly on the probation-confirm / intern-end action.
+// Scope / safety:
+//   • Only `salaryType === "regular"` employees are touched. Real interns
+//     (salaryType "intern") keep the Intern Leave Plan and their SL-only plan.
+//   • Only CURRENT-YEAR completions are owned here. Prior-year completions are
+//     tenured staff — the flat accrual engine already credits them a full year,
+//     so we leave those rows alone.
+//   • The written total is floored at usedDays + pendingDays so a correction can
+//     never drop someone below leave they've already taken or requested.
+//   • Only CL is touched; SL and every other leave type stay with flat accrual.
+//
+// Runs from accrueLeavesForUser (so every accrual — monthly cron or the lazy
+// on-page-read trigger — self-heals) and can be invoked directly on the
+// probation-confirm / intern-end action.
 
 import prisma from "@/lib/prisma";
 
@@ -35,8 +49,10 @@ function monthsBetween(fromYm: string, toYm: string): number {
 export type ConversionResult = {
   changed: boolean;
   movedToRegular?: boolean;
-  clSeeded?: number;        // first-month credit written (1 or 0.5), if any
+  clTotal?: number;         // CL total the rule settled on, if written
+  earned?: number;          // rule figure before the used/pending floor
   completionDate?: string;  // YYYY-MM-DD
+  onProbation?: boolean;    // completion still in the future → CL withheld
   reason?: string;
 };
 
@@ -55,13 +71,39 @@ async function resolveIds() {
 }
 
 /**
- * Reconcile one employee's intern/probation→regular CL crediting.
+ * How much CL a regular employee has EARNED so far this year under the
+ * completion-month rule. Returns null when the rule does not own this row
+ * (prior-year / tenured completion — leave it to flat accrual).
  *
- * Only acts on someone CURRENTLY on the Intern Leave Plan whose internship or
- * probation completion date has already passed. Moves them to the regular
- * policy and seeds their Casual Leave for the completion month (full ≤15th,
- * else half). Idempotent: once moved off the intern plan it early-returns, so
- * running it repeatedly (each accrual) can't re-seed or double-credit.
+ *   • completion still in the future  → 0   (still on probation → withhold)
+ *   • completion earlier this year    → full (≤15th) or half (>15th) for the
+ *                                        completion month, + 1 per month since
+ *   • completion in a prior year      → null (tenured; flat accrual owns it)
+ */
+export function earnedClForYear(
+  completion: Date,
+  year: number,
+  currentYm: string,
+  today: Date,
+): number | null {
+  if (completion.getTime() > today.getTime()) return 0; // on probation → withhold
+  const cy = completion.getUTCFullYear();
+  const cm = completion.getUTCMonth() + 1; // 1-based
+  const cd = completion.getUTCDate();
+  if (cy < year) return null;   // tenured — flat accrual owns the full year
+  if (cy > year) return 0;      // completes later this... future year → nothing yet
+  const firstMonth = cd <= 15 ? 1 : 0.5;
+  return firstMonth + monthsBetween(ym(cy, cm), currentYm);
+}
+
+/**
+ * Reconcile one employee's intern/probation → regular CL crediting.
+ *
+ * Acts on any `salaryType === "regular"` employee whose internship/probation
+ * completes in the CURRENT accrual year, owning their CL balance = the earned
+ * figure above (floored at used+pending). Interns still on the Intern Leave
+ * Plan are additionally moved onto the regular policy. Idempotent: recomputing
+ * and rewriting the same number each pass converges, never double-credits.
  *
  * `year` / `currentYm` are passed in so this shares the exact clock the accrual
  * engine stamps, preventing drift.
@@ -82,84 +124,82 @@ export async function reconcileConversionLeaveForUser(
       employeeProfile: { select: { internshipEndDate: true, probationEndDate: true } },
     },
   });
-  // Only interns still parked on the Intern Leave Plan are candidates — once
-  // converted (policy != intern), CL is the regular accrual engine's job.
-  if (!user || user.leavePolicyId !== ids.internPolicyId) return { changed: false };
+  if (!user) return { changed: false };
 
-  // CRUCIAL: act only once the employee has ACTUALLY been made regular
-  // (salaryStructure.salaryType === "regular"). A passed internshipEndDate
-  // alone is NOT conversion — HR may still be deciding / may extend. Real
-  // interns (salaryType "intern") stay put and keep the Intern Leave Plan.
+  // CRUCIAL: the rule governs REGULAR employees only. A real intern
+  // (salaryType "intern") — even one whose internshipEndDate has passed — is
+  // NOT yet converted; HR may still be deciding / may extend. They stay on the
+  // Intern Leave Plan (SL only, no CL) untouched.
   if (user.salaryStructure?.salaryType !== "regular") {
-    return { changed: false, reason: "still an intern — not yet converted to regular" };
+    return { changed: false, reason: "not a regular employee — rule does not apply" };
   }
 
   const prof = user.employeeProfile;
   // Completion = internship end (intern path) or, failing that, probation end.
   const completion = prof?.internshipEndDate ?? prof?.probationEndDate ?? null;
-  if (!completion) return { changed: false, reason: "no completion date" };
+  if (!completion) return { changed: false, reason: "no completion date — flat accrual owns CL" };
 
   const compDate = new Date(completion);
   const today = new Date();
-  if (compDate.getTime() > today.getTime()) return { changed: false, reason: "completion in the future" };
+  const earned = earnedClForYear(compDate, year, currentYm, today);
+  // null = prior-year / tenured completion → not owned here; flat accrual credits
+  // the full year as usual. Leave the row alone.
+  if (earned === null) return { changed: false, reason: "tenured (prior-year completion) — flat accrual owns CL" };
 
-  const compYear  = compDate.getUTCFullYear();
-  const compMonth = compDate.getUTCMonth() + 1; // 1-based
-  const compDay   = compDate.getUTCDate();
+  const onProbation = compDate.getTime() > today.getTime();
+  const needsPolicyMove = user.leavePolicyId === ids.internPolicyId;
 
-  // Seed the CL balance for the CURRENT accrual year:
-  //   • completion in this year → seed the completion month with full/half, and
-  //     stamp lastAccrualMonth = completion month so accrual fills the rest.
-  //   • completion in a PRIOR year → they've been regular all year, so seed 0
-  //     with lastAccrualMonth = last-Dec, letting accrual credit every month.
-  let firstMonth: number;
-  let seedYm: string;
-  if (compYear === year) {
-    firstMonth = compDay <= 15 ? 1 : 0.5;
-    seedYm = ym(compYear, compMonth);
-  } else if (compYear < year) {
-    firstMonth = 0;
-    seedYm = ym(year - 1, 12);
-  } else {
-    return { changed: false, reason: "completion year is in the future" };
-  }
+  const result = await prisma.$transaction(async (tx) => {
+    // 1) An intern actually made regular but still parked on the Intern Leave
+    //    Plan → move to the regular policy so CL (and SL) accrue normally.
+    if (needsPolicyMove) {
+      await tx.user.update({ where: { id: userId }, data: { leavePolicyId: ids.regularPolicyId } });
+    }
 
-  await prisma.$transaction(async (tx) => {
-    // 1) Move onto the regular policy so CL (and the rest) accrue.
-    await tx.user.update({ where: { id: userId }, data: { leavePolicyId: ids.regularPolicyId } });
-
-    // 2) Seed the CL balance for the year (upsert). totalDays is the seed; the
-    //    accrual pass right after this in accrueLeavesForUser adds the months
-    //    after `seedYm`. usedDays/pendingDays are preserved on an existing row.
+    // 2) Own the CL balance for the year. totalDays = earned, but never below
+    //    what's already used/pending (a correction can't strand taken leave).
+    //    lastAccrualMonth = currentYm so the flat accrual pass that runs right
+    //    after this in accrueLeavesForUser adds nothing on top.
     const existing = await tx.leaveBalance.findUnique({
       where: { userId_leaveTypeId_year: { userId, leaveTypeId: ids.clTypeId, year } },
-      select: { id: true },
+      select: { id: true, totalDays: true, usedDays: true, pendingDays: true, lastAccrualMonth: true },
     });
+    const used = Number(existing?.usedDays ?? 0);
+    const pending = Number(existing?.pendingDays ?? 0);
+    const newTotal = Math.max(earned, used + pending);
+
     if (existing) {
+      // Skip a needless write if the row is already settled where the rule wants.
+      if (Number(existing.totalDays) === newTotal && existing.lastAccrualMonth === currentYm) {
+        return { wrote: false, newTotal };
+      }
       await tx.leaveBalance.update({
         where: { id: existing.id },
-        data: { totalDays: firstMonth, lastAccrualMonth: seedYm },
+        data: { totalDays: newTotal, lastAccrualMonth: currentYm },
       });
     } else {
       await tx.leaveBalance.create({
-        data: { userId, leaveTypeId: ids.clTypeId, year, totalDays: firstMonth, usedDays: 0, pendingDays: 0, lastAccrualMonth: seedYm },
+        data: { userId, leaveTypeId: ids.clTypeId, year, totalDays: newTotal, usedDays: 0, pendingDays: 0, lastAccrualMonth: currentYm },
       });
     }
+    return { wrote: true, newTotal };
   });
 
-  // How much accrual will add after the seed, for reporting only.
-  const monthsAfter = monthsBetween(seedYm, currentYm);
   return {
-    changed: true,
-    movedToRegular: true,
-    clSeeded: firstMonth,
+    changed: needsPolicyMove || result.wrote,
+    movedToRegular: needsPolicyMove,
+    clTotal: result.newTotal,
+    earned,
     completionDate: compDate.toISOString().slice(0, 10),
-    reason: `seeded CL ${firstMonth} @ ${seedYm}; accrual adds ${monthsAfter} more → ${firstMonth + monthsAfter}`,
+    onProbation,
+    reason: onProbation
+      ? "on probation — CL withheld until completion month"
+      : `CL owned by completion rule → ${result.newTotal}`,
   };
 }
 
-/** Reconcile every active employee — a one-time backfill / periodic sweep for
- *  interns whose completion was missed (left on the Intern Leave Plan). */
+/** Reconcile every active employee — a one-time backfill / periodic sweep so
+ *  no regular employee's CL drifts from the completion-month rule. */
 export async function reconcileAllConversionLeaves(currentYm: string, year: number): Promise<{ fixed: number; details: ConversionResult[] }> {
   const users = await prisma.user.findMany({ where: { isActive: true }, select: { id: true } });
   const details: ConversionResult[] = [];

@@ -41,13 +41,15 @@ export async function accrueLeavesForUser(userId: number): Promise<number> {
   const currentYm = ymKey(now);
   const year = istTodayDateOnly().getUTCFullYear();
 
-  // Intern/probation → regular conversion FIRST: if this user's internship or
-  // probation has completed but they're still on the Intern Leave Plan (no CL),
-  // move them to the regular policy and seed the completion-month CL (full if
-  // the end date is on/before the 15th, else half). Runs before the policy read
-  // below so the freshly-switched policy's CL entry is picked up and the months
-  // after the completion month accrue in the same pass. Fail-safe — a hiccup
-  // here must never block the normal accrual. See lib/hr/conversion-leave.
+  // Intern/probation → regular CL rule FIRST. For a regular employee whose
+  // internship/probation completes THIS year, CL is owned by the completion-
+  // month rule: withheld (0) while still on probation, then full (end ≤15th) or
+  // half (>15th) for the completion month and 1/month after. This also moves a
+  // converted intern off the Intern Leave Plan onto the regular policy. Runs
+  // before the policy read below and stamps CL's lastAccrualMonth = currentYm,
+  // so the flat accrual pass that follows adds nothing on top of CL (SL and the
+  // rest accrue as normal). Fail-safe — a hiccup here must never block accrual.
+  // See lib/hr/conversion-leave.
   await reconcileConversionLeaveForUser(userId, currentYm, year).catch(() => {});
 
   // Find every (leaveType × monthlyAccrual > 0) entry for this user's policy.
