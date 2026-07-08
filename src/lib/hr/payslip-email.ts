@@ -8,6 +8,7 @@ import { htmlToPdf } from "@/lib/hr/html-to-pdf";
 import { buildPayslipHtml } from "@/lib/hr/payslip-html";
 import { decryptPII } from "@/lib/pii-crypto";
 import { writeAuditLog } from "@/lib/audit-log";
+import { pickStructureForMonth } from "@/lib/hr/salary-periods";
 
 const MON_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -59,6 +60,18 @@ export async function emailPayslipsForRun(
     },
   });
   const uids = allPayslips.map((p) => p.userId);
+
+  // Month-effective salary structure — a past month must render with the salary
+  // that applied THEN (from SalaryStructureHistory), not a later revision.
+  const structHistory = uids.length
+    ? await prisma.salaryStructureHistory.findMany({ where: { userId: { in: uids } } })
+    : [];
+  const histByUser = new Map<number, typeof structHistory>();
+  for (const h of structHistory) {
+    const arr = histByUser.get(h.userId) ?? [];
+    arr.push(h);
+    histByUser.set(h.userId, arr);
+  }
 
   const profiles = await prisma.employeeProfile.findMany({
     where: { userId: { in: uids } },
@@ -127,7 +140,13 @@ export async function emailPayslipsForRun(
           }
         : {};
       const pObj = { ...ps, adhocPayments: adhocMap.get(ps.userId) ?? [] };
-      const html = buildPayslipHtml(pObj, ps.salaryStructure, profile, bonusMap.get(ps.userId) ?? []);
+      const effStructure = pickStructureForMonth(
+        ps.salaryStructure as any,
+        (histByUser.get(ps.userId) ?? []) as any[],
+        run.year,
+        run.month,
+      ) ?? ps.salaryStructure;
+      const html = buildPayslipHtml(pObj, effStructure, profile, bonusMap.get(ps.userId) ?? []);
       const pdf = await htmlToPdf(html);
 
       const safeName = (ps.user.name || "employee").replace(/[^a-z0-9]+/gi, "_");

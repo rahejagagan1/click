@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
 import { resolveBrandScope } from "@/lib/hr/brand-scope";
 import { readBrandStatus, brandOfBusinessUnit } from "@/lib/hr/payroll-run-status";
+import { pickStructureForMonth } from "@/lib/hr/salary-periods";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +52,10 @@ export async function GET(req: NextRequest) {
       orderBy: [{ year: "desc" }, { month: "desc" }],
       include: {
         payrollRun: { select: { id: true, status: true, brandStatus: true } },
-        salaryStructure: { select: { ctc: true, basic: true, hra: true, salaryType: true, specialAllowance: true } },
+        salaryStructure: { select: {
+          ctc: true, basic: true, hra: true, dearnessAllowance: true, conveyanceAllowance: true,
+          medicalAllowance: true, specialAllowance: true, pfEmployee: true, salaryType: true, effectiveFrom: true,
+        } },
         user: { select: { id: true, name: true, email: true, employeeProfile: { select: { businessUnit: true } } } },
       },
     });
@@ -84,8 +88,30 @@ export async function GET(req: NextRequest) {
       arr.push({ type: a.type || "Other", amount: parseFloat(a.amount) });
       adhocMap.set(k, arr);
     }
+
+    // Month-effective salary structure per payslip: a past month must show the
+    // salary that applied THEN, not a later revision. When the current structure
+    // took effect after a payslip's month, swap in the SalaryStructureHistory
+    // row whose window covered that month (Gagan: May shows his old ₹35k rate,
+    // not the ₹50k that started in June).
+    const history = uids.length
+      ? await prisma.salaryStructureHistory.findMany({ where: { userId: { in: uids } } })
+      : [];
+    const histByUser = new Map<number, typeof history>();
+    for (const h of history) {
+      const arr = histByUser.get(h.userId) ?? [];
+      arr.push(h);
+      histByUser.set(h.userId, arr);
+    }
+
     const withAdhoc = visiblePayslips.map((p) => ({
       ...p,
+      salaryStructure: pickStructureForMonth(
+        p.salaryStructure as any,
+        (histByUser.get(p.userId) ?? []) as any[],
+        p.year,
+        p.month,
+      ) ?? p.salaryStructure,
       adhocPayments: adhocMap.get(adhocKey(p.userId, p.month, p.year)) ?? [],
     }));
     return NextResponse.json(withAdhoc);
