@@ -80,7 +80,7 @@ export const CRON_JOB_DEFINITIONS: CronJobDefinition[] = [
     id: "probation_reminders",
     name: "Probation ending reminders",
     description:
-      "Daily sweep: emails HR + the employee's reporting manager when an active employee's probation ends in exactly 14, 7, or 1 day (three nudges as the date nears). Same-day dedupe via probationReminderSentAt so the cron never double-sends within a milestone — that stamp is auto-cleared when HR edits the end date so extensions re-arm all three cleanly. Email includes one-click extension links (+1 month / +2 months / custom).",
+      "Daily sweep. First self-heals: auto-puts any eligible new joiner (joined within the last 3 months, no probation window yet) on a 3-month probation so nobody who should be on probation is missed. Then emails HR + the employee's reporting manager when an active employee's probation ends in exactly 14, 7, or 1 day (three nudges as the date nears). Same-day dedupe via probationReminderSentAt so the cron never double-sends within a milestone — that stamp is auto-cleared when HR edits the end date so extensions re-arm all three cleanly. Email includes one-click extension links (+1 month / +2 months / custom).",
     defaultIntervalHours: 24,
   },
   {
