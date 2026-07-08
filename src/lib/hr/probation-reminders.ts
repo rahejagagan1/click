@@ -19,10 +19,11 @@ import { probationEndingReminderEmail } from "@/lib/email/templates";
 import { isDryRun } from "@/lib/email/transport";
 import { isEmailEnabled, devEmailRecipientsClause, rolesForUser, isEmailEnabledForRoles } from "@/lib/email/toggles";
 
-// Fire window: probation end within the next N days. The user
-// approved a 7-day heads-up; keep this in one place so future tuning
-// (e.g. extend to 10 days) stays one-line.
-const REMINDER_LEAD_DAYS = 7;
+// Reminder milestones: HR + the reporting manager get a heads-up when
+// probation ends in exactly 14, 7, and 1 day(s). Each fires once (same-day
+// dedupe via probationReminderSentAt), so an employee gets up to three nudges
+// as the date approaches. Keep these here so tuning the cadence is one-line.
+const REMINDER_MILESTONES = [14, 7, 1];
 
 type DueRow = {
   userId: number;
@@ -47,9 +48,13 @@ export async function sendProbationEndingReminders(): Promise<number> {
     return 0;
   }
 
-  // "Within 7 days from now" upper bound. End date must also be in
-  // the FUTURE (no point emailing about an already-expired window).
-  const upper = new Date(Date.now() + REMINDER_LEAD_DAYS * 24 * 60 * 60 * 1000);
+  // Fire when the probation end date is EXACTLY one of the milestones away
+  // (14 / 7 / 1 day). Same-day dedupe: only send if we haven't already stamped
+  // a reminder today, so the daily cron never double-sends within a milestone —
+  // yet each distinct milestone day (which are separate calendar days) still
+  // gets its own nudge. probationReminderSentAt is cleared whenever HR edits
+  // the end date, so an extension re-arms all three milestones cleanly.
+  const milestoneList = REMINDER_MILESTONES.join(", "); // e.g. "14, 7, 1"
 
   const due = await prisma.$queryRawUnsafe<DueRow[]>(
     `SELECT u.id AS "userId",
@@ -69,11 +74,9 @@ export async function sendProbationEndingReminders(): Promise<number> {
       WHERE u."isActive" = true
         AND ep."probationEndDate" IS NOT NULL
         AND ep."probationConfirmedAt" IS NULL
-        AND ep."probationEndDate" >= NOW()
-        AND ep."probationEndDate" <= $1
-        AND ep."probationReminderSentAt" IS NULL
+        AND (ep."probationEndDate"::date - CURRENT_DATE) IN (${milestoneList})
+        AND (ep."probationReminderSentAt" IS NULL OR ep."probationReminderSentAt"::date < CURRENT_DATE)
       ORDER BY ep."probationEndDate" ASC`,
-    upper,
   );
   if (due.length === 0) return 0;
 
