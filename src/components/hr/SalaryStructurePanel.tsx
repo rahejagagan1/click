@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
+import { regularSplit } from "@/lib/hr/salary-split";
 import {
   CheckCircle2, AlertCircle, IndianRupee, Save, Wallet, Info, Lock, Calendar,
   MoreVertical, Plus, X, Paperclip, TrendingUp,
@@ -94,39 +95,8 @@ function apiToForm(s: ApiStructure | null): FormState {
   };
 }
 
-// Fixed-amount components used by the regular-employee split.
-// All annual figures so they match how the rest of the payroll engine
-// stores numbers (payslip divides by 12 at generation time).
-const MEDICAL_ALLOWANCE_ANNUAL  = 15000;   // ₹15,000 / yr = ₹1,250 / month
-const PF_EMPLOYEE_ANNUAL_FIXED  = 21600;   // ₹21,600 / yr = ₹1,800 / month (12% × ₹15k cap)
-const PF_EMPLOYER_ANNUAL_FIXED  = 21600;   // matched employer contribution (not part of CTC)
-
-// Compute the per-component annual amounts for a regular employee given
-// the entered annual CTC and the pfEligible flag. When the CTC is too low to
-// cover the fixed portions, Special Allowance floors at 0 (no minimum-CTC gate).
-//
-// Split rule:
-//   Basic   = 50%  of CTC
-//   HRA     = 20%  of CTC
-//   DA      = 10%  of CTC
-//   Conv    =  7.5% of CTC
-//   Medical = fixed ₹15,000 / year
-//   PF (Emp) = fixed ₹21,600 / year when pfEligible
-//   Special = CTC − (sum of the above)
-function regularSplit(annualCtc: number, pfEligible: boolean) {
-  const basic   = Math.round(annualCtc * 0.50);
-  const hra     = Math.round(annualCtc * 0.20);
-  const da      = Math.round(annualCtc * 0.10);
-  const conv    = Math.round(annualCtc * 0.075);
-  const medical = MEDICAL_ALLOWANCE_ANNUAL;
-  const pfEmp   = pfEligible ? PF_EMPLOYEE_ANNUAL_FIXED : 0;
-  const pfEmpr  = pfEligible ? PF_EMPLOYER_ANNUAL_FIXED : 0;
-  // Floor at 0: for a low CTC the fixed portions (Basic/HRA/DA/Conv % + Medical
-  // + PF) can exceed the CTC. Rather than block the save or store a negative
-  // Special Allowance, clamp it to 0 (the other components absorb the rest).
-  const special = Math.max(0, annualCtc - (basic + hra + da + conv + medical + pfEmp));
-  return { basic, hra, da, conv, medical, pfEmp, pfEmpr, special };
-}
+// regularSplit + the fixed-amount constants now live in lib/hr/salary-split and
+// are shared with the onboarding API (/api/users) so the two can't drift.
 
 // Form state → POST body for /api/hr/payroll/salary-structure. Mirrors
 // the field mapping the onboarding submit handler does.
