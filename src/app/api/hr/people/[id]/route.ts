@@ -758,17 +758,22 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     // Upserts the user's single UserShift. effectiveFrom is only re-set when
     // the shift actually CHANGES — re-saving the section with the same shift
     // keeps the original anchor, so an alternate-Saturday rotation never
-    // silently re-phases on an unrelated profile edit.
+    // silently re-phases on an unrelated profile edit. When it IS set, anchor
+    // it on the SHIFT's createdAt (not today) so the user shares the same
+    // alternate-Saturday phase as everyone else on the shift — a today-anchor
+    // can land out of phase and make the wrong Saturdays "working" only for
+    // this person (see HRM161/162/164).
     if (body.shiftId !== undefined) {
       const sid = body.shiftId === null || body.shiftId === "" ? null : parseInt(String(body.shiftId), 10);
       try {
         const cur = await prisma.userShift.findUnique({ where: { userId: id }, select: { shiftId: true } });
         if (sid === null || !Number.isFinite(sid)) {
           if (cur) await prisma.userShift.delete({ where: { userId: id } });
-        } else if (!cur) {
-          await prisma.userShift.create({ data: { userId: id, shiftId: sid, effectiveFrom: istTodayDateOnly() } });
-        } else if (cur.shiftId !== sid) {
-          await prisma.userShift.update({ where: { userId: id }, data: { shiftId: sid, effectiveFrom: istTodayDateOnly() } });
+        } else if (!cur || cur.shiftId !== sid) {
+          const sh = await prisma.shift.findUnique({ where: { id: sid }, select: { createdAt: true } });
+          const effectiveFrom = sh?.createdAt ?? istTodayDateOnly();
+          if (!cur) await prisma.userShift.create({ data: { userId: id, shiftId: sid, effectiveFrom } });
+          else await prisma.userShift.update({ where: { userId: id }, data: { shiftId: sid, effectiveFrom } });
         }
       } catch (e) { console.warn("[people PUT] shift assignment failed:", e); }
     }
