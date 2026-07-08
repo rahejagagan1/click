@@ -8,6 +8,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const N = (x: any) => parseFloat(String(x ?? 0)) || 0;
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 const MONTHS_FULL = [
   "January", "February", "March", "April", "May", "June",
@@ -103,12 +104,30 @@ function adhocLabel(type: string): string {
   return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// "Net Salary Payable" figure. For a Full & Final payslip we show the true
+// payable = Total Earnings (A) − Deductions (B) computed from the payslip's own
+// figures, rather than the separately-stored `netPay` — so the printed
+// "( A − B )" is literally A − B. Non-F&F payslips keep `netPay` (which already
+// equals A − B). Regex mirrors renderEarnings' F&F detection.
+const FF_RE = /ff.?settlement|full.?and.?final|f\s*&\s*f/i;
+function netPayable(p: any): number {
+  const items = Array.isArray(p?.adhocPayments) ? p.adhocPayments : [];
+  const hasFf = items.some((a: any) => FF_RE.test(String(a?.type ?? "")));
+  return hasFf ? N(p?.grossEarnings) - N(p?.totalDeductions) : N(p?.netPay);
+}
+
 function deductionRows(p: any): { label: string; value: string }[] {
   const rows: { label: string; value: string }[] = [];
   if (N(p.pfEmployee) > 0)      rows.push({ label: "Provident Fund (Employee)", value: fmtInr(p.pfEmployee) });
   if (N(p.tds) > 0)             rows.push({ label: "TDS / Income Tax", value: fmtInr(p.tds) });
   if (N(p.professionalTax) > 0) rows.push({ label: "Professional Tax", value: fmtInr(p.professionalTax) });
   if (N(p.additionalTax) > 0)   rows.push({ label: "Professional Tax", value: fmtInr(p.additionalTax) });
+  // Residual — ESI / LWF / adhoc recoveries (e.g. salary-advance recovery) are
+  // baked into totalDeductions but aren't stored as their own payslip fields.
+  // Surface them so the deductions column sums to Total (B).
+  const itemised = N(p.pfEmployee) + N(p.tds) + N(p.professionalTax) + N(p.additionalTax);
+  const other = N(p.totalDeductions) - itemised;
+  if (other >= 0.5) rows.push({ label: "Other Deductions", value: fmtInr(other) });
   return rows;
 }
 
@@ -163,45 +182,63 @@ function renderEarnings(p: any, structure: any, bonuses: BonusRow[] = []): { lab
     }
   } else if (isFnF) {
     const worked  = wd > 0 ? Math.max(0, Math.min(1, N(p.presentDays) / wd)) : lopFactor;
-    const basic   = (N(structure.basic) / 12) * worked;
-    const hra     = (N(structure.hra) / 12) * worked;
-    const da      = (N(structure.dearnessAllowance) / 12) * worked;
-    const conv    = (N(structure.conveyanceAllowance) / 12) * worked;
-    const medical = (N(structure.medicalAllowance) / 12) * worked;
+    const basic   = round2((N(structure.basic) / 12) * worked);
+    const hra     = round2((N(structure.hra) / 12) * worked);
+    const da      = round2((N(structure.dearnessAllowance) / 12) * worked);
+    const conv    = round2((N(structure.conveyanceAllowance) / 12) * worked);
+    const medical = round2((N(structure.medicalAllowance) / 12) * worked);
     const regularWorked = componentsMonthly * worked;
-    const fixed   = basic + hra + da + conv + medical;
-    const special = Math.max(0, regularWorked - fixed);
-    // Everything in gross beyond the worked salary and any NON-F&F adhocs
-    // (advance salary / reimbursements — still itemised below) is encashment.
+    // Special absorbs the rounding residual of the worked salary; Leave
+    // Encashment then absorbs the final residual so the rows sum EXACTLY to
+    // Total Earnings (A).
+    const special = round2(Math.max(0, regularWorked - (basic + hra + da + conv + medical)));
     const adhocExFf = adhocItems.filter((a) => !isFfType(a.type)).reduce((s, a) => s + N(a.amount), 0);
-    leaveEncashment = Math.max(0, gross - bonusInGross - regularWorked - adhocExFf);
+    leaveEncashment = round2(Math.max(0, gross - bonusInGross - adhocExFf - (basic + hra + da + conv + medical) - special));
+    // Row order mirrors the Exit Statement letter (letter-render EarningsRows)
+    // so the F&F payslip and the F&F letter list earnings identically.
     if (basic)   rows.push({ label: "Basic Salary",         value: fmtInr(basic)   });
     if (hra)     rows.push({ label: "House Rent Allowance", value: fmtInr(hra)     });
-    if (da)      rows.push({ label: "Dearness Allowance",   value: fmtInr(da)      });
-    if (conv)    rows.push({ label: "Conveyance Allowance", value: fmtInr(conv)    });
     if (medical) rows.push({ label: "Medical Allowance",    value: fmtInr(medical) });
+    if (conv)    rows.push({ label: "Conveyance Allowance", value: fmtInr(conv)    });
     if (special) rows.push({ label: "Special Allowance",    value: fmtInr(special) });
+    if (da)      rows.push({ label: "Dearness Allowance",   value: fmtInr(da)      });
   } else {
-    // Non-exit month: prorate by paid days (workingDays − lopDays); anything in
-    // baseEarnings above the regular scaled salary is itemised as encashment.
-    const monthlyRegular = componentsMonthly * lopFactor;
-    const extra = baseEarnings - monthlyRegular;
-    leaveEncashment = extra >= 0.5 ? extra : 0;
-    const regularBase = baseEarnings - leaveEncashment;
-    const basic   = (N(structure.basic) / 12) * lopFactor;
-    const hra     = (N(structure.hra) / 12) * lopFactor;
-    const da      = (N(structure.dearnessAllowance) / 12) * lopFactor;
-    const conv    = (N(structure.conveyanceAllowance) / 12) * lopFactor;
-    const medical = (N(structure.medicalAllowance) / 12) * lopFactor;
-    const fixed   = basic + hra + da + conv + medical;
-    const special = Math.max(0, regularBase - fixed);
+    // Non-exit month: prorate the fixed components by paid days; Special
+    // Allowance absorbs whatever balances to baseEarnings. We do NOT infer
+    // "Leave Encashment" here — that would mislabel any legitimate surplus in
+    // gross (new-joiner joining-month arrears, a structure entered AFTER the
+    // first payslip, a mid-cycle revision) as encashment. Leave encashment is
+    // itemised only on F&F payslips (the isFnF branch above).
+    let basic   = (N(structure.basic) / 12) * lopFactor;
+    let hra     = (N(structure.hra) / 12) * lopFactor;
+    let da      = (N(structure.dearnessAllowance) / 12) * lopFactor;
+    let conv    = (N(structure.conveyanceAllowance) / 12) * lopFactor;
+    let medical = (N(structure.medicalAllowance) / 12) * lopFactor;
+    let fixed   = basic + hra + da + conv + medical;
+    // If the structure's fixed components exceed what was actually paid (gross
+    // set below the structure — new-joiner joining-month proration, a later
+    // structure revision, a partial / held month), scale them down proportionally
+    // so the rows never overshoot Total Earnings. Otherwise Special absorbs the
+    // surplus (gross ≥ fixed).
+    if (fixed > baseEarnings && fixed > 0) {
+      const scale = baseEarnings / fixed;
+      basic *= scale; hra *= scale; da *= scale; conv *= scale; medical *= scale;
+    }
+    // Round each component to paise, then let Special = baseEarnings − Σ(rounded
+    // components). This makes the DISPLAYED rows sum EXACTLY to Total Earnings
+    // (A) instead of drifting a paisa from independent per-row rounding.
+    basic = round2(basic); hra = round2(hra); da = round2(da); conv = round2(conv); medical = round2(medical);
+    let special = round2(baseEarnings - (basic + hra + da + conv + medical));
+    // If rounding the scaled components overshot baseEarnings (special < 0), trim
+    // the penny off Basic so the rows still sum exactly to Total Earnings (A).
+    if (special < 0) { basic = round2(basic + special); special = 0; }
     if (basic)   rows.push({ label: "Basic Salary",         value: fmtInr(basic)   });
     if (hra)     rows.push({ label: "House Rent Allowance", value: fmtInr(hra)     });
     if (da)      rows.push({ label: "Dearness Allowance",   value: fmtInr(da)      });
     if (conv)    rows.push({ label: "Conveyance Allowance", value: fmtInr(conv)    });
     if (medical) rows.push({ label: "Medical Allowance",    value: fmtInr(medical) });
     if (special) rows.push({ label: "Special Allowance",    value: fmtInr(special) });
-    if (rows.length === 0) rows.push({ label: "Monthly Stipend", value: fmtInr(regularBase) });
+    if (rows.length === 0) rows.push({ label: "Monthly Stipend", value: fmtInr(baseEarnings) });
   }
   if (leaveEncashment > 0) rows.push({ label: "Leave Encashment", value: fmtInr(leaveEncashment) });
 
@@ -344,8 +381,8 @@ export function buildPayslipHtml(p: any, structure: any, profile?: any, bonuses:
   ${edHtml}
 
   <div class="net">
-    <div class="row"><span class="k">Net Salary Payable ( ${netLabel} )</span><span class="v">${fmtInr(p.netPay)}</span></div>
-    <div class="row"><span class="k">Net Salary in words</span><span class="v">${amountInWords(N(p.netPay))}</span></div>
+    <div class="row"><span class="k">Net Salary Payable ( ${netLabel} )</span><span class="v">${fmtInr(netPayable(p))}</span></div>
+    <div class="row"><span class="k">Net Salary in words</span><span class="v">${amountInWords(netPayable(p))}</span></div>
   </div>
 
   <div class="note"><b>**Note :</b> All amounts displayed in this payslip are in <b>INR</b></div>

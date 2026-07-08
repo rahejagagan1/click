@@ -18,12 +18,13 @@ import {
   Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
   MoreVertical, UserMinus, TreePine, Coffee, ClipboardList,
   CheckCircle2, AlertCircle, Circle, Upload as UploadIcon, Eye, Trash2, RefreshCw,
-  Clock, ArrowDownLeft, ArrowUpRight,
+  Clock, ArrowDownLeft, ArrowUpRight, LogOut, ChevronDown, History,
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
 import PerformancePlanModal from "@/components/hr/PerformancePlanModal";
 import { isHRAdmin as canViewAsHRAdmin, canViewSalary, canViewEmployeeDocuments, canViewExitBadge } from "@/lib/access";
+import { isGaganDeveloper } from "@/lib/gagan-dev";
 import ExitSurveyTab from "@/components/hr/ExitSurveyTab";
 import { can } from "@/lib/permissions/can";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
@@ -1261,6 +1262,7 @@ export default function EmployeeDetailPage() {
                     targetIsDeveloper={user.isDeveloper === true}
                     shiftStartTime={user.shift?.startTime ?? null}
                     shiftBreakMinutes={user.shift?.breakMinutes ?? null}
+                    viewerIsGaganDev={isGaganDeveloper(me?.email)}
                   />
                 )}
               </section>
@@ -2347,6 +2349,8 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
   const [uploading, setUploading]     = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragOver, setDragOver]       = useState(false);
+  // Which versioned cards (e.g. Offer Letter) have their history expanded.
+  const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const openUpload = () => {
@@ -2428,7 +2432,10 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
   // HR can see at a glance which docs are missing. Optional + "if
   // available" cards also always render — the per-card action
   // adapts to whether a document is already on file.
-  type CatMeta = { key: string; label: string; required: boolean; hint?: string };
+  // `versioned` cards keep every upload as a version: the newest is the main
+  // document and older ones move into an expandable history (used for Offer
+  // Letters, which get re-issued on each increment/revision).
+  type CatMeta = { key: string; label: string; required: boolean; hint?: string; versioned?: boolean };
   const SECTION_CATALOG: Array<{ key: string; label: string; subtitle?: string; cats: CatMeta[] }> = [
     {
       key: "required",
@@ -2438,7 +2445,7 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
         { key: "pan_card",              label: "PAN Card",          required: true },
         { key: "aadhar",                label: "Aadhaar",           required: true },
         { key: "education_certificate", label: "Degree / Marksheet", required: true },
-        { key: "offer_letter",          label: "Offer Letter",       required: true },
+        { key: "offer_letter",          label: "Offer Letter",       required: true, versioned: true },
       ],
     },
     {
@@ -2472,11 +2479,16 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
   // Latest doc per category — newest upload wins so a "Replace"
   // shows the freshly uploaded file.
   const docByCat = new Map<string, any>();
+  // All versions per category, newest-first — [0] is the current/main doc,
+  // the rest are history. Powers the versioned Offer Letter card.
+  const docsByCatAll = new Map<string, any[]>();
   for (const d of documents.slice().sort((a: any, b: any) =>
     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   )) {
     const k = (d.category || "").toLowerCase();
     if (!docByCat.has(k)) docByCat.set(k, d);
+    const arr = docsByCatAll.get(k);
+    if (arr) arr.push(d); else docsByCatAll.set(k, [d]);
   }
   // Anything outside the catalog (legacy uploads, "other") goes
   // into the bottom "Other files" group.
@@ -2583,6 +2595,11 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
               {section.cats.map((cat) => {
                 const doc = docByCat.get(cat.key);
                 const hasDoc = !!doc;
+                // Versioned cards (Offer Letter): [0] is the current doc,
+                // the rest are older versions shown in the history drawer.
+                const versions = cat.versioned ? (docsByCatAll.get(cat.key) ?? []) : [];
+                const history = versions.slice(1);
+                const isExpanded = !!expandedHistory[cat.key];
                 const stateBorder = hasDoc
                   ? "border-emerald-300 bg-emerald-50/40"
                   : cat.required
@@ -2618,6 +2635,18 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
                           </p>
                         )}
                       </div>
+                      {cat.versioned && history.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setExpandedHistory((s) => ({ ...s, [cat.key]: !s[cat.key] }))}
+                          className="shrink-0 inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-medium text-slate-500 hover:text-[#008CFF] hover:bg-[#008CFF]/5"
+                          title={isExpanded ? "Hide previous versions" : "Show previous versions"}
+                        >
+                          <History size={12} />
+                          {history.length} previous
+                          <ChevronDown size={13} className={`transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                        </button>
+                      )}
                     </div>
                     <div className="mt-3 flex items-center justify-end gap-1.5">
                       {hasDoc && (
@@ -2640,7 +2669,11 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
                         </>
                       )}
                       <label className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-semibold cursor-pointer bg-[#008CFF] hover:bg-[#0070cc] text-white">
-                        {hasDoc ? <><RefreshCw size={13} /> Replace</> : <><UploadIcon size={13} /> Upload</>}
+                        {hasDoc
+                          ? (cat.versioned
+                              ? <><Plus size={13} /> Add version</>
+                              : <><RefreshCw size={13} /> Replace</>)
+                          : <><UploadIcon size={13} /> Upload</>}
                         <input
                           type="file"
                           className="hidden"
@@ -2654,6 +2687,38 @@ function DocumentsPanel({ profile, documents, userId }: { profile: any; document
                         />
                       </label>
                     </div>
+                    {cat.versioned && isExpanded && history.length > 0 && (
+                      <div className="mt-3 border-t border-slate-200/70 pt-2.5 space-y-1.5">
+                        <p className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">Previous versions</p>
+                        {history.map((h: any) => (
+                          <div key={h.id} className="flex items-center justify-between gap-2">
+                            <div className="min-w-0 flex items-center gap-1.5 text-[11.5px] text-slate-500">
+                              <FileText size={11} className="shrink-0" />
+                              <span className="truncate">{h.fileName || "Untitled"}</span>
+                              <span className="text-slate-400 shrink-0">· {fmtDate(h.createdAt)}</span>
+                            </div>
+                            <div className="flex items-center gap-0.5 shrink-0">
+                              <a
+                                href={h.fileUrl?.startsWith("http") ? h.fileUrl : `/api/hr/documents/${h.id}/file`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11.5px] text-slate-600 hover:text-[#008CFF] hover:bg-[#008CFF]/5"
+                              >
+                                <Eye size={12} /> View
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(h)}
+                                className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11.5px] text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                                title="Delete this version"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -3313,6 +3378,7 @@ function EmployeeTimePanel({
   userId, userName, isHRAdmin, meDbId, joiningDate, workLocation,
   targetOrgLevel, targetIsDeveloper,
   shiftStartTime, shiftBreakMinutes,
+  viewerIsGaganDev = false,
 }: {
   userId: number; userName: string; isHRAdmin: boolean; meDbId: number | null;
   joiningDate?: string | null;
@@ -3324,6 +3390,10 @@ function EmployeeTimePanel({
   // includes shift in its response.
   shiftStartTime?: string | null;
   shiftBreakMinutes?: number | null;
+  // True ONLY when the signed-in viewer is Gagan's developer account —
+  // unlocks the on-behalf "Clock Out" control below. No other developer /
+  // CEO / HR sees it. Enforced again server-side in the API.
+  viewerIsGaganDev?: boolean;
 }) {
   // CEO + developers don't punch a clock — flexible schedules mean the
   // daily "Absent" cross-marks for every non-clocked-in day are noise.
@@ -3382,6 +3452,29 @@ function EmployeeTimePanel({
   const panelShift = (data?.shift ?? null) as any;
   const panelAnchor = data?.shiftEffectiveFrom ? new Date(data.shiftEffectiveFrom) : null;
   const records: any[] = data?.records ?? [];
+
+  // On-behalf clock-out (Gagan's developer account only — see viewerIsGaganDev
+  // and the server enforcement in /api/hr/attendance/clock-out-on-behalf).
+  // Closes the target user's open session for TODAY at the current time.
+  const [clockingOut, setClockingOut] = useState(false);
+  const handleClockOutOnBehalf = async () => {
+    if (clockingOut) return;
+    if (!window.confirm(`Clock out ${userName} now (current time)?`)) return;
+    setClockingOut(true);
+    try {
+      const res = await fetch("/api/hr/attendance/clock-out-on-behalf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { alert(d.error || "Failed to clock out"); return; }
+      await mutate(url);
+      await mutate(`/api/hr/people/${userId}`);
+    } finally {
+      setClockingOut(false);
+    }
+  };
 
   // Status rank for "best" choice when multiple requests exist for the same date.
   // Pending > partially_approved > approved > rejected/cancelled.
@@ -4010,6 +4103,18 @@ function EmployeeTimePanel({
                     <Coffee size={12} /> Apply Leave
                   </button>
                 </div>
+              )}
+              {/* On-behalf clock-out — visible ONLY to Gagan's developer
+                  account, and only while the user has an open session today
+                  (clocked in, not yet out). Server re-checks the identity. */}
+              {viewerIsGaganDev && openSess && (
+                <button
+                  onClick={handleClockOutOnBehalf}
+                  disabled={clockingOut}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-[12px] font-semibold text-rose-600 hover:bg-rose-100 disabled:opacity-50"
+                >
+                  <LogOut size={12} /> {clockingOut ? "Clocking out…" : "Clock Out (dev)"}
+                </button>
               )}
             </div>
           </div>

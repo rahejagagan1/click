@@ -10,6 +10,8 @@ export const dynamic = 'force-dynamic';
 import { serializeBigInt } from "@/lib/utils";
 import { resolveTeamCapsuleForSave } from "@/lib/capsule-matching";
 import { isDeveloperEmail } from "@/lib/hr/notification-policy";
+import { regularSplit } from "@/lib/hr/salary-split";
+import { probationWindow } from "@/lib/hr/probation";
 
 // CEO + developer only — used for destructive actions (DELETE).
 // Onboarding employees is gated separately by `canCreateUsers` so HR
@@ -360,9 +362,23 @@ export async function POST(request: NextRequest) {
                     uanNumber:               profile.uanNumber               ?? null,
                     biometricId:             profile.biometricId             ?? null,
                 };
+                // Auto-probation: every new hire starts on a 3-month probation
+                // from their joining date (HR can extend later). Only applied
+                // when the profile is NEW — re-saving an existing employee must
+                // never reset their probation clock.
+                const probationCreate = !existingProfile
+                    ? (() => {
+                        const w = probationWindow(profile.joiningDate ? new Date(profile.joiningDate) : null);
+                        return {
+                            probationStartDate: w.start,
+                            probationEndDate:   w.end,
+                            probationPolicy:    profile.probationPolicy ?? "Regular Employees",
+                        };
+                    })()
+                    : {};
                 await tx.employeeProfile.upsert({
                     where:  { userId: created.id },
-                    create: { userId: created.id, ...profileData },
+                    create: { userId: created.id, ...profileData, ...probationCreate },
                     update: profileData,
                 });
             }
@@ -427,32 +443,38 @@ export async function POST(request: NextRequest) {
                     ? new Date(compensation.effectiveFrom)
                     : new Date();
                 const isIntern = compensation.salaryType === "intern";
-                const monthly  = isIntern
-                    ? Number(compensation.monthlyBasic) || 0
-                    : (Number(compensation.annualCtc) || 0) / 12;
-                const ctc      = isIntern ? monthly * 12 : (Number(compensation.annualCtc) || 0);
-                // Interns get a flat stipend → only `basic` is meaningful.
-                const basic    = isIntern ? monthly : Math.round(monthly * 0.5);
-                const hra      = isIntern ? 0 : Math.round(monthly * 0.2);
                 const pfElig   = !isIntern && !!compensation.pfEligible;
-                const pfEmp    = pfElig ? Math.min(Math.round(basic * 0.12), 1800) : 0;
-                const da       = isIntern ? 0 : Math.round(monthly * 0.10);
-                const conv     = isIntern ? 0 : Math.round(monthly * 0.075);
-                const med      = isIntern ? 0 : 1250;
-                const consumed = basic + hra + da + conv + med + pfEmp;
-                const special  = isIntern ? 0 : Math.max(0, Math.round(monthly) - consumed);
-                // Typed fields first (those the generated Prisma client knows
-                // about). The 6 new columns we just added live in the DB but
-                // not in the cached client until `prisma generate` reruns —
-                // we patch them via raw SQL right after, so the dev server
-                // doesn't need a restart.
+                // ALL component amounts are stored ANNUAL (the payslip divides
+                // by 12 at display). This mirrors the HR salary form exactly —
+                // both use regularSplit() from lib/hr/salary-split so the two
+                // paths can't drift. (They used to: this path computed the split
+                // off the MONTHLY figure and dropped DA/Conveyance/Medical on
+                // save, giving API-onboarded hires 1/12-scale components with
+                // three heads at 0. See HRM161 Harman Singh.)
+                let ctc: number, basic: number, hra: number, da: number, conv: number,
+                    med: number, special: number, pfEmp: number, pfEmpr: number;
+                if (isIntern) {
+                    // Flat stipend, stored ANNUAL (stipend × 12) like the form;
+                    // no allowance split, no PF.
+                    const stipend = Number(compensation.monthlyBasic) || 0;
+                    ctc = stipend * 12; basic = stipend * 12;
+                    hra = 0; da = 0; conv = 0; med = 0; special = 0; pfEmp = 0; pfEmpr = 0;
+                } else {
+                    ctc = Number(compensation.annualCtc) || 0;
+                    const s = regularSplit(ctc, pfElig);
+                    basic = s.basic; hra = s.hra; da = s.da; conv = s.conv;
+                    med = s.medical; special = s.special; pfEmp = s.pfEmp; pfEmpr = s.pfEmpr;
+                }
                 const typedData = {
                     ctc,
                     basic,
                     hra,
-                    specialAllowance: special,
+                    dearnessAllowance:   da,
+                    conveyanceAllowance: conv,
+                    medicalAllowance:    med,
+                    specialAllowance:    special,
                     pfEmployee:    pfEmp,
-                    pfEmployer:    pfEmp,
+                    pfEmployer:    pfEmpr,
                     esiEmployee:   0,
                     esiEmployer:   0,
                     tds:           0,

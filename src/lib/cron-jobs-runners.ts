@@ -10,6 +10,7 @@ import { runYoutubeDashboardSync } from "@/lib/youtube/yt-dashboard-sync";
 import { sendViolationInProgressReminders, sendViolationFollowUpReminders } from "@/lib/hr/violation-reminders";
 import { sendProbationEndingReminders } from "@/lib/hr/probation-reminders";
 import { sweepProbationManagerNotifications } from "@/lib/hr/probation-review";
+import { applyMissingProbationWindows } from "@/lib/hr/probation-autoassign";
 import { sendPipEndingReminders } from "@/lib/hr/pip-reminders";
 import { sendExitSurveyReminders } from "@/lib/hr/exit-survey-reminders";
 import { sendLastWorkingDayReminders } from "@/lib/hr/last-working-day-reminders";
@@ -48,6 +49,12 @@ export const CRON_JOB_RUNNERS: Record<CronJobId, () => Promise<void>> = {
     await sendViolationFollowUpReminders();
   },
   probation_reminders: async () => {
+    // First self-heal: auto-put any eligible new joiner on probation who
+    // slipped past the onboarding auto-set (added via another route, seeded,
+    // or joining date filled in later). Then run the reminder + manager sweep.
+    // Each step is isolated + idempotent so one failing never gates the rest.
+    try { await applyMissingProbationWindows(); }
+    catch (e) { console.error("[probation] auto-assign sweep failed", e); }
     // Isolate the two halves — both are independently idempotent, so an
     // email-side failure shouldn't gate the in-app manager-review nudge.
     try { await sendProbationEndingReminders(); }
