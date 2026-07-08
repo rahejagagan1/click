@@ -243,7 +243,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         : null,
       activeExit,
     };
-    return NextResponse.json(serializeBigInt(payload));
+    // Never cache this employee payload (it's PII and changes on every
+    // document add/delete, profile edit, etc.). Without this, a browser or
+    // upstream proxy can serve a stale copy to SWR's revalidation, so changes
+    // only appear after a hard refresh. no-store makes the mutate() after an
+    // upload/delete fetch fresh data and the UI update on its own.
+    return NextResponse.json(serializeBigInt(payload), {
+      headers: { "Cache-Control": "no-store, must-revalidate" },
+    });
   } catch (e) {
     return serverError(e, "GET /api/hr/people/[id]");
   }
