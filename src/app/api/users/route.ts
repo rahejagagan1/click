@@ -11,6 +11,7 @@ import { serializeBigInt } from "@/lib/utils";
 import { resolveTeamCapsuleForSave } from "@/lib/capsule-matching";
 import { isDeveloperEmail } from "@/lib/hr/notification-policy";
 import { regularSplit } from "@/lib/hr/salary-split";
+import { probationWindow } from "@/lib/hr/probation";
 
 // CEO + developer only — used for destructive actions (DELETE).
 // Onboarding employees is gated separately by `canCreateUsers` so HR
@@ -361,9 +362,23 @@ export async function POST(request: NextRequest) {
                     uanNumber:               profile.uanNumber               ?? null,
                     biometricId:             profile.biometricId             ?? null,
                 };
+                // Auto-probation: every new hire starts on a 3-month probation
+                // from their joining date (HR can extend later). Only applied
+                // when the profile is NEW — re-saving an existing employee must
+                // never reset their probation clock.
+                const probationCreate = !existingProfile
+                    ? (() => {
+                        const w = probationWindow(profile.joiningDate ? new Date(profile.joiningDate) : null);
+                        return {
+                            probationStartDate: w.start,
+                            probationEndDate:   w.end,
+                            probationPolicy:    profile.probationPolicy ?? "Regular Employees",
+                        };
+                    })()
+                    : {};
                 await tx.employeeProfile.upsert({
                     where:  { userId: created.id },
-                    create: { userId: created.id, ...profileData },
+                    create: { userId: created.id, ...profileData, ...probationCreate },
                     update: profileData,
                 });
             }

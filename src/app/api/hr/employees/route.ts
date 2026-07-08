@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, requireHRAdmin, isHRAdmin, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
 import { isDeveloperEmail } from "@/lib/hr/notification-policy";
+import { probationWindow } from "@/lib/hr/probation";
 
 // GET /api/hr/employees — list all employees with profiles
 export async function GET(req: NextRequest) {
@@ -243,6 +244,10 @@ export async function POST(req: NextRequest) {
         update: { name: String(displayName).trim() },
       });
 
+      // Auto-probation: every new hire starts on a 3-month probation from
+      // their joining date (falls back to today when the quick-add form
+      // doesn't collect one). HR can extend it later.
+      const pw = probationWindow(body?.joiningDate ? new Date(body.joiningDate) : null);
       const profile = await tx.employeeProfile.create({
         data: {
           userId: user.id,
@@ -256,7 +261,11 @@ export async function POST(req: NextRequest) {
           gender: String(gender),
           dateOfBirth: dob,
           phone: String(mobileNumber).trim(),
-        },
+          joiningDate: body?.joiningDate ? new Date(body.joiningDate) : null,
+          probationStartDate: pw.start,
+          probationEndDate: pw.end,
+          probationPolicy: "Regular Employees",
+        } as any,
       });
 
       return { user, profile };
