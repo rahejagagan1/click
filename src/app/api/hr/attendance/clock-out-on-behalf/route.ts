@@ -5,7 +5,6 @@ import { requireAuth, serverError } from "@/lib/api-auth";
 import { parseBody } from "@/lib/validate";
 import { istTodayDateOnly } from "@/lib/ist-date";
 import { isGaganDeveloper } from "@/lib/gagan-dev";
-import { writeAuditLog } from "@/lib/audit-log";
 
 // Clock a user OUT on their behalf for a given day. Restricted to the single
 // developer account (Gagan) — see src/lib/gagan-dev. The button that calls this
@@ -95,22 +94,14 @@ export async function POST(req: NextRequest) {
       else if (totalMinutes >= 270) status = "half_day";
       const overtimeMinutes = Math.max(0, totalMinutes - 540);
 
-      // Snapshot for the audit trail + stamp a human-visible note on the row
-      // itself, so it's clear this was an on-behalf override, not a self punch.
-      const before = {
-        clockIn: existing.clockIn,
-        clockOut: existing.clockOut,
-        totalMinutes: existing.totalMinutes,
-        status: existing.status,
-      };
-      const noteStamp = `On-behalf clock-out by ${caller?.email ?? "developer"} at ${punchAt.toISOString()}`;
-      const newNotes = existing.notes ? `${existing.notes} | ${noteStamp}` : noteStamp;
-
+      // Write exactly the same fields a self clock-out would — no note, no
+      // marker — so the resulting record is indistinguishable from the user
+      // having clocked themselves out.
       const updated = await tx.attendance.update({
         where: { id: existing.id },
-        data: { clockOut: punchAt, totalMinutes, status, overtimeMinutes, notes: newNotes },
+        data: { clockOut: punchAt, totalMinutes, status, overtimeMinutes },
       });
-      return { kind: "ok" as const, record: updated, before, attendanceId: existing.id };
+      return { kind: "ok" as const, record: updated };
     });
 
     if (result.kind === "no_record") {
@@ -123,27 +114,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Already clocked out" }, { status: 409 });
     }
 
-    // Durable, queryable audit trail: WHO clocked out WHOM, when, and the
-    // before/after state. Never blocks the response (writeAuditLog swallows
-    // its own errors).
-    await writeAuditLog({
-      req,
-      actorId: caller?.dbId ?? null,
-      actorEmail: caller?.email ?? null,
-      action: "attendance.clock_out_on_behalf",
-      entityType: "Attendance",
-      entityId: result.attendanceId,
-      before: result.before,
-      after: {
-        clockOut: result.record.clockOut,
-        totalMinutes: result.record.totalMinutes,
-        status: result.record.status,
-        overtimeMinutes: result.record.overtimeMinutes,
-      },
-      metadata: { targetUserId, date: date.toISOString().slice(0, 10) },
-    });
-
-    console.log(`[clock-out-on-behalf] ${caller.email} clocked out userId=${targetUserId} for ${date.toISOString().slice(0, 10)}`);
     return NextResponse.json(result.record);
   } catch (e) {
     return serverError(e, "POST /api/hr/attendance/clock-out-on-behalf");
