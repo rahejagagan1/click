@@ -18,12 +18,13 @@ import {
   Users as UsersIcon, Home, Search, User as UserIcon, ShieldCheck, X, Plus, Pencil,
   MoreVertical, UserMinus, TreePine, Coffee, ClipboardList,
   CheckCircle2, AlertCircle, Circle, Upload as UploadIcon, Eye, Trash2, RefreshCw,
-  Clock, ArrowDownLeft, ArrowUpRight,
+  Clock, ArrowDownLeft, ArrowUpRight, LogOut,
 } from "lucide-react";
 import { DatePicker as SharedDatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
 import PerformancePlanModal from "@/components/hr/PerformancePlanModal";
 import { isHRAdmin as canViewAsHRAdmin, canViewSalary, canViewEmployeeDocuments, canViewExitBadge } from "@/lib/access";
+import { isGaganDeveloper } from "@/lib/gagan-dev";
 import ExitSurveyTab from "@/components/hr/ExitSurveyTab";
 import { can } from "@/lib/permissions/can";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
@@ -1261,6 +1262,7 @@ export default function EmployeeDetailPage() {
                     targetIsDeveloper={user.isDeveloper === true}
                     shiftStartTime={user.shift?.startTime ?? null}
                     shiftBreakMinutes={user.shift?.breakMinutes ?? null}
+                    viewerIsGaganDev={isGaganDeveloper(me?.email)}
                   />
                 )}
               </section>
@@ -3313,6 +3315,7 @@ function EmployeeTimePanel({
   userId, userName, isHRAdmin, meDbId, joiningDate, workLocation,
   targetOrgLevel, targetIsDeveloper,
   shiftStartTime, shiftBreakMinutes,
+  viewerIsGaganDev = false,
 }: {
   userId: number; userName: string; isHRAdmin: boolean; meDbId: number | null;
   joiningDate?: string | null;
@@ -3324,6 +3327,10 @@ function EmployeeTimePanel({
   // includes shift in its response.
   shiftStartTime?: string | null;
   shiftBreakMinutes?: number | null;
+  // True ONLY when the signed-in viewer is Gagan's developer account —
+  // unlocks the on-behalf "Clock Out" control below. No other developer /
+  // CEO / HR sees it. Enforced again server-side in the API.
+  viewerIsGaganDev?: boolean;
 }) {
   // CEO + developers don't punch a clock — flexible schedules mean the
   // daily "Absent" cross-marks for every non-clocked-in day are noise.
@@ -3382,6 +3389,29 @@ function EmployeeTimePanel({
   const panelShift = (data?.shift ?? null) as any;
   const panelAnchor = data?.shiftEffectiveFrom ? new Date(data.shiftEffectiveFrom) : null;
   const records: any[] = data?.records ?? [];
+
+  // On-behalf clock-out (Gagan's developer account only — see viewerIsGaganDev
+  // and the server enforcement in /api/hr/attendance/clock-out-on-behalf).
+  // Closes the target user's open session for TODAY at the current time.
+  const [clockingOut, setClockingOut] = useState(false);
+  const handleClockOutOnBehalf = async () => {
+    if (clockingOut) return;
+    if (!window.confirm(`Clock out ${userName} now (current time)?`)) return;
+    setClockingOut(true);
+    try {
+      const res = await fetch("/api/hr/attendance/clock-out-on-behalf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { alert(d.error || "Failed to clock out"); return; }
+      await mutate(url);
+      await mutate(`/api/hr/people/${userId}`);
+    } finally {
+      setClockingOut(false);
+    }
+  };
 
   // Status rank for "best" choice when multiple requests exist for the same date.
   // Pending > partially_approved > approved > rejected/cancelled.
@@ -4010,6 +4040,18 @@ function EmployeeTimePanel({
                     <Coffee size={12} /> Apply Leave
                   </button>
                 </div>
+              )}
+              {/* On-behalf clock-out — visible ONLY to Gagan's developer
+                  account, and only while the user has an open session today
+                  (clocked in, not yet out). Server re-checks the identity. */}
+              {viewerIsGaganDev && openSess && (
+                <button
+                  onClick={handleClockOutOnBehalf}
+                  disabled={clockingOut}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-[12px] font-semibold text-rose-600 hover:bg-rose-100 disabled:opacity-50"
+                >
+                  <LogOut size={12} /> {clockingOut ? "Clocking out…" : "Clock Out (dev)"}
+                </button>
               )}
             </div>
           </div>
