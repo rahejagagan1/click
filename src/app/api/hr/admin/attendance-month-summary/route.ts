@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
     if (!scope.allBrands && !scope.brand) {
       return NextResponse.json({ users: [], workingDays, workingDaysElapsed, weekendDays, holidayDays, daysInMonth });
     }
-    const users = await prisma.user.findMany({
+    const usersRaw = await prisma.user.findMany({
       where: {
         isActive: true,
         ...(scope.allBrands ? {} : { employeeProfile: { businessUnit: scope.brand! } }),
@@ -80,6 +80,15 @@ export async function GET(req: NextRequest) {
         employeeProfile: { select: { department: true, designation: true, employeeId: true } },
       },
     });
+    // Exclude employees who exited BEFORE this month (last working day earlier
+    // than the 1st) — they have no attendance to show. Someone who exited
+    // during/after the month still worked part of it, so they remain listed.
+    const exitedRows = await prisma.employeeExit.findMany({
+      where: { lastWorkingDay: { lt: fromDate } },
+      select: { userId: true },
+    });
+    const exitedIds = new Set(exitedRows.map((e) => e.userId));
+    const users = usersRaw.filter((u) => !exitedIds.has(u.id));
 
     const att = await prisma.attendance.findMany({
       where: { date: { gte: fromDate, lt: toDate } },
