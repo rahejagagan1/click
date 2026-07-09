@@ -168,6 +168,10 @@ async function addEmployeesSheet(wb: ExcelJS.Workbook, brand: BrandFilter, statu
     include: {
       employeeProfile: true,
       manager: { select: { name: true } },
+      // RBAC designation (source of truth) — its label drives the Designation
+      // column, falling back to the profile's free-text title only when a user
+      // has no designationId assigned.
+      designation: { select: { label: true } },
     },
   });
   const ws = wb.addWorksheet("Employees");
@@ -182,8 +186,6 @@ async function addEmployeesSheet(wb: ExcelJS.Workbook, brand: BrandFilter, statu
     { header: "Employment Type", key: "etype",     width: 14 },
     { header: "Joining Date",   key: "jd",         width: 14 },
     { header: "Manager",        key: "mgr",        width: 22 },
-    { header: "Role",           key: "role",       width: 16 },
-    { header: "Org Level",      key: "orglevel",   width: 16 },
     { header: "Business Unit",  key: "bu",         width: 14 },
     { header: "Cost Center",    key: "cc",         width: 14 },
     { header: "Legal Entity",   key: "le",         width: 22 },
@@ -199,10 +201,9 @@ async function addEmployeesSheet(wb: ExcelJS.Workbook, brand: BrandFilter, statu
     ws.addRow({
       hrm: p?.employeeId, name: u.name, email: u.email,
       pmail: p?.personalEmail ?? "", phone: p?.phone ?? "",
-      dept: p?.department ?? "", desig: p?.designation ?? "",
+      dept: p?.department ?? "", desig: u.designation?.label ?? p?.designation ?? "",
       etype: p?.employmentType === "intern" ? "Intern" : "Regular Employee",
       jd: fmtDate(p?.joiningDate as any), mgr: u.manager?.name ?? "",
-      role: u.role, orglevel: u.orgLevel,
       bu: p?.businessUnit ?? "", cc: p?.costCenter ?? "",
       le: p?.legalEntity ?? "", jl: p?.jobLocation ?? "",
       wl: p?.workLocation ?? "", dob: fmtDate(p?.dateOfBirth as any),
