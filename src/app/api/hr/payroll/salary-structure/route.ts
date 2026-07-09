@@ -57,7 +57,13 @@ export async function GET(req: NextRequest) {
       where: { userId },
       include: { user: { select: { id: true, name: true, email: true } } },
     });
-    return NextResponse.json(structure || null);
+    // Never cache: it's salary PII AND it changes the moment HR sets/updates a
+    // structure. Without this a browser/proxy can serve a stale copy — e.g. a
+    // `null` cached before the structure was created keeps the profile's salary
+    // section blank even after the salary is saved (until a hard refresh).
+    return NextResponse.json(structure || null, {
+      headers: { "Cache-Control": "no-store, must-revalidate" },
+    });
   } catch (e) { return serverError(e, "GET /api/hr/payroll/salary-structure"); }
 }
 
