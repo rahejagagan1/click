@@ -111,6 +111,7 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const {
             name, email: rawEmail, role, orgLevel, clickupUserId, teamCapsule, managerId,
+            designationId,              // optional RBAC Designation link (drives job title / perms)
             inlineManagerId,            // optional secondary / dotted-line manager
             inviteToLogin,              // boolean: if true, email a welcome / sign-in link
             enableOnboarding,           // boolean: if true, gate first login behind /onboarding
@@ -223,6 +224,25 @@ export async function POST(request: NextRequest) {
                         leavePolicyId: leavePolicyId == null || leavePolicyId === "" ? null : Number(leavePolicyId),
                     },
                 });
+            }
+
+            // RBAC designation link — raw SQL (typed client may lag on the
+            // column). Keeps the displayed job-title designation in sync with
+            // the chosen Designation's label, mirroring the People PUT route.
+            if (designationId !== undefined) {
+                const did = designationId === null || designationId === "" ? null : Number(designationId);
+                await tx.$executeRawUnsafe(
+                    `UPDATE "User" SET "designationId" = $1 WHERE id = $2`,
+                    did, created.id,
+                );
+                if (did != null && profile && typeof profile === "object") {
+                    try {
+                        const drow = await tx.$queryRawUnsafe<Array<{ label: string }>>(
+                            `SELECT "label" FROM "Designation" WHERE id = $1`, did,
+                        );
+                        if (drow[0]?.label) (profile as any).designation = drow[0].label;
+                    } catch { /* Designation table missing → keep the sent label */ }
+                }
             }
 
             // Mark new hire for first-login wizard if HR opted in. Done via
