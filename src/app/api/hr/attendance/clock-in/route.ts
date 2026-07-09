@@ -51,6 +51,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
+    // Exited employees can't clock in. Once the last working day has passed
+    // the person is off the books for attendance (their account stays alive
+    // so they can still view their F&F payslip). LWD === today still allows a
+    // clock-in on their final day.
+    const exitRec = await prisma.employeeExit.findUnique({
+      where: { userId },
+      select: { lastWorkingDay: true },
+    });
+    if (exitRec && new Date(exitRec.lastWorkingDay) < istTodayDateOnly()) {
+      logDeny(req, userId, "exited", { lwd: exitRec.lastWorkingDay });
+      return NextResponse.json(
+        { error: "You have exited the organisation and can no longer clock in." },
+        { status: 403 },
+      );
+    }
+
     // Mobile guard. Default policy: clock-in is desktop / laptop only —
     // we don't want people clocking in from their phone in the car.
     // Exception: when the user has an On-Duty for today (in ANY status

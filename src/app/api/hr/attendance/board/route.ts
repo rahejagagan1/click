@@ -24,11 +24,20 @@ export async function GET() {
       },
       orderBy: { name: "asc" },
     });
+    // Exclude anyone whose last working day has passed — they've exited and
+    // fall off the attendance board (their account stays for payslip access).
+    const exitedRows = await prisma.employeeExit.findMany({
+      where: { lastWorkingDay: { lt: today } },
+      select: { userId: true },
+    });
+    const exitedIds = new Set(exitedRows.map((e) => e.userId));
+
     // Filter out attendance-disabled users (CEO + developers default OFF;
     // HR can override via the toggles page). They don't appear on the
     // home page's attendance lists or in the counts.
     const policies = await getPoliciesByUser(allActive.map((u) => u.id));
-    const allUsers = allActive.filter((u) => policies.get(u.id)?.attendanceEnabled !== false);
+    const allUsers = allActive.filter((u) =>
+      policies.get(u.id)?.attendanceEnabled !== false && !exitedIds.has(u.id));
 
     const todayRecords = await prisma.attendance.findMany({
       where: { date: today },
