@@ -31,6 +31,13 @@ const BRAND_OPTIONS: Array<{ value: BrandScope; label: string }> = [
   { value: "yt-labs",  label: "YT Labs only" },
 ];
 
+type StatusScope = "active" | "exited" | "all";
+const STATUS_OPTIONS: Array<{ value: StatusScope; label: string }> = [
+  { value: "active", label: "Active employees only" },
+  { value: "exited", label: "Exited employees only" },
+  { value: "all",    label: "All (active + exited)" },
+];
+
 type SheetKey = "employees" | "attendance" | "leaves" | "requests";
 
 const SHEETS: Array<{
@@ -75,6 +82,9 @@ export default function MasterSheetPage() {
          : raw === "nb-media" || raw === "nb"     ? "nb-media"
          : "all";
   });
+  // Employee status — default "active" so exited employees are excluded from
+  // the export unless HR deliberately asks for them (or "all").
+  const [empStatus, setEmpStatus] = useState<StatusScope>("active");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>("");
 
@@ -115,6 +125,8 @@ export default function MasterSheetPage() {
       // Only send `brand=` when narrowing — keeps the URL clean for
       // "all" exports and matches the API's "missing = all" default.
       if (brand !== "all") qs.set("brand", brand);
+      // Default (active) matches the API's default, so only send when narrowing.
+      if (empStatus !== "active") qs.set("status", empStatus);
       // Stream straight from the server — fetch+blob keeps us inside
       // the SPA shell so the error path can show an inline message
       // rather than navigating to a JSON error page.
@@ -128,7 +140,8 @@ export default function MasterSheetPage() {
       const a = document.createElement("a");
       a.href = url;
       const brandSlug = brand === "all" ? "all-brands" : brand;
-      a.download = `master-sheet-${brandSlug}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const statusSlug = empStatus === "active" ? "" : `-${empStatus}`;
+      a.download = `master-sheet-${brandSlug}${statusSlug}-${new Date().toISOString().slice(0, 10)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -237,6 +250,37 @@ export default function MasterSheetPage() {
                   key={o.value}
                   type="button"
                   onClick={() => setBrand(o.value)}
+                  className={`text-left rounded-lg border px-4 py-3 transition-colors text-[12.5px] font-semibold ${
+                    on
+                      ? "border-[#008CFF] bg-[#008CFF]/[0.08] text-[#008CFF]"
+                      : "border-slate-200 dark:border-white/[0.06] bg-white dark:bg-white/[0.02] text-slate-700 dark:text-slate-300 hover:border-slate-300"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Employee status — Active (default) excludes anyone who has exited;
+            Exited exports only past employees; All includes both. Exited =
+            deactivated OR last-working-day already passed. */}
+        <section className="bg-white dark:bg-[#001529]/80 border border-slate-200 dark:border-white/[0.06] rounded-xl p-5">
+          <h2 className="text-[13px] font-bold text-slate-800 dark:text-white uppercase tracking-wide">
+            Employee status
+          </h2>
+          <p className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
+            Filters every sheet by employment status. <strong>Active</strong> excludes exited employees; pick <strong>Exited</strong> or <strong>All</strong> to include them.
+          </p>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {STATUS_OPTIONS.map((o) => {
+              const on = empStatus === o.value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => setEmpStatus(o.value)}
                   className={`text-left rounded-lg border px-4 py-3 transition-colors text-[12.5px] font-semibold ${
                     on
                       ? "border-[#008CFF] bg-[#008CFF]/[0.08] text-[#008CFF]"
