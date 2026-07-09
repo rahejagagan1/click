@@ -64,6 +64,34 @@ function componentsOf(s: Struct): SalaryComponents {
   };
 }
 
+/** Pick the salary-structure snapshot that was EFFECTIVE for a payroll month —
+ *  the current structure if it was already in force, else the
+ *  SalaryStructureHistory row whose [effectiveFrom, effectiveTo) window covers
+ *  the month. Used so a past payslip's breakdown + Monthly Salary reflect the
+ *  salary that applied THAT month, not a later revision. Representative day =
+ *  the LAST day of the month (so a revision effective next month doesn't leak
+ *  into this one). Pure — pass already-fetched records; returns one of them. */
+export function pickStructureForMonth<T extends { effectiveFrom: Date | string; effectiveTo?: Date | string | null }>(
+  current: T | null,
+  history: T[],
+  year: number,
+  month0: number,
+): T | null {
+  if (!current) return null;
+  const daysInMonth = new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate();
+  const t = Date.UTC(year, month0, daysInMonth); // last day of the payroll month
+  const ms = (v: Date | string) => new Date(v).getTime();
+  let best: T | null = null;
+  let bestFrom = -Infinity;
+  if (ms(current.effectiveFrom) <= t) { best = current; bestFrom = ms(current.effectiveFrom); }
+  for (const h of history) {
+    const from = ms(h.effectiveFrom);
+    const to = h.effectiveTo ? ms(h.effectiveTo) : Infinity;
+    if (from <= t && t < to && from > bestFrom) { best = h; bestFrom = from; }
+  }
+  return best ?? current;
+}
+
 /** Resolve an employee's salary for a payroll month, splitting at any mid-month
  *  effective date. Returns blended monthly earnings + component breakdown
  *  (both PRE-LOP — the caller applies its own LOP factor). */

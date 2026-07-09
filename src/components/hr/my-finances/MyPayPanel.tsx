@@ -688,6 +688,11 @@ function PaySlipsView({ payslips, structure, structureLoading, userId }: { paysl
   }, [monthsInYear, selectedId]);
 
   const active = monthsInYear.find((p: any) => p.id === selectedId) || null;
+  // Month-effective structure for the selected payslip — the API attaches the
+  // structure that applied in the payslip's month (from SalaryStructureHistory
+  // when the current one took effect later), so a past month shows the salary
+  // that applied THEN. Fall back to the current structure prop if absent.
+  const activeStructure = active?.salaryStructure ?? structure;
   const activeBonuses = active ? bonusesForPayslip(active, allBonuses) : [];
   // Stipend-only employees (no PF/TDS/PT/etc.) get no deductions section.
   const activeDeductions = active ? deductionRows(active) : [];
@@ -717,7 +722,7 @@ function PaySlipsView({ payslips, structure, structureLoading, userId }: { paysl
           </div>
           {active && !dataLoading ? (
             <button
-              onClick={() => downloadPayslip(active, structure, profile, activeBonuses, header)}
+              onClick={() => downloadPayslip(active, activeStructure, profile, activeBonuses, header)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sky-300 text-sky-600 hover:bg-sky-50 text-[13px] font-semibold"
             >
               {MONTHS_FULL[active.month]} {active.year} Pay Slip
@@ -817,7 +822,7 @@ function PaySlipsView({ payslips, structure, structureLoading, userId }: { paysl
 
                     <PayslipField label="Bank IFSC"        value={profile?.bankIfsc || "—"} />
                     <PayslipField label="Bank Account"     value={maskedAcct(profile?.bankAccountNumber)} />
-                    <PayslipField label="Monthly Salary"   value={fmtInrWhole(monthlyBaseSalary(active, structure))} />
+                    <PayslipField label="Monthly Salary"   value={fmtInrWhole(monthlyBaseSalary(active, activeStructure))} />
                     <PayslipField label="PAN Number"       value={maskedPan(profile?.panNumber)} />
                   </div>
 
@@ -834,7 +839,7 @@ function PaySlipsView({ payslips, structure, structureLoading, userId }: { paysl
                   <div className="mt-7 grid grid-cols-2">
                     <div className="pr-7 border-r border-slate-200">
                       <p className="text-[13px] font-bold text-slate-800 mb-2.5">EARNINGS</p>
-                      {renderEarnings(active, structure, activeBonuses).map((row) => (
+                      {renderEarnings(active, activeStructure, activeBonuses).map((row) => (
                         <div key={row.label} className="flex justify-between py-1.5 text-[12.5px] text-slate-700">
                           <span>{row.label}</span><span className="tabular-nums">{row.value}</span>
                         </div>

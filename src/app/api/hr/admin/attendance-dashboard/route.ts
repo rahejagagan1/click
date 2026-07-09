@@ -42,11 +42,24 @@ export async function GET() {
         employeeProfile: { select: { department: true, designation: true, employeeId: true, workLocation: true, attendanceCaptureScheme: true, businessUnit: true } },
       },
     });
+    // Exclude anyone whose last working day has already passed — they've
+    // exited and shouldn't appear in attendance, even if their isActive flag
+    // wasn't flipped (e.g. an exit left in "cleared" status). LWD === today
+    // still counts as working (their final day), so only strictly-past LWDs
+    // are dropped. Their account stays alive so they can still see their F&F
+    // payslip; they just fall off the attendance surfaces.
+    const exitedRows = await prisma.employeeExit.findMany({
+      where: { lastWorkingDay: { lt: today } },
+      select: { userId: true },
+    });
+    const exitedIds = new Set(exitedRows.map((e) => e.userId));
+
     // Drop anyone whose Attendance toggle is OFF — they're "off the
     // books" for attendance (CEO + developers default OFF). The whole
     // dashboard, counts and rows, simply pretends they don't exist.
     const policies = await getPoliciesByUser(usersAll.map((u) => u.id));
-    const users = usersAll.filter((u) => policies.get(u.id)?.attendanceEnabled !== false);
+    const users = usersAll.filter((u) =>
+      policies.get(u.id)?.attendanceEnabled !== false && !exitedIds.has(u.id));
 
     const todayRows = await prisma.attendance.findMany({
       where: { date: today },

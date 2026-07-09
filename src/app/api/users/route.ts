@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
+import { requireAuth, serverError } from "@/lib/api-auth";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { sendEmail } from "@/lib/email/sender";
@@ -111,6 +111,7 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const {
             name, email: rawEmail, role, orgLevel, clickupUserId, teamCapsule, managerId,
+            designationId,              // optional RBAC Designation link (drives job title / perms)
             inlineManagerId,            // optional secondary / dotted-line manager
             inviteToLogin,              // boolean: if true, email a welcome / sign-in link
             enableOnboarding,           // boolean: if true, gate first login behind /onboarding
@@ -223,6 +224,25 @@ export async function POST(request: NextRequest) {
                         leavePolicyId: leavePolicyId == null || leavePolicyId === "" ? null : Number(leavePolicyId),
                     },
                 });
+            }
+
+            // RBAC designation link — raw SQL (typed client may lag on the
+            // column). Keeps the displayed job-title designation in sync with
+            // the chosen Designation's label, mirroring the People PUT route.
+            if (designationId !== undefined) {
+                const did = designationId === null || designationId === "" ? null : Number(designationId);
+                await tx.$executeRawUnsafe(
+                    `UPDATE "User" SET "designationId" = $1 WHERE id = $2`,
+                    did, created.id,
+                );
+                if (did != null && profile && typeof profile === "object") {
+                    try {
+                        const drow = await tx.$queryRawUnsafe<Array<{ label: string }>>(
+                            `SELECT "label" FROM "Designation" WHERE id = $1`, did,
+                        );
+                        if (drow[0]?.label) (profile as any).designation = drow[0].label;
+                    } catch { /* Designation table missing → keep the sent label */ }
+                }
             }
 
             // Mark new hire for first-login wizard if HR opted in. Done via
@@ -384,9 +404,18 @@ export async function POST(request: NextRequest) {
             }
 
             if (shiftId) {
+                // Anchor the UserShift at the SHIFT's createdAt, not the default
+                // now(). The alternate-Saturday phase falls back to
+                // UserShift.effectiveFrom when a caller doesn't load the shift's
+                // createdAt (e.g. the leave-day counter), so a new joiner
+                // defaulting to their join date can land out of phase with
+                // everyone else on the shift — wrong Saturdays show as working
+                // only for them (see HRM161/162/164). Using the shift's own
+                // anchor keeps every user on the shift on the same phase.
+                const sh = await tx.shift.findUnique({ where: { id: Number(shiftId) }, select: { createdAt: true } });
                 await tx.userShift.upsert({
                     where:  { userId: created.id },
-                    create: { userId: created.id, shiftId: Number(shiftId) },
+                    create: { userId: created.id, shiftId: Number(shiftId), ...(sh ? { effectiveFrom: sh.createdAt } : {}) },
                     update: { shiftId: Number(shiftId) },
                 });
             }
@@ -433,12 +462,16 @@ export async function POST(request: NextRequest) {
             // We compute breakup components here so they match what the
             // wizard previewed on screen.
             //
-            // Salary policy: only canViewSalary callers (HR Manager, CEO,
-            // developer) may write SalaryStructure. Other HR-admin users
-            // can still create the rest of the user record — they just
-            // skip the compensation block silently. The UI hides the
-            // Compensation step for them, so this is belt-and-braces.
-            if (compensation && typeof compensation === "object" && canViewSalary(session!.user)) {
+            // Salary policy (onboarding exception): ANY authorised onboarder
+            // may save the salary they enter in Step 4 — this POST already
+            // required canCreateUsers to get here, so if they're trusted to
+            // onboard the employee they're trusted to record the salary they
+            // just typed. This means an entered Step 4 salary is NEVER silently
+            // dropped. Scoped to ONBOARDING ONLY: seeing or editing salary
+            // anywhere else in the app (Finances tab, profile Compensation
+            // panel, payroll) still requires canViewSalary — the salary-
+            // structure POST behind those surfaces keeps its own gate.
+            if (compensation && typeof compensation === "object") {
                 const effectiveFrom = compensation.effectiveFrom
                     ? new Date(compensation.effectiveFrom)
                     : new Date();
