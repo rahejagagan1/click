@@ -95,12 +95,17 @@ const fmtMins = (m: number | null | undefined) => {
 
 type BrandFilter = "NB Media" | "YT Labs" | null;
 
-// Developers are never included in the export — they're platform accounts, not
-// real employees. Identified by DEVELOPER_EMAILS (same source the session uses
-// for isDeveloper). Emails are normalised to lowercase in the DB, so a
-// lowercase `notIn` reliably drops them from every sheet.
-const DEV_EMAILS = (process.env.DEVELOPER_EMAILS || "")
-  .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+// Developers / platform accounts are never included in the export — they're not
+// real employees. Sources: DEVELOPER_EMAILS (same list the session uses for
+// isDeveloper) plus a few built-in non-employee accounts that aren't in that env
+// (e.g. the "Dev Admin" account). Matched by EXACT lowercase email, so a real
+// employee whose email merely starts with "dev" (e.g. devender@…, HRM156) is
+// NOT affected. Emails are normalised to lowercase in the DB.
+const BUILTIN_EXCLUDED_EMAILS = ["dev@nbmediaproductions.com"];
+const DEV_EMAILS = Array.from(new Set([
+  ...(process.env.DEVELOPER_EMAILS || "").split(",").map((e) => e.trim().toLowerCase()),
+  ...BUILTIN_EXCLUDED_EMAILS.map((e) => e.toLowerCase()),
+].filter(Boolean)));
 const devExclusionWhere = (): Record<string, any> =>
   DEV_EMAILS.length ? { email: { notIn: DEV_EMAILS } } : {};
 
