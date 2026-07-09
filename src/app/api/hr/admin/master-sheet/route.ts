@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import prisma from "@/lib/prisma";
 import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
+import { istTodayDateOnly } from "@/lib/ist-date";
 
 export const dynamic = "force-dynamic";
 
@@ -110,20 +111,44 @@ function userWhereForBrand(brand: BrandFilter) {
   };
 }
 
-// Where-clause segment that flows through the `user` relation on a
-// child entity (Attendance.user, LeaveApplication.user, etc.).
-function viaUserWhereForBrand(brand: BrandFilter) {
-  if (!brand) return {};
-  return { user: userWhereForBrand(brand) };
+// Employee-status filter. "exited" = flagged inactive OR has a past
+// last-working-day exit (covers exits stuck in a non-final status whose
+// isActive was never flipped). "active" (default) is the complement — the
+// regular, on-the-books workforce. "all" applies no status filter.
+type StatusFilter = "active" | "exited" | "all";
+
+function userWhereForStatus(status: StatusFilter, exitedIds: number[]): Record<string, any> {
+  if (status === "all") return {};
+  if (status === "exited") {
+    return exitedIds.length
+      ? { OR: [{ isActive: false }, { id: { in: exitedIds } }] }
+      : { isActive: false };
+  }
+  // active / regular: on the books AND not among the past-LWD exits.
+  return { isActive: true, ...(exitedIds.length ? { id: { notIn: exitedIds } } : {}) };
+}
+
+// Combine the brand + status where-clauses for a User query. AND them so two
+// narrowing clauses (each possibly an `OR`) don't collide on the same key.
+function userWhere(brand: BrandFilter, statusWhere: Record<string, any>): Record<string, any> {
+  const parts = [userWhereForBrand(brand), statusWhere].filter((w) => w && Object.keys(w).length);
+  return parts.length === 0 ? {} : parts.length === 1 ? parts[0] : { AND: parts };
+}
+
+// Same combination, but flowing through the `user` relation on a child entity
+// (Attendance.user, LeaveApplication.user, etc.).
+function viaUserWhere(brand: BrandFilter, statusWhere: Record<string, any>): Record<string, any> {
+  const u = userWhere(brand, statusWhere);
+  return Object.keys(u).length ? { user: u } : {};
 }
 
 // ─────────────────────────────────────────────────────────────────────
 //  Sheet generators
 // ─────────────────────────────────────────────────────────────────────
 
-async function addEmployeesSheet(wb: ExcelJS.Workbook, brand: BrandFilter) {
+async function addEmployeesSheet(wb: ExcelJS.Workbook, brand: BrandFilter, statusWhere: Record<string, any>) {
   const users = await prisma.user.findMany({
-    where: { isActive: true, ...userWhereForBrand(brand) },
+    where: userWhere(brand, statusWhere),
     orderBy: { name: "asc" },
     include: {
       employeeProfile: true,
@@ -173,14 +198,14 @@ async function addEmployeesSheet(wb: ExcelJS.Workbook, brand: BrandFilter) {
   styleSheet(ws);
 }
 
-async function addAttendanceSheet(wb: ExcelJS.Workbook, label: string, start: Date | null, end: Date | null, brand: BrandFilter) {
+async function addAttendanceSheet(wb: ExcelJS.Workbook, label: string, start: Date | null, end: Date | null, brand: BrandFilter, statusWhere: Record<string, any>) {
   // When start/end are null we export every attendance row regardless
   // of date — the "All time" option in the picker. Sheet names are
   // capped at 31 chars by Excel, so use a short label.
   const records = await prisma.attendance.findMany({
     where: {
       ...(start && end ? { date: { gte: start, lt: end } } : {}),
-      ...viaUserWhereForBrand(brand),
+      ...viaUserWhere(brand, statusWhere),
     },
     include: { user: { select: { name: true, email: true, employeeProfile: { select: { employeeId: true, department: true } } } } },
     orderBy: [{ date: "asc" }, { user: { name: "asc" } }],
@@ -213,9 +238,9 @@ async function addAttendanceSheet(wb: ExcelJS.Workbook, label: string, start: Da
   styleSheet(ws);
 }
 
-async function addLeaveBalancesSheet(wb: ExcelJS.Workbook, brand: BrandFilter) {
+async function addLeaveBalancesSheet(wb: ExcelJS.Workbook, brand: BrandFilter, statusWhere: Record<string, any>) {
   const balances = await prisma.leaveBalance.findMany({
-    where: viaUserWhereForBrand(brand),
+    where: viaUserWhere(brand, statusWhere),
     include: {
       user:      { select: { name: true, email: true, employeeProfile: { select: { employeeId: true, department: true } }, isActive: true } },
       leaveType: { select: { name: true, code: true } },
@@ -250,8 +275,8 @@ async function addLeaveBalancesSheet(wb: ExcelJS.Workbook, brand: BrandFilter) {
   styleSheet(ws);
 }
 
-async function addRequestsSheets(wb: ExcelJS.Workbook, brand: BrandFilter) {
-  const whereBrand = viaUserWhereForBrand(brand);
+async function addRequestsSheets(wb: ExcelJS.Workbook, brand: BrandFilter, statusWhere: Record<string, any>) {
+  const whereBrand = viaUserWhere(brand, statusWhere);
   // Leave
   const leaves = await prisma.leaveApplication.findMany({
     where: whereBrand,
@@ -414,32 +439,49 @@ export async function GET(req: NextRequest) {
       brandRaw === "nb-media" || brandRaw === "nb"     ? "NB Media" :
       null;
 
+    // Employee status — "active" (default) exports the regular on-the-books
+    // workforce (no exited employees); "exited" exports only those who've left;
+    // "all" ignores the status filter. Exited = inactive OR a past last-working
+    // day (so exits stuck in a non-final status still count as exited).
+    const statusRaw = (req.nextUrl.searchParams.get("status") || "").toLowerCase();
+    const status: StatusFilter =
+      statusRaw === "exited" ? "exited" :
+      statusRaw === "all"    ? "all" :
+      "active";
+    const exitedRows = status === "all"
+      ? []
+      : await prisma.employeeExit.findMany({
+          where: { lastWorkingDay: { lt: istTodayDateOnly() } },
+          select: { userId: true },
+        });
+    const statusWhere = userWhereForStatus(status, exitedRows.map((e) => e.userId));
+
     const wb = new ExcelJS.Workbook();
     wb.creator = brand
       ? `${brand} HR Dashboard`
       : "NB Media HR Dashboard";
     wb.created = new Date();
 
-    if (sheets.includes("employees"))     await addEmployeesSheet(wb, brand);
+    if (sheets.includes("employees"))     await addEmployeesSheet(wb, brand, statusWhere);
     if (sheets.includes("attendance")) {
       const now = new Date();
       const yNow = now.getUTCFullYear();
       const mNow = now.getUTCMonth();
       if (period === "both" || period === "last") {
         const prev = istMonthRange(yNow, mNow - 1);
-        await addAttendanceSheet(wb, prev.label, prev.start, prev.end, brand);
+        await addAttendanceSheet(wb, prev.label, prev.start, prev.end, brand, statusWhere);
       }
       if (period === "both" || period === "current") {
         const curr = istMonthRange(yNow, mNow);
-        await addAttendanceSheet(wb, curr.label, curr.start, curr.end, brand);
+        await addAttendanceSheet(wb, curr.label, curr.start, curr.end, brand, statusWhere);
       }
       if (period === "this-year") {
         const r = istYearRange(yNow);
-        await addAttendanceSheet(wb, r.label, r.start, r.end, brand);
+        await addAttendanceSheet(wb, r.label, r.start, r.end, brand, statusWhere);
       }
       if (period === "last-year") {
         const r = istYearRange(yNow - 1);
-        await addAttendanceSheet(wb, r.label, r.start, r.end, brand);
+        await addAttendanceSheet(wb, r.label, r.start, r.end, brand, statusWhere);
       }
       if (period === "all") {
         // One sheet per year for readability. Years derived from the
@@ -451,17 +493,17 @@ export async function GET(req: NextRequest) {
              FROM "Attendance" ORDER BY y ASC`
         );
         if (yearsRaw.length === 0) {
-          await addAttendanceSheet(wb, "All time", null, null, brand);
+          await addAttendanceSheet(wb, "All time", null, null, brand, statusWhere);
         } else {
           for (const { y } of yearsRaw) {
             const r = istYearRange(Number(y));
-            await addAttendanceSheet(wb, r.label, r.start, r.end, brand);
+            await addAttendanceSheet(wb, r.label, r.start, r.end, brand, statusWhere);
           }
         }
       }
     }
-    if (sheets.includes("leaves"))   await addLeaveBalancesSheet(wb, brand);
-    if (sheets.includes("requests")) await addRequestsSheets(wb, brand);
+    if (sheets.includes("leaves"))   await addLeaveBalancesSheet(wb, brand, statusWhere);
+    if (sheets.includes("requests")) await addRequestsSheets(wb, brand, statusWhere);
 
     const buffer = await wb.xlsx.writeBuffer();
     const brandFileSlug = brand === "YT Labs" ? "yt-labs" : brand === "NB Media" ? "nb-media" : "all-brands";
