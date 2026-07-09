@@ -95,6 +95,15 @@ const fmtMins = (m: number | null | undefined) => {
 
 type BrandFilter = "NB Media" | "YT Labs" | null;
 
+// Developers are never included in the export — they're platform accounts, not
+// real employees. Identified by DEVELOPER_EMAILS (same source the session uses
+// for isDeveloper). Emails are normalised to lowercase in the DB, so a
+// lowercase `notIn` reliably drops them from every sheet.
+const DEV_EMAILS = (process.env.DEVELOPER_EMAILS || "")
+  .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+const devExclusionWhere = (): Record<string, any> =>
+  DEV_EMAILS.length ? { email: { notIn: DEV_EMAILS } } : {};
+
 // Where-clause segment for `prisma.user.findMany`.
 function userWhereForBrand(brand: BrandFilter) {
   if (!brand) return {};
@@ -131,7 +140,8 @@ function userWhereForStatus(status: StatusFilter, exitedIds: number[]): Record<s
 // Combine the brand + status where-clauses for a User query. AND them so two
 // narrowing clauses (each possibly an `OR`) don't collide on the same key.
 function userWhere(brand: BrandFilter, statusWhere: Record<string, any>): Record<string, any> {
-  const parts = [userWhereForBrand(brand), statusWhere].filter((w) => w && Object.keys(w).length);
+  const parts = [userWhereForBrand(brand), statusWhere, devExclusionWhere()]
+    .filter((w) => w && Object.keys(w).length);
   return parts.length === 0 ? {} : parts.length === 1 ? parts[0] : { AND: parts };
 }
 
