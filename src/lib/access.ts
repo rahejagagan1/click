@@ -239,6 +239,8 @@ export const HR_MANAGER_ALLOWED_TABS = new Set<string>([
   "assets",
   "departments",
   "payroll",
+  // HR department runs engagement surveys, so they see Pulse & Surveys.
+  "pulse-surveys",
 ]);
 
 export const HR_MANAGER_ALLOWED_RAIL_LINKS = new Set<string>([

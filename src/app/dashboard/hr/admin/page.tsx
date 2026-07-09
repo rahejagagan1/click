@@ -156,7 +156,9 @@ export default function HRAdminPage() {
     || (HR_MANAGER_ALLOWED_RAIL_LINKS.has("hiring")   && tabAllowed("hr_hiring"));
   const showTabPermsRail  = isFullAdmin; // policy config — admin-only
   const showManageKpisRail = isFullAdmin; // KPI uploads — admin-only
-  const showMasterSheetRail = isFullAdmin; // Excel exports — admin-only
+  // Master Sheet (Excel exports) — HR department needs it too. The page and
+  // export API already gate on isHRAdmin, so align the rail link with that.
+  const showMasterSheetRail = isAdmin;
 
   // URL-synced — refresh stays on the same admin section.
   // Untyped allowed-values list because ADMIN_TABS may be filtered
