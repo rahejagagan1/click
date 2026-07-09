@@ -336,6 +336,21 @@ export default function OnboardEmployeePage() {
   const managers  = opts?.managers  ?? [];
   const allUsers: Array<{ id: number; name: string }> = opts?.allUsers ?? [];
 
+  // RBAC job designations — the SAME source Edit Profile uses. The Job
+  // Designation field (Step 2) picks from these instead of the old hardcoded
+  // title lists, so onboarding links the employee to a real Designation.
+  const { data: desigData } = useSWR<{ designations: { id: number; label: string; businessUnit: string | null }[] }>(
+    "/api/designations", fetcher,
+  );
+  const designationOptions = useMemo(() => {
+    const brand = brandFromNumberSeries(form.numberSeries);
+    const all = desigData?.designations ?? [];
+    // Show this brand's designations (plus brand-agnostic ones); fall back to
+    // the full list if the brand filter would leave it empty.
+    const scoped = all.filter((d) => !d.businessUnit || d.businessUnit === brand);
+    return scoped.length ? scoped : all;
+  }, [desigData, form.numberSeries]);
+
   // Union of the server-side existing employee IDs and any IDs created
   // in this session — what the modal uses to grey out "already
   // onboarded" rows.
@@ -697,6 +712,10 @@ export default function OnboardEmployeePage() {
         email: form.workEmail,
         role:  form.role,
         orgLevel: form.orgLevel,
+        // RBAC designation link — resolved from the picked Job Designation
+        // label so the new hire is tied to a real Designation (drives job
+        // title, scorecard function, designation-based permissions).
+        designationId: designationOptions.find((d) => d.label === form.jobTitle)?.id ?? null,
         // Send null (not undefined) when HR cleared the dropdown so
         // the API actually clears the existing link. The API now
         // distinguishes undefined ("don't touch") from null ("set to
@@ -1215,17 +1234,17 @@ export default function OnboardEmployeePage() {
               <Field label="Joining Date" required>
                 <DatePicker value={form.joiningDate} onChange={v => set("joiningDate", v)} futureYears={2} />
               </Field>
-              <Field label="Job Title" required>
-                {/* Company-scoped: YT Labs picks from JOB_TITLES_YT_LABS,
-                    NB Media from JOB_TITLES. The listKey also swaps so
-                    custom additions don't bleed between brands. */}
-                <CustomSelect
-                  listKey={jobTitleSource(brandFromNumberSeries(form.numberSeries)).listKey}
-                  defaults={jobTitleSource(brandFromNumberSeries(form.numberSeries)).defaults}
-                  value={form.jobTitle}
-                  onChange={v => set("jobTitle", v)}
-                  placeholder="Select job title"
-                  required
+              <Field label="Job Designation" required>
+                {/* Wired to the RBAC Designation list (brand-scoped) — the same
+                    source as Edit Profile, so onboarding links to a real
+                    designation instead of a free-text/old title. */}
+                <Select
+                  v={form.jobTitle}
+                  set={v => set("jobTitle", v)}
+                  opts={[
+                    { value: "", label: "— Select designation —" },
+                    ...designationOptions.map((d) => ({ value: d.label, label: d.label })),
+                  ]}
                 />
               </Field>
               <Field label="Secondary Job Title">
@@ -1332,19 +1351,6 @@ export default function OnboardEmployeePage() {
                 hint="On their first sign-in we'll redirect them to a short wizard to confirm contact details (mobile, address, emergency contact) before they see the dashboard."
               />
             </div>
-
-            <SectionTitle>Access</SectionTitle>
-            <Grid>
-              <Field label="Org Level">
-                <Select v={form.orgLevel} set={v => set("orgLevel", v)} opts={[
-                  "member", "sub_lead", "lead",
-                  "manager", "hr_manager", "hod", "special_access", "ceo",
-                ]} />
-              </Field>
-              <Field label="Role">
-                <Select v={form.role} set={v => set("role", v)} opts={["member", "admin"]} />
-              </Field>
-            </Grid>
 
             <SectionTitle>Leave Settings</SectionTitle>
             <Grid>
@@ -1705,7 +1711,7 @@ export default function OnboardEmployeePage() {
 
               <StepCard title="Job Details">
                 <div>
-                  <ReviewRow label="Job title"         value={form.jobTitle} />
+                  <ReviewRow label="Job Designation"   value={form.jobTitle} />
                   <ReviewRow label="Department"        value={form.department} />
                   <ReviewRow label="Joining date"     value={form.joiningDate} />
                   <ReviewRow label="Reporting manager" value={reviewManagerName} />
@@ -1719,7 +1725,6 @@ export default function OnboardEmployeePage() {
 
               <StepCard title="Work Details">
                 <div>
-                  <ReviewRow label="Role · org level"   value={`${form.role} · ${form.orgLevel}`} />
                   <ReviewRow label="Invite to login"    value={form.inviteToLogin ? "Yes" : "No"} />
                   <ReviewRow label="Enable onboarding"  value={form.enableOnboarding ? "Yes" : "No"} />
                   <ReviewRow label="Shift"              value={reviewShiftName} />
