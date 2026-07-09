@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, canViewSalary, serverError } from "@/lib/api-auth";
+import { requireAuth, serverError } from "@/lib/api-auth";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { sendEmail } from "@/lib/email/sender";
@@ -462,12 +462,16 @@ export async function POST(request: NextRequest) {
             // We compute breakup components here so they match what the
             // wizard previewed on screen.
             //
-            // Salary policy: only canViewSalary callers (HR Manager, CEO,
-            // developer) may write SalaryStructure. Other HR-admin users
-            // can still create the rest of the user record — they just
-            // skip the compensation block silently. The UI hides the
-            // Compensation step for them, so this is belt-and-braces.
-            if (compensation && typeof compensation === "object" && canViewSalary(session!.user)) {
+            // Salary policy (onboarding exception): ANY authorised onboarder
+            // may save the salary they enter in Step 4 — this POST already
+            // required canCreateUsers to get here, so if they're trusted to
+            // onboard the employee they're trusted to record the salary they
+            // just typed. This means an entered Step 4 salary is NEVER silently
+            // dropped. Scoped to ONBOARDING ONLY: seeing or editing salary
+            // anywhere else in the app (Finances tab, profile Compensation
+            // panel, payroll) still requires canViewSalary — the salary-
+            // structure POST behind those surfaces keeps its own gate.
+            if (compensation && typeof compensation === "object") {
                 const effectiveFrom = compensation.effectiveFrom
                     ? new Date(compensation.effectiveFrom)
                     : new Date();
