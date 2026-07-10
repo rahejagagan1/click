@@ -206,7 +206,9 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
           toDate:   { gte: date },
           status:   { in: PROTECTED_LEAVE_STATUSES },
         },
-        select: { userId: true },
+        // reason carries the [First Half]/[Second Half] marker; fromDate/toDate
+        // + totalDays distinguish a half-day leave from a full / multi-day one.
+        select: { userId: true, reason: true, fromDate: true, toDate: true, totalDays: true },
       }),
       prisma.attendanceRegularization.findMany({
         where: {
@@ -337,12 +339,63 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
     }
     } // end WFH-completion enforcement (on/after 2026-07-01)
 
+    // ── Half-day leave completion (parity with WFH, on/after 2026-07-01) ──
+    // A full / multi-day leave shields the whole day. A HALF-day leave (marker
+    // [First Half]/[Second Half], single date, ≤ 0.5 day) leaves the OTHER half
+    // as a WORKING half that must be worked ≥ 270 min (4.5h) in its window —
+    // else half-day LOP, exactly like a half WFH. Shielded when they clocked a
+    // full 9h overall, or when both halves are leave.
+    const leaveMetIds = new Set<number>();
+    const leaveHalfLopIds = new Set<number>();
+    const halfLeave = new Map<number, { first: boolean; second: boolean }>();
+    for (const l of leaves) {
+      const singleDay = String(l.fromDate).slice(0, 10) === String(l.toDate).slice(0, 10);
+      const reason = l.reason ?? "";
+      const first  = /\[first\s+half\]/i.test(reason);
+      const second = /\[second\s+half\]/i.test(reason);
+      const isHalf = enforceWfhCompletion && singleDay && (first || second) && Number(l.totalDays) <= 0.5;
+      if (!isHalf) { leaveMetIds.add(l.userId); continue; } // full / multi-day (or pre-July) → shield
+      const c = halfLeave.get(l.userId) ?? { first: false, second: false };
+      if (first) c.first = true; else c.second = true;
+      halfLeave.set(l.userId, c);
+    }
+    if (halfLeave.size > 0) {
+      const ids = [...halfLeave.keys()];
+      const sess = await prisma.$queryRawUnsafe<Array<{ userId: number; clockIn: Date; clockOut: Date | null }>>(
+        `SELECT a."userId", s."clockIn", s."clockOut"
+           FROM "AttendanceSession" s JOIN "Attendance" a ON a.id = s."attendanceId"
+          WHERE a."userId" = ANY($1::int[]) AND a.date = $2`,
+        ids, date,
+      );
+      const fw = new Map<number, number>(), sw = new Map<number, number>();
+      for (const s of sess) {
+        if (!s.clockOut) continue;
+        const sr = shiftByUser.get(s.userId);
+        const mid = Math.round((parseHM(sr?.startTime, 540) + parseHM(sr?.endTime, 1080)) / 2);
+        const inMin = istMinuteOfDay(s.clockIn), outMin = istMinuteOfDay(s.clockOut);
+        if (outMin <= inMin) continue;
+        fw.set(s.userId, (fw.get(s.userId) ?? 0) + minutesOverlap(inMin, outMin, 0, mid));
+        sw.set(s.userId, (sw.get(s.userId) ?? 0) + minutesOverlap(inMin, outMin, mid, 1440));
+      }
+      for (const [uid, c] of halfLeave) {
+        if (c.first && c.second) { leaveMetIds.add(uid); continue; }         // both halves leave → whole day off
+        if ((attByUser.get(uid)?.totalMinutes ?? 0) >= 540) { leaveMetIds.add(uid); continue; } // full day worked
+        // Working half = the half NOT on leave (leave 1st → work 2nd, and vice versa).
+        const workingWorked = c.first ? (sw.get(uid) ?? 0) : (fw.get(uid) ?? 0);
+        if (workingWorked >= 270) leaveMetIds.add(uid);
+        else leaveHalfLopIds.add(uid);
+      }
+    }
+
     const protectedIds = new Set<number>();
     // Any attendance row EXCEPT an unregularized missed clock-out protects the
     // user (they were present / on leave / already settled). The missed-swipe
     // rows are intentionally left out so they can receive a half-day LOP.
     for (const r of attendances) if (!isUnregularizedMissedSwipe(r)) protectedIds.add(r.userId);
-    for (const r of leaves)      protectedIds.add(r.userId);
+    // Leave: full/multi-day (or a completed half) shields; a half-day leave
+    // whose WORKING half fell short is handled explicitly below (half-day LOP).
+    for (const id of leaveMetIds)     protectedIds.add(id);
+    for (const id of leaveHalfLopIds) protectedIds.add(id);
     for (const r of regs)        protectedIds.add(r.userId);
     for (const r of ods)         protectedIds.add(r.userId);
     for (const r of compOffs)    protectedIds.add(r.userId);
@@ -372,6 +425,7 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
     };
     await applyWfhLop(wfhFullLopIds, "lop", 1, "Auto-LOP: approved full-day WFH not completed (worked < 9h).");
     await applyWfhLop(wfhHalfLopIds, "half_day_lop", 0.5, "Auto-LOP: approved half-day WFH not completed (worked < 4.5h).");
+    await applyWfhLop(leaveHalfLopIds, "half_day_lop", 0.5, "Auto-LOP: half-day leave — the working half was not completed (worked < 4.5h).");
 
     // Half-day LOP: unregularized missed clock-outs not otherwise covered by a
     // pending/approved leave / regularization / WFH / OD / comp-off. (A pending
