@@ -57,6 +57,21 @@ function dateOnlyUTC(d: Date): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
+// "HH:MM" shift string → minutes-of-day (fallback when unset/invalid).
+function parseHM(hm: string | null | undefined, fallback: number): number {
+  const m = /^(\d{1,2}):(\d{2})/.exec(hm ?? "");
+  return m ? Number(m[1]) * 60 + Number(m[2]) : fallback;
+}
+// UTC timestamp → IST minute-of-day (IST = UTC+5:30).
+function istMinuteOfDay(d: Date): number {
+  const t = new Date(d.getTime() + 330 * 60_000);
+  return t.getUTCHours() * 60 + t.getUTCMinutes();
+}
+// Minutes of overlap between [aStart,aEnd] and [bStart,bEnd].
+function minutesOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): number {
+  return Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart));
+}
+
 export async function runAutoLOP(): Promise<AutoLOPSummary> {
   const today = istTodayDateOnly();
   const featureStart = new Date(`${FEATURE_START_DATE_ISO}T00:00:00.000Z`);
@@ -104,9 +119,9 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
   // so the new saturday* columns work before `prisma generate` picks them up.
   // Users with no shift are absent from the map → never auto-LOP'd (unchanged).
   const shiftRows = await prisma.$queryRawUnsafe<Array<{
-    userId: number; effectiveFrom: Date; workDays: unknown; saturdayPolicy: string; saturdayWeeks: number[]; shiftCreatedAt: Date;
+    userId: number; effectiveFrom: Date; workDays: unknown; saturdayPolicy: string; saturdayWeeks: number[]; shiftCreatedAt: Date; startTime: string; endTime: string;
   }>>(
-    `SELECT us."userId", us."effectiveFrom", s."workDays", s."saturdayPolicy", s."saturdayWeeks", s."createdAt" AS "shiftCreatedAt"
+    `SELECT us."userId", us."effectiveFrom", s."workDays", s."saturdayPolicy", s."saturdayWeeks", s."createdAt" AS "shiftCreatedAt", s."startTime", s."endTime"
        FROM "UserShift" us JOIN "Shift" s ON s.id = us."shiftId"`,
   );
   const shiftByUser = new Map(shiftRows.map((r) => [r.userId, r]));
@@ -242,29 +257,74 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
 
     // ── WFH completion enforcement ──────────────────────────────────────
     // An approved WFH no longer BLANKET-shields from LOP. A WFH day must be
-    // worked like any shift: full = 540 min (9h), half = 270 min (4.5h) — the
-    // same 9h bar the attendance UI uses — with "half" detected from the
-    // [First Half] / [Second Half] reason marker. Judged from worked minutes
-    // (Attendance.totalMinutes): meet the bar → shielded (present); fall short
-    // → LOP (full-day for a full WFH, half-day for a half WFH). A leave /
-    // regularization / OD / comp-off on the same day still shields — they
-    // weren't expected to work the WFH portion.
+    // WORKED like any shift: full-day = 540 min (9h, the same bar the UI uses),
+    // half-day = 270 min (4.5h) WITHIN that half's window. "Which half" comes
+    // from the [First Half] / [Second Half] reason marker; a full day has no
+    // marker. Each applied half is judged on ITS OWN window (measured from the
+    // sessions, split at the shift mid-point) — so a completed 1st half and a
+    // failed 2nd half are scored independently, and if someone stacks both
+    // halves and fails the second, only that half is LOP'd. Outcomes:
+    //   full short           → full-day LOP
+    //   one applied half short  → half-day LOP
+    //   both applied halves short → full-day LOP
+    // A leave / regularization / OD / comp-off the same day still shields.
     const WFH_FULL_MIN = 540, WFH_HALF_MIN = 270;
     const otherwiseCovered = new Set<number>([
       ...leaves.map((r) => r.userId), ...regs.map((r) => r.userId),
       ...ods.map((r) => r.userId), ...compOffs.map((r) => r.userId),
     ]);
+    // Per-user WFH coverage: which halves (or full) they applied for.
+    const wfhCover = new Map<number, { full: boolean; first: boolean; second: boolean }>();
+    for (const w of wfhs) {
+      if (otherwiseCovered.has(w.userId)) continue;
+      const c = wfhCover.get(w.userId) ?? { full: false, first: false, second: false };
+      const reason = w.reason ?? "";
+      if      (/\[first\s+half\]/i.test(reason))  c.first = true;
+      else if (/\[second\s+half\]/i.test(reason)) c.second = true;
+      else                                        c.full = true;
+      wfhCover.set(w.userId, c);
+    }
+    // Minutes worked in each half-window (before / after the shift mid-point),
+    // summed from the day's sessions. Needed to tell which half was worked.
+    const wfhUserIds = [...wfhCover.keys()];
+    const firstHalfWorked = new Map<number, number>();
+    const secondHalfWorked = new Map<number, number>();
+    if (wfhUserIds.length > 0) {
+      const sessRows = await prisma.$queryRawUnsafe<Array<{ userId: number; clockIn: Date; clockOut: Date | null }>>(
+        `SELECT a."userId", s."clockIn", s."clockOut"
+           FROM "AttendanceSession" s JOIN "Attendance" a ON a.id = s."attendanceId"
+          WHERE a."userId" = ANY($1::int[]) AND a.date = $2`,
+        wfhUserIds, date,
+      );
+      for (const s of sessRows) {
+        if (!s.clockOut) continue; // open session (shouldn't occur on a graced past day)
+        const sr = shiftByUser.get(s.userId);
+        const mid = Math.round((parseHM(sr?.startTime, 540) + parseHM(sr?.endTime, 1080)) / 2);
+        const inMin = istMinuteOfDay(s.clockIn), outMin = istMinuteOfDay(s.clockOut);
+        if (outMin <= inMin) continue; // crosses midnight / bad data — skip
+        firstHalfWorked.set(s.userId,  (firstHalfWorked.get(s.userId)  ?? 0) + minutesOverlap(inMin, outMin, 0, mid));
+        secondHalfWorked.set(s.userId, (secondHalfWorked.get(s.userId) ?? 0) + minutesOverlap(inMin, outMin, mid, 1440));
+      }
+    }
     const wfhMetIds = new Set<number>();
     const wfhFullLopIds = new Set<number>();
     const wfhHalfLopIds = new Set<number>();
-    for (const w of wfhs) {
-      if (otherwiseCovered.has(w.userId)) continue;
-      const isHalf = /\[(?:first|second)\s+half\]/i.test(w.reason ?? "");
-      const required = isHalf ? WFH_HALF_MIN : WFH_FULL_MIN;
-      const worked = attByUser.get(w.userId)?.totalMinutes ?? 0;
-      if (worked >= required) wfhMetIds.add(w.userId);
-      else if (isHalf) wfhHalfLopIds.add(w.userId);
-      else wfhFullLopIds.add(w.userId);
+    for (const [uid, c] of wfhCover) {
+      const total = attByUser.get(uid)?.totalMinutes ?? 0;
+      if (c.full) {
+        // Full-day WFH: strict — must work the full 9h, else full-day LOP.
+        if (total >= WFH_FULL_MIN) wfhMetIds.add(uid);
+        else wfhFullLopIds.add(uid);
+        continue;
+      }
+      // Half-day WFH but they actually put in a FULL day's hours overall →
+      // obligation met, never LOP a full day on a per-window technicality.
+      if (total >= WFH_FULL_MIN) { wfhMetIds.add(uid); continue; }
+      const firstShort  = c.first  && (firstHalfWorked.get(uid)  ?? 0) < WFH_HALF_MIN;
+      const secondShort = c.second && (secondHalfWorked.get(uid) ?? 0) < WFH_HALF_MIN;
+      if (firstShort && secondShort) wfhFullLopIds.add(uid);        // both applied halves missed
+      else if (firstShort || secondShort) wfhHalfLopIds.add(uid);  // one applied half missed
+      else wfhMetIds.add(uid);                                      // all applied halves completed
     }
 
     const protectedIds = new Set<number>();
