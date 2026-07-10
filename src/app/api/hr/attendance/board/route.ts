@@ -4,6 +4,10 @@ import { requireAuth, serverError } from "@/lib/api-auth";
 import { istTodayDateOnly } from "@/lib/ist-date";
 import { getPoliciesByUser } from "@/lib/hr/notification-policy";
 
+// Live board — must never be cached (statuses change through the day, and a
+// stale copy shows wrong late/present/leave badges even after the data changes).
+export const dynamic = "force-dynamic";
+
 // GET /api/hr/attendance/board — today's team attendance board
 export async function GET() {
   const { errorResponse } = await requireAuth();
@@ -133,7 +137,9 @@ export async function GET() {
       total: allUsers.length,
     };
 
-    return NextResponse.json({ board, counts, date: today });
+    return NextResponse.json({ board, counts, date: today }, {
+      headers: { "Cache-Control": "no-store, must-revalidate" },
+    });
   } catch (e) {
     return serverError(e, "GET /api/hr/attendance/board");
   }
