@@ -269,6 +269,18 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
     //   both applied halves short → full-day LOP
     // A leave / regularization / OD / comp-off the same day still shields.
     const WFH_FULL_MIN = 540, WFH_HALF_MIN = 270;
+    // Feature start: the WFH-completion rule applies ONLY to attendance on or
+    // after 2026-07-01. Earlier days keep the legacy behaviour (an approved WFH
+    // blanket-shields from LOP) so historical attendance is never re-judged.
+    const WFH_LOP_START = new Date("2026-07-01T00:00:00.000Z");
+    const enforceWfhCompletion = date.getTime() >= WFH_LOP_START.getTime();
+    const wfhMetIds = new Set<number>();
+    const wfhFullLopIds = new Set<number>();
+    const wfhHalfLopIds = new Set<number>();
+    if (!enforceWfhCompletion) {
+      // Legacy (pre-2026-07-01): shield every approved WFH unconditionally.
+      for (const w of wfhs) wfhMetIds.add(w.userId);
+    } else {
     const otherwiseCovered = new Set<number>([
       ...leaves.map((r) => r.userId), ...regs.map((r) => r.userId),
       ...ods.map((r) => r.userId), ...compOffs.map((r) => r.userId),
@@ -306,9 +318,6 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
         secondHalfWorked.set(s.userId, (secondHalfWorked.get(s.userId) ?? 0) + minutesOverlap(inMin, outMin, mid, 1440));
       }
     }
-    const wfhMetIds = new Set<number>();
-    const wfhFullLopIds = new Set<number>();
-    const wfhHalfLopIds = new Set<number>();
     for (const [uid, c] of wfhCover) {
       const total = attByUser.get(uid)?.totalMinutes ?? 0;
       if (c.full) {
@@ -326,6 +335,7 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
       else if (firstShort || secondShort) wfhHalfLopIds.add(uid);  // one applied half missed
       else wfhMetIds.add(uid);                                      // all applied halves completed
     }
+    } // end WFH-completion enforcement (on/after 2026-07-01)
 
     const protectedIds = new Set<number>();
     // Any attendance row EXCEPT an unregularized missed clock-out protects the
