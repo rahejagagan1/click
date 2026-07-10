@@ -1745,6 +1745,20 @@ export default function AttendancePage() {
                                 {wfhOtherHalfLabel}
                               </span>
                             )}
+                            {/* Half-day LEAVE without a WFH covering the other half —
+                                badge both segments so the employee sees they worked
+                                the other half at office (the WFH cases above already
+                                show both halves). */}
+                            {!hasPendingAny && leaveHalf && !approvedWfh && (
+                              <>
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 font-bold uppercase tracking-wider">
+                                  {leaveFirst ? "1st" : "2nd"} Half Leave{leaveTypeName ? ` · ${leaveTypeName}` : ""}
+                                </span>
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-bold uppercase tracking-wider">
+                                  {leaveFirst ? "2nd" : "1st"} Half Office
+                                </span>
+                              </>
+                            )}
                           </div>
                         </td>
 
