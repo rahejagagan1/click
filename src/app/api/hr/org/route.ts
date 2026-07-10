@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { isDeveloperEmail } from "@/lib/hr/notification-policy";
+import { istTodayDateOnly } from "@/lib/ist-date";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +18,18 @@ export async function GET() {
       .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
     const hideDevs = !viewerIsDev && devEmails.length > 0;
 
+    const today = istTodayDateOnly();
     const users = await prisma.user.findMany({
       where: {
         isActive: true,
-        ...(hideDevs ? { NOT: { email: { in: devEmails } } } : {}),
+        AND: [
+          ...(hideDevs ? [{ NOT: { email: { in: devEmails } } }] : []),
+          // Hide employees who have already LEFT — an exit whose last working
+          // day has passed (they may still be isActive=true if the clearance
+          // flow never deactivated them). Employees with no exit, or still
+          // serving notice (LWD today or later), stay visible.
+          { NOT: { employeeExit: { lastWorkingDay: { lt: today } } } },
+        ],
       },
       select: {
         id: true, name: true, email: true, role: true, orgLevel: true,
