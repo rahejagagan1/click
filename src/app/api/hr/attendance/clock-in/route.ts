@@ -153,11 +153,25 @@ export async function POST(req: NextRequest) {
     // are checked against the YT Labs office coords instead of the NB
     // Media default, so they don't get flagged as "off-site" while
     // sitting at the YT Labs building.
-    const [userShift, profile, approvedWfh] = await Promise.all([
+    const [userShift, profile, approvedWfh, halfLeave] = await Promise.all([
       prisma.userShift.findUnique({ where: { userId }, include: { shift: true } }),
       prisma.employeeProfile.findUnique({ where: { userId }, select: { workLocation: true, businessUnit: true } }),
-      prisma.wFHRequest.findFirst({ where: { userId, date: today, status: "approved" }, select: { id: true } }),
+      prisma.wFHRequest.findFirst({ where: { userId, date: today, status: "approved" }, select: { id: true, reason: true } }),
+      prisma.leaveApplication.findFirst({
+        where: { userId, fromDate: { lte: today }, toDate: { gte: today }, status: { in: ["approved", "partially_approved", "pending"] } },
+        select: { reason: true },
+      }),
     ]);
+
+    // First-half OFF (a leave or WFH tagged [First Half]) means the employee is
+    // only expected from the SECOND half — so late detection must use the shift
+    // mid-point, not the full-day start. Otherwise an afternoon clock-in on a
+    // first-half-leave day is wrongly flagged "late" (e.g. Palak on 1st-half
+    // leave clocking in at 1:12 PM). Second-half off keeps the normal morning
+    // start (they still work the first half).
+    const isFirstHalfOff =
+      /\[first\s+half\]/i.test(halfLeave?.reason ?? "") ||
+      /\[first\s+half\]/i.test(approvedWfh?.reason ?? "");
 
     // Late detection is per-shift: the cutoff is the shift's own startTime
     // plus the grace window the shift defines. The admin shift form labels
@@ -176,11 +190,15 @@ export async function POST(req: NextRequest) {
     const nowMin = istMinutesOfDay(now);
     if (userShift?.shift) {
       const [sh, sm] = userShift.shift.startTime.split(":").map(Number);
+      const [eh, em] = userShift.shift.endTime.split(":").map(Number);
       const grace = Number.isFinite(userShift.shift.breakMinutes) ? userShift.shift.breakMinutes : 15;
-      const lateCutoffMin = sh * 60 + sm + grace;
+      const startMin = sh * 60 + sm;
+      const midMin   = Math.round((startMin + (eh * 60 + em)) / 2);
+      // First-half off → expected from the mid-point; otherwise from shift start.
+      const lateCutoffMin = (isFirstHalfOff ? midMin : startMin) + grace;
       if (nowMin > lateCutoffMin) status = "late";
-    } else if (nowMin >= 10 * 60) {
-      status = "late"; // no shift assigned → legacy 10:00 AM IST cutoff
+    } else if (nowMin >= (isFirstHalfOff ? 14 * 60 : 10 * 60)) {
+      status = "late"; // no shift assigned → legacy cutoff (2 PM if first-half off, else 10 AM)
     }
 
     const wl = (profile?.workLocation || "office").toLowerCase();
