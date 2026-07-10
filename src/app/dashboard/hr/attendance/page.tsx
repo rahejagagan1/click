@@ -1564,9 +1564,20 @@ export default function AttendancePage() {
                       return dateIso >= from && dateIso <= to;
                     });
                     const onLeave = !!approvedLeave || rec.status === "on_leave";
-                    const leaveLabel = approvedLeave?.leaveType?.name
-                      ? `On Leave · ${approvedLeave.leaveType.name}`
-                      : "On Leave";
+                    // Stage 4 — half-day leave parity with WFH: detect which half
+                    // is leave (same [First Half]/[Second Half] marker) and show
+                    // BOTH segments — the leave half plus the working other half
+                    // (WFH if a WFH covers it, else expected office).
+                    const leaveReason = String(approvedLeave ? approvedLeave.reason ?? "" : "");
+                    const leaveFirst  = /\[first\s+half\]/i.test(leaveReason);
+                    const leaveSecond = /\[second\s+half\]/i.test(leaveReason);
+                    const leaveHalf   = leaveFirst || leaveSecond;
+                    const leaveTypeName = approvedLeave?.leaveType?.name;
+                    const leaveLabel = approvedLeave
+                      ? (leaveHalf
+                          ? `${leaveFirst ? "1st" : "2nd"} Half Leave${leaveTypeName ? ` · ${leaveTypeName}` : ""} · ${leaveFirst ? "2nd" : "1st"} Half ${approvedWfh ? "WFH" : "Office"}`
+                          : `On Leave${leaveTypeName ? ` · ${leaveTypeName}` : ""}`)
+                      : (approvedLeave?.leaveType?.name ? `On Leave · ${approvedLeave.leaveType.name}` : "On Leave");
 
                     // Stage 3 — for a HALF-day WFH, describe the OTHER half so the
                     // log shows BOTH segments (e.g. 1st-half WFH + 2nd-half office).
