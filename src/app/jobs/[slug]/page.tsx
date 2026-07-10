@@ -775,9 +775,15 @@ function JdHtmlPanel({
   // The branch is invisible to the candidate — both produce the
   // same Times New Roman prose under the NB Media letterhead +
   // watermark frame.
-  const html       = isHtmlJd(text);
-  const sanitised  = html ? sanitizeHtml(text, JD_SANITIZE) : "";
-  const blocks     = html ? [] : parseJdBlocks(text);
+  // JDs extracted from an uploaded file often store EVERY space as &nbsp;
+  // (non-breaking). On the page that BLOCKS word-wrapping, forcing ugly
+  // mid-word breaks at the only allowed break point — hyphens (e.g.
+  // "hands-\non execution", "day-To-\nday"). Normalise them back to regular
+  // spaces so the text wraps naturally, matching the clean PDF preview.
+  const normalised = (text ?? "").split("&nbsp;").join(" ").split("&#160;").join(" ").split(String.fromCharCode(160)).join(" ");
+  const html       = isHtmlJd(normalised);
+  const sanitised  = html ? sanitizeHtml(normalised, JD_SANITIZE) : "";
+  const blocks     = html ? [] : parseJdBlocks(normalised);
 
   return (
     <div className="relative rounded-xl sm:rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
