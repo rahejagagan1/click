@@ -1548,8 +1548,13 @@ export default function AttendancePage() {
                     const approvedWfh = Array.isArray(wfhData) && wfhData.find(
                       (r: any) => r.status === "approved" && String(r.date).slice(0, 10) === dateIso
                     );
+                    // Half-day WFH is tagged in the reason as [First Half] /
+                    // [Second Half] (the request form's marker) — detect which.
+                    const wfhReason = String(approvedWfh ? approvedWfh.reason ?? "" : "");
+                    const wfhFirst  = /\[first\s+half\]/i.test(wfhReason);
+                    const wfhSecond = /\[second\s+half\]/i.test(wfhReason);
                     const approvedWfhKind = approvedWfh
-                      ? (String(approvedWfh.reason ?? "").startsWith("[Half Day]") ? "Half Day WFH" : "WFH")
+                      ? (wfhFirst ? "1st Half WFH" : wfhSecond ? "2nd Half WFH" : "WFH")
                       : null;
                     // Approved leave that covers this date — shows "On Leave" plus the type name.
                     const approvedLeave = myLeaves.find((l: any) => {
@@ -1559,9 +1564,29 @@ export default function AttendancePage() {
                       return dateIso >= from && dateIso <= to;
                     });
                     const onLeave = !!approvedLeave || rec.status === "on_leave";
-                    const leaveLabel = approvedLeave?.leaveType?.name
-                      ? `On Leave · ${approvedLeave.leaveType.name}`
-                      : "On Leave";
+                    // Stage 4 — half-day leave parity with WFH: detect which half
+                    // is leave (same [First Half]/[Second Half] marker) and show
+                    // BOTH segments — the leave half plus the working other half
+                    // (WFH if a WFH covers it, else expected office).
+                    const leaveReason = String(approvedLeave ? approvedLeave.reason ?? "" : "");
+                    const leaveFirst  = /\[first\s+half\]/i.test(leaveReason);
+                    const leaveSecond = /\[second\s+half\]/i.test(leaveReason);
+                    const leaveHalf   = leaveFirst || leaveSecond;
+                    const leaveTypeName = approvedLeave?.leaveType?.name;
+                    const leaveLabel = approvedLeave
+                      ? (leaveHalf
+                          ? `${leaveFirst ? "1st" : "2nd"} Half Leave${leaveTypeName ? ` · ${leaveTypeName}` : ""} · ${leaveFirst ? "2nd" : "1st"} Half ${approvedWfh ? "WFH" : "Office"}`
+                          : `On Leave${leaveTypeName ? ` · ${leaveTypeName}` : ""}`)
+                      : (approvedLeave?.leaveType?.name ? `On Leave · ${approvedLeave.leaveType.name}` : "On Leave");
+
+                    // Stage 3 — for a HALF-day WFH, describe the OTHER half so the
+                    // log shows BOTH segments (e.g. 1st-half WFH + 2nd-half office).
+                    // The other half is "Leave" when an approved leave covers this
+                    // date, otherwise the employee is expected in office.
+                    const wfhOtherHalfLabel =
+                      approvedWfh && (wfhFirst || wfhSecond)
+                        ? `${wfhFirst ? "2nd" : "1st"} Half ${approvedLeave ? "Leave" : "Office"}`
+                        : null;
 
                     // Specific request rows for this date — used to surface the
                     // requested time window in the centered text label.
@@ -1713,6 +1738,11 @@ export default function AttendancePage() {
                             {!hasPendingAny && approvedWfhKind && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold uppercase tracking-wider">
                                 {approvedWfhKind}
+                              </span>
+                            )}
+                            {!hasPendingAny && wfhOtherHalfLabel && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-bold uppercase tracking-wider">
+                                {wfhOtherHalfLabel}
                               </span>
                             )}
                           </div>
