@@ -4195,9 +4195,24 @@ function EmployeeTimePanel({
               const isWfhApproved = wfh && wfh.status === "approved";
               const isLeavePending  = leave && (leave.status === "pending" || leave.status === "partially_approved");
               const isLeaveApproved = leave && leave.status === "approved";
-              // True if the row should be rendered as a centered "On <X> Leave" banner.
-              const isLeaveRow = rec.status === "on_leave" || isLeaveApproved;
               const leaveTypeName = leave?.leaveType?.name || (rec.status === "on_leave" ? "Leave" : null);
+              // Half-day markers ([First/Second Half]) on the leave / WFH requests.
+              const leaveHalfDir: "first" | "second" | null =
+                leave ? (/\[first\s+half\]/i.test(leave.reason ?? "") ? "first" : /\[second\s+half\]/i.test(leave.reason ?? "") ? "second" : null) : null;
+              const wfhHalfDir: "first" | "second" | null =
+                wfh ? (/\[first\s+half\]/i.test(wfh.reason ?? "") ? "first" : /\[second\s+half\]/i.test(wfh.reason ?? "") ? "second" : null) : null;
+              // A FULL-day leave renders as the centered "On <X> Leave" banner and
+              // hides the timeline. A HALF-day leave does NOT — the employee works
+              // the other half, so keep the timeline and show BOTH segments.
+              const isLeaveRow = (rec.status === "on_leave" || isLeaveApproved) && !leaveHalfDir;
+              // Both-segment label for a split day (half-day leave and/or half WFH):
+              // each half is the leave type / WFH / (expected) Office.
+              const halfKind = (which: "first" | "second"): string =>
+                leaveHalfDir === which ? (leaveTypeName || "Leave")
+                : wfhHalfDir === which ? "WFH"
+                : "Office";
+              const isSplitDay = !!(leaveHalfDir || wfhHalfDir);
+              const splitLabel = isSplitDay ? `1st Half ${halfKind("first")} · 2nd Half ${halfKind("second")}` : null;
 
               // Admins can regularize any past/today row that doesn't already
               // have a regularization in flight — including leave days (employee
@@ -4285,6 +4300,11 @@ function EmployeeTimePanel({
                       {isLateFirstIn && !!rec.clockIn && !hasPendingAny && !isLeaveRow ? <span className="inline-flex items-center rounded bg-orange-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-orange-700">Late</span> : null}
                       {isOnBreak ? <span className="inline-flex items-center rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-700">On break</span> : null}
                     </div>
+                    {/* Split-day summary so HR + the employee can see BOTH halves
+                        at a glance (e.g. 1st Half Sick Leave · 2nd Half WFH). */}
+                    {splitLabel && (
+                      <p className="mt-1 text-[10.5px] font-semibold text-violet-600">{splitLabel}</p>
+                    )}
                   </td>
 
                   {/* Attendance Visual / centered text — used for all "no real
@@ -4305,6 +4325,9 @@ function EmployeeTimePanel({
                       || (isLeavePending && !isPresent)
                       || (isWfhPending && !isPresent && !isWfhApproved)
                       || isRegOnly
+                      // Split day (half leave / half WFH) with no punches yet →
+                      // show the both-segment label instead of an empty bar.
+                      || (isSplitDay && !hasActualPunches)
                       // LOP rows have no usable punches → show the centered LOP
                       // banner instead of an empty bar. (For a half-day LOP the
                       // row does carry a clock-in, but the day is already docked,
@@ -4317,7 +4340,9 @@ function EmployeeTimePanel({
                     const regWindow = reg?.requestedIn && reg?.requestedOut
                       ? `${fmt(reg.requestedIn)} → ${fmt(reg.requestedOut)}`
                       : null;
-                    const label = isLeaveRow
+                    const label = isSplitDay
+                      ? splitLabel
+                      : isLeaveRow
                       ? `On ${leaveTypeName || "Leave"}${leave?.totalDays && leave.totalDays > 1 ? ` (${leave.totalDays} days)` : ""}`
                       : isLeavePending  ? `Leave Pending — ${leave?.leaveType?.name || "Leave"}`
                       : isWfhPending    ? "WFH Pending Approval"
