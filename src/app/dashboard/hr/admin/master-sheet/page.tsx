@@ -18,10 +18,11 @@ import {
   Calendar,
   Clock,
   FileText,
+  IndianRupee,
   AlertCircle,
   ArrowLeft,
 } from "lucide-react";
-import { isHRAdmin } from "@/lib/access";
+import { isHRAdmin, canViewSalary } from "@/lib/access";
 import SelectField from "@/components/ui/SelectField";
 
 type BrandScope = "all" | "nb-media" | "yt-labs";
@@ -38,19 +39,30 @@ const STATUS_OPTIONS: Array<{ value: StatusScope; label: string }> = [
   { value: "all",    label: "All (active + exited)" },
 ];
 
-type SheetKey = "employees" | "attendance" | "leaves" | "requests";
+type SheetKey = "employees" | "attendance" | "leaves" | "requests" | "salaries";
 
-const SHEETS: Array<{
+type SheetDef = {
   key: SheetKey;
   label: string;
   desc: string;
   icon: React.ComponentType<{ className?: string; size?: number }>;
-}> = [
+};
+
+const SHEETS: SheetDef[] = [
   { key: "employees",  label: "Employees",       desc: "Full directory — names, IDs, departments, roles, contact, statutory info.", icon: Users },
   { key: "attendance", label: "Attendance",      desc: "Daily clock-in/out with effective hours, status, and regularization flag.",  icon: Clock },
   { key: "leaves",     label: "Leave Balances",  desc: "Per-employee balance grid — total / used / pending / available.",            icon: Calendar },
   { key: "requests",   label: "Requests Log",    desc: "Five tabs: Leaves, WFH, On-Duty, Regularizations, Comp-Off.",                 icon: FileText },
 ];
+
+// Salaries is compensation data — shown only to HR Manager / CEO / salary-dev
+// (canViewSalary). Kept out of the default SHEETS list and appended per-user
+// so it never renders for a broader HR-admin who can't see pay.
+const SALARY_SHEET: SheetDef = {
+  key: "salaries", label: "Salaries",
+  desc: "Per-employee annual CTC and monthly salary. Restricted to HR Manager, CEO & admin.",
+  icon: IndianRupee,
+};
 
 const PERIOD_OPTIONS = [
   { value: "both",      label: "Current + Last month"        },
@@ -107,6 +119,11 @@ export default function MasterSheetPage() {
       </div>
     );
   }
+
+  // Salaries card only for compensation-cleared viewers (HR Manager / CEO /
+  // salary-dev). Appended after the base sheets so it reads as an extra,
+  // sensitive option at the end of the list.
+  const visibleSheets = canViewSalary(user) ? [...SHEETS, SALARY_SHEET] : SHEETS;
 
   const toggle = (k: SheetKey) => {
     setPicked((prev) => {
@@ -190,7 +207,7 @@ export default function MasterSheetPage() {
             Each ticked item becomes one or more sheets in the workbook.
           </p>
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {SHEETS.map((s) => {
+            {visibleSheets.map((s) => {
               const on = picked.has(s.key);
               const Icon = s.icon;
               return (
