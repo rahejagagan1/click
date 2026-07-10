@@ -1159,6 +1159,39 @@ function JdButton({
   // the extracted text inside the modal. Confirming the modal does
   // the actual upload (with edited text), cancelling discards.
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  // Edit mode: the existing JD's HTML, loaded on demand for in-place editing.
+  const [editHtml, setEditHtml] = useState<string | null>(null);
+
+  // Load the current JD text and open the editor for in-place editing.
+  const openEdit = async () => {
+    setMenuOpen(false);
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/hr/hiring/jobs/${jobId}/jd`);
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { showToast(j?.error || "Couldn't load the JD to edit", "error"); return; }
+      setEditHtml(String(j?.jdText ?? ""));
+    } finally { setBusy(false); }
+  };
+
+  // Save an edited JD (text only) — re-renders the PDF server-side.
+  const saveEdit = async (jdText: string) => {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/hr/hiring/jobs/${jobId}/jd`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jdText }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        showToast(j?.error || "JD save failed", "error");
+        return false;
+      }
+      onChange();
+      return true;
+    } finally { setBusy(false); }
+  };
 
   const remove = async () => {
     setMenuOpen(false);
@@ -1227,6 +1260,10 @@ function JdButton({
               <div className="fixed inset-0 z-[100]" onClick={() => setMenuOpen(false)} />
               <div className="absolute right-0 top-9 z-[101] w-44 rounded-lg border border-slate-200 bg-white shadow-lg py-1.5">
                 <button
+                  onClick={openEdit}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-slate-700 hover:bg-slate-50"
+                ><Pencil size={12} className="text-slate-400" /> Edit JD</button>
+                <button
                   onClick={() => { setMenuOpen(false); ref.current?.click(); }}
                   className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-slate-700 hover:bg-slate-50"
                 ><FileText size={12} className="text-slate-400" /> Replace file</button>
@@ -1252,6 +1289,20 @@ function JdButton({
           }}
         />
       )}
+
+      {editHtml !== null && (
+        <JdReplaceModal
+          initialHtml={editHtml}
+          confirmLabel="Save JD"
+          jobTitle={jobTitle}
+          saving={busy}
+          onCancel={() => setEditHtml(null)}
+          onConfirm={async (edited) => {
+            const ok = await saveEdit(edited);
+            if (ok) setEditHtml(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1261,16 +1312,18 @@ function JdButton({
 // scoped to a single modal so HR can replace an existing JD without
 // leaving the job-detail page.
 function JdReplaceModal({
-  file, jobTitle, saving, onCancel, onConfirm,
+  file, initialHtml, confirmLabel, jobTitle, saving, onCancel, onConfirm,
 }: {
-  file: File;
+  file?: File | null;
+  initialHtml?: string;       // edit mode: load existing JD HTML instead of a file
+  confirmLabel?: string;      // edit mode: "Save JD" instead of "Replace JD"
   jobTitle: string;
   saving: boolean;
   onCancel: () => void;
   onConfirm: (jdText: string) => Promise<void>;
 }) {
-  const [text, setText]             = useState("");
-  const [extracting, setExtracting] = useState(true);
+  const [text, setText]             = useState(file ? "" : (initialHtml ?? ""));
+  const [extracting, setExtracting] = useState(!!file);
   const [error, setError]           = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -1287,8 +1340,10 @@ function JdReplaceModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [onCancel, saving]);
 
-  // Extract text from the picked file on mount.
+  // Extract text from the picked file on mount. In EDIT mode (no file) there's
+  // nothing to extract — the existing JD HTML is already loaded into `text`.
   useEffect(() => {
+    if (!file) { setExtracting(false); setError(null); return; }
     let cancelled = false;
     const ctrl = new AbortController();
     const timeoutId = window.setTimeout(() => ctrl.abort(), 30_000);
@@ -1365,9 +1420,11 @@ function JdReplaceModal({
       >
         <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="text-[15px] font-semibold text-slate-900">Replace Job Description</h3>
+            <h3 className="text-[15px] font-semibold text-slate-900">{file ? "Replace Job Description" : "Edit Job Description"}</h3>
             <p className="text-[11.5px] text-slate-500 truncate">
-              Reading <span className="font-semibold text-slate-700">{file.name}</span> — edit any line; the cleaned-up text is what gets saved as the new PDF.
+              {file
+                ? <>Reading <span className="font-semibold text-slate-700">{file.name}</span> — edit any line; the cleaned-up text is what gets saved as the new PDF.</>
+                : <>Edit the current JD below — the cleaned-up text is saved as the new PDF.</>}
             </p>
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -1460,7 +1517,7 @@ function JdReplaceModal({
               disabled={extracting || saving || !text.trim()}
               className="inline-flex items-center gap-1.5 h-8 px-4 rounded-md bg-[#3b82f6] hover:bg-[#2563eb] disabled:bg-slate-300 text-white text-[12px] font-semibold shadow-sm"
             >
-              <Upload size={12} /> {saving ? "Saving…" : "Replace JD"}
+              <Upload size={12} /> {saving ? "Saving…" : (confirmLabel ?? "Replace JD")}
             </button>
           </div>
         </div>

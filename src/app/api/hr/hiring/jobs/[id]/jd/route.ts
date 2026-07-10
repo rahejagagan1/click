@@ -114,6 +114,72 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 }
 
+// GET — return the current editable JD text (Quill HTML) so HR can edit it
+// in place without re-uploading a file.
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { session, errorResponse } = await requireAuth();
+  if (errorResponse) return errorResponse;
+  if (!isHRAdmin(session!.user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  try {
+    const { id: idParam } = await params;
+    const id = parseInt(idParam, 10);
+    if (!Number.isInteger(id) || id <= 0) return NextResponse.json({ error: "Bad id" }, { status: 400 });
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT "jdText", "jdFileUrl", "jdFileName" FROM "JobOpening" WHERE id = $1`, id,
+    );
+    if (!rows[0]) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    return NextResponse.json({
+      jdText: rows[0].jdText ?? "",
+      jdFileUrl: rows[0].jdFileUrl ?? null,
+      jdFileName: rows[0].jdFileName ?? null,
+    });
+  } catch (e) {
+    return serverError(e, "GET /api/hr/hiring/jobs/[id]/jd");
+  }
+}
+
+// PATCH — save an EDITED JD from text only (no file). Re-renders the text to a
+// fresh PDF (same as the text→PDF path in POST) so the careers page serves the
+// edited version, and updates jdText / jdFileUrl / jdFileName.
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { session, errorResponse } = await requireAuth();
+  if (errorResponse) return errorResponse;
+  if (!isHRAdmin(session!.user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  try {
+    const { id: idParam } = await params;
+    const id = parseInt(idParam, 10);
+    if (!Number.isInteger(id) || id <= 0) return NextResponse.json({ error: "Bad id" }, { status: 400 });
+
+    const body = await req.json().catch(() => ({}));
+    const jdText = typeof body?.jdText === "string" ? body.jdText.slice(0, 100_000) : "";
+    if (!jdText.trim()) return NextResponse.json({ error: "JD text is required" }, { status: 400 });
+
+    const j = await prisma.$queryRawUnsafe<any[]>(`SELECT title FROM "JobOpening" WHERE id = $1`, id);
+    if (!j[0]) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    const title = j[0].title ?? "Job Description";
+
+    const outBytes = await renderJdPdfFromText({ title, text: jdText });
+    const dir = resolve(process.cwd(), "public", "uploads", "jds");
+    await mkdir(dir, { recursive: true });
+    const stamped = `${randomUUID()}-jd.pdf`;
+    await writeFile(resolve(dir, stamped), outBytes);
+    const url = `/uploads/jds/${stamped}`;
+    const outDisplayName = `${title.replace(/[\r\n"/\\]/g, "").slice(0, 80)} — JD.pdf`;
+
+    await prisma.$executeRawUnsafe(
+      `UPDATE "JobOpening" SET "jdFileUrl" = $1, "jdFileName" = $2, "jdText" = $3, "updatedAt" = NOW() WHERE id = $4`,
+      url, outDisplayName, jdText, id,
+    );
+    return NextResponse.json({ ok: true, jdFileUrl: url, jdFileName: outDisplayName });
+  } catch (e) {
+    return serverError(e, "PATCH /api/hr/hiring/jobs/[id]/jd");
+  }
+}
+
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;

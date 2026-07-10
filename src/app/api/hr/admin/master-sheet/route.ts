@@ -5,7 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import prisma from "@/lib/prisma";
-import { requireAuth, isHRAdmin, serverError } from "@/lib/api-auth";
+import { requireAuth, isHRAdmin, canViewSalary, serverError } from "@/lib/api-auth";
+import { getBrandScope } from "@/lib/hr/brand-scope";
 import { istTodayDateOnly } from "@/lib/ist-date";
 
 export const dynamic = "force-dynamic";
@@ -161,7 +162,29 @@ function viaUserWhere(brand: BrandFilter, statusWhere: Record<string, any>): Rec
 //  Sheet generators
 // ─────────────────────────────────────────────────────────────────────
 
-async function addEmployeesSheet(wb: ExcelJS.Workbook, brand: BrandFilter, statusWhere: Record<string, any>) {
+// True when a row's businessUnit falls inside the salary viewer's allowed
+// brand. `salaryBrand === null` means all-brands (developer / cross-brand
+// HR) so every row qualifies; NB Media absorbs legacy null-BU rows (same
+// rule as userWhereForBrand) so those employees still get their pay shown.
+function rowInSalaryBrand(businessUnit: string | null | undefined, salaryBrand: BrandFilter): boolean {
+  if (salaryBrand === null) return true;
+  if (salaryBrand === "YT Labs") return businessUnit === "YT Labs";
+  return businessUnit === "NB Media" || businessUnit == null;
+}
+
+// Employees directory. When `includeSalary` is true the CTC / Monthly Salary
+// columns are APPENDED here (rather than emitted as a separate Salaries tab),
+// so a combined Employees+Salaries export is one sheet with no duplicated
+// identity headers. `salaryBrand` clamps which rows get pay populated: a
+// single-brand salary viewer sees pay only for their own brand's rows even if
+// the directory itself spans all brands.
+async function addEmployeesSheet(
+  wb: ExcelJS.Workbook,
+  brand: BrandFilter,
+  statusWhere: Record<string, any>,
+  includeSalary: boolean,
+  salaryBrand: BrandFilter,
+) {
   const users = await prisma.user.findMany({
     where: userWhere(brand, statusWhere),
     orderBy: { name: "asc" },
@@ -172,6 +195,7 @@ async function addEmployeesSheet(wb: ExcelJS.Workbook, brand: BrandFilter, statu
       // column, falling back to the profile's free-text title only when a user
       // has no designationId assigned.
       designation: { select: { label: true } },
+      ...(includeSalary ? { salaryStructure: true } : {}),
     },
   });
   const ws = wb.addWorksheet("Employees");
@@ -195,10 +219,16 @@ async function addEmployeesSheet(wb: ExcelJS.Workbook, brand: BrandFilter, statu
     { header: "Gender",         key: "gender",     width: 10 },
     { header: "Blood Group",    key: "blood",      width: 10 },
     { header: "Marital Status", key: "ms",         width: 12 },
+    // Salary columns — only present when the export bundles compensation.
+    ...(includeSalary ? [
+      { header: "Annual CTC (₹)",     key: "ctc",     width: 16, style: { numFmt: "#,##0" } },
+      { header: "Monthly Salary (₹)", key: "monthly", width: 18, style: { numFmt: "#,##0" } },
+      { header: "Salary Effective",   key: "salEff",  width: 16 },
+    ] : []),
   ];
   for (const u of users) {
     const p = u.employeeProfile;
-    ws.addRow({
+    const row: Record<string, any> = {
       hrm: p?.employeeId, name: u.name, email: u.email,
       pmail: p?.personalEmail ?? "", phone: p?.phone ?? "",
       dept: p?.department ?? "", desig: u.designation?.label ?? p?.designation ?? "",
@@ -209,6 +239,58 @@ async function addEmployeesSheet(wb: ExcelJS.Workbook, brand: BrandFilter, statu
       wl: p?.workLocation ?? "", dob: fmtDate(p?.dateOfBirth as any),
       gender: p?.gender ?? "", blood: p?.bloodGroup ?? "",
       ms: p?.maritalStatus ?? "",
+    };
+    if (includeSalary) {
+      // Only populate pay for rows inside the viewer's salary brand scope.
+      const s = rowInSalaryBrand(p?.businessUnit, salaryBrand) ? (u as any).salaryStructure : null;
+      const ctc = s ? Number(s.ctc ?? 0) : null;
+      row.ctc     = ctc ?? "";
+      row.monthly = ctc != null ? Math.round(ctc / 12) : "";
+      row.salEff  = s ? fmtDate(s.effectiveFrom as any) : "";
+    }
+    ws.addRow(row);
+  }
+  styleSheet(ws);
+}
+
+// Salaries — CTC + monthly pay per employee. Gated separately behind
+// canViewSalary (HR Manager / CEO / salary-dev), NOT the general HR-admin
+// tier that opens the rest of the workbook. Every regular employee's
+// components sum to CTC, so monthly = CTC / 12 (same figure the profile's
+// "Monthly Salary" falls back to). Employees without a salary structure
+// still get a row, with the pay columns blank, so gaps are visible.
+async function addSalariesSheet(wb: ExcelJS.Workbook, brand: BrandFilter, statusWhere: Record<string, any>) {
+  const users = await prisma.user.findMany({
+    where: userWhere(brand, statusWhere),
+    orderBy: { name: "asc" },
+    include: {
+      employeeProfile: { select: { employeeId: true, department: true, businessUnit: true } },
+      salaryStructure: true,
+    },
+  });
+  const ws = wb.addWorksheet("Salaries");
+  ws.columns = [
+    { header: "HRM No.",            key: "hrm",     width: 12 },
+    { header: "Name",               key: "name",    width: 24 },
+    { header: "Department",         key: "dept",    width: 22 },
+    { header: "Business Unit",      key: "bu",      width: 14 },
+    { header: "Salary Type",        key: "stype",   width: 14 },
+    { header: "Annual CTC (₹)",     key: "ctc",     width: 16, style: { numFmt: "#,##0" } },
+    { header: "Monthly Salary (₹)", key: "monthly", width: 18, style: { numFmt: "#,##0" } },
+    { header: "Effective From",     key: "eff",     width: 14 },
+  ];
+  for (const u of users) {
+    const s = u.salaryStructure;
+    const ctc = s ? Number(s.ctc ?? 0) : null;
+    ws.addRow({
+      hrm:   u.employeeProfile?.employeeId ?? "",
+      name:  u.name,
+      dept:  u.employeeProfile?.department ?? "",
+      bu:    u.employeeProfile?.businessUnit ?? "",
+      stype: s ? (s.salaryType === "intern" ? "Intern" : "Regular") : "",
+      ctc:     ctc ?? "",
+      monthly: ctc != null ? Math.round(ctc / 12) : "",
+      eff:   s ? fmtDate(s.effectiveFrom as any) : "",
     });
   }
   styleSheet(ws);
@@ -438,7 +520,8 @@ async function addRequestsSheets(wb: ExcelJS.Workbook, brand: BrandFilter, statu
 export async function GET(req: NextRequest) {
   const { session, errorResponse } = await requireAuth();
   if (errorResponse) return errorResponse;
-  if (!isHRAdmin(session!.user as any)) {
+  const user = session!.user as any;
+  if (!isHRAdmin(user)) {
     return NextResponse.json({ error: "HR-admin only" }, { status: 403 });
   }
   try {
@@ -472,13 +555,34 @@ export async function GET(req: NextRequest) {
         });
     const statusWhere = userWhereForStatus(status, exitedRows.map((e) => e.userId));
 
+    // Salary gate + brand-clamp resolved once, up front. Salaries is gated
+    // behind canViewSalary (HR Manager / CEO / salary-dev) — NOT the broader
+    // HR-admin tier — and clamped to the viewer's brand: an all-brands viewer
+    // (developer / cross-brand HR) sees pay for everyone in scope; a
+    // single-brand HR Manager only their own brand. `salaryBrand === null`
+    // means all-brands. A no-brand (fail-closed) viewer gets no pay at all.
+    const wantsSalary = sheets.includes("salaries") && canViewSalary(user);
+    let salaryOk = false;
+    let salaryBrand: BrandFilter = null;
+    if (wantsSalary) {
+      const scope = getBrandScope(user);
+      if (scope.allBrands)      { salaryOk = true; salaryBrand = null; }
+      else if (scope.brand)     { salaryOk = true; salaryBrand = scope.brand as BrandFilter; }
+    }
+
     const wb = new ExcelJS.Workbook();
     wb.creator = brand
       ? `${brand} HR Dashboard`
       : "NB Media HR Dashboard";
     wb.created = new Date();
 
-    if (sheets.includes("employees"))     await addEmployeesSheet(wb, brand, statusWhere);
+    // When BOTH Employees and Salaries are picked, CTC / Monthly Salary are
+    // merged as extra columns on the Employees sheet (no second tab, no
+    // duplicated identity headers). A standalone Salaries tab is emitted only
+    // when Salaries is picked without Employees (see after the request logs).
+    const mergeSalaryIntoEmployees = salaryOk && sheets.includes("employees");
+    if (sheets.includes("employees"))
+      await addEmployeesSheet(wb, brand, statusWhere, mergeSalaryIntoEmployees, salaryBrand);
     if (sheets.includes("attendance")) {
       const now = new Date();
       const yNow = now.getUTCFullYear();
@@ -520,6 +624,13 @@ export async function GET(req: NextRequest) {
     }
     if (sheets.includes("leaves"))   await addLeaveBalancesSheet(wb, brand, statusWhere);
     if (sheets.includes("requests")) await addRequestsSheets(wb, brand, statusWhere);
+    // Standalone Salaries tab ONLY when Salaries was picked without the
+    // Employees directory. When Employees is also picked, pay was already
+    // merged into that sheet above — so we don't emit a second tab here (that
+    // was the duplicated-header behaviour we're removing).
+    if (salaryOk && !sheets.includes("employees")) {
+      await addSalariesSheet(wb, salaryBrand, statusWhere);
+    }
 
     const buffer = await wb.xlsx.writeBuffer();
     const brandFileSlug = brand === "YT Labs" ? "yt-labs" : brand === "NB Media" ? "nb-media" : "all-brands";
