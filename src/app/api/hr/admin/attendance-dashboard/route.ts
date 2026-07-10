@@ -81,15 +81,19 @@ export async function GET() {
     // legacy rule).
     const userShifts = await prisma.userShift.findMany({
       where:   { userId: { in: users.map((u) => u.id) } },
-      include: { shift: { select: { startTime: true, breakMinutes: true } } },
+      include: { shift: { select: { startTime: true, endTime: true, breakMinutes: true } } },
     });
     const shiftByUser = new Map(userShifts.map((us) => [us.userId, us.shift]));
     function lateCutoffMinForUser(userId: number): number {
       const s = shiftByUser.get(userId);
-      if (!s) return 10 * 60; // legacy 10:00 IST when no shift assigned
+      const firstHalfOff = firstHalfOffIds.has(userId);
+      if (!s) return firstHalfOff ? 14 * 60 : 10 * 60; // no shift → 2 PM if first-half off, else 10 AM
       const [sh, sm] = String(s.startTime).split(":").map((n) => Number(n) || 0);
+      const [eh, em] = String(s.endTime).split(":").map((n) => Number(n) || 0);
       const grace = Number.isFinite(s.breakMinutes) ? s.breakMinutes : 15;
-      return sh * 60 + sm + grace;
+      const startMin = sh * 60 + sm;
+      const midMin   = Math.round((startMin + (eh * 60 + em)) / 2);
+      return (firstHalfOff ? midMin : startMin) + grace;
     }
 
     // Anyone with a LeaveApplication that covers today, in any status that
@@ -102,7 +106,7 @@ export async function GET() {
         toDate:   { gte: today },
         status:   { notIn: ["rejected", "cancelled"] },
       },
-      select: { userId: true },
+      select: { userId: true, reason: true },
     });
     const onLeaveIds = new Set<number>(leaveTodayRows.map((r) => r.userId));
 
@@ -113,9 +117,17 @@ export async function GET() {
     // remains a pure "GPS said remote" view.
     const wfhTodayRows = await prisma.wFHRequest.findMany({
       where: { date: today, status: { notIn: ["rejected", "cancelled"] } },
-      select: { userId: true },
+      select: { userId: true, reason: true },
     });
     const wfhTodayIds = new Set<number>(wfhTodayRows.map((r) => r.userId));
+
+    // First-half OFF (a [First Half] leave or WFH covers today) → the employee
+    // is only expected from the afternoon, so late detection uses the shift
+    // mid-point, not the morning start. Otherwise a valid afternoon clock-in on
+    // a first-half-leave day is wrongly flagged "late" (e.g. Palak, 1:12 PM).
+    const firstHalfOffIds = new Set<number>();
+    for (const r of leaveTodayRows) if (/\[first\s+half\]/i.test(r.reason ?? "")) firstHalfOffIds.add(r.userId);
+    for (const r of wfhTodayRows)   if (/\[first\s+half\]/i.test(r.reason ?? "")) firstHalfOffIds.add(r.userId);
 
     const rows = users.map((u) => {
       const rec = byUser.get(u.id) ?? null;
@@ -252,6 +264,8 @@ export async function GET() {
       late:         rows.filter((r) => r.rawStatus === "late").length,
     };
 
-    return NextResponse.json(serializeBigInt({ rows, counts, date: today.toISOString().slice(0, 10) }));
+    return NextResponse.json(serializeBigInt({ rows, counts, date: today.toISOString().slice(0, 10) }), {
+      headers: { "Cache-Control": "no-store, must-revalidate" },
+    });
   } catch (e) { return serverError(e, "GET /api/hr/admin/attendance-dashboard"); }
 }
