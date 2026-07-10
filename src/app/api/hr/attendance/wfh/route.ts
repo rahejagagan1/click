@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { notifyApprovers, notifyUsers, brandCeoIdForEmployee, brandScopedFinalApprovers } from "@/lib/notifications";
-import { istTimeOnDate, istDateOnlyFrom, istMonthRange } from "@/lib/ist-date";
+import { istDateOnlyFrom, istMonthRange } from "@/lib/ist-date";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { checkPastDateAllowed } from "@/lib/hr/leave-date-rules";
 import { isWorkingDay } from "@/lib/hr/shift-working-days";
@@ -477,42 +477,27 @@ export async function PUT(req: NextRequest) {
     });
     if (count === 0) return NextResponse.json({ error: "Request has already been decided" }, { status: 409 });
 
-    // Seed an Attendance row so the WFH day counts as worked.
+    // WFH approval PERMITS remote work — it does NOT auto-credit the day.
+    // Policy: a WFH day must still be worked like any shift (full = shift hours,
+    // half = shift/2), judged from the employee's real clock-in/out; auto-LOP
+    // then enforces completion. So we never seed a fake full-day present row
+    // (that used to over-credit hours and break the live clock widget). If the
+    // employee has already clocked in, we only flag the day as remote and let
+    // their actual clock-out finalise the hours.
     const dateOnly = new Date(record.date);
     const existing = await prisma.attendance.findUnique({
       where: { userId_date: { userId: record.userId, date: dateOnly } },
     });
     const location = stringifyAttLoc({ mode: "remote" });
     if (existing?.clockIn) {
-      // The employee has ALREADY clocked in for this WFH day and may still be
-      // actively working (open session). Do NOT overwrite their clock-out with
-      // a fake 23:59 / full-day total: that clobbers the live day, breaks their
-      // clock widget (shows 0h and a fresh Clock-In while they're working) and
-      // over-credits hours. WFH approval here only flags the day as remote —
-      // their real clock-out finalises the hours, and the normal shift-
-      // completion / half-day / LOP rules then apply exactly like an office day.
       await prisma.attendance.update({
         where: { userId_date: { userId: record.userId, date: dateOnly } },
         data: { status: "present", location },
       });
-    } else {
-      // No clock-in yet — seed the day so an approved WFH isn't marked absent.
-      const finalClockIn  = istTimeOnDate(dateOnly, 10, 0);
-      const finalClockOut = istTimeOnDate(dateOnly, 23, 59);
-      const totalMin = Math.max(0, Math.round((finalClockOut.getTime() - finalClockIn.getTime()) / 60000));
-      await prisma.attendance.upsert({
-        where: { userId_date: { userId: record.userId, date: dateOnly } },
-        create: {
-          userId: record.userId, date: dateOnly,
-          clockIn: finalClockIn, clockOut: finalClockOut,
-          status: "present", totalMinutes: totalMin, isRegularized: true, location,
-        },
-        update: {
-          clockIn: finalClockIn, clockOut: finalClockOut,
-          status: "present", totalMinutes: totalMin, isRegularized: true, location,
-        },
-      });
     }
+    // else: no clock-in yet → no attendance row is seeded. The approved
+    // WFHRequest is the record of permission; the day is completed by the
+    // employee actually clocking in and working their required hours.
 
     // L1 approver lookup so the final email lists manager + finaliser.
     const l1Approver = record.approvedById
