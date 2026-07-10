@@ -182,7 +182,7 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
     const [attendances, leaves, regs, wfhs, ods, compOffs] = await Promise.all([
       prisma.attendance.findMany({
         where: { userId: { in: eligibleUserIds }, date },
-        select: { id: true, userId: true, status: true, isRegularized: true },
+        select: { id: true, userId: true, status: true, isRegularized: true, totalMinutes: true },
       }),
       prisma.leaveApplication.findMany({
         where: {
@@ -207,7 +207,8 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
           date,
           status: { in: PROTECTED_SINGLE_STAGE_STATUSES },
         },
-        select: { userId: true },
+        // reason carries the [First Half] / [Second Half] marker for half-day WFH.
+        select: { userId: true, reason: true },
       }),
       prisma.onDutyRequest.findMany({
         where: {
@@ -237,6 +238,34 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
       a.status === "missed_clock_out" && !a.isRegularized;
     const missedSwipeRows = attendances.filter(isUnregularizedMissedSwipe);
     const missedSwipeUserIds = new Set(missedSwipeRows.map((a) => a.userId));
+    const attByUser = new Map(attendances.map((a) => [a.userId, a]));
+
+    // ── WFH completion enforcement ──────────────────────────────────────
+    // An approved WFH no longer BLANKET-shields from LOP. A WFH day must be
+    // worked like any shift: full = 540 min (9h), half = 270 min (4.5h) — the
+    // same 9h bar the attendance UI uses — with "half" detected from the
+    // [First Half] / [Second Half] reason marker. Judged from worked minutes
+    // (Attendance.totalMinutes): meet the bar → shielded (present); fall short
+    // → LOP (full-day for a full WFH, half-day for a half WFH). A leave /
+    // regularization / OD / comp-off on the same day still shields — they
+    // weren't expected to work the WFH portion.
+    const WFH_FULL_MIN = 540, WFH_HALF_MIN = 270;
+    const otherwiseCovered = new Set<number>([
+      ...leaves.map((r) => r.userId), ...regs.map((r) => r.userId),
+      ...ods.map((r) => r.userId), ...compOffs.map((r) => r.userId),
+    ]);
+    const wfhMetIds = new Set<number>();
+    const wfhFullLopIds = new Set<number>();
+    const wfhHalfLopIds = new Set<number>();
+    for (const w of wfhs) {
+      if (otherwiseCovered.has(w.userId)) continue;
+      const isHalf = /\[(?:first|second)\s+half\]/i.test(w.reason ?? "");
+      const required = isHalf ? WFH_HALF_MIN : WFH_FULL_MIN;
+      const worked = attByUser.get(w.userId)?.totalMinutes ?? 0;
+      if (worked >= required) wfhMetIds.add(w.userId);
+      else if (isHalf) wfhHalfLopIds.add(w.userId);
+      else wfhFullLopIds.add(w.userId);
+    }
 
     const protectedIds = new Set<number>();
     // Any attendance row EXCEPT an unregularized missed clock-out protects the
@@ -245,9 +274,34 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
     for (const r of attendances) if (!isUnregularizedMissedSwipe(r)) protectedIds.add(r.userId);
     for (const r of leaves)      protectedIds.add(r.userId);
     for (const r of regs)        protectedIds.add(r.userId);
-    for (const r of wfhs)        protectedIds.add(r.userId);
     for (const r of ods)         protectedIds.add(r.userId);
     for (const r of compOffs)    protectedIds.add(r.userId);
+    // WFH: completed → shielded; short → handled explicitly just below. Add ALL
+    // WFH users to protectedIds so the generic missed-swipe / no-row LOP passes
+    // never double-process (or double-charge LWP for) a WFH user.
+    for (const id of wfhMetIds)     protectedIds.add(id);
+    for (const id of wfhFullLopIds) protectedIds.add(id);
+    for (const id of wfhHalfLopIds) protectedIds.add(id);
+
+    // Apply WFH shortfalls. A short WFH user may already have a (present or
+    // missed-swipe) row → UPDATE it; or no row (never clocked in) → CREATE it.
+    // Idempotent: skip if the row is already at the target LOP status so a
+    // re-run never re-charges LWP.
+    const applyWfhLop = async (ids: Set<number>, status: string, lwp: number, why: string) => {
+      for (const uid of ids) {
+        const row = attByUser.get(uid);
+        if (row?.status === status) continue;
+        if (row) {
+          await prisma.attendance.update({ where: { id: row.id }, data: { status, notes: why } });
+        } else {
+          await prisma.attendance.create({ data: { userId: uid, date, status, totalMinutes: 0, notes: why } });
+        }
+        await addLwpUsage(uid, date.getUTCFullYear(), lwp);
+        lopApplied++;
+      }
+    };
+    await applyWfhLop(wfhFullLopIds, "lop", 1, "Auto-LOP: approved full-day WFH not completed (worked < 9h).");
+    await applyWfhLop(wfhHalfLopIds, "half_day_lop", 0.5, "Auto-LOP: approved half-day WFH not completed (worked < 4.5h).");
 
     // Half-day LOP: unregularized missed clock-outs not otherwise covered by a
     // pending/approved leave / regularization / WFH / OD / comp-off. (A pending
