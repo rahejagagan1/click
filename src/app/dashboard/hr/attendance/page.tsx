@@ -630,13 +630,13 @@ export default function AttendancePage() {
   // Mobile gate w/ two bypasses (mirrors /dashboard/hr/home):
   //   1. Developers (DEVELOPER_EMAILS env → user.isDeveloper) — stable
   //      identity-bound bypass.
-  //   2. ?desktop=1 query param — short-term emergency override for
+  //   2. ?desktop=11 query param — short-term emergency override for
   //      anyone whose laptop is unavailable. Not a secret; pair with
   //      a regularization request if used.
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   useEffect(() => {
     const isDev = user?.isDeveloper === true;
-    // isDesktopBypassActive() persists `?desktop=1` for the session, so the
+    // isDesktopBypassActive() persists `?desktop=11` for the session, so the
     // override survives navigation that drops the query string.
     setIsMobileDevice(detectMobileDevice() && !isDev && !isDesktopBypassActive());
   }, [user]);
