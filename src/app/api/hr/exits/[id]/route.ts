@@ -250,6 +250,31 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
            WHERE id = (SELECT "userId" FROM "EmployeeExit" WHERE id = $2)`,
         !shouldDeactivate, id,
       ));
+      // Finalising an exit voids any still-pending probation — a person
+      // who has left can't be "on probation", so the open window and its
+      // reminder stamps are cleared (confirmed probations keep their
+      // history), and any pending manager recommendation is dropped from
+      // the HR queue. NOT restored on reactivation / flipping the status
+      // back — HR re-sets the probation end date manually if the person
+      // returns mid-probation.
+      if (shouldDeactivate) {
+        ops.push(prisma.$executeRawUnsafe(
+          `UPDATE "EmployeeProfile"
+              SET "probationEndDate" = NULL,
+                  "probationReminderSentAt" = NULL,
+                  "probationManagerNotifiedAt" = NULL
+            WHERE "userId" = (SELECT "userId" FROM "EmployeeExit" WHERE id = $1)
+              AND "probationConfirmedAt" IS NULL
+              AND "probationEndDate" IS NOT NULL`,
+          id,
+        ));
+        ops.push(prisma.$executeRawUnsafe(
+          `DELETE FROM "ProbationReview"
+            WHERE "employeeUserId" = (SELECT "userId" FROM "EmployeeExit" WHERE id = $1)
+              AND status = 'pending'`,
+          id,
+        ));
+      }
     }
     await prisma.$transaction(ops);
 

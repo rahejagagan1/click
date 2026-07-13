@@ -47,6 +47,22 @@ export function brandFilterSql(brand: string | null | undefined, ep = "ep"): str
   return "";
 }
 
+// SQL guard shared by every probation list / sweep: excludes employees who
+// are effectively gone even though isActive hasn't been flipped yet — an
+// exit record finalised (exited / legacy offboarded) OR whose last working
+// day has already passed. Matches the "Exited" badge rule used across the
+// UI, so someone shown as Exited can never simultaneously sit in a
+// probation queue. `u` = alias of the "User" table in the outer query.
+// Fixed literal SQL only — safe to inline into raw queries.
+export function notExitedSql(u = "u"): string {
+  return ` AND NOT EXISTS (
+        SELECT 1 FROM "EmployeeExit" ex
+         WHERE ex."userId" = ${u}.id
+           AND (ex.status IN ('exited','offboarded')
+                OR ex."lastWorkingDay"::date < CURRENT_DATE)
+      )`;
+}
+
 // ── Recipient lookups ───────────────────────────────────────────────
 async function hrRecipientIds(): Promise<number[]> {
   const rows = await prisma.$queryRawUnsafe<{ id: number }[]>(
@@ -108,7 +124,7 @@ export async function listManagerProbationReviews(managerId: number): Promise<Ma
         AND ep."probationEndDate" IS NOT NULL
         AND ep."probationConfirmedAt" IS NULL
         AND ep."probationEndDate" >= (NOW() - INTERVAL '60 days')
-        AND ep."probationEndDate" <= (NOW() + ($2::int * INTERVAL '1 day'))
+        AND ep."probationEndDate" <= (NOW() + ($2::int * INTERVAL '1 day'))${notExitedSql()}
       ORDER BY ep."probationEndDate" ASC`,
     managerId, REVIEW_WINDOW_DAYS,
   );
@@ -145,7 +161,7 @@ export async function pendingManagerReviewCount(managerId: number): Promise<numb
         AND ep."probationEndDate" IS NOT NULL
         AND ep."probationConfirmedAt" IS NULL
         AND ep."probationEndDate" >= (NOW() - INTERVAL '60 days')
-        AND ep."probationEndDate" <= (NOW() + ($2::int * INTERVAL '1 day'))
+        AND ep."probationEndDate" <= (NOW() + ($2::int * INTERVAL '1 day'))${notExitedSql()}
         AND NOT EXISTS (
           SELECT 1 FROM "ProbationReview" pr
            WHERE pr."employeeUserId" = u.id AND pr.status = 'pending'
@@ -166,7 +182,8 @@ export async function listPendingHrReviews(brand?: string | null): Promise<any[]
        JOIN "User" e ON e.id = pr."employeeUserId"
        LEFT JOIN "EmployeeProfile" ep ON ep."userId" = pr."employeeUserId"
        LEFT JOIN "User" m ON m.id = pr."managerId"
-      WHERE pr.status = 'pending'${brandFilterSql(brand)}
+      WHERE pr.status = 'pending'
+        AND e."isActive" = true${notExitedSql("e")}${brandFilterSql(brand)}
       ORDER BY pr."createdAt" ASC`,
   );
   return rows.map((r) => ({
@@ -250,7 +267,7 @@ export async function listOnProbationEmployees(brand?: string | null): Promise<a
       WHERE u."isActive" = true
         AND ep."probationEndDate" IS NOT NULL
         AND ep."probationConfirmedAt" IS NULL
-        AND ep."probationEndDate" >= CURRENT_DATE${brandFilterSql(brand)}
+        AND ep."probationEndDate" >= CURRENT_DATE${notExitedSql()}${brandFilterSql(brand)}
       ORDER BY ep."probationEndDate" ASC`);
   return rows.map((r) => ({
     userId: r.userId, name: r.name, email: r.email,
@@ -483,7 +500,7 @@ export async function sweepProbationManagerNotifications(): Promise<number> {
         AND ep."probationConfirmedAt" IS NULL
         AND ep."probationManagerNotifiedAt" IS NULL
         AND ep."probationEndDate" >= (NOW() - INTERVAL '60 days')
-        AND ep."probationEndDate" <= (NOW() + ($1::int * INTERVAL '1 day'))`,
+        AND ep."probationEndDate" <= (NOW() + ($1::int * INTERVAL '1 day'))${notExitedSql()}`,
     REVIEW_WINDOW_DAYS,
   );
   let processed = 0;
