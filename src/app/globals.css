@@ -632,43 +632,64 @@ html:not(.dark) .glass {
   max-width:     100%;
   box-sizing:    border-box;
 }
-.jd-prose h1, .jd-prose h2 {
-  margin-top: 1.6rem;
-  margin-bottom: 0.5rem;
-  font-size: 18px;
+/* Heading / paragraph / list rules below MIRROR the Edit JD modal's
+   editor styles (.jd-quill-wrap .ql-editor further down + Quill's own
+   snow defaults) 1:1 — same sizes, margins, hairline rules, colors —
+   so the JD a candidate reads is formatted exactly like what HR sees
+   while editing. Change them TOGETHER or the two drift apart again. */
+.jd-prose h1 {
+  /* Editor: Quill snow default — 2em of the 14.5px body, no margins. */
+  margin: 0;
+  font-size: 29px;
   font-weight: 700;
   color: #0f172a;
-  letter-spacing: -0.01em;
   line-height: 1.3;
 }
+.jd-prose h2 {
+  /* Mirrors .jd-quill-wrap .ql-editor h2 (centered title-style). */
+  margin: 18px 0 14px;
+  font-size: 20px;
+  font-weight: 700;
+  text-align: center;
+  color: #0f172a;
+}
 .jd-prose h3 {
-  margin-top: 1.4rem;
-  margin-bottom: 0.4rem;
-  font-size: 16.5px;
+  /* Mirrors .jd-quill-wrap .ql-editor h3 — incl. the hairline rule
+     under section headings HR sees in the editor. */
+  margin: 16px 0 6px;
+  font-size: 16px;
   font-weight: 700;
   color: #0f172a;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 4px;
 }
 .jd-prose h1:first-child,
 .jd-prose h2:first-child,
 .jd-prose h3:first-child { margin-top: 0; }
 .jd-prose p {
-  margin-top: 0.5rem;
-  margin-bottom: 0.5rem;
+  /* ZERO vertical margins — Quill's editor renders every <p> flush
+     (its default stylesheet), and JDs extracted from PDFs store each
+     visual line as its own <p>. Any margin here blows those wrapped
+     lines apart into gappy fragments on the public page while the
+     edit modal looks fine. Paragraph separation comes from the
+     explicit blank lines HR sees in the editor (<p><br></p>), which
+     render as an empty line — exactly like Quill. */
+  margin: 0;
   font-size: 14.5px;
-  line-height: 1.8;
-  color: #334155;
+  line-height: 1.7;
+  color: #1e293b;
 }
 .jd-prose ul, .jd-prose ol {
-  margin: 0.5rem 0;
-  padding-left: 1.5rem;
+  margin: 6px 0;
+  padding-left: 24px;
 }
 .jd-prose ul { list-style: disc; }
 .jd-prose ol { list-style: decimal; }
 .jd-prose li {
-  margin: 0.25rem 0;
+  margin: 2px 0;
   font-size: 14.5px;
   line-height: 1.7;
-  color: #334155;
+  color: #1e293b;
 }
 .jd-prose strong, .jd-prose b { font-weight: 700; color: #0f172a; }
 .jd-prose em, .jd-prose i    { font-style: italic; }

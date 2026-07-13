@@ -15,6 +15,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import sanitizeHtml from "sanitize-html";
+import { mergeSoftWrappedJdParagraphs } from "@/lib/jd-html";
 import JobShareButton from "./JobShareButton";
 import Reveal from "./Reveal";
 import Magnetic from "./Magnetic";
@@ -784,7 +785,11 @@ function JdHtmlPanel({
   // spaces so the text wraps naturally, matching the clean PDF preview.
   const normalised = (text ?? "").split("&nbsp;").join(" ").split("&#160;").join(" ").split(String.fromCharCode(160)).join(" ");
   const html       = isHtmlJd(normalised);
-  const sanitised  = html ? sanitizeHtml(normalised, JD_SANITIZE) : "";
+  // Merge soft-wrapped <p> fragments (one per PDF line in extracted JDs)
+  // into flowing paragraphs BEFORE sanitising, so the text reflows to
+  // this column's width instead of breaking where the source PDF's lines
+  // ended. Same helper runs in the editor preview + the generated PDF.
+  const sanitised  = html ? sanitizeHtml(mergeSoftWrappedJdParagraphs(normalised), JD_SANITIZE) : "";
   const blocks     = html ? [] : parseJdBlocks(normalised);
 
   return (
@@ -928,6 +933,11 @@ function parseJdBlocks(text: string): JdBlock[] {
   const out: JdBlock[] = [];
   let bulletBuf: string[]   = [];
   let numberedBuf: string[] = [];
+  // Consecutive plain lines are SOFT WRAPS from PDF-to-text extraction
+  // (extractors emit one line per visual line), so they're buffered and
+  // joined into ONE paragraph. Only a blank line, bullet, number, or
+  // heading starts a new block — mirrors how the text reads in the PDF.
+  let paraBuf: string[]     = [];
 
   const flushBullets = () => {
     if (bulletBuf.length) {
@@ -941,7 +951,13 @@ function parseJdBlocks(text: string): JdBlock[] {
       numberedBuf = [];
     }
   };
-  const flushAll = () => { flushBullets(); flushNumbered(); };
+  const flushPara = () => {
+    if (paraBuf.length) {
+      out.push({ kind: "paragraph", text: paraBuf.join(" ") });
+      paraBuf = [];
+    }
+  };
+  const flushAll = () => { flushBullets(); flushNumbered(); flushPara(); };
 
   for (const raw of lines) {
     const line = raw.trim();
@@ -950,25 +966,26 @@ function parseJdBlocks(text: string): JdBlock[] {
 
     const bullet = line.match(/^[-*•]\s+(.*)$/);
     if (bullet) {
-      flushNumbered();
+      flushNumbered(); flushPara();
       bulletBuf.push(bullet[1]);
       continue;
     }
     const num = line.match(/^\d+[.)]\s+(.*)$/);
     if (num) {
-      flushBullets();
+      flushBullets(); flushPara();
       numberedBuf.push(num[1]);
       continue;
     }
 
-    flushAll();
+    flushBullets(); flushNumbered();
 
     // Heading heuristic: short line ending with ":" (≤60 chars).
     if (/:\s*$/.test(line) && line.length <= 60) {
+      flushPara();
       out.push({ kind: "heading", text: line.replace(/:\s*$/, "") + ":" });
       continue;
     }
-    out.push({ kind: "paragraph", text: line });
+    paraBuf.push(line);
   }
   flushAll();
   return out;
