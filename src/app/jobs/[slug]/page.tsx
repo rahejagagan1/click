@@ -22,6 +22,7 @@ import ScrollProgress from "./ScrollProgress";
 import WordReveal from "./WordReveal";
 import CharReveal from "../CharReveal";
 import PlayBadges from "./PlayBadges";
+import TrackJobView from "./track-job-view";
 
 // JDs authored via the new Quill-based editor are stored as HTML;
 // older JDs are plain text. Detect by looking for a leading `<`
@@ -300,6 +301,7 @@ export default async function PublicJobDetailPage({ params }: { params: Promise<
       style={{ scrollBehavior: "smooth" }}
     >
       <ScrollProgress />
+      <TrackJobView jobId={job.id} jobTitle={job.title} />
       <style>{`
         @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
         .bob { animation: bob 2s ease-in-out infinite; }

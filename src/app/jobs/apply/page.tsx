@@ -15,6 +15,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { DateField } from "@/components/ui/date-field";
 import { CalendarField } from "@/components/ui/calendar-field";
 import SelectField from "@/components/ui/SelectField";
+import { fbqTrack } from "@/components/meta-pixel";
 import {
   CheckCircle2, AlertCircle, User, Mail, Phone, Briefcase,
   Building2, Clock, Link as LinkIcon, FileText, Upload, X,
@@ -408,6 +409,15 @@ export default function JobApplyPage() {
       // previous candidate's data.
       try { window.localStorage.removeItem(DRAFT_KEY); } catch {}
       setDone(true);
+      // Meta Pixel — a completed application is the conversion the
+      // hiring ads optimise for; tag it with the role so Events
+      // Manager can break results down per opening.
+      const applied = openings?.find((o) => String(o.id) === form.jobOpeningId);
+      fbqTrack("Lead", {
+        content_name: applied?.title || "Job application",
+        content_ids: form.jobOpeningId ? [form.jobOpeningId] : undefined,
+        content_category: "job_application",
+      });
     } catch (e: any) {
       setError(e?.message || "Submission failed");
     } finally {
