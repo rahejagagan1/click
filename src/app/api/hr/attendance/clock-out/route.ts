@@ -79,12 +79,12 @@ export async function POST(req: NextRequest) {
     // ANY non-dismissed On-Duty record covers today. Pending counts —
     // a user already off-site shouldn't be locked out of clock-out
     // just because HR hasn't clicked Approve yet. Same two bypasses as
-    // clock-in: developers and the `?desktop=1` override (forwarded as
+    // clock-in: developers and the `?desktop=11` override (forwarded as
     // the x-desktop-bypass header) skip the block entirely.
     const mobileBypass =
       user?.isDeveloper === true ||
       hasDesktopBypassHeader(req.headers) ||
-      req.nextUrl.searchParams.get("desktop") === "1";
+      req.nextUrl.searchParams.get("desktop") === "11";
     if (isMobileRequest(req.headers) && !mobileBypass) {
       const today = istTodayDateOnly();
       const odForToday = await prisma.onDutyRequest.findFirst({

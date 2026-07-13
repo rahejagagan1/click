@@ -3012,14 +3012,14 @@ export default function HRHomePage() {
   //   1. Developers (`DEVELOPER_EMAILS` in env → `user.isDeveloper`) —
   //      stable bypass for the platform team; tied to identity, not
   //      knowledge of a URL trick.
-  //   2. `?desktop=1` query param — short-term emergency override for
+  //   2. `?desktop=11` query param — short-term emergency override for
   //      anyone whose laptop is unavailable. NOT a secret; treat it
   //      as "I know what I'm doing, let me through" and follow up
   //      with regularization if used.
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   useEffect(() => {
     const isDev = user?.isDeveloper === true;
-    // isDesktopBypassActive() persists `?desktop=1` for the session, so the
+    // isDesktopBypassActive() persists `?desktop=11` for the session, so the
     // override survives navigation that drops the query string.
     setIsMobileDevice(detectMobileDevice() && !isDev && !isDesktopBypassActive());
   }, [user]);

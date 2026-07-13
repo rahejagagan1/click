@@ -79,14 +79,14 @@ export async function POST(req: NextRequest) {
     //
     // Two bypasses skip the block entirely (mirrors the client UI gate in
     // src/app/dashboard/hr/attendance/page.tsx): developers, and the
-    // `?desktop=1` emergency override which the client forwards as the
-    // `x-desktop-bypass: 1` header (see src/lib/desktop-bypass.ts). The
+    // `?desktop=11` emergency override which the client forwards as the
+    // `x-desktop-bypass: 11` header (see src/lib/desktop-bypass.ts). The
     // header is intentionally not a secret — it's a soft override for when
     // a laptop isn't available; pair with a regularization request if used.
     const mobileBypass =
       user?.isDeveloper === true ||
       hasDesktopBypassHeader(req.headers) ||
-      req.nextUrl.searchParams.get("desktop") === "1";
+      req.nextUrl.searchParams.get("desktop") === "11";
     if (isMobileRequest(req.headers) && !mobileBypass) {
       const today = istTodayDateOnly();
       const odForToday = await prisma.onDutyRequest.findFirst({

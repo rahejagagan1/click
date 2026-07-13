@@ -47,8 +47,8 @@ const NB_MEDIA_REELS: Reel[] = [
   { url: "https://www.instagram.com/reel/DTxezQGkqtH/?utm_source=ig_web_copy_link&igsh=MzRlODBiNWFlZA==", video: "/reels/DTxezQGkqtH.mp4", poster: "/reels/DTxezQGkqtH.jpg" },
   { url: "https://www.instagram.com/reel/DUS_8ybElFT/?utm_source=ig_web_copy_link&igsh=MzRlODBiNWFlZA==", video: "/reels/DUS_8ybElFT.mp4", poster: "/reels/DUS_8ybElFT.jpg" },
 ];
-const NB_MEDIA_IG_HANDLE = "@nbmediaa";
-const NB_MEDIA_IG_URL    = "https://www.instagram.com/nbmediaa?utm_source=ig_web_button_share_sheet&igsh=ZDNlZDc0MzIxNw==";
+const NB_MEDIA_IG_HANDLE = "@nbmediaa_";
+const NB_MEDIA_IG_URL    = "https://www.instagram.com/nbmediaa_/";
 const NB_MEDIA_LIFE_BLURB = "We're not your usual agency. We move fast, ask better questions, and actually like the people we work with. It's a place where showing up as yourself isn't just accepted — it's expected. Good vibes, big ideas, and the occasional prank war included.";
 
 // Culture Highlights photos — save the source JPGs into

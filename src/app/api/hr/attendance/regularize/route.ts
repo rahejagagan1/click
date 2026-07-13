@@ -37,7 +37,9 @@ const REGULARIZATION_MONTHLY_QUOTA = 2;
 
 // 48-hour cutoff, measured in IST calendar days. A request for date D is only
 // allowed while today_IST - D ≤ WINDOW_DAYS. Example: miss on 2 Mar → can apply
-// through end of 4 Mar IST. Bypassed for admin emergency grants.
+// through end of 4 Mar IST. Bypassed for admin emergency grants and for the
+// HR team's own self-applies (anyone passing isHRAdmin — includes every
+// orgLevel=hr_manager HR member).
 const REGULARIZATION_WINDOW_DAYS = 2;
 
 export const dynamic = "force-dynamic";
@@ -196,6 +198,12 @@ export async function POST(req: NextRequest) {
     // (SyncConfig.regularization_window_enforced). When the flag is OFF,
     // employees can self-apply for any past IST date; future dates are
     // still rejected, and admin grants still bypass.
+    //
+    // HR-team self-apply bypass: everyone in the HR team (orgLevel=
+    // hr_manager is set on all HR employees, not just the HR Manager
+    // role) skips the window on their OWN requests too — same set as
+    // isHRAdmin. Only the window is waived; the future-date block and
+    // the monthly quota still apply to them.
     if (!isAdminGrant) {
       const todayIst = istTodayDateOnly();
       const diff = dayDiff(todayIst, targetDateOnly);
@@ -205,7 +213,7 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      if (!unlimited) {
+      if (!unlimited && !admin) {
         const windowEnforced = await isRegularizationWindowEnforced();
         if (windowEnforced && diff > REGULARIZATION_WINDOW_DAYS) {
           const dateLabel = targetDateOnly.toLocaleDateString("en-IN", {
