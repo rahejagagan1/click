@@ -21,6 +21,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import PizZip from "pizzip";
 import { docxToPdf } from "./docx-to-pdf";
+import { mergeSoftWrappedJdParagraphs } from "./jd-html";
 
 const TEMPLATE_PATH = resolve(process.cwd(), "public", "templates", "jd-template.docx");
 
@@ -347,9 +348,14 @@ function htmlToBodyXml(html: string): string {
         `</w:p>`,
       );
     } else {
-      // p / div — plain paragraph
+      // p / div — plain paragraph. NO after-spacing: Quill stores each
+      // soft-wrapped line as its own <p> (JDs extracted from PDFs), and
+      // the editor renders them flush. Spacing between real paragraphs
+      // comes from the explicit blank-line <p><br></p> spacers above —
+      // keeps the PDF in lockstep with the editor and the careers page
+      // (.jd-prose p { margin: 0 } in globals.css).
       out.push(
-        `<w:p>${pPrXml({ align, after: 120 })}` +
+        `<w:p>${pPrXml({ align })}` +
           inlineToRuns(inner) +
         `</w:p>`,
       );
@@ -364,33 +370,48 @@ function htmlToBodyXml(html: string): string {
 }
 
 function buildBodyXml(text: string): string {
-  // HTML body (Quill-authored) → walk the markup
-  if (isHtmlBody(text)) return htmlToBodyXml(text);
+  // HTML body (Quill-authored) → walk the markup. Soft-wrapped <p>
+  // fragments (one per PDF line in extracted JDs) are merged into
+  // flowing paragraphs first — same helper as the careers page render.
+  if (isHtmlBody(text)) return htmlToBodyXml(mergeSoftWrappedJdParagraphs(text));
 
-  // Plain text (legacy JDs) — original per-line classifier.
+  // Plain text (legacy JDs) — per-line classifier. Consecutive plain
+  // lines are soft wraps from PDF-to-text extraction, so they're
+  // buffered and joined into ONE paragraph; only a blank line, bullet,
+  // number, or heading breaks the flow. Mirrors parseJdBlocks in
+  // src/app/jobs/[slug]/page.tsx so the saved PDF and the inline
+  // careers-page render stay visually in sync.
   let sawTitle = false; // drop ONE leading "Job Description - X" title line
-  return text
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((raw) => {
-      const line = raw.trimEnd();
-      if (!line.trim()) return paraBlank();
-      if (PAGE_MARKER_RE.test(line.trim())) return "";
-      // The template prints {{JobTitle}} itself, so a legacy plain-text
-      // body that still carries a "Job Description - X" / "Job Title: X"
-      // line would double the title — drop it once.
-      const titleMatch = line.trim().match(/^(?:Job\s+Description|Job\s+Title)\s*[-–—:]\s*(.+)$/i);
-      if (!sawTitle && titleMatch) { sawTitle = true; return ""; }
-      const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
-      if (bullet) return paraBullet(bullet[1]);
-      const num = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
-      if (num) return paraNumbered(parseInt(num[1], 10), num[2]);
-      if (/:\s*$/.test(line) && line.length <= 60) {
-        return paraHeading(line.replace(/:\s*$/, "") + ":");
-      }
-      return paraPlain(line);
-    })
-    .join("");
+  const out: string[] = [];
+  let paraBuf: string[] = [];
+  const flushPara = () => {
+    if (paraBuf.length) {
+      out.push(paraPlain(paraBuf.join(" ")));
+      paraBuf = [];
+    }
+  };
+  for (const raw of text.replace(/\r\n/g, "\n").split("\n")) {
+    const line = raw.trimEnd();
+    if (!line.trim()) { flushPara(); out.push(paraBlank()); continue; }
+    if (PAGE_MARKER_RE.test(line.trim())) { flushPara(); continue; }
+    // The template prints {{JobTitle}} itself, so a legacy plain-text
+    // body that still carries a "Job Description - X" / "Job Title: X"
+    // line would double the title — drop it once.
+    const titleMatch = line.trim().match(/^(?:Job\s+Description|Job\s+Title)\s*[-–—:]\s*(.+)$/i);
+    if (!sawTitle && titleMatch) { sawTitle = true; continue; }
+    const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
+    if (bullet) { flushPara(); out.push(paraBullet(bullet[1])); continue; }
+    const num = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
+    if (num) { flushPara(); out.push(paraNumbered(parseInt(num[1], 10), num[2])); continue; }
+    if (/:\s*$/.test(line) && line.length <= 60) {
+      flushPara();
+      out.push(paraHeading(line.replace(/:\s*$/, "") + ":"));
+      continue;
+    }
+    paraBuf.push(line.trim());
+  }
+  flushPara();
+  return out.join("");
 }
 
 // Replace the entire {{Body}} placeholder PARAGRAPH (not just the

@@ -21,6 +21,7 @@ import { createPortal } from "react-dom";
 import useSWR, { mutate as globalMutate } from "swr";
 import { fetcher } from "@/lib/swr";
 import { stripLeadingCompanyContent, looksLikeKnownTitle } from "@/lib/hr/jd-format";
+import { mergeSoftWrappedJdParagraphs } from "@/lib/jd-html";
 import { useDebouncedValue } from "@/lib/hooks/useDebouncedValue";
 import { showToast } from "@/components/ui/Toast";
 import {
@@ -79,13 +80,22 @@ const JD_QUILL_FORMATS = [
 function plainTextToQuillHtml(input: string, knownTitle?: string): string {
   if (!input) return "";
   const trimmed = input.trim();
-  if (trimmed.startsWith("<")) return input;  // already HTML — likely re-edit
+  // Already HTML — likely a re-edit of a stored JD. Merge soft-wrapped
+  // <p> fragments (older JDs saved one <p> per PDF line) so the editor
+  // shows real flowing paragraphs and the next save persists them.
+  if (trimmed.startsWith("<")) return mergeSoftWrappedJdParagraphs(input);
   // Drop a pasted company letterhead from the top so it can't double the
   // .docx template's own letterhead (and drag in a typo'd email).
   const lines = stripLeadingCompanyContent(input).replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];
   let bulletBuf: string[] = [];
   let numberedBuf: string[] = [];
+  // Consecutive plain lines are soft wraps from PDF-to-text extraction
+  // (one line per visual line) — buffer and join them into ONE <p> so
+  // the paragraph reflows naturally in the editor and on the careers
+  // page. Blank lines / bullets / numbers / headings break the flow.
+  // Mirrors parseJdBlocks (careers page) + buildBodyXml (saved PDF).
+  let paraBuf: string[] = [];
   let sawTitle = false;
   let sawContent = false; // true once the first real body line is emitted
   const escape = (s: string) =>
@@ -102,15 +112,21 @@ function plainTextToQuillHtml(input: string, knownTitle?: string): string {
       numberedBuf = [];
     }
   };
-  const flushAll = () => { flushB(); flushN(); };
+  const flushP = () => {
+    if (paraBuf.length) {
+      out.push(`<p>${escape(paraBuf.join(" "))}</p>`);
+      paraBuf = [];
+    }
+  };
+  const flushAll = () => { flushB(); flushN(); flushP(); };
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) { flushAll(); out.push("<p><br></p>"); continue; }
     const bullet = line.match(/^[-*•]\s+(.*)$/);
-    if (bullet) { flushN(); bulletBuf.push(bullet[1]); continue; }
+    if (bullet) { flushN(); flushP(); bulletBuf.push(bullet[1]); continue; }
     const num = line.match(/^\d+[.)]\s+(.*)$/);
-    if (num) { flushB(); numberedBuf.push(num[1]); continue; }
-    flushAll();
+    if (num) { flushB(); flushP(); numberedBuf.push(num[1]); continue; }
+    flushB(); flushN();
     // The .docx template prints "Job Description - {{JobTitle}}" itself —
     // drop a title line from the body so it isn't duplicated.
     if (!sawTitle) {
@@ -123,9 +139,10 @@ function plainTextToQuillHtml(input: string, knownTitle?: string): string {
     }
     sawContent = true; // bare-title strip above is first-content-line only
     if (/:\s*$/.test(line) && line.length <= 60) {
+      flushP();
       out.push(`<h3>${escape(line.replace(/:\s*$/, ""))}</h3>`);
     } else {
-      out.push(`<p>${escape(line)}</p>`);
+      paraBuf.push(line);
     }
   }
   flushAll();
@@ -1325,8 +1342,11 @@ function JdReplaceModal({
   const [text, setText]             = useState(file ? "" : (initialHtml ?? ""));
   const [extracting, setExtracting] = useState(!!file);
   const [error, setError]           = useState<string | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewing, setPreviewing] = useState(false);
+  // Website-style preview — renders the current editor HTML inside a
+  // replica of the careers page's JD panel (letterhead + watermark +
+  // the same global .jd-prose CSS), so HR sees EXACTLY what a
+  // candidate will see. Purely client-side: no PDF round-trip.
+  const [previewOpen, setPreviewOpen] = useState(false);
   // Maximised mode lets HR expand the modal to nearly fullscreen so
   // long JDs are easier to scan + edit. Toggles via the header icon.
   const [expanded, setExpanded]     = useState(false);
@@ -1381,27 +1401,15 @@ function JdReplaceModal({
   const plainText = text.replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;/g, " ").trim();
   const wordCount = plainText ? plainText.split(/\s+/).length : 0;
 
-  const showPreview = async () => {
-    if (!text.trim()) return;
-    setPreviewing(true);
-    try {
-      const res = await fetch("/api/hr/hiring/jd-render-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: jobTitle || "Job Description", text }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        showToast(j?.error || "Preview render failed", "error");
-        return;
-      }
-      const blob = await res.blob();
-      if (blob.size === 0) { showToast("Server returned an empty PDF", "error"); return; }
-      setPreviewUrl(URL.createObjectURL(blob));
-    } finally {
-      setPreviewing(false);
-    }
-  };
+  // Same &nbsp; normalisation + soft-wrap paragraph merging the careers
+  // page applies before render (JdHtmlPanel in src/app/jobs/[slug]/
+  // page.tsx) so wrapping behaves identically in the preview.
+  const previewHtml = mergeSoftWrappedJdParagraphs(
+    text
+      .split("&nbsp;").join(" ")
+      .split("&#160;").join(" ")
+      .split(String.fromCharCode(160)).join(" "),
+  );
 
   return (
     <div
@@ -1499,11 +1507,11 @@ function JdReplaceModal({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={showPreview}
-              disabled={extracting || previewing || saving || !text.trim()}
+              onClick={() => setPreviewOpen(true)}
+              disabled={extracting || saving || !text.trim()}
               className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 hover:border-[#3b82f6] hover:text-[#3b82f6] text-slate-700 text-[11.5px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Eye size={12} /> {previewing ? "Rendering…" : "Preview"}
+              <Eye size={12} /> Preview
             </button>
             <button
               type="button"
@@ -1523,37 +1531,53 @@ function JdReplaceModal({
         </div>
       </div>
 
-      {previewUrl && (
+      {previewOpen && (
         <div
           className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm"
-          onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}
+          onClick={() => setPreviewOpen(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
             className="w-full max-w-4xl h-[92vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden"
           >
             <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
-              <h3 className="text-[14px] font-semibold text-slate-900">JD Preview</h3>
-              <div className="flex items-center gap-2">
-                <a
-                  href={previewUrl}
-                  download="jd-preview.pdf"
-                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 hover:border-[#3b82f6] hover:text-[#3b82f6] text-slate-700 text-[11.5px] font-semibold"
-                >Download</a>
-                <button
-                  onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}
-                  className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100"
-                  aria-label="Close preview"
-                ><X size={15} /></button>
-              </div>
+              <h3 className="text-[14px] font-semibold text-slate-900">
+                Website preview
+                <span className="ml-2 text-[11.5px] font-medium text-slate-400">how candidates see it on the careers page</span>
+              </h3>
+              <button
+                onClick={() => setPreviewOpen(false)}
+                className="h-8 w-8 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100"
+                aria-label="Close preview"
+              ><X size={15} /></button>
             </div>
-            <div className="flex-1 bg-slate-100 p-2">
-              <iframe
-                src={previewUrl}
-                title="JD Preview"
-                className="w-full h-full bg-white rounded border border-slate-200"
-                style={{ border: 0 }}
-              />
+            {/* Replica of JdHtmlPanel on /jobs/[slug] — same letterhead
+                strip, watermark, Times body, and the SAME global
+                .jd-prose CSS, so this preview cannot drift from the
+                real careers-page render. */}
+            <div className="flex-1 overflow-y-auto bg-slate-100 p-3 sm:p-5">
+              <div className="relative max-w-3xl mx-auto rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
+                <div className="relative flex items-start justify-between gap-4 px-5 sm:px-8 pt-5 sm:pt-7 pb-3 border-b border-slate-100 bg-gradient-to-b from-white to-slate-50/40">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#3b82f6]">NB Media</p>
+                    <p className="mt-1 text-[12px] sm:text-[13px] text-slate-600 leading-snug">YT Money Productions Pvt. Ltd.</p>
+                    <p className="text-[10.5px] sm:text-[11.5px] text-slate-400 leading-snug">HRD@nbmediaproductions.com · +91&nbsp;81468&nbsp;91380</p>
+                  </div>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/logo.png" alt="NB Media" className="h-10 sm:h-12 w-auto shrink-0" />
+                </div>
+                <div className="relative">
+                  <div aria-hidden="true" className="pointer-events-none select-none absolute inset-0 flex items-center justify-center overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/logo.png" alt="" className="w-[60%] max-w-[460px] opacity-[0.05]" style={{ filter: "grayscale(20%)" }} />
+                  </div>
+                  <div className="relative px-5 sm:px-10 py-6 sm:py-8">
+                    <div className="text-slate-800" style={{ fontFamily: '"Times New Roman", Georgia, serif' }}>
+                      <div className="jd-prose" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
