@@ -39,9 +39,8 @@ export async function GET(req: NextRequest) {
     const q = (url.searchParams.get("q") || "").trim().toLowerCase();
 
     // Hard brand scope — a YT Labs HR Manager only ever sees YT
-    // Labs employees, etc. Developers + allowlisted users
-    // (CROSS_BRAND_HR_USER_IDS) can switch freely via the
-    // requested brand parameter.
+    // Labs employees, etc. Developers + VIEW_ALL_BRANDS permission
+    // holders can switch freely via the requested brand parameter.
     const scope = getBrandScope(session!.user);
     const effectiveBrand = scope.allBrands
       ? (requestedBrand === "NB Media" || requestedBrand === "YT Labs" ? requestedBrand : null)
