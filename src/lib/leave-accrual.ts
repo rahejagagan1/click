@@ -7,9 +7,10 @@
 // for the current year by `months * monthlyAccrual`.
 //
 // Idempotent: stamps `lastAccrualMonth` (YYYY-MM) on each LeaveBalance row
-// after crediting. Re-runs in the same month are no-ops. New rows seeded
-// without a lastAccrualMonth get the current month stamped so they don't
-// accrue retroactively — their first credit happens next month.
+// after crediting. Re-runs in the same month are no-ops. Brand-new rows are
+// created WITH the current month's credit — leave starts from the month of
+// joining (HR rule, 2026-07-14), and the January rows minted at year rollover
+// must not skip January. Only prior months are never back-credited.
 
 import prisma from "@/lib/prisma";
 import { istTodayDateOnly } from "@/lib/ist-date";
@@ -75,10 +76,11 @@ export async function accrueLeavesForUser(userId: number): Promise<number> {
     const perMonth = Number(e.monthlyAccrual);
     if (!Number.isFinite(perMonth) || perMonth <= 0) continue;
 
-    // Upsert the LeaveBalance row for this (user, leaveType, year). New
-    // rows start with totalDays=0 and lastAccrualMonth=currentYm so they
-    // don't accrue retroactively for prior months in the same year — the
-    // first credit lands next month.
+    // Upsert the LeaveBalance row for this (user, leaveType, year). A brand-
+    // new row gets the CURRENT month's credit immediately — leave starts from
+    // the month of joining (HR rule, 2026-07-14) — and is stamped so this
+    // month can't double-credit. Prior months in the year are never
+    // back-credited.
     const existing = await prisma.$queryRawUnsafe<
       Array<{ id: number; lastAccrualMonth: string | null }>
     >(
@@ -91,10 +93,11 @@ export async function accrueLeavesForUser(userId: number): Promise<number> {
       await prisma.$executeRawUnsafe(
         `INSERT INTO "LeaveBalance"
            ("userId","leaveTypeId","year","totalDays","usedDays","pendingDays","lastAccrualMonth","createdAt","updatedAt")
-         VALUES ($1, $2, $3, 0, 0, 0, $4, NOW(), NOW())`,
-        userId, e.leaveTypeId, year, currentYm,
+         VALUES ($1, $2, $3, $4, 0, 0, $5, NOW(), NOW())`,
+        userId, e.leaveTypeId, year, perMonth, currentYm,
       );
-      continue; // first credit happens next month
+      credited += 1;
+      continue;
     }
 
     // A row with no accrual marker (e.g. one hand-created by HR through the

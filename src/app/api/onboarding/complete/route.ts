@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/prisma";
+import { ensurePolicyBaselineForUser } from "@/lib/hr/apply-leave-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,12 @@ export async function POST(request: NextRequest) {
     `UPDATE "User" SET "onboardingPending" = false WHERE id = $1`,
     user.id,
   );
+
+  // Baseline leave entitlements — the accrual engine may have pre-created
+  // this joiner's LeaveBalance rows as zeros before HR ran "Apply policy"
+  // (which is seed-only and would then skip them all). Land the assigned
+  // policy's lump sums now. Fail-safe: never blocks the wizard.
+  try { await ensurePolicyBaselineForUser(user.id); } catch { /* non-fatal */ }
 
   return NextResponse.json({ ok: true });
 }

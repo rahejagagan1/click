@@ -5,7 +5,8 @@
 //   LEFT JOIN "EmployeeProfile" ep ON ep."userId" = u.id
 //   WHERE ...
 // and need to filter to the caller's businessUnit unless the caller
-// is allowlisted (developers + CROSS_BRAND_HR_USER_IDS env users).
+// is allowlisted (developers + VIEW_ALL_BRANDS permission holders —
+// granted via the RBAC designation UI; see canViewAllBrands).
 //
 // Usage:
 //   const scope = getBrandScope(session?.user);

@@ -279,32 +279,20 @@ export function isFullHRAdmin(user: ClientUser): boolean {
  *
  * Add new gate sites by composing: `canViewAllBrands(user) || same-brand`.
  */
-// ENV-driven allowlist of user IDs that legitimately need cross-
-// brand HR visibility. Comma-separated list of User.id values. Used
-// instead of role-based detection because BOTH per-brand HR Managers
-// have role="hr_manager" + a businessUnit (Tanvi → NB Media,
-// Riya → YT Labs), so role alone can't tell who should see across.
+// Cross-brand visibility is a designation-held RBAC permission
+// (VIEW_ALL_BRANDS). Today only the NB Media "HR Manager" designation
+// carries it — the NB Media HR Manager oversees both brands, while the
+// YT Labs HR Manager designation deliberately does NOT hold it (Riya
+// only sees YT Labs). Granting a new cross-brand viewer = the RBAC
+// designation UI, no code deploy.
 //
-// Add Tanvi's id (521) here to keep her existing cross-brand view.
-// Riya (1279) deliberately NOT added — she only sees YT Labs.
-//   CROSS_BRAND_HR_USER_IDS=521
-function parseCrossBrandIds(): Set<number> {
-  const raw = process.env.CROSS_BRAND_HR_USER_IDS ?? "";
-  return new Set(raw.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0));
-}
-const CROSS_BRAND_USER_IDS = parseCrossBrandIds();
-
+// Formerly a per-user env allowlist (CROSS_BRAND_HR_USER_IDS=521,
+// Tanvi). Shifted to the designation (2026-07-13) so the grant follows
+// whoever holds the NB Media HR Manager designation, not a person.
 export function canViewAllBrands(user: ClientUser): boolean {
   if (!user) return false;
   if (user.isDeveloper === true) return true;
-  // Explicit per-user allowlist via env (production HR ops). Keep
-  // this OUT of the role-based heuristic — both Tanvi (NB Media)
-  // and Riya (YT Labs) hold role="hr_manager" but only Tanvi is
-  // org-wide. Adding new cross-brand viewers = a one-line .env
-  // change, no code deploy.
-  const uid = (user as any)?.dbId ?? (user as any)?.id;
-  if (uid != null && CROSS_BRAND_USER_IDS.has(Number(uid))) return true;
-  return false;
+  return hasResolvedPermissions(user) && can(user, "VIEW_ALL_BRANDS");
 }
 
 /**

@@ -34,6 +34,7 @@ export type Permission =
   | "MANAGE_EMAIL_SETTINGS"
   // ── visibility ──
   | "SEE_ALL_DATA"
+  | "VIEW_ALL_BRANDS"
   // ── hr operations ──
   | "MANAGE_HR"
   | "VIEW_MY_TEAM"
@@ -126,6 +127,10 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
     label: "See all employees' data",
     description: "Bypass the reporting-tree scope — view every employee's cases, attendance, reports. (Managers see their own subtree automatically without this.)",
     replaces: "getVisibleUserIds → null / all-active" },
+  { key: "VIEW_ALL_BRANDS", category: "visibility", sensitive: true,
+    label: "See all brands",
+    description: "Cross-brand visibility — view both NB Media and YT Labs employees on brand-scoped HR surfaces instead of only your own brand.",
+    replaces: "CROSS_BRAND_HR_USER_IDS env allowlist (canViewAllBrands)" },
 
   // ── hr operations ─────────────────────────────────────────────────────────
   { key: "MANAGE_HR", category: "hr",
