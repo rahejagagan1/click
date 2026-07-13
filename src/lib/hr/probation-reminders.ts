@@ -18,6 +18,7 @@ import { sendEmail } from "@/lib/email/sender";
 import { probationEndingReminderEmail } from "@/lib/email/templates";
 import { isDryRun } from "@/lib/email/transport";
 import { isEmailEnabled, devEmailRecipientsClause, rolesForUser, isEmailEnabledForRoles } from "@/lib/email/toggles";
+import { notExitedSql } from "@/lib/hr/probation-review";
 
 // Reminder milestones: HR + the reporting manager get a heads-up when
 // probation ends in exactly 14, 7, and 1 day(s). Each fires once (same-day
@@ -75,7 +76,7 @@ export async function sendProbationEndingReminders(): Promise<number> {
         AND ep."probationEndDate" IS NOT NULL
         AND ep."probationConfirmedAt" IS NULL
         AND (ep."probationEndDate"::date - CURRENT_DATE) IN (${milestoneList})
-        AND (ep."probationReminderSentAt" IS NULL OR ep."probationReminderSentAt"::date < CURRENT_DATE)
+        AND (ep."probationReminderSentAt" IS NULL OR ep."probationReminderSentAt"::date < CURRENT_DATE)${notExitedSql()}
       ORDER BY ep."probationEndDate" ASC`,
   );
   if (due.length === 0) return 0;
