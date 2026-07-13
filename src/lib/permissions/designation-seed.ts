@@ -51,8 +51,12 @@ const CEO_PERMS: Permission[] = [
 ];
 
 // The actual HR Manager (legacy role="hr_manager"). Owns HR policy + salary.
+// Carries VIEW_ALL_BRANDS — the NB Media HR Manager oversees both brands
+// (formerly the per-user CROSS_BRAND_HR_USER_IDS env allowlist). The custom
+// YT Labs HR Manager designation deliberately does NOT hold it: YT Labs HR
+// stays scoped to its own brand.
 const HR_MANAGER_PERMS: Permission[] = [
-  "MANAGE_HR", "MANAGE_USERS", "MANAGE_TAB_PERMISSIONS", "SEE_ALL_DATA", "VIEW_MY_TEAM",
+  "MANAGE_HR", "MANAGE_USERS", "MANAGE_TAB_PERMISSIONS", "SEE_ALL_DATA", "VIEW_ALL_BRANDS", "VIEW_MY_TEAM",
   "APPROVE_TEAM_REQUESTS", "APPROVE_ALL_REQUESTS", "ACT_ON_BEHALF",
   "MANAGE_LEAVE_POLICY", "MANAGE_HOLIDAYS", "MANAGE_ASSETS",
   "APPLY_RESTRICTED_LEAVE", "BACKDATE_REQUESTS",
