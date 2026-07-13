@@ -8,6 +8,13 @@ import { getPermissionsByEmail, getScorecardFunctionByEmail, hasDesignationRepor
 const useDevLogin = process.env.NEXT_PUBLIC_DEV_LOGIN === "true";
 const developerEmails = (process.env.DEVELOPER_EMAILS || "").split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
 
+// The mock account the dev credentials provider signs in as. Dev-mode
+// conveniences (auto row creation, admin fallback) apply ONLY to this
+// account — any real email logging in on a dev server gets exactly its
+// production access, so permission testing locally reflects reality.
+// The developer flag itself comes solely from DEVELOPER_EMAILS.
+const DEV_LOGIN_EMAIL = "dev@nbmediaproductions.com";
+
 // ── Per-user auth bundle ────────────────────────────────────────────
 // Everything the JWT + session callbacks need about a user, fetched in
 // as few round-trips as possible and cached briefly. Both `jwt()` AND
@@ -51,6 +58,7 @@ const userBundleSelect = {
 
 async function loadAuthBundle(email: string): Promise<AuthBundle> {
     const isDev = developerEmails.includes(email.toLowerCase());
+    const isMockDevAccount = useDevLogin && email.toLowerCase() === DEV_LOGIN_EMAIL;
 
     // Identity + profile in one round-trip. Case-insensitive match so a
     // record stored with a stray capital (e.g. "Aditi@…") still resolves to
@@ -61,7 +69,9 @@ async function loadAuthBundle(email: string): Promise<AuthBundle> {
     });
 
     // Dev credentials login: ensure a DB row exists so APIs get dbId/orgLevel.
-    if (!dbUser && useDevLogin) {
+    // Scoped to the mock account only — a rowless real email must never get
+    // an admin row auto-created (the dev DB is shared with production).
+    if (!dbUser && isMockDevAccount) {
         dbUser = await prisma.user.upsert({
             where: { email },
             create: { email, name: "Dev Admin", role: "admin", orgLevel: "ceo" },
@@ -86,7 +96,7 @@ async function loadAuthBundle(email: string): Promise<AuthBundle> {
 
     return {
         dbId: dbUser?.id ?? null,
-        role: dbUser?.role ?? (useDevLogin ? "admin" : null),
+        role: dbUser?.role ?? (isMockDevAccount ? "admin" : null),
         // Developer emails get full visibility via special_access (NOT CEO —
         // that title stays with the real CEO account).
         orgLevel: isDev ? "special_access" : (dbUser?.orgLevel ?? null),
@@ -100,7 +110,11 @@ async function loadAuthBundle(email: string): Promise<AuthBundle> {
         permissions,
         scorecardFunction,
         hasReportGrants,
-        isDeveloper: isDev || useDevLogin,
+        // Developer flag comes ONLY from DEVELOPER_EMAILS — dev-login mode no
+        // longer blankets every session as a developer, so the dev server
+        // shows each real user their true tabs/permissions. The mock Dev
+        // Admin account keeps full access via its role=admin DB row.
+        isDeveloper: isDev,
     };
 }
 
@@ -126,7 +140,7 @@ const devCredentialsProvider = CredentialsProvider({
         return {
             id: "dev",
             name: "Dev Admin",
-            email: "dev@nbmediaproductions.com",
+            email: DEV_LOGIN_EMAIL,
             image: null,
         };
     },
@@ -241,7 +255,11 @@ export const authOptions: NextAuthOptions = {
                     u.hasReportGrants = b.hasReportGrants;
                     u.isDeveloper = b.isDeveloper;
                 } catch {
-                    if (useDevLogin) (session.user as any).role = "admin";
+                    // Transient DB failure — only the mock dev account falls
+                    // back to admin; real users keep an unprivileged session.
+                    if (useDevLogin && email.toLowerCase() === DEV_LOGIN_EMAIL) {
+                        (session.user as any).role = "admin";
+                    }
                 }
             }
             return session;
