@@ -6,6 +6,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import { useSession } from "next-auth/react";
 import { fetcher } from "@/lib/swr";
+import { X } from "lucide-react";
 import { canViewExitBadge } from "@/lib/access";
 
 // Next.js 16 + Turbopack require any consumer of useSearchParams() to
@@ -244,6 +245,12 @@ function HeaderSearchInner() {
                       !exit || !canSeeBadge
                         ? null
                         : (exFinalised || exLwdPassed) ? "exited" : "on_notice";
+                    // Exited / deactivated people render with a muted
+                    // avatar (grayscale photo / slate initials) so
+                    // they're visually distinct from active employees
+                    // at a glance, not just via the chip. Follows the
+                    // same canViewExitBadge gating as the chip.
+                    const isGone = exitState === "exited" || u.isActive === false;
                     return (
                       <Link
                         key={`p-${u.id}`}
@@ -251,11 +258,21 @@ function HeaderSearchInner() {
                         onClick={close}
                         className="flex items-center gap-2.5 px-3 py-2 border-b border-slate-100 dark:border-white/[0.04] last:border-b-0 hover:bg-[#008CFF]/[0.06] dark:hover:bg-[#008CFF]/[0.1] transition-colors"
                       >
-                        {u.profilePictureUrl ? (
-                          <img src={u.profilePictureUrl} alt="" referrerPolicy="no-referrer" className="h-7 w-7 rounded-full object-cover shrink-0" />
-                        ) : (
-                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#008CFF] text-[10px] font-bold text-white">{initials}</span>
-                        )}
+                        <span className="relative shrink-0">
+                          {u.profilePictureUrl ? (
+                            <img src={u.profilePictureUrl} alt="" referrerPolicy="no-referrer" className={`h-7 w-7 rounded-full object-cover${isGone ? " grayscale opacity-55" : ""}`} />
+                          ) : (
+                            <span className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold text-white ${isGone ? "bg-slate-400 opacity-70" : "bg-[#008CFF]"}`}>{initials}</span>
+                          )}
+                          {/* Crossed-out overlay — marks the person as no
+                              longer with the company, matching the muted
+                              avatar treatment. */}
+                          {isGone && (
+                            <span className="absolute inset-0 flex items-center justify-center rounded-full bg-slate-900/25">
+                              <X size={11} strokeWidth={3.5} className="text-white drop-shadow" />
+                            </span>
+                          )}
+                        </span>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
                             <p className="text-[12.5px] font-medium text-slate-800 dark:text-white truncate leading-snug">{u.name}</p>

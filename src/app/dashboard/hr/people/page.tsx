@@ -23,6 +23,7 @@ import {
   roleOptions,
 } from "@/lib/hr-taxonomy";
 import { getUserRoleLabel } from "@/lib/user-role-options";
+import { X } from "lucide-react";
 import { isHRAdmin, canViewExitBadge } from "@/lib/access";
 
 const ORG_TABS = [
@@ -173,13 +174,38 @@ export default function PeoplePage() {
 
             {/* Card Grid (Keka exact: 4 cards per row) */}
             <div className="grid grid-cols-4 gap-4">
-              {filtered.map((emp: any) => (
+              {filtered.map((emp: any) => {
+                // Muted avatar for exited / deactivated employees —
+                // grayscale photo / slate fallback so they read as
+                // "gone" at a glance. Mirrors the header-search
+                // treatment and follows the same canViewExitBadge
+                // gating as the Exited chip below.
+                const exMuted = (() => {
+                  if (emp.isActive === false) return true;
+                  const ex = emp.employeeExit;
+                  if (!ex?.status) return false;
+                  const isSelfCard = user?.dbId != null && Number(user.dbId) === emp.id;
+                  if (!canViewExitBadge(user, isSelfCard)) return false;
+                  const finalised = ex.status === "exited" || ex.status === "offboarded";
+                  const lwdMs = ex.lastWorkingDay ? new Date(ex.lastWorkingDay).getTime() : 0;
+                  const lwdPassed = lwdMs > 0 && Date.now() > lwdMs + 86400000;
+                  return finalised || lwdPassed;
+                })();
+                return (
                 <Link key={emp.id} href={`/dashboard/hr/people/${emp.id}`}
                   className="bg-white dark:bg-[#0a1e3a] border border-slate-200 dark:border-white/[0.06] rounded-xl p-5 hover:border-[#008CFF]/30 transition-all group">
                   <div className="flex items-start gap-4 mb-4">
                     {/* Avatar */}
-                    <div className="w-14 h-14 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-slate-800 dark:text-white text-lg font-bold overflow-hidden ring-2 ring-white/[0.06] shrink-0">
-                      {emp.profilePictureUrl ? <img src={emp.profilePictureUrl} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" /> : emp.name?.charAt(0)}
+                    <div className={`relative w-14 h-14 rounded-full bg-gradient-to-br ${exMuted ? "from-slate-400 to-slate-500" : "from-cyan-500 to-blue-600"} flex items-center justify-center text-slate-800 dark:text-white text-lg font-bold overflow-hidden ring-2 ring-white/[0.06] shrink-0`}>
+                      {emp.profilePictureUrl ? <img src={emp.profilePictureUrl} className={`w-full h-full object-cover${exMuted ? " grayscale opacity-55" : ""}`} alt="" referrerPolicy="no-referrer" /> : emp.name?.charAt(0)}
+                      {/* Crossed-out overlay — marks the person as no
+                          longer with the company, matching the muted
+                          avatar treatment. */}
+                      {exMuted && (
+                        <span className="absolute inset-0 flex items-center justify-center rounded-full bg-slate-900/25">
+                          <X size={20} strokeWidth={3} className="text-white drop-shadow" />
+                        </span>
+                      )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -288,7 +314,8 @@ export default function PeoplePage() {
                     )}
                   </div>
                 </Link>
-              ))}
+                );
+              })}
             </div>
 
             {filtered.length === 0 && (
