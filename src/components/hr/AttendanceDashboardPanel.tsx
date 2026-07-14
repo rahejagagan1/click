@@ -5,7 +5,7 @@ import useSWR from "swr";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { fetcher } from "@/lib/swr";
-import { Users, CalendarOff, CheckCircle2, Home, Search, CircleUser, Clock, ChevronLeft, ChevronRight, ChevronDown, MapPin } from "lucide-react";
+import { Users, CalendarOff, CheckCircle2, Home, Search, CircleUser, Clock, ChevronLeft, ChevronRight, ChevronDown, MapPin, Monitor } from "lucide-react";
 import FilterDropdown, { FilterOption } from "@/components/hr/FilterDropdown";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
 
@@ -875,6 +875,67 @@ export default function AttendanceDashboardPanel({
                     {offSite.length > 10 && (
                       <li className="text-[11px] text-amber-700 inline-flex items-center px-1">
                         +{offSite.length - 10} more
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              );
+            })()}
+            {/* ── PC clock-in at office warning ──────────────────────────
+                The inverse of the off-site flag: employees who are
+                provably INSIDE the office geofence (atOffice=true from
+                their punch's GPS) but clocked in from the web/PC app
+                instead of scanning at the biometric terminal. Office
+                policy is terminal-first — a PC punch from inside the
+                office usually means they skipped the scanner (or the
+                terminal failed). Biometric punches are excluded by
+                their stamped location label (see DEVICE_LOCATION in
+                src/lib/hr/device-punch.ts); remote / hybrid / WFH
+                folks are excluded the same way as the off-site flag
+                since PC clock-in is their expected path. */}
+            {(() => {
+              if (tab !== "all" && tab !== "office") return null;
+              const pcAtOffice = filtered.filter((r) => {
+                if (!r.clockIn)                          return false;
+                if (r.atOffice !== true)                 return false; // must be provably inside the geofence
+                if (/biometric/i.test(r.locationAddress ?? "")) return false; // terminal punch — expected path
+                if (r.wfhToday)                          return false;
+                const wl = (r.workLocation ?? "").toLowerCase();
+                if (wl === "remote" || wl === "hybrid")  return false;
+                const cs = (r.attendanceCaptureScheme ?? "").toLowerCase();
+                if (cs === "remote" || cs === "hybrid")  return false;
+                return true;
+              });
+              if (pcAtOffice.length === 0) return null;
+              return (
+                <div className="mb-3 rounded-lg ring-1 ring-inset ring-sky-200 bg-sky-50/70 px-4 py-3">
+                  <p className="text-[12px] font-bold text-sky-800 mb-1.5 inline-flex items-center gap-1.5">
+                    <Monitor size={13} strokeWidth={2.2} />
+                    {pcAtOffice.length === 1
+                      ? "1 PC clock-in from inside the office flagged today"
+                      : `${pcAtOffice.length} PC clock-ins from inside the office flagged today`}
+                  </p>
+                  <p className="text-[11px] text-sky-700/90 mb-2">
+                    These employees are <strong>at the office</strong> but clocked in from the
+                    web/PC app instead of the biometric terminal. Could be a forgotten scan or a
+                    terminal issue. Click a name to investigate.
+                  </p>
+                  <ul className="flex flex-wrap gap-1.5">
+                    {pcAtOffice.slice(0, 10).map((r) => (
+                      <li key={r.id}>
+                        <Link
+                          href={`/dashboard/hr/people/${r.id}`}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md ring-1 ring-inset ring-sky-300 bg-white hover:bg-sky-100 text-[11px] font-semibold text-sky-800 transition-colors"
+                          title={`${r.name} — clocked in ${fmtTime(r.clockIn)} via ${r.locationAddress || "web/PC"}`}
+                        >
+                          {r.name}
+                          <span className="text-sky-600 font-normal"> · {fmtTime(r.clockIn)}</span>
+                        </Link>
+                      </li>
+                    ))}
+                    {pcAtOffice.length > 10 && (
+                      <li className="text-[11px] text-sky-700 inline-flex items-center px-1">
+                        +{pcAtOffice.length - 10} more
                       </li>
                     )}
                   </ul>
