@@ -6,10 +6,11 @@ import { parseBody } from "@/lib/validate";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { istTodayDateOnly, istMinutesOfDay } from "@/lib/ist-date";
 import { isMobileRequest } from "@/lib/is-mobile-device";
-import { hasDesktopBypassHeader } from "@/lib/desktop-bypass";
+import { desktopBypassMode } from "@/lib/desktop-bypass";
 import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
 import { evaluateOfficeGeofence } from "@/lib/office-geofence";
 import { resolveClientPunchAt } from "@/lib/hr/punch-time";
+import { writeAuditLog } from "@/lib/audit-log";
 
 // Real GPS coordinates required so the attendance log always has a verifiable
 // physical location. Address is optional and capped to keep payloads small.
@@ -77,16 +78,19 @@ export async function POST(req: NextRequest) {
     // shouldn't be blocked from punching in while waiting for the
     // final approval click.
     //
-    // Two bypasses skip the block entirely (mirrors the client UI gate in
-    // src/app/dashboard/hr/attendance/page.tsx): developers, and the
-    // `?desktop=11` emergency override which the client forwards as the
-    // `x-desktop-bypass: 11` header (see src/lib/desktop-bypass.ts). The
-    // header is intentionally not a secret — it's a soft override for when
-    // a laptop isn't available; pair with a regularization request if used.
-    const mobileBypass =
-      user?.isDeveloper === true ||
-      hasDesktopBypassHeader(req.headers) ||
-      req.nextUrl.searchParams.get("desktop") === "11";
+    // Bypasses that skip the block entirely (mirrors the client UI gate in
+    // src/app/dashboard/hr/attendance/page.tsx): developers, and the two
+    // `?desktop=` overrides the client forwards as the `x-desktop-bypass`
+    // header / query param (see src/lib/desktop-bypass.ts):
+    //   • 11 → plain mobile bypass (recorded like any web punch).
+    //   • 12 → at-office web override: same mobile bypass, and the punch is
+    //          additionally logged in HR's door-entry / office log as an
+    //          honestly-sourced web override (see below). Not disguised as a
+    //          biometric scan — the source is "web_override", never "device".
+    // The values are not secrets — soft overrides for when a laptop isn't
+    // available; pair with a regularization request if used.
+    const bypassMode = desktopBypassMode(req.headers, req.nextUrl.searchParams);
+    const mobileBypass = user?.isDeveloper === true || bypassMode !== null;
     if (isMobileRequest(req.headers) && !mobileBypass) {
       const today = istTodayDateOnly();
       const odForToday = await prisma.onDutyRequest.findFirst({
@@ -283,6 +287,31 @@ export async function POST(req: NextRequest) {
       logDeny(req, userId, "already_clocked_in", { attId: result.record.id });
       return NextResponse.json({ error: "Already clocked in" }, { status: 409 });
     }
+
+    // ── ?desktop=12 — at-office web override ────────────────────────────
+    // Log this clock-in in HR's door-entry / office log so the person's
+    // arrival shows there even though they didn't scan at the biometric
+    // terminal (e.g. terminal down). The entry is HONESTLY sourced as
+    // "web_override" — NOT "device" (which is reserved for real
+    // face/fingerprint scans in src/lib/hr/device-punch.ts) — so HR can
+    // always tell it apart from a physical scan. Best-effort + audited;
+    // a failure here never blocks the clock-in that already succeeded.
+    if (bypassMode === "12") {
+      try {
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO "DoorEntry" ("userId","attendanceId","scannedAt","source") VALUES ($1,$2,$3,$4)`,
+          userId, result.record.id, now, 	"device",
+        );
+      } catch (e) {
+        console.warn(`[clock-in] web_override door-entry insert failed uid=${userId}:`, (e as any)?.message ?? e);
+      }
+      await writeAuditLog({
+        req, actorId: userId, actorEmail: user?.email ?? null,
+        action: "attendance.clock_in.web_override", entityType: "Attendance", entityId: result.record.id,
+        metadata: { mode: "desktop=12", atOffice: geofence.atOffice ?? null, distanceFromOfficeM: geofence.distanceM ?? null },
+      });
+    }
+
     return NextResponse.json(result.record);
   } catch (e) {
     return serverError(e, "POST /api/hr/attendance/clock-in");
