@@ -11,6 +11,7 @@ import { isRegularizationUnlimited } from "@/app/api/hr/policy/regularization-un
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
 import { isSingleStageApprovalEmployee } from "@/lib/hr/single-stage-approval";
 import { refundLopLwp } from "@/lib/hr/lop-lwp";
+import { isHRAdmin } from "@/lib/access";
 
 // Schema covers both self-apply and admin-grant flavours of regularize POST.
 const RegularizePost = z.object({
@@ -44,20 +45,11 @@ const REGULARIZATION_WINDOW_DAYS = 2;
 
 export const dynamic = "force-dynamic";
 
-// Mirrors src/lib/access.ts:isHRAdmin so the regularize approve gate
-// matches the rest of the HR module. Was missing special_access,
-// role=admin, and role=hr_manager — that last one locked out HR
-// Managers who happen to also have orgLevel="manager" (a common combo).
-function isHRAdmin(user: any): boolean {
-  return (
-    user?.orgLevel === "ceo" ||
-    user?.isDeveloper === true ||
-    user?.orgLevel === "special_access" ||
-    user?.role === "admin" ||
-    user?.orgLevel === "hr_manager" ||
-    user?.role === "hr_manager"
-  );
-}
+// HR access is RBAC-designation-driven (per policy 2026-07-14): the shared
+// isHRAdmin (imported from @/lib/access) resolves MANAGE_HR from the caller's
+// designation permissions, so HR staff provisioned by designation alone
+// (role/orgLevel still "member") can grant/approve here. Replaced a local
+// orgLevel/role-only copy that locked such users out.
 
 /** Day-difference between two IST calendar days (both stored as UTC-midnight). */
 function dayDiff(a: Date, b: Date): number {

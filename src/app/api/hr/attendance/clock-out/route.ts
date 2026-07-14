@@ -6,7 +6,7 @@ import { parseBody } from "@/lib/validate";
 import { stringifyAttLoc } from "@/lib/attendance-location";
 import { istTodayDateOnly } from "@/lib/ist-date";
 import { isMobileRequest } from "@/lib/is-mobile-device";
-import { hasDesktopBypassHeader } from "@/lib/desktop-bypass";
+import { desktopBypassMode } from "@/lib/desktop-bypass";
 import { isAttendanceEnabled } from "@/lib/hr/notification-policy";
 import { isAfterSendTime, getWeekKey } from "@/lib/hr/pulse-week";
 import { resolveClientPunchAt } from "@/lib/hr/punch-time";
@@ -78,13 +78,14 @@ export async function POST(req: NextRequest) {
     // Mobile guard, mirrors clock-in: blocked by default, allowed when
     // ANY non-dismissed On-Duty record covers today. Pending counts —
     // a user already off-site shouldn't be locked out of clock-out
-    // just because HR hasn't clicked Approve yet. Same two bypasses as
-    // clock-in: developers and the `?desktop=11` override (forwarded as
-    // the x-desktop-bypass header) skip the block entirely.
+    // just because HR hasn't clicked Approve yet. Same bypasses as
+    // clock-in: developers and the `?desktop=11` / `?desktop=12`
+    // overrides (forwarded as the x-desktop-bypass header / query param)
+    // skip the block entirely. (The office-log door entry is a clock-IN
+    // concern only, so 11 and 12 behave identically on clock-out.)
     const mobileBypass =
       user?.isDeveloper === true ||
-      hasDesktopBypassHeader(req.headers) ||
-      req.nextUrl.searchParams.get("desktop") === "11";
+      desktopBypassMode(req.headers, req.nextUrl.searchParams) !== null;
     if (isMobileRequest(req.headers) && !mobileBypass) {
       const today = istTodayDateOnly();
       const odForToday = await prisma.onDutyRequest.findFirst({
