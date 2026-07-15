@@ -11,15 +11,11 @@ import { requireAuth } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
+// RBAC-designation-driven (policy 2026-07-14): shared isHRAdmin resolves
+// MANAGE_HR from the caller's designation. Replaced a local legacy copy.
+import { isHRAdmin } from "@/lib/access";
 function canManage(session: any): boolean {
-  const u = session?.user;
-  return !!u && (
-    u.orgLevel === "ceo" ||
-    u.orgLevel === "hr_manager" ||
-    u.orgLevel === "special_access" ||
-    u.role === "admin" ||
-    u.isDeveloper === true
-  );
+  return isHRAdmin(session?.user);
 }
 
 const CATEGORIES = new Set(["finance", "tasks", "it", "admin"]);

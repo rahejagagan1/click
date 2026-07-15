@@ -10,6 +10,7 @@
 // Raw SQL throughout — the typed client lags the table + pip* columns.
 
 import prisma from "@/lib/prisma";
+import { userIdsWithPermission } from "@/lib/permissions/resolve-permissions";
 
 export const REVIEW_WINDOW_DAYS = 14;
 export type Recommendation = "extend" | "pass" | "end";
@@ -34,12 +35,18 @@ function brandFilterSql(brand: string | null | undefined, ep = "ep"): string {
   return "";
 }
 
+// RBAC-designation-driven (policy 2026-07-14): fans out to MANAGE_HR
+// designation-holders (CEO/special_access designations excluded); legacy
+// rows kept as a fallback for users without designations.
 async function hrRecipientIds(): Promise<number[]> {
-  const rows = await prisma.$queryRawUnsafe<{ id: number }[]>(
-    `SELECT id FROM "User"
-      WHERE "isActive" = true AND ("orgLevel" = 'special_access' OR role = 'hr_manager')`,
-  );
-  return rows.map((r) => r.id);
+  const [byPerm, legacy] = await Promise.all([
+    userIdsWithPermission("MANAGE_HR", { excludeDesignationKeys: ["ceo", "ceo_yt_labs", "special_access"] }),
+    prisma.$queryRawUnsafe<{ id: number }[]>(
+      `SELECT id FROM "User"
+        WHERE "isActive" = true AND ("orgLevel" = 'special_access' OR role = 'hr_manager')`,
+    ),
+  ]);
+  return Array.from(new Set([...byPerm, ...legacy.map((r) => r.id)]));
 }
 
 async function notify(userIds: number[], title: string, body: string, linkUrl: string): Promise<boolean> {

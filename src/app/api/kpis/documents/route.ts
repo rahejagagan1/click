@@ -12,6 +12,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { resolve, extname } from "node:path";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { can, hasResolvedPermissions } from "@/lib/permissions/can";
 
 export const dynamic = "force-dynamic";
 export const runtime  = "nodejs";
@@ -38,7 +39,12 @@ function parseBrandParam(raw: string | null): "NB Media" | "YT Labs" | null {
   return null;
 }
 
+// RBAC-designation-driven (policy 2026-07-14): MANAGE_KPIS is the KPI-docs
+// permission (the actual HR Manager designation holds it; plain HR staff
+// deliberately don't — matching the old role=hr_manager-only check). Legacy
+// expression kept only as fallback for sessions without resolved permissions.
 function isAdmin(u: any): boolean {
+  if (hasResolvedPermissions(u)) return can(u, "MANAGE_KPIS");
   return (
     u?.orgLevel === "ceo" ||
     u?.isDeveloper === true ||

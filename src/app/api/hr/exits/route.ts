@@ -16,9 +16,11 @@ import { exitStakeholderEmails } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 
+// RBAC-designation-driven (policy 2026-07-14): shared isHRAdmin resolves
+// MANAGE_HR from the caller's designation. Replaced a local legacy copy.
+import { isHRAdmin } from "@/lib/access";
 function canManage(session: any): boolean {
-  const u = session?.user;
-  return !!u && (u.orgLevel === "ceo" || u.orgLevel === "hr_manager" || u.role === "admin" || u.isDeveloper === true);
+  return isHRAdmin(session?.user);
 }
 
 const EXIT_TYPES = new Set(["resignation", "termination", "contract_end", "retirement", "other"]);

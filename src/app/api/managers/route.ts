@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
 import { isDeveloperEmail } from "@/lib/hr/notification-policy";
+import { userIdsWithPermission } from "@/lib/permissions/resolve-permissions";
 
 export const dynamic = 'force-dynamic';
 
@@ -58,13 +59,14 @@ export async function GET(req: NextRequest) {
             templateOwnerIds = rows.map((r) => Number(r.id));
         } catch { /* table absent pre-migration → no designation-template owners */ }
 
-        // Mirror of src/lib/access.ts:isPickableAsManager — kept here
-        // as the server-side gate so a tampered client can't sneak in
-        // a non-manager when `all` isn't set. Cast through `any` because
-        // Prisma generates enum-typed `OrgLevel` literals and the typed
-        // client may lag on the dev box (Windows DLL lock blocks regen).
+        // RBAC-designation-driven (policy 2026-07-14): ACT_AS_MANAGER marks
+        // a designation as a manager-picker target / report owner — mirrors
+        // src/lib/access.ts:isPickableAsManager. The legacy role/orgLevel
+        // clauses stay as a fallback for users without designations.
+        const actAsManagerIds = await userIdsWithPermission("ACT_AS_MANAGER");
         const managerWhere: any = {
             OR: [
+                ...(actAsManagerIds.length ? [{ id: { in: actAsManagerIds } }] : []),
                 { orgLevel: { in: ["hod", "manager"] } },
                 { role: { in: [
                     "manager",

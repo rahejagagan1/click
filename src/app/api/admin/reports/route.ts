@@ -2,24 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 
-// Mirrors src/lib/access.ts:canSeeReports — full admin tier + manager
-// tier (CMs / HoDs / HR Manager) can read the org-wide report list
-// because that's who the dashboard panel is for. Without this any
-// authenticated user could enumerate every manager's reports.
-function canSeeReports(u: any): boolean {
-    return (
-        u?.orgLevel === "ceo" ||
-        u?.isDeveloper === true ||
-        u?.orgLevel === "special_access" ||
-        u?.role === "admin" ||
-        // role=hr_manager (not orgLevel) — see src/lib/access.ts for
-        // the rationale. Gating on orgLevel=hr_manager would let every
-        // HR employee (including plain Members) see all reports.
-        u?.role === "hr_manager" ||
-        u?.orgLevel === "manager" ||
-        u?.orgLevel === "hod"
-    );
-}
+// RBAC-designation-driven (policy 2026-07-14): the shared canSeeReports
+// resolves VIEW_REPORTS from the caller's designation (plus report grants),
+// falling back to the legacy admin/manager/HoD tier for sessions without
+// resolved permissions. Replaced a local orgLevel/role-only copy.
+import { canSeeReports } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 

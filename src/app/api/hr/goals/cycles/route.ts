@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
+import { isHRAdmin } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,9 @@ export async function POST(request: NextRequest) {
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
 
-  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager";
+  // RBAC-designation-driven (policy 2026-07-14) — shared isHRAdmin resolves
+  // MANAGE_HR from the caller's designation.
+  const isAdmin = isHRAdmin(user);
   if (!isAdmin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {

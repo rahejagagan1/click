@@ -54,10 +54,8 @@ export async function POST(req: NextRequest) {
   const self = session!.user as any;
   const myId = await resolveUserId(session);
   if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
-  // Same gate the rest of the HR module uses for "on-behalf" actions.
-  const callerIsHRAdmin = self?.orgLevel === "ceo" || self?.isDeveloper
-    || self?.orgLevel === "special_access" || self?.role === "admin"
-    || self?.orgLevel === "hr_manager"     || self?.role === "hr_manager";
+  // Shared RBAC-aware gate (MANAGE_HR via designation) — see GET above.
+  const callerIsHRAdmin = isHRAdmin(self);
 
   try {
     const body = await req.json();

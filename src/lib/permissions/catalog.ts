@@ -50,6 +50,9 @@ export type Permission =
   | "MANAGE_HIRING"
   | "MANAGE_OFFBOARDING"
   | "VIEW_FEEDBACK_INBOX"
+  | "HR_CONFIDENTIAL"
+  | "HR_PRIMARY_CONTACT"
+  | "ACT_AS_MANAGER"
   | "BYPASS_BRAND_RESTRICTION"
   // ── finance (all sensitive) ──
   | "VIEW_SALARY"
@@ -189,6 +192,18 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
     label: "Anonymous feedback inbox",
     description: "Read submitted anonymous feedback.",
     replaces: "canViewFeedbackInbox" },
+  { key: "HR_CONFIDENTIAL", category: "hr", sensitive: true,
+    label: "HR-confidential tier",
+    description: "The HR team's confidential tier: view other employees' documents (PAN/Aadhaar), see exit/notice-period status, moderate Engage posts. Deliberately NOT part of special_access / role=admin; CEOs and developers pass these gates through their own tier, not this permission.",
+    replaces: "isLeadershipOrHR / canViewExitBadge (orgLevel=hr_manager)" },
+  { key: "HR_PRIMARY_CONTACT", category: "hr",
+    label: "Brand HR primary contact",
+    description: "The brand's primary HR Manager: doc-compliance violations and brand-routed HR attributions are reported by/attributed to this person. Hold on exactly one designation per brand.",
+    replaces: "role=hr_manager brand-routing lookups (doc-compliance)" },
+  { key: "ACT_AS_MANAGER", category: "hr",
+    label: "Assignable as manager",
+    description: "Appears in the Reporting Manager picker and the Manager Reports sidebar as a report owner. Developers never appear regardless of this permission.",
+    replaces: "isPickableAsManager (orgLevel manager/hod, role *_manager/hr_manager)" },
   { key: "BYPASS_BRAND_RESTRICTION", category: "hr", sensitive: true,
     label: "Action requests across business units",
     description: "Approve/act on requests from a different brand/business unit.",

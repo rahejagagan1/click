@@ -57,11 +57,13 @@ export function isHRAdmin(user: ClientUser): boolean {
  */
 export function isLeadershipOrHR(user: ClientUser): boolean {
   if (!user) return false;
-  return (
-    user.orgLevel === "ceo" ||
-    user.isDeveloper === true ||
-    user.orgLevel === "hr_manager"
-  );
+  // CEOs and developers pass on their own tier — the RBAC-only policy
+  // (2026-07-14) covers HR staff, who are provisioned by designation.
+  if (user.orgLevel === "ceo" || user.isDeveloper === true) return true;
+  // HR team: the designation-held HR_CONFIDENTIAL permission. Legacy
+  // orgLevel fallback only for sessions without resolved permissions.
+  if (hasResolvedPermissions(user)) return can(user, "HR_CONFIDENTIAL");
+  return user.orgLevel === "hr_manager";
 }
 
 /**
@@ -123,7 +125,13 @@ export function canViewExitBadge(
 ): boolean {
   if (isSelfView) return true;
   if (!user) return false;
-  return user.orgLevel === "hr_manager" || user.isDeveloper === true;
+  if (user.isDeveloper === true) return true;
+  // HR team via the designation-held HR_CONFIDENTIAL permission. The CEO
+  // designations deliberately do NOT hold it, preserving the policy that
+  // exit status is HR's confidential signal (CEO/admins excluded). Legacy
+  // orgLevel fallback only for sessions without resolved permissions.
+  if (hasResolvedPermissions(user)) return can(user, "HR_CONFIDENTIAL");
+  return user.orgLevel === "hr_manager";
 }
 
 /**
@@ -336,6 +344,14 @@ export function isPickableAsManager(user: ClientUser): boolean {
   // employee shows up as a manager. The actual HR-Manager (e.g.
   // Tanvi) is identified by `role === "hr_manager"`; that's what
   // we gate on here.
+  // RBAC-designation-driven (policy 2026-07-14): ACT_AS_MANAGER marks a
+  // designation as a manager-picker target / report owner. Checked on the
+  // RAW grant (not can()) because can()'s developer blanket pass must NOT
+  // apply — devs never appear in manager lists. Legacy role/orgLevel
+  // expression kept only for sessions without resolved permissions.
+  if (hasResolvedPermissions(user)) {
+    return ((user as any).permissions ?? []).includes("ACT_AS_MANAGER");
+  }
   if (user.orgLevel === "hod")            return true;
   if (user.orgLevel === "manager")        return true;
   if (user.role === "manager")            return true;

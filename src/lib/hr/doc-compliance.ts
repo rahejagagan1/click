@@ -31,6 +31,7 @@ import { sendEmail } from "@/lib/email/sender";
 import { docComplianceWarningEmail, docComplianceViolationEmail } from "@/lib/email/templates";
 import { isDryRun } from "@/lib/email/transport";
 import { isEmailEnabled, devEmailRecipientsClause } from "@/lib/email/toggles";
+import { userIdsWithPermission } from "@/lib/permissions/resolve-permissions";
 
 const GRACE_DAYS_AFTER_JOINING = 7;
 const VIOLATION_DELAY_DAYS     = 2;
@@ -169,8 +170,18 @@ export async function sendMissingDocReminders(): Promise<{ warned: number; viola
   // today), and a YT Labs employee's violation should be reported by
   // the YT Labs HR Manager (Riya). Previously we just picked the
   // first role="hr_manager" found, which mis-attributed cross-brand.
+  // RBAC-designation-driven (policy 2026-07-14): the brand's primary HR
+  // Manager is marked by the HR_PRIMARY_CONTACT designation permission.
+  // Legacy role=hr_manager kept as a fallback for users without designations.
+  const primaryHrIds = await userIdsWithPermission("HR_PRIMARY_CONTACT");
   const hrManagers = await prisma.user.findMany({
-    where: { isActive: true, role: "hr_manager" },
+    where: {
+      isActive: true,
+      OR: [
+        ...(primaryHrIds.length ? [{ id: { in: primaryHrIds } }] : []),
+        { role: "hr_manager" },
+      ],
+    },
     select: {
       id: true, name: true, email: true,
       employeeProfile: { select: { businessUnit: true } },

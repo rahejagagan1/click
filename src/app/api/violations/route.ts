@@ -8,6 +8,7 @@ import {
   violationCreatedEmail,
   violationStatusChangedEmail,
 } from "@/lib/email/templates";
+import { isHRAdmin } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 // Need the Node runtime for fs (Edge can't write files).
@@ -39,19 +40,12 @@ const MIME_BY_EXT: Record<string, string> = {
   ".webp": "image/webp",
 };
 
-// Mirrors src/lib/access.ts:isHRAdmin so the API gate matches the UI's
-// canViewViolationLog logic. Previously missed role=admin and
-// orgLevel=hr_manager, locking out HR managers + admins.
+// HR access is RBAC-designation-driven (policy 2026-07-14): the shared
+// isHRAdmin resolves MANAGE_HR from the caller's designation permissions,
+// so HR staff provisioned by designation alone (role/orgLevel still
+// "member") pass. Replaced a local orgLevel/role-only copy.
 function hasViolationAccess(session: any): boolean {
-    const user = session?.user as any;
-    return (
-        user?.orgLevel === "ceo" ||
-        user?.orgLevel === "special_access" ||
-        user?.orgLevel === "hr_manager" ||
-        user?.role === "hr_manager" ||
-        user?.role === "admin" ||
-        user?.isDeveloper === true
-    );
+    return isHRAdmin(session?.user as any);
 }
 
 // GET: Fetch violations with summary

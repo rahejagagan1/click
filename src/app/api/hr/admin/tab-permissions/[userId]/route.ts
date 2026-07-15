@@ -10,11 +10,11 @@ import {
 
 export const dynamic = "force-dynamic";
 
+// RBAC-designation-driven (policy 2026-07-14): shared isHRAdmin resolves
+// MANAGE_HR from the caller's designation. Replaced a local legacy copy.
+import { isHRAdmin } from "@/lib/access";
 function canManage(session: any): boolean {
-  const u = session?.user;
-  return u?.orgLevel === "ceo" || u?.isDeveloper === true
-    || u?.orgLevel === "hr_manager" || u?.role === "admin"
-    || u?.orgLevel === "special_access";
+  return isHRAdmin(session?.user);
 }
 
 /**

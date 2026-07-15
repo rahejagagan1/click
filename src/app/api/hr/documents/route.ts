@@ -7,14 +7,12 @@ import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 // (orgLevel=hr_manager) can see / write OTHER employees' documents.
 // Excludes special_access and role=admin, which pass isHRAdmin in
 // other contexts. Self-upload is handled separately at each call
-// site (target === myId always allowed). Keeps server semantics in
-// sync with canViewEmployeeDocuments in src/lib/access.ts.
+// site (target === myId always allowed). Delegates to the shared
+// isLeadershipOrHR (HR_CONFIDENTIAL via designation — policy
+// 2026-07-14) so it stays in sync with canViewEmployeeDocuments.
+import { isLeadershipOrHR } from "@/lib/access";
 function isHRAdmin(u: any): boolean {
-  return (
-    u?.orgLevel === "ceo" ||
-    u?.isDeveloper === true ||
-    u?.orgLevel === "hr_manager"
-  );
+  return isLeadershipOrHR(u);
 }
 
 export async function GET(req: NextRequest) {

@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { requireAuth, resolveUserId, serverError, isHRAdmin } from "@/lib/api-auth";
 import { DEPARTMENTS } from "@/lib/departments";
 import { DEPARTMENTS_YT_LABS } from "@/lib/departments-yt-labs";
 
@@ -67,13 +67,9 @@ export async function GET(req: NextRequest) {
   try {
     const myId = await resolveUserId(session);
     const u = session!.user as any;
-    const isTopTier =
-      u?.orgLevel === "ceo" ||
-      u?.isDeveloper === true ||
-      u?.orgLevel === "special_access" ||
-      u?.role === "admin" ||
-      u?.orgLevel === "hr_manager" ||
-      u?.role === "hr_manager";
+    // RBAC-designation-driven (policy 2026-07-14) — shared isHRAdmin
+    // resolves MANAGE_HR from the caller's designation.
+    const isTopTier = isHRAdmin(u);
 
     // Resolve the viewer's department + role/orgLevel + brand — used
     // to pick the right KPI bucket AND the right brand-tagged doc.
