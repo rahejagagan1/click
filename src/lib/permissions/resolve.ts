@@ -1,5 +1,6 @@
 import prisma from "@/lib/prisma";
 import { TAB_CATALOG, TabKey, defaultTabPermissions, HR_MANAGER_FORCED_TABS } from "./tabs";
+import { getPermissionsForUserId } from "./resolve-permissions";
 
 /**
  * Always-on override. These roles/flags are NEVER blocked by tab
@@ -65,27 +66,31 @@ async function rawUpsert(userId: number, tabKey: string, enabled: boolean, updat
  * are "protected" — the UI won't let an admin flip their toggles.
  */
 export async function tabPermissionsForUser(userId: number): Promise<Record<TabKey, boolean>> {
-  const [user, rows] = await Promise.all([
+  const [user, rows, perms] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
       select: { orgLevel: true, role: true, email: true },
     }),
     rawGetRows(userId),
+    getPermissionsForUserId(userId),
   ]);
 
   const devEmails = (process.env.DEVELOPER_EMAILS || "")
     .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
   const isDeveloper = !!user?.email && devEmails.includes(user.email.toLowerCase());
 
-  // Role-aware defaults — a brand-new Manager gets Scores + Reports on
-  // by default, a new Member only gets the 4 basic tabs, etc.
-  const out = defaultTabPermissions(user?.orgLevel);
+  // Defaults: static catalog + legacy orgLevel overrides + DESIGNATION-
+  // permission-derived enables (RBAC-only policy 2026-07-14 — the sidebar
+  // follows the designation; orgLevel stays as a fallback union).
+  const out = defaultTabPermissions(user?.orgLevel, perms);
 
-  // Top-tier admin override — developers, CEO, special_access, and
-  // anyone with role="admin" always see every tab. Their UserTabPermission
-  // rows (if any) are ignored at runtime so they can never be partially
-  // locked out. Matches `hasProtectedRole`.
+  // Top-tier admin override — developers plus SYSTEM_ADMIN designation
+  // holders (CEO / Special Access) always see every tab. Their
+  // UserTabPermission rows (if any) are ignored at runtime so they can
+  // never be partially locked out. Legacy role/orgLevel expression kept
+  // for users without designations. Matches `hasProtectedRole`.
   if (
+    perms.includes("SYSTEM_ADMIN") ||
     hasProtectedRole({
       orgLevel: user?.orgLevel,
       role:     user?.role,
@@ -101,14 +106,16 @@ export async function tabPermissionsForUser(userId: number): Promise<Record<TabK
     if (r.tabKey in out) out[r.tabKey as TabKey] = r.enabled;
   }
 
-  // The *actual* HR Manager (role="hr_manager") owns HR policy config and
-  // always sees Leave Types / Leave Policies / Shift Templates / Payroll —
-  // forced on AFTER explicit rows so a stale seeded "false" (from
-  // onboarding before this rule) can't hide them. Scoped to the role, so
-  // the broader orgLevel="hr_manager" HR tier is unaffected — which keeps
-  // the salary-visibility policy intact for Payroll. The harder gate in
-  // the HR Admin page (canViewSalary) still applies on top of this.
-  if (user?.role === "hr_manager") {
+  // The actual HR Manager owns HR policy config and always sees Leave
+  // Types / Leave Policies / Shift Templates / Payroll — forced on AFTER
+  // explicit rows so a stale seeded "false" (from onboarding before this
+  // rule) can't hide them. Designation-driven via MANAGE_LEAVE_POLICY
+  // (RBAC-only policy 2026-07-14); role="hr_manager" kept as the legacy
+  // fallback. Scoped so the broader HR-staff tier (no MANAGE_LEAVE_POLICY)
+  // is unaffected — which keeps the salary-visibility policy intact for
+  // Payroll. The harder gate in the HR Admin page (canViewSalary) still
+  // applies on top of this.
+  if (user?.role === "hr_manager" || perms.includes("MANAGE_LEAVE_POLICY")) {
     for (const k of HR_MANAGER_FORCED_TABS) out[k] = true;
   }
 
@@ -122,10 +129,19 @@ export async function canAccessTab(
 ): Promise<boolean> {
   if (tabKey === null) return true;
   if (hasProtectedRole(tokenHints)) return true;
-  const rows = await rawGetRows(userId);
+  const [rows, perms] = await Promise.all([
+    rawGetRows(userId),
+    getPermissionsForUserId(userId),
+  ]);
+  // SYSTEM_ADMIN designation-holders are protected regardless of rows —
+  // mirrors the tabPermissionsForUser override above.
+  if (perms.includes("SYSTEM_ADMIN")) return true;
+  // Forced HR-policy tabs win over stale explicit rows (same rule as
+  // tabPermissionsForUser) — designation-driven via MANAGE_LEAVE_POLICY.
+  if (HR_MANAGER_FORCED_TABS.includes(tabKey) && perms.includes("MANAGE_LEAVE_POLICY")) return true;
   const r = rows.find((x) => x.tabKey === tabKey);
   if (r) return r.enabled;
-  return defaultTabPermissions(tokenHints.orgLevel)[tabKey];
+  return defaultTabPermissions(tokenHints.orgLevel, perms)[tabKey];
 }
 
 /**
@@ -140,12 +156,16 @@ export async function seedDefaultPermissionsIfMissing(
 ): Promise<{ seeded: boolean }> {
   const existing = await rawCount(userId);
   if (existing > 0) return { seeded: false };
-  // Look up the user's orgLevel so we seed role-appropriate defaults.
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { orgLevel: true },
-  });
-  const defaults = defaultTabPermissions(user?.orgLevel);
+  // Seed defaults from the user's orgLevel AND designation permissions so
+  // a designation-only provisioned user starts with the right tabs.
+  const [user, perms] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { orgLevel: true },
+    }),
+    getPermissionsForUserId(userId),
+  ]);
+  const defaults = defaultTabPermissions(user?.orgLevel, perms);
   await Promise.all(
     TAB_CATALOG.map((t) => rawUpsert(userId, t.key, defaults[t.key], actorId))
   );

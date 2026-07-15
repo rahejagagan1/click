@@ -3,20 +3,20 @@ import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
 import { istTodayDateOnly } from "@/lib/ist-date";
+import { isHRAdmin, isLeadershipOrHR, canViewExitBadge } from "@/lib/access";
+import { can, hasResolvedPermissions } from "@/lib/permissions/can";
 
 // Editing other employees' profiles is reserved for HR ops + admins.
-// Mirrors src/lib/access.ts:isHRAdmin so the server gate matches the UI:
-// CEO / developer / special_access / role=admin / hr_manager.
+// HR access is RBAC-designation-driven (policy 2026-07-14): the shared
+// isHRAdmin resolves MANAGE_HR from the caller's designation, so HR staff
+// provisioned by designation alone (role/orgLevel still "member") pass.
+// EDIT_EMPLOYEE_PROFILES additionally lets a non-HR designation be
+// delegated just this power. Replaced a local orgLevel/role-only copy.
 function canEditOthers(session: any): boolean {
   const u = session?.user;
   if (!u) return false;
-  return (
-    u.orgLevel === "ceo" ||
-    u.orgLevel === "hr_manager" ||
-    u.orgLevel === "special_access" ||
-    u.role === "admin" ||
-    u.isDeveloper === true
-  );
+  if (isHRAdmin(u)) return true;
+  return hasResolvedPermissions(u) && can(u, "EDIT_EMPLOYEE_PROFILES");
 }
 
 // GET /api/hr/people/:id
@@ -80,10 +80,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const sUserBadge = session?.user as any;
     // Reuse callerId (resolved above) instead of a second resolveUserId call.
     const isSelfForBadge = callerId === id;
-    const canSeeExitBadge =
-      isSelfForBadge ||
-      sUserBadge?.orgLevel === "hr_manager" ||
-      sUserBadge?.isDeveloper === true;
+    // Shared RBAC-aware gate (HR_CONFIDENTIAL via designation) — replaces
+    // the inline orgLevel-only check.
+    const canSeeExitBadge = canViewExitBadge(sUserBadge, isSelfForBadge);
 
     const today = istTodayDateOnly();
 
@@ -188,10 +187,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // most other things). Mirrors canViewEmployeeDocuments in
     // src/lib/access.ts and the GET /api/hr/documents gate below.
     const sUser = session?.user as any;
-    const isDocViewer =
-      sUser?.orgLevel === "ceo" ||
-      sUser?.isDeveloper === true ||
-      sUser?.orgLevel === "hr_manager";
+    // Shared RBAC-aware tier (HR_CONFIDENTIAL via designation).
+    const isDocViewer = isLeadershipOrHR(sUser);
     const docsAllowed = isSelfRequest || isDocViewer;
     // Identity + bank PII (PAN / Aadhaar / bank account) is as sensitive as
     // documents — visible only to the owner, HR (hr_manager), CEO and
@@ -471,8 +468,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     // admin) receive it redacted, so writing here would silently wipe the
     // stored PAN / Aadhaar / bank. Skip those writes entirely for them.
     const putUser = session?.user as any;
-    const putIsDocViewer =
-      putUser?.orgLevel === "ceo" || putUser?.isDeveloper === true || putUser?.orgLevel === "hr_manager";
+    // Shared RBAC-aware tier (HR_CONFIDENTIAL via designation) — same gate
+    // that governs SEEING the PII on GET.
+    const putIsDocViewer = isLeadershipOrHR(putUser);
     if (putIsDocViewer) {
       if (panNumber         !== undefined) profileData.panNumber         = panNumber         ? String(panNumber).trim().toUpperCase() || null : null;
       if (aadhaarNumber     !== undefined) profileData.aadhaarNumber     = aadhaarNumber     ? String(aadhaarNumber).trim()           || null : null;

@@ -11,17 +11,11 @@ import {
 export const dynamic = "force-dynamic";
 
 // Same gate as the People PUT route (canEditOthers): editing someone
-// else's reporting line is HR ops + admins only.
+// else's reporting line is HR ops + admins only. RBAC-designation-driven
+// (policy 2026-07-14) via the shared isHRAdmin (MANAGE_HR).
+import { isHRAdmin } from "@/lib/access";
 function canEditOthers(session: any): boolean {
-  const u = session?.user;
-  if (!u) return false;
-  return (
-    u.orgLevel === "ceo" ||
-    u.orgLevel === "hr_manager" ||
-    u.orgLevel === "special_access" ||
-    u.role === "admin" ||
-    u.isDeveloper === true
-  );
+  return isHRAdmin(session?.user);
 }
 
 function parseUserId(idParam: string): number | null {

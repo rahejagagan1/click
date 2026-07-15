@@ -61,6 +61,37 @@ export function getPermissionsForUserId(userId: number): Promise<Permission[]> {
   return rawPerms(`u."id" = $1`, userId);
 }
 
+/**
+ * Active user ids whose DESIGNATION grants the given permission — the
+ * designation-driven replacement for role/orgLevel recipient lookups
+ * (notification fan-outs, manager pickers, brand HR routing).
+ * `excludeDesignationKeys` drops tiers that hold the permission but must
+ * not be in the recipient set (e.g. CEO designations for L2 fan-outs).
+ */
+export async function userIdsWithPermission(
+  perm: Permission,
+  opts?: { excludeDesignationKeys?: string[] },
+): Promise<number[]> {
+  if (!(await rbacReady())) return [];
+  const excl = opts?.excludeDesignationKeys ?? [];
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ id: number }[]>(
+      `SELECT DISTINCT u."id"
+         FROM "User" u
+         JOIN "Designation" dg           ON dg."id" = u."designationId"
+         JOIN "DesignationPermission" dp ON dp."designationId" = dg."id"
+         JOIN "Permission" pm            ON pm."id" = dp."permissionId"
+        WHERE u."isActive" = true
+          AND pm."key" = $1
+          ${excl.length ? `AND dg."key" <> ALL($2::text[])` : ""}`,
+      ...(excl.length ? [perm, excl] : [perm]),
+    );
+    return rows.map((r) => Number(r.id));
+  } catch {
+    return [];
+  }
+}
+
 /** True if the user's designation has any report grant — either a per-owner
  *  grant (DesignationReportAccess) OR a report-template assignment
  *  (DesignationReportTemplate). Lets `canSeeReports` open the hub for a

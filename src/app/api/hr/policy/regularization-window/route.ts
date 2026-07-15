@@ -12,18 +12,10 @@ export const dynamic = "force-dynamic";
 // Default when missing: enabled = true (matches the legacy behaviour).
 const KEY = "regularization_window_enforced";
 
-// Mirrors src/lib/access.ts:isHRAdmin so the policy gate matches the rest
-// of the HR module (CEO / Developer / special_access / role=admin / hr_manager).
-function isHRAdmin(user: any): boolean {
-  return (
-    user?.orgLevel === "ceo" ||
-    user?.isDeveloper === true ||
-    user?.orgLevel === "special_access" ||
-    user?.role === "admin" ||
-    user?.orgLevel === "hr_manager" ||
-    user?.role === "hr_manager"
-  );
-}
+// HR access is RBAC-designation-driven (policy 2026-07-14): use the shared
+// isHRAdmin (MANAGE_HR via designation permissions) instead of a local
+// orgLevel/role-only copy, so designation-provisioned HR staff pass.
+import { isHRAdmin } from "@/lib/access";
 
 type PolicyValue = {
   enabled: boolean;

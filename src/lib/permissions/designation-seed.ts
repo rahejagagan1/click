@@ -25,7 +25,7 @@ const BASELINE: Permission[] = ["VIEW_YOUTUBE_DASHBOARD"];
 
 // Manager-tier permissions, shared by the generic Manager + the production /
 // researcher manager designations (same access; different scorecard track / role).
-const MANAGER_PERMS: Permission[] = ["VIEW_REPORTS", "RATE_TEAM", "APPROVE_TEAM_REQUESTS", "VIEW_MY_TEAM", ...BASELINE];
+const MANAGER_PERMS: Permission[] = ["VIEW_REPORTS", "RATE_TEAM", "APPROVE_TEAM_REQUESTS", "VIEW_MY_TEAM", "ACT_AS_MANAGER", ...BASELINE];
 
 // Senior-admin tier (special_access). Full admin EXCEPT: salary, delete-users,
 // cron management, restricted/back-dated leave, and cross-brand bypass (all CEO/dev-only).
@@ -64,6 +64,12 @@ const HR_MANAGER_PERMS: Permission[] = [
   "VIEW_REPORTS", "MANAGE_KPIS",
   "VIEW_VIOLATIONS", "MANAGE_VIOLATIONS",
   "VIEW_SALARY", "MANAGE_PAYROLL",
+  // HR-confidential tier (employee documents / exit badges / engage
+  // moderation) — the whole HR team holds it; special_access does not.
+  "HR_CONFIDENTIAL",
+  // The actual HR Manager is a report owner / manager-picker target and the
+  // brand's primary HR contact for doc-compliance attributions.
+  "ACT_AS_MANAGER", "HR_PRIMARY_CONTACT",
   ...BASELINE,
 ];
 
@@ -76,13 +82,16 @@ const HR_STAFF_PERMS: Permission[] = [
   "MANAGE_HOLIDAYS", "MANAGE_ASSETS", "BACKDATE_REQUESTS",
   "MANAGE_HIRING", "MANAGE_OFFBOARDING", "VIEW_FEEDBACK_INBOX",
   "VIEW_VIOLATIONS", "MANAGE_VIOLATIONS",
+  // HR-confidential tier — every HR team member (incl. staff like
+  // Vanshika) views employee documents / exit badges per HR policy.
+  "HR_CONFIDENTIAL",
   ...BASELINE,
 ];
 
 export const DESIGNATION_SEED: DesignationSeed[] = [
   { key: "ceo",            label: "CEO",             scorecardFunction: null,        sortOrder: 0,  permissions: CEO_PERMS },
   { key: "special_access", label: "Special Access",  scorecardFunction: null,        sortOrder: 1,  permissions: SPECIAL_ACCESS_PERMS },
-  { key: "hod",            label: "Head of Dept",    scorecardFunction: "manager",   sortOrder: 2,  permissions: ["SEE_ALL_DATA", "VIEW_REPORTS", "RATE_TEAM", "APPROVE_TEAM_REQUESTS", "VIEW_MY_TEAM", ...BASELINE] },
+  { key: "hod",            label: "Head of Dept",    scorecardFunction: "manager",   sortOrder: 2,  permissions: ["SEE_ALL_DATA", "VIEW_REPORTS", "RATE_TEAM", "APPROVE_TEAM_REQUESTS", "VIEW_MY_TEAM", "ACT_AS_MANAGER", ...BASELINE] },
   { key: "hr_manager",     label: "HR Manager",      scorecardFunction: null,        sortOrder: 3,  permissions: HR_MANAGER_PERMS },
   { key: "hr_staff",       label: "HR Staff",        scorecardFunction: null,        sortOrder: 4,  permissions: HR_STAFF_PERMS },
   { key: "manager",            label: "Manager",            scorecardFunction: "manager", sortOrder: 5,  permissions: MANAGER_PERMS },

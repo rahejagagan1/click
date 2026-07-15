@@ -245,14 +245,69 @@ export const HR_MANAGER_FORCED_TABS: TabKey[] = [
   "hr_admin_payroll",
 ];
 
-export function defaultTabPermissions(orgLevel?: OrgLevel | string | null): Record<TabKey, boolean> {
+// ── Permission-derived tab enables (RBAC-only policy 2026-07-14) ─────────
+// A user's DESIGNATION permissions flip these tabs ON, on top of the static
+// catalog defaults and the legacy orgLevel overrides (which stay as a
+// fallback / union — permission rules only ever ADD, never remove). This is
+// what makes the sidebar follow the designation: create a new designation,
+// grant it MANAGE_HR, and its holders get the HR Dashboard without anyone
+// touching orgLevel or per-user tab rows.
+export const PERMISSION_TAB_RULES: ReadonlyArray<{ perm: string; tabs: TabKey[] }> = [
+  // Full platform tier — everything except the CEO-only landing dashboard
+  // and developer diagnostics (mirrors the special_access override above).
+  { perm: "SYSTEM_ADMIN", tabs: [
+    "cases", "company", "scores", "reports", "departments", "violations",
+    "hr_my_team", "hr_admin", "hr_people", "hr_hiring", "hr_offboard",
+    "hr_admin_attendance", "hr_admin_approvals", "hr_admin_leaves",
+    "hr_admin_holidays", "hr_admin_assets", "hr_admin_leave_types",
+    "hr_admin_leave_policies", "hr_admin_shifts", "hr_admin_departments",
+    "hr_admin_payroll", "hr_engage", "hr_announcements", "hr_org",
+    "hr_expenses", "hr_approvals", "hr_analytics",
+  ] },
+  // HR tier — mirrors the orgLevel=hr_manager override above.
+  { perm: "MANAGE_HR", tabs: [
+    "hr_admin", "hr_people", "cases", "company",
+    "hr_admin_attendance", "hr_admin_approvals", "hr_admin_leaves",
+    "hr_admin_holidays", "hr_admin_assets", "hr_admin_departments",
+    "hr_approvals", "hr_analytics",
+  ] },
+  { perm: "MANAGE_HIRING",         tabs: ["hr_hiring"] },
+  { perm: "MANAGE_OFFBOARDING",    tabs: ["hr_offboard"] },
+  { perm: "VIEW_REPORTS",          tabs: ["reports", "scores"] },
+  { perm: "VIEW_MY_TEAM",          tabs: ["hr_my_team"] },
+  { perm: "APPROVE_TEAM_REQUESTS", tabs: ["hr_approvals"] },
+  { perm: "APPROVE_ALL_REQUESTS",  tabs: ["hr_approvals"] },
+  { perm: "VIEW_VIOLATIONS",       tabs: ["violations"] },
+  { perm: "MANAGE_LEAVE_POLICY",   tabs: ["hr_admin_leave_types", "hr_admin_leave_policies", "hr_admin_shifts"] },
+  { perm: "MANAGE_PAYROLL",        tabs: ["hr_admin_payroll"] },
+  { perm: "MANAGE_KPIS",           tabs: ["departments"] },
+  { perm: "ACT_AS_MANAGER",        tabs: ["hr_my_team", "hr_approvals"] },
+];
+
+/** Tab enables derived from a permission set — ON-flips only. */
+export function tabsFromPermissions(permissions: readonly string[]): Partial<Record<TabKey, boolean>> {
+  const set = new Set(permissions);
+  const out: Partial<Record<TabKey, boolean>> = {};
+  for (const rule of PERMISSION_TAB_RULES) {
+    if (!set.has(rule.perm)) continue;
+    for (const t of rule.tabs) out[t] = true;
+  }
+  return out;
+}
+
+export function defaultTabPermissions(
+  orgLevel?: OrgLevel | string | null,
+  permissions?: readonly string[] | null,
+): Record<TabKey, boolean> {
   const base = Object.fromEntries(
     TAB_CATALOG.map((t) => [t.key, t.defaultForNewUser])
   ) as Record<TabKey, boolean>;
-  if (!orgLevel) return base;
-  const overrides = ROLE_TAB_OVERRIDES[orgLevel as OrgLevel];
-  if (!overrides) return base;
-  return { ...base, ...overrides };
+  const overrides = orgLevel ? ROLE_TAB_OVERRIDES[orgLevel as OrgLevel] : undefined;
+  const withRole = overrides ? { ...base, ...overrides } : base;
+  // Designation permissions ADD tabs on top of the legacy role defaults —
+  // union, so neither provisioning style regresses the other.
+  if (!permissions || permissions.length === 0) return withRole;
+  return { ...withRole, ...tabsFromPermissions(permissions) };
 }
 
 /**

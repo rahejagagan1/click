@@ -15,6 +15,7 @@
 // table + the new EmployeeProfile columns.
 
 import prisma from "@/lib/prisma";
+import { userIdsWithPermission } from "@/lib/permissions/resolve-permissions";
 import { renderLetterHtml, wrapLetterPreviewHtml } from "@/lib/hr/letter-render";
 import { htmlToPdf } from "@/lib/hr/html-to-pdf";
 
@@ -64,12 +65,19 @@ export function notExitedSql(u = "u"): string {
 }
 
 // ── Recipient lookups ───────────────────────────────────────────────
+// RBAC-designation-driven (policy 2026-07-14): the HR decision queue fans
+// out to MANAGE_HR designation-holders (CEO designations excluded — the CEO
+// isn't an HR probation decider). Legacy special_access / role=hr_manager
+// rows kept as a fallback for users without designations.
 async function hrRecipientIds(): Promise<number[]> {
-  const rows = await prisma.$queryRawUnsafe<{ id: number }[]>(
-    `SELECT id FROM "User"
-      WHERE "isActive" = true AND ("orgLevel" = 'special_access' OR role = 'hr_manager')`,
-  );
-  return rows.map((r) => r.id);
+  const [byPerm, legacy] = await Promise.all([
+    userIdsWithPermission("MANAGE_HR", { excludeDesignationKeys: ["ceo", "ceo_yt_labs", "special_access"] }),
+    prisma.$queryRawUnsafe<{ id: number }[]>(
+      `SELECT id FROM "User"
+        WHERE "isActive" = true AND ("orgLevel" = 'special_access' OR role = 'hr_manager')`,
+    ),
+  ]);
+  return Array.from(new Set([...byPerm, ...legacy.map((r) => r.id)]));
 }
 
 async function notify(userIds: number[], title: string, body: string, linkUrl: string): Promise<boolean> {

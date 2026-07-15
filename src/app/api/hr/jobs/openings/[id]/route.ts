@@ -11,9 +11,15 @@ import { requireAuth } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
+// RBAC-designation-driven (policy 2026-07-14): MANAGE_HIRING is the hiring-
+// console permission. Legacy expression kept only as the fallback for
+// sessions without resolved permissions.
+import { can, hasResolvedPermissions } from "@/lib/permissions/can";
 function canManageHiring(session: any): boolean {
-  const u = session?.user;
-  return !!u && (u.orgLevel === "ceo" || u.orgLevel === "hr_manager" || u.role === "admin" || u.isDeveloper === true);
+  const u = session?.user as any;
+  if (!u) return false;
+  if (hasResolvedPermissions(u)) return can(u, "MANAGE_HIRING");
+  return u.orgLevel === "ceo" || u.orgLevel === "hr_manager" || u.role === "admin" || u.isDeveloper === true;
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
