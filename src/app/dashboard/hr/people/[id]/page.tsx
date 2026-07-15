@@ -4289,6 +4289,12 @@ function EmployeeTimePanel({
                       {isWeekend      ? <span className="inline-flex items-center rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-600">W-Off</span> : null}
                       {isHoliday      ? <span className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">Holiday</span> : null}
                       {isWfhApproved && !isLeaveRow ? <span className="inline-flex items-center rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-700">WFH</span> : null}
+                      {/* Request in flight (regularization / WFH / leave) —
+                          same chip the employee sees on their own attendance
+                          page, so HR knows the day is awaiting a decision
+                          (the split-day summary below shows even while
+                          pending, which used to read as already-approved). */}
+                      {hasPendingAny ? <span className="inline-flex items-center rounded bg-[#008CFF]/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#008CFF]">Pending</span> : null}
                       {/* New tags (matches Me-section) */}
                       {isLop ? <span className="inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-red-700">{isHalfDayLop ? "½ Day LOP" : "LOP"}</span> : null}
                       {/* Under-9h day that clocked out but wasn't regularised —
