@@ -815,7 +815,10 @@ export default function AttendancePage() {
   const onTimePct   = summary.present > 0
     ? Math.round(((summary.present - (summary.late || 0)) / summary.present) * 100) : 0;
 
-  // Elapsed since clock-in (live while open; snapshot after clock-out).
+  // GROSS elapsed since the day's FIRST clock-in (live while open; snapshot
+  // after clock-out). This is wall-clock time and INCLUDES any break gaps
+  // (clocked out for lunch, then back in). Drives the "Gross" tile + the
+  // "Since Last Login" counter.
   // Clamp to 0: if the client clock is even one second behind the
   // server-stored clockIn (small drift, post-DST, or just-clocked-in
   // race), Math.floor(-1/60) is -1 and the formatter spits out
@@ -824,6 +827,28 @@ export default function AttendancePage() {
     ? Math.max(0, Math.floor((clock.getTime() - new Date(todayRec.clockIn).getTime()) / 60000))
     : Math.max(0, todayRec?.totalMinutes || 0);
   const elapsedStr  = fmtMins(elapsedMins);
+
+  // EFFECTIVE worked minutes = Σ each session's own duration, EXCLUDING break
+  // gaps between sessions. Mirrors the per-day timeline row's `liveMins`
+  // (stored totalMinutes = sum of closed sessions, + the open session's live
+  // elapsed) so the header's "Effective" tile agrees with the log below it.
+  // Previously the Effective tile reused the gross figure, so a day with a
+  // lunch break showed e.g. 7h43m up top vs 7h24m in the log — the gap was
+  // the break. Now they match.
+  const effectiveMins = (() => {
+    if (!todayRec?.clockIn) return 0;
+    const stored = Math.max(0, todayRec?.totalMinutes || 0); // Σ closed sessions
+    const daySessions: Array<{ clockIn: string; clockOut: string | null }> =
+      Array.isArray(todayRec?.sessions) && todayRec.sessions.length > 0
+        ? todayRec.sessions
+        : [{ clockIn: todayRec.clockIn, clockOut: todayRec.clockOut ?? null }];
+    const openSess = daySessions.find((s) => !s.clockOut);
+    if (openSess && clock) {
+      return stored + Math.max(0, Math.floor((clock.getTime() - new Date(openSess.clockIn).getTime()) / 60000));
+    }
+    return stored;
+  })();
+  const effectiveStr = fmtMins(effectiveMins);
 
   // IST minutes-since-midnight for an arbitrary instant (live clock tick).
   const toIstMinutes = (d: Date) => {
@@ -1153,13 +1178,15 @@ export default function AttendancePage() {
               </p>
             </div>
 
-            {/* Tile 2 — effective hours */}
+            {/* Tile 2 — effective hours (worked time, breaks EXCLUDED — matches
+                the timeline log's Effective/Gross column). */}
             <div className="flex flex-col justify-center rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-2">
               <p className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1.5">Effective <Info size={9} strokeWidth={2} /></p>
-              <p className="text-[15px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
+              <p className="text-[15px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? effectiveStr : "0h 0m"}</p>
             </div>
 
-            {/* Tile 3 — gross hours */}
+            {/* Tile 3 — gross hours (wall-clock since first clock-in, breaks
+                INCLUDED). */}
             <div className="flex flex-col justify-center rounded-lg border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0a1526] px-3 py-2">
               <p className="text-[9px] uppercase tracking-wider text-slate-400 font-bold leading-none mb-1.5">Gross</p>
               <p className="text-[15px] font-bold text-slate-800 dark:text-white leading-none tabular-nums">{todayRec?.clockIn ? elapsedStr : "0h 0m"}</p>
@@ -1608,6 +1635,27 @@ export default function AttendancePage() {
                     const regWindow = (r: any) => r?.requestedIn && r?.requestedOut
                       ? `${fmtT(r.requestedIn)} → ${fmtT(r.requestedOut)}`
                       : null;
+                    // Split-day summary for a PENDING half-day WFH / leave — the
+                    // employee should see which half is which while the request
+                    // is still in flight, not only after approval (parity with
+                    // the admin profile view's split label).
+                    const pendingWfhRow = Array.isArray(wfhData)
+                      ? wfhData.find((r: any) => isOpen(r.status) && String(r.date).slice(0, 10) === dateIso)
+                      : null;
+                    const pHalf = (reason: any): "first" | "second" | null => {
+                      const s = String(reason ?? "");
+                      return /\[first\s+half\]/i.test(s) ? "first" : /\[second\s+half\]/i.test(s) ? "second" : null;
+                    };
+                    const pendingWfhHalf   = pendingWfhRow ? pHalf(pendingWfhRow.reason) : null;
+                    const pendingLeaveHalf = pendingLeaveRow ? pHalf(pendingLeaveRow.reason) : null;
+                    const pendingSplitLabel = (() => {
+                      if (!pendingWfhHalf && !pendingLeaveHalf) return null;
+                      const kind = (which: "first" | "second") =>
+                        pendingLeaveHalf === which ? (pendingLeaveRow?.leaveType?.name || "Leave")
+                        : pendingWfhHalf === which ? "WFH"
+                        : "Office";
+                      return `1st Half ${kind("first")} · 2nd Half ${kind("second")}`;
+                    })();
                     // Missed clock-out: clocked in on a past day but never clocked out.
                     // Either the server has already flagged it (status === "missed_clock_out")
                     // or the sweeper hasn't run yet but the row is stale. Either way, we must
@@ -1654,6 +1702,26 @@ export default function AttendancePage() {
                       return stored;
                     })();
                     const hrs       = liveMins ? fmtMins(liveMins) : "0h 0m";
+                    // GROSS = wall-clock span from the first clock-in to the last
+                    // clock-out (or now, while a session is open), INCLUDING break
+                    // gaps between sessions. `liveMins`/`hrs` above is EFFECTIVE
+                    // (worked time, breaks excluded); gross ≥ effective, and the
+                    // difference is the break time. Both agree with the header
+                    // tiles (Effective vs Gross) so the two surfaces never
+                    // contradict on a day with a lunch break.
+                    const grossMins = (() => {
+                      const firstInMs = sessions[0]?.clockIn ? new Date(sessions[0].clockIn).getTime() : null;
+                      if (firstInMs == null) return liveMins;
+                      let endMs: number | null;
+                      if (openSession) endMs = isTodayRow && clock ? clock.getTime() : null;
+                      else {
+                        const lastOut = sessions[sessions.length - 1]?.clockOut ?? rec.clockOut ?? null;
+                        endMs = lastOut ? new Date(lastOut).getTime() : null;
+                      }
+                      if (endMs == null) return liveMins; // open but no live clock / missing data → fall back
+                      return Math.max(liveMins, Math.floor((endMs - firstInMs) / 60000));
+                    })();
+                    const grossStr  = grossMins ? fmtMins(grossMins) : "0h 0m";
                     const pct       = liveMins ? Math.min((liveMins / 540) * 100, 100) : 0;
                     const met9h     = liveMins >= 540;
                     const hasClock  = !!rec.clockIn;
@@ -1735,6 +1803,14 @@ export default function AttendancePage() {
                             {hasPendingAny && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#008CFF]/15 text-[#008CFF] font-bold uppercase tracking-wider">Pending</span>
                             )}
+                            {/* Pending HALF-day request — show which half is
+                                which right next to the Pending chip (matches
+                                the admin profile's split-day summary). */}
+                            {hasPendingAny && pendingSplitLabel && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 font-bold uppercase tracking-wider">
+                                {pendingSplitLabel}
+                              </span>
+                            )}
                             {!hasPendingAny && approvedWfhKind && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold uppercase tracking-wider">
                                 {approvedWfhKind}
@@ -1773,9 +1849,9 @@ export default function AttendancePage() {
                               {pendingKind === "regularization" && pendingRegRow
                                 ? `Regularization Pending${regWindow(pendingRegRow) ? ` · ${regWindow(pendingRegRow)}` : ""}`
                                 : pendingKind === "leave" && pendingLeaveRow
-                                  ? `Leave Pending — ${pendingLeaveRow?.leaveType?.name || "Leave"}`
+                                  ? `Leave Pending — ${pendingLeaveRow?.leaveType?.name || "Leave"}${pendingSplitLabel ? ` · ${pendingSplitLabel}` : ""}`
                                   : pendingKind === "WFH"
-                                    ? "WFH Pending Approval"
+                                    ? `WFH Pending Approval${pendingSplitLabel ? ` · ${pendingSplitLabel}` : ""}`
                                     : pendingKind === "On-Duty"
                                       ? "On-Duty Pending Approval"
                                       : `Pending ${pendingKind}`}
@@ -1865,12 +1941,13 @@ export default function AttendancePage() {
                           ) : null}
                         </td>
 
-                        {/* GROSS HOURS — centered to match its centred header. */}
+                        {/* GROSS HOURS — wall-clock incl. breaks (≥ Effective).
+                            Centered to match its centred header. */}
                         <td className="px-5 py-3 text-center text-[13px] text-slate-700 dark:text-slate-300">
                           {missedClockOut
                             ? <span className="text-slate-400">—</span>
                             : liveMins > 0
-                              ? hrs
+                              ? grossStr
                               : (isHoliday || isWeekend)
                                 ? <span className="text-slate-400 text-lg">···</span>
                                 : ""}
