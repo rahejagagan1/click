@@ -8,6 +8,7 @@ import { sendEmail } from "@/lib/email/sender";
 import { pocAssignmentEmail } from "@/lib/email/templates";
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
 import { isSingleStageApprovalEmployee } from "@/lib/hr/single-stage-approval";
+import { isHRAdmin } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -16,9 +17,10 @@ export async function GET(req: NextRequest) {
   if (errorResponse) return errorResponse;
   const user = session!.user as any;
   const myId = await resolveUserId(session);
-  // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access + role=admin + role=hr_manager.
-  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager"
-                || user.orgLevel === "special_access" || user.role === "admin" || user.role === "hr_manager";
+  // HR access is RBAC-designation-driven (policy 2026-07-14): the shared
+  // isHRAdmin resolves MANAGE_HR from the caller's designation permissions.
+  // Replaces a local orgLevel/role-only copy.
+  const isAdmin = isHRAdmin(user);
   const { searchParams } = new URL(req.url);
   const view = searchParams.get("view") || "my";
 
@@ -79,9 +81,8 @@ export async function POST(req: NextRequest) {
     // HR-on-behalf: when targetUserId is set and the caller is HR-admin,
     // the on-duty is created for that user instead of the caller.
     const callerUser = session!.user as any;
-    const callerIsHRAdmin = callerUser.orgLevel === "ceo" || callerUser.isDeveloper
-                          || callerUser.orgLevel === "hr_manager" || callerUser.orgLevel === "special_access"
-                          || callerUser.role === "admin" || callerUser.role === "hr_manager";
+    // Shared RBAC-aware gate (MANAGE_HR via designation) — see GET above.
+    const callerIsHRAdmin = isHRAdmin(callerUser);
     const tid = typeof targetUserId === "number" ? targetUserId : null;
     const onBehalf = tid !== null && tid !== myId && callerIsHRAdmin;
     const subjectUserId = onBehalf ? tid! : myId;
@@ -225,9 +226,8 @@ export async function PUT(req: NextRequest) {
   const user = session!.user as any;
   const myId = await resolveUserId(session);
   if (!myId) return NextResponse.json({ error: "User not found" }, { status: 404 });
-  // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access + role=admin + role=hr_manager.
-  const isAdmin = user.orgLevel === "ceo" || user.isDeveloper || user.orgLevel === "hr_manager"
-                || user.orgLevel === "special_access" || user.role === "admin" || user.role === "hr_manager";
+  // Shared RBAC-aware gate (MANAGE_HR via designation) — see GET above.
+  const isAdmin = isHRAdmin(user);
 
   try {
     const body = await req.json();

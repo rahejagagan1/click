@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import prisma from "@/lib/prisma";
-import { requireAuth, isHRAdmin, canViewSalary, serverError } from "@/lib/api-auth";
+import { requireAuth, isHRAdmin, canViewSalary, isLeadershipOrHR, serverError } from "@/lib/api-auth";
 import { getBrandScope } from "@/lib/hr/brand-scope";
 import { istTodayDateOnly } from "@/lib/ist-date";
 
@@ -296,6 +296,54 @@ async function addSalariesSheet(wb: ExcelJS.Workbook, brand: BrandFilter, status
   styleSheet(ws);
 }
 
+// Identity — PAN + Aadhaar per employee. PII: gated behind the
+// HR-confidential tier (isLeadershipOrHR — HR team via designation, CEO,
+// developers), NOT the general HR-admin tier. Employees without documents
+// still get a row with blanks so HR can see who's missing what, and a
+// "PAN Check" column flags stored values that don't match the real PAN
+// format (5 letters + 4 digits + 1 letter) — catches truncated/typo'd
+// entries before they break payroll or TDS filings.
+const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+async function addIdentitySheet(wb: ExcelJS.Workbook, brand: BrandFilter, statusWhere: Record<string, any>) {
+  const users = await prisma.user.findMany({
+    where: userWhere(brand, statusWhere),
+    orderBy: { name: "asc" },
+    include: {
+      employeeProfile: {
+        select: { employeeId: true, department: true, businessUnit: true, designation: true, panNumber: true, aadhaarNumber: true, aadhaarEnrollment: true },
+      },
+    },
+  });
+  const ws = wb.addWorksheet("Identity (PAN & Aadhaar)");
+  ws.columns = [
+    { header: "HRM No.",            key: "hrm",     width: 12 },
+    { header: "Name",               key: "name",    width: 24 },
+    { header: "Department",         key: "dept",    width: 22 },
+    { header: "Business Unit",      key: "bu",      width: 14 },
+    { header: "Designation",        key: "desig",   width: 22 },
+    { header: "PAN Number",         key: "pan",     width: 16 },
+    { header: "PAN Check",          key: "panok",   width: 12 },
+    { header: "Aadhaar Number",     key: "aadhaar", width: 18 },
+    { header: "Aadhaar Enrollment", key: "enroll",  width: 20 },
+  ];
+  for (const u of users) {
+    const p = u.employeeProfile;
+    const pan = (p?.panNumber ?? "").trim().toUpperCase();
+    ws.addRow({
+      hrm:     p?.employeeId ?? "",
+      name:    u.name,
+      dept:    p?.department ?? "",
+      bu:      p?.businessUnit ?? "",
+      desig:   p?.designation ?? "",
+      pan,
+      panok:   pan ? (PAN_RE.test(pan) ? "OK" : "INVALID") : "MISSING",
+      aadhaar: p?.aadhaarNumber ?? "",
+      enroll:  p?.aadhaarEnrollment ?? "",
+    });
+  }
+  styleSheet(ws);
+}
+
 async function addAttendanceSheet(wb: ExcelJS.Workbook, label: string, start: Date | null, end: Date | null, brand: BrandFilter, statusWhere: Record<string, any>) {
   // When start/end are null we export every attendance row regardless
   // of date — the "All time" option in the picker. Sheet names are
@@ -570,6 +618,18 @@ export async function GET(req: NextRequest) {
       else if (scope.brand)     { salaryOk = true; salaryBrand = scope.brand as BrandFilter; }
     }
 
+    // Identity (PAN/Aadhaar) gate — HR-confidential tier only, and clamped to
+    // the intersection of the requested brand and the viewer's brand scope
+    // (an all-brands viewer exports the brand they asked for; a single-brand
+    // HR Manager only ever their own brand, whatever the URL says).
+    let identityOk = false;
+    let identityBrand: BrandFilter = null;
+    if (sheets.includes("identity") && isLeadershipOrHR(user)) {
+      const scope = getBrandScope(user);
+      if (scope.allBrands)  { identityOk = true; identityBrand = brand; }
+      else if (scope.brand) { identityOk = true; identityBrand = scope.brand as BrandFilter; }
+    }
+
     const wb = new ExcelJS.Workbook();
     wb.creator = brand
       ? `${brand} HR Dashboard`
@@ -631,6 +691,7 @@ export async function GET(req: NextRequest) {
     if (salaryOk && !sheets.includes("employees")) {
       await addSalariesSheet(wb, salaryBrand, statusWhere);
     }
+    if (identityOk) await addIdentitySheet(wb, identityBrand, statusWhere);
 
     const buffer = await wb.xlsx.writeBuffer();
     const brandFileSlug = brand === "YT Labs" ? "yt-labs" : brand === "NB Media" ? "nb-media" : "all-brands";

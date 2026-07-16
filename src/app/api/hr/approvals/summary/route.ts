@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { parseYearMonth, istCalendarMonthRange } from "@/lib/ist-date";
+import { can, hasResolvedPermissions } from "@/lib/permissions/can";
 
 export const dynamic = "force-dynamic";
 
@@ -23,15 +24,17 @@ export async function GET(req: NextRequest) {
   if (errorResponse) return errorResponse;
   try {
     const self = session!.user as any;
-    // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access
-    // + role=hr_manager.
-    const isFinalApprover =
-      self.orgLevel === "ceo" ||
-      self.isDeveloper ||
-      self.orgLevel === "hr_manager" ||
-      self.orgLevel === "special_access" ||
-      self.role === "admin" ||
-      self.role === "hr_manager";
+    // RBAC-designation-driven (policy 2026-07-14): APPROVE_ALL_REQUESTS is
+    // the L2/final-approver permission. Legacy expression kept only as the
+    // fallback for sessions without resolved permissions.
+    const isFinalApprover = hasResolvedPermissions(self)
+      ? can(self, "APPROVE_ALL_REQUESTS")
+      : (self.orgLevel === "ceo" ||
+         self.isDeveloper ||
+         self.orgLevel === "hr_manager" ||
+         self.orgLevel === "special_access" ||
+         self.role === "admin" ||
+         self.role === "hr_manager");
 
     let myId: number | null = null;
     if (!isFinalApprover) {

@@ -7,6 +7,7 @@ import { countWorkingDays } from "@/lib/hr/working-days";
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
 import { refundLopLwp } from "@/lib/hr/lop-lwp";
 import { isSingleStageApprovalEmployee } from "@/lib/hr/single-stage-approval";
+import { can, hasResolvedPermissions } from "@/lib/permissions/can";
 
 function fmtRange(from: Date, to: Date, days: number) {
   return `${from.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} (${days} day${days === 1 ? "" : "s"})`;
@@ -42,16 +43,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     });
     if (!application) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access
-    // + role=hr_manager. Tanvi-style HR Managers (role=hr_manager,
-    // orgLevel=manager) couldn't finalise leave applications.
-    const isFinalApprover =
-      self.orgLevel === "ceo" ||
-      self.isDeveloper ||
-      self.orgLevel === "hr_manager" ||
-      self.orgLevel === "special_access" ||
-      self.role === "admin" ||
-      self.role === "hr_manager";
+    // RBAC-designation-driven (policy 2026-07-14): APPROVE_ALL_REQUESTS is
+    // the L2/final-approver permission. Legacy expression kept only as the
+    // fallback for sessions without resolved permissions.
+    const isFinalApprover = hasResolvedPermissions(self)
+      ? can(self, "APPROVE_ALL_REQUESTS")
+      : (self.orgLevel === "ceo" ||
+         self.isDeveloper ||
+         self.orgLevel === "hr_manager" ||
+         self.orgLevel === "special_access" ||
+         self.role === "admin" ||
+         self.role === "hr_manager");
     const isDirectManager = application.user?.managerId === myId;
     // YT Labs: single-stage approval — any authorised approver (the direct
     // manager OR HR/CEO) finalises the leave on the first approve instead
@@ -461,16 +463,15 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (errorResponse) return errorResponse;
   try {
     const self = session!.user as any;
-    // Mirrors src/lib/access.ts:isHRAdmin — was missing special_access
-    // + role=hr_manager. Tanvi-style HR Managers (role=hr_manager,
-    // orgLevel=manager) couldn't finalise leave applications.
-    const isFinalApprover =
-      self.orgLevel === "ceo" ||
-      self.isDeveloper ||
-      self.orgLevel === "hr_manager" ||
-      self.orgLevel === "special_access" ||
-      self.role === "admin" ||
-      self.role === "hr_manager";
+    // RBAC-designation-driven (policy 2026-07-14) — same gate as PUT above.
+    const isFinalApprover = hasResolvedPermissions(self)
+      ? can(self, "APPROVE_ALL_REQUESTS")
+      : (self.orgLevel === "ceo" ||
+         self.isDeveloper ||
+         self.orgLevel === "hr_manager" ||
+         self.orgLevel === "special_access" ||
+         self.role === "admin" ||
+         self.role === "hr_manager");
     if (!isFinalApprover) return NextResponse.json({ error: "Only HR admin can delete leaves" }, { status: 403 });
 
     const { id: idParam } = await params;

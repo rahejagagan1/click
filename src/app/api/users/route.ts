@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
+import { can, hasResolvedPermissions } from "@/lib/permissions/can";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { sendEmail } from "@/lib/email/sender";
@@ -26,6 +27,10 @@ function canManageUsers(session: any): boolean {
 // CEO / developer / special_access / role=admin / orgLevel=hr_manager.
 function canCreateUsers(session: any): boolean {
     const user = session?.user as any;
+    // RBAC-designation-driven (policy 2026-07-14): MANAGE_USERS is the
+    // create/edit-users permission. Legacy expression kept only as the
+    // fallback for sessions without resolved permissions.
+    if (hasResolvedPermissions(user)) return can(user, "MANAGE_USERS");
     return (
         user?.orgLevel === "ceo" ||
         user?.isDeveloper === true ||

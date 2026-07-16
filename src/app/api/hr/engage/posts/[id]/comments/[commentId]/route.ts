@@ -2,8 +2,8 @@
 //
 // Removes a comment. Allowed when the caller is:
 //   • The comment author themselves
-//   • A developer  (isDeveloper === true)
-//   • orgLevel === "hr_manager"  (covers HR Manager + HR tier)
+//   • The HR-confidential tier (isLeadershipOrHR — HR_CONFIDENTIAL via
+//     designation, plus CEO / developers)
 //
 // Anyone else → 403.
 
@@ -13,11 +13,12 @@ import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
+// RBAC-designation-driven (policy 2026-07-14): moderation follows the shared
+// isLeadershipOrHR tier (HR_CONFIDENTIAL via designation), matching the
+// engage page's client-side gate. Replaced a local orgLevel-only copy.
+import { isLeadershipOrHR } from "@/lib/access";
 function canModerateComments(user: any): boolean {
-  return !!user && (
-    user.isDeveloper === true ||
-    user.orgLevel === "hr_manager"
-  );
+  return isLeadershipOrHR(user);
 }
 
 export async function DELETE(

@@ -93,11 +93,12 @@ export function isHRAdmin(user: any): boolean {
  * (engage post create / edit / delete, employee documents, etc.).
  */
 export function isLeadershipOrHR(user: any): boolean {
-    return (
-        user?.orgLevel === "ceo" ||
-        user?.isDeveloper === true ||
-        user?.orgLevel === "hr_manager"
-    );
+    // CEOs and developers pass on their own tier; the HR team is
+    // designation-driven via HR_CONFIDENTIAL (RBAC-only policy 2026-07-14).
+    // Legacy orgLevel fallback only for bare objects without permissions.
+    if (user?.orgLevel === "ceo" || user?.isDeveloper === true) return true;
+    if (hasResolvedPermissions(user)) return can(user, "HR_CONFIDENTIAL");
+    return user?.orgLevel === "hr_manager";
 }
 
 /**

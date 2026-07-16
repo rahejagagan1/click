@@ -19,10 +19,11 @@ import {
   Clock,
   FileText,
   IndianRupee,
+  Fingerprint,
   AlertCircle,
   ArrowLeft,
 } from "lucide-react";
-import { isHRAdmin, canViewSalary } from "@/lib/access";
+import { isHRAdmin, canViewSalary, isLeadershipOrHR } from "@/lib/access";
 import SelectField from "@/components/ui/SelectField";
 
 type BrandScope = "all" | "nb-media" | "yt-labs";
@@ -39,7 +40,7 @@ const STATUS_OPTIONS: Array<{ value: StatusScope; label: string }> = [
   { value: "all",    label: "All (active + exited)" },
 ];
 
-type SheetKey = "employees" | "attendance" | "leaves" | "requests" | "salaries";
+type SheetKey = "employees" | "attendance" | "leaves" | "requests" | "salaries" | "identity";
 
 type SheetDef = {
   key: SheetKey;
@@ -64,6 +65,15 @@ const SALARY_SHEET: SheetDef = {
   icon: IndianRupee,
 };
 
+// Identity documents are PAN / Aadhaar PII — shown only to the HR-confidential
+// tier (isLeadershipOrHR: HR team via designation, CEO, developers). Same
+// per-user append pattern as Salaries so broader HR admins never see the card.
+const IDENTITY_SHEET: SheetDef = {
+  key: "identity", label: "Identity (PAN & Aadhaar)",
+  desc: "Per-employee PAN and Aadhaar numbers with a PAN format check. Restricted to the HR team, CEO & admin.",
+  icon: Fingerprint,
+};
+
 const PERIOD_OPTIONS = [
   { value: "both",      label: "Current + Last month"        },
   { value: "current",   label: "Current month only"          },
@@ -79,10 +89,10 @@ export default function MasterSheetPage() {
   const searchParams = useSearchParams();
   const user = session?.user as any;
 
-  // Default: every sheet ticked — that's what a full export looks like.
-  const [picked, setPicked] = useState<Set<SheetKey>>(
-    new Set<SheetKey>(["employees", "attendance", "leaves", "requests"])
-  );
+  // Default: nothing ticked — the user explicitly picks what to export
+  // (per HR request 2026-07-15; the old default pre-ticked the four base
+  // sheets, which made accidental full exports too easy).
+  const [picked, setPicked] = useState<Set<SheetKey>>(new Set<SheetKey>());
   const [period, setPeriod] = useState<string>("both");
   // Brand scope — seeded from ?brand= so entering via the HR
   // Dashboard sidebar flyout (NB Media / YT Labs) lands on the right
@@ -120,10 +130,14 @@ export default function MasterSheetPage() {
     );
   }
 
-  // Salaries card only for compensation-cleared viewers (HR Manager / CEO /
-  // salary-dev). Appended after the base sheets so it reads as an extra,
-  // sensitive option at the end of the list.
-  const visibleSheets = canViewSalary(user) ? [...SHEETS, SALARY_SHEET] : SHEETS;
+  // Sensitive extras appended per-viewer after the base sheets: Salaries for
+  // compensation-cleared viewers (canViewSalary), Identity (PAN/Aadhaar) for
+  // the HR-confidential tier (isLeadershipOrHR).
+  const visibleSheets = [
+    ...SHEETS,
+    ...(canViewSalary(user) ? [SALARY_SHEET] : []),
+    ...(isLeadershipOrHR(user) ? [IDENTITY_SHEET] : []),
+  ];
 
   const toggle = (k: SheetKey) => {
     setPicked((prev) => {

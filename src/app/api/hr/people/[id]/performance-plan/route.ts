@@ -9,16 +9,11 @@ import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+// RBAC-designation-driven (policy 2026-07-14): shared isHRAdmin resolves
+// MANAGE_HR from the caller's designation. Replaced a local legacy copy.
+import { isHRAdmin } from "@/lib/access";
 function canEditOthers(session: any): boolean {
-  const u = session?.user;
-  if (!u) return false;
-  return (
-    u.orgLevel === "ceo" ||
-    u.orgLevel === "hr_manager" ||
-    u.orgLevel === "special_access" ||
-    u.role === "admin" ||
-    u.isDeveloper === true
-  );
+  return isHRAdmin(session?.user);
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

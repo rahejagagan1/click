@@ -1,6 +1,7 @@
 import prisma from "@/lib/prisma";
 import { sendEmail, emailsForUserIds, emailsForUserIdsFiltered } from "@/lib/email/sender";
 import { isEmailEnabled, devEmailRecipientsClause } from "@/lib/email/toggles";
+import { userIdsWithPermission } from "@/lib/permissions/resolve-permissions";
 import {
   leaveRequestEmail, wfhRequestEmail, onDutyRequestEmail,
   regularizationRequestEmail, compOffRequestEmail, decisionEmail,
@@ -491,11 +492,20 @@ export async function brandScopedFinalApprovers(
     select: { employeeProfile: { select: { businessUnit: true } } },
   });
   const brand = brandBucket(empRow?.employeeProfile?.businessUnit);
+  // RBAC-designation-driven (policy 2026-07-14): fan out to holders of the
+  // L2 permission APPROVE_ALL_REQUESTS via their designation — CEO
+  // designations excluded (callers add the brand CEO separately, same as
+  // the legacy orgLevel!=ceo rule). Legacy role/orgLevel clauses kept as a
+  // fallback for users without designations.
+  const l2Ids = await userIdsWithPermission("APPROVE_ALL_REQUESTS", {
+    excludeDesignationKeys: ["ceo", "ceo_yt_labs"],
+  });
   const raw = await prisma.user.findMany({
     where: {
       isActive: true,
       orgLevel: { not: "ceo" },
       OR: [
+        ...(l2Ids.length ? [{ id: { in: l2Ids } }] : []),
         { orgLevel: "special_access" },
         { role: "hr_manager" },
         ...devClause,

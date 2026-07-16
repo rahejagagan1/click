@@ -7,16 +7,9 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 
-function isHRAdmin(u: any): boolean {
-  return (
-    u?.orgLevel === "ceo" ||
-    u?.isDeveloper === true ||
-    u?.orgLevel === "special_access" ||
-    u?.role === "admin" ||
-    u?.orgLevel === "hr_manager" ||
-    u?.role === "hr_manager"
-  );
-}
+// RBAC-designation-driven (policy 2026-07-14): shared isHRAdmin resolves
+// MANAGE_HR from the caller's designation. Replaced a local legacy copy.
+import { isHRAdmin } from "@/lib/access";
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { session, errorResponse } = await requireAuth();

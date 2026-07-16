@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, requireHRAdmin, isHRAdmin, serverError } from "@/lib/api-auth";
+import { canViewExitBadge } from "@/lib/access";
 import { serializeBigInt } from "@/lib/utils";
 import { isDeveloperEmail } from "@/lib/hr/notification-policy";
 import { probationWindow } from "@/lib/hr/probation";
@@ -37,8 +38,9 @@ export async function GET(req: NextRequest) {
     // row without it — their UI also gates on canViewExitBadge, but
     // stripping at the API is defense in depth (a curl can't pull
     // exit status either way).
-    const canSeeExitBadge =
-      viewer?.orgLevel === "hr_manager" || viewer?.isDeveloper === true;
+    // Shared RBAC-aware gate (HR_CONFIDENTIAL via designation) — keeps the
+    // API's defense-in-depth in sync with the client's canViewExitBadge.
+    const canSeeExitBadge = canViewExitBadge(viewer, false);
 
     // Directory visibility policy: active employees are searchable by
     // everyone (global header search + home feed @-mention picker), but
