@@ -214,7 +214,7 @@ export async function POST(req: NextRequest) {
     const existing = await prisma.wFHRequest.findMany({
       where: {
         userId: subjectUserId,
-        status: { in: ["pending", "approved"] },
+        status: { in: ["pending", "partially_approved", "approved"] },
         date: { in: targetDays },
       },
       select: { date: true },

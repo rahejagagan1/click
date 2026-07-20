@@ -8,8 +8,9 @@ export const dynamic = "force-dynamic";
  * GET /api/hr/attendance/wfh/balance?month=YYYY-MM
  *
  * Returns the WFH usage for the current user against the 2-per-month
- * cap. Counts pending + approved requests (rejected / cancelled don't
- * use up a slot). Defaults to the current calendar month when no
+ * cap. Counts pending + partially_approved + approved requests
+ * (rejected / cancelled don't use up a slot), matching the quota gate
+ * in ../route.ts. Defaults to the current calendar month when no
  * `month` query param is supplied.
  *
  *   { month: "2026-04", limit: 2, used: 1, remaining: 1 }
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest) {
     const used = await prisma.wFHRequest.count({
       where: {
         userId: myId,
-        status: { in: ["pending", "approved"] },
+        status: { in: ["pending", "partially_approved", "approved"] },
         date:   { gte: monthStart, lte: monthEnd },
       },
     });

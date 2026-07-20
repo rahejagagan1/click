@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
+import { requireAuth, resolveUserId, isHRAdmin, serverError } from "@/lib/api-auth";
 import { istMonthRange, istTodayDateOnly } from "@/lib/ist-date";
 import { isRegularizationUnlimited } from "@/app/api/hr/policy/regularization-unlimited/route";
 
@@ -30,16 +30,19 @@ export async function GET(req: NextRequest) {
     const ref = dateParam ? new Date(dateParam) : istTodayDateOnly();
     const { start, end } = istMonthRange(ref);
 
-    const [used, unlimited] = await Promise.all([
+    const [used, orgUnlimited] = await Promise.all([
       prisma.attendanceRegularization.count({
         where: {
           userId: myId,
           date: { gte: start, lte: end },
-          status: { in: ["pending", "approved"] },
+          status: { in: ["pending", "partially_approved", "approved"] },
         },
       }),
       isRegularizationUnlimited(),
     ]);
+    // HR-team self-applies are uncapped (2026-07-15, matches the POST gate):
+    // report unlimited so the modal doesn't disable the submit button at 2/2.
+    const unlimited = orgUnlimited || isHRAdmin(session!.user);
 
     return NextResponse.json({
       used,
