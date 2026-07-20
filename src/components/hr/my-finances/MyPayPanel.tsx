@@ -379,6 +379,10 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
 
   const totalAnnual  = earningsRows.reduce((s, r) => s + r.annual, 0);
   const totalMonthly = totalAnnual / 12;
+  // Employee-PF share carved out of CTC by the structure split rule. Surfaced
+  // next to Regular Salary so the timeline total ties back to the CTC shown on
+  // the Current Compensation card (₹0 for interns / non-PF-eligible).
+  const pfAnnual = myStructure?.salaryType === "intern" ? 0 : (parseFloat(myStructure?.pfEmployee || 0) || 0);
 
   const subTabs: { key: SubTab; label: string }[] = [
     { key: "my-salary",  label: userId ? "Salary" : "My Salary" },
@@ -456,9 +460,10 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
                   </div>
 
                   <div className="rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
-                    {/* Compact row — REGULAR SALARY [+ BONUS] = TOTAL. Bonus
-                        only appears when the user actually has bonuses on
-                        record; otherwise it's a clean two-up. */}
+                    {/* Compact row — REGULAR SALARY [+ PF] [+ BONUS] = TOTAL.
+                        PF appears only for PF-eligible structures (so the
+                        total ties to the CTC card); Bonus only when the user
+                        actually has bonuses on record. */}
                     <div className="flex items-center justify-between gap-4 px-5 py-4">
                       <div className="flex items-center gap-6 text-slate-700">
                         <button onClick={() => setRevisionOpen(o => !o)}
@@ -470,6 +475,15 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
                           <p className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-slate-400">Regular salary</p>
                           <p className="mt-1 text-[13.5px] font-semibold text-slate-800">INR {fmtInrWhole(totalAnnual)}</p>
                         </div>
+                        {pfAnnual > 0 && (
+                          <>
+                            <span className="text-slate-400 text-[15px] font-semibold">+</span>
+                            <div>
+                              <p className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-slate-400">PF</p>
+                              <p className="mt-1 text-[13.5px] font-semibold text-slate-800">INR {fmtInrWhole(pfAnnual)}</p>
+                            </div>
+                          </>
+                        )}
                         {hasBonuses && (
                           <>
                             <span className="text-slate-400 text-[15px] font-semibold">+</span>
@@ -482,7 +496,7 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
                         <span className="text-slate-400 text-[15px] font-semibold">=</span>
                         <div>
                           <p className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-slate-400">Total</p>
-                          <p className="mt-1 text-[13.5px] font-semibold text-slate-800">INR {fmtInrWhole(totalAnnual + totalBonus)}</p>
+                          <p className="mt-1 text-[13.5px] font-semibold text-slate-800">INR {fmtInrWhole(totalAnnual + pfAnnual + totalBonus)}</p>
                         </div>
                       </div>
                       <button onClick={() => setShowBreakup(true)}
@@ -509,6 +523,13 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
                             <p className="mt-1 text-[13px] font-medium text-slate-800">{effectiveFrom}</p>
                           </div>
                         </div>
+
+                        {pfAnnual > 0 && (
+                          <div className="bg-slate-100 px-5 py-2 border-t border-slate-200 flex items-center justify-between">
+                            <span className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-slate-500">PF — Employee Contribution</span>
+                            <span className="text-[12px] font-medium text-slate-700">INR {fmtInrWhole(pfAnnual)} / Annum</span>
+                          </div>
+                        )}
 
                         {hasBonuses && (
                           <>
@@ -570,7 +591,7 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
         <div className="fixed inset-0 z-50 flex bg-black/40 backdrop-blur-sm">
           <div className="flex-1 bg-white flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-              <h3 className="text-[15px] font-semibold text-slate-800">Salary Breakup for INR {fmtInrWhole(totalAnnual)}</h3>
+              <h3 className="text-[15px] font-semibold text-slate-800">Salary Breakup for INR {fmtInrWhole(totalAnnual + pfAnnual)}</h3>
               <button onClick={() => setShowBreakup(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
               </button>
@@ -597,6 +618,20 @@ export default function MyPayPanel({ userId, initialSub = "my-salary" }: Props) 
                     <td className="px-4 py-3 font-semibold text-slate-800">INR {fmtInr(totalMonthly)}</td>
                     <td className="px-4 py-3 font-semibold text-slate-800">INR {fmtInr(totalAnnual)}</td>
                   </tr>
+                  {pfAnnual > 0 && (
+                    <>
+                      <tr className="border-b border-slate-100">
+                        <td className="px-4 py-3 text-slate-800">PF — Employee Contribution</td>
+                        <td className="px-4 py-3 text-slate-800">INR {fmtInr(pfAnnual / 12)}</td>
+                        <td className="px-4 py-3 text-slate-800">INR {fmtInr(pfAnnual)}</td>
+                      </tr>
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        <td className="px-4 py-3 font-semibold text-slate-800">Total (CTC)</td>
+                        <td className="px-4 py-3 font-semibold text-slate-800">INR {fmtInr((totalAnnual + pfAnnual) / 12)}</td>
+                        <td className="px-4 py-3 font-semibold text-slate-800">INR {fmtInr(totalAnnual + pfAnnual)}</td>
+                      </tr>
+                    </>
+                  )}
                 </tbody>
               </table>
 

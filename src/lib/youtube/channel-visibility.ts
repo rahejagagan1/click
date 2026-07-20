@@ -43,15 +43,19 @@ const CHANNEL_CAPSULES: Record<string, ReadonlySet<string>> = {
 /**
  * Designations that always see every channel (no capsule filter).
  *
- * Currently: "Executive Assistant" (Palak Dhiman) — needs full
- * cross-channel visibility because the EA role coordinates across all
- * brands and capsules on behalf of leadership. Compared
- * case-insensitively against EmployeeProfile.designation.
+ *   • "Executive Assistant" (Palak Dhiman) — coordinates across all
+ *     brands/capsules on behalf of leadership.
+ *   • "Associate Operations Head" (Aditi Tiwari) — Operations leadership
+ *     oversees every channel's targets, so she gets full cross-channel
+ *     visibility regardless of capsule placement (she has no teamCapsule
+ *     of her own, and the capsule filter would otherwise hide the panel).
  *
+ * Compared case-insensitively against EmployeeProfile.designation.
  * Add more designations here as policy evolves; one-line change.
  */
 const BYPASS_DESIGNATIONS: ReadonlySet<string> = new Set([
     "executive assistant",
+    "associate operations head",
 ]);
 
 function suffixOf(capsule: string | null | undefined): string | null {

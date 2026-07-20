@@ -14,8 +14,9 @@ const REGULARIZATION_MONTHLY_QUOTA = 2;
  *
  * Developer-only. Returns every active employee's regularization quota
  * usage for the IST month containing `date` (defaults to today's IST
- * month). Active = both pending and approved requests count, matching
- * the per-user balance endpoint at ../route.ts.
+ * month). Active = pending, partially_approved and approved requests
+ * count, matching the quota gate in ../../route.ts and the per-user
+ * balance endpoint at ../route.ts.
  *
  * The view is deliberately gated to `isDeveloper === true` only — not
  * even CEO / HR Manager. It's a debugging/operational view, not part
@@ -44,7 +45,12 @@ export async function GET(req: NextRequest) {
 
     const [users, counts, unlimited] = await Promise.all([
       prisma.user.findMany({
-        where: { isActive: true },
+        where: {
+          isActive: true,
+          // Hide exited employees whose isActive flag was never flipped —
+          // same past-last-working-day test as the master-sheet "active" filter.
+          NOT: { employeeExit: { lastWorkingDay: { lt: istTodayDateOnly() } } },
+        },
         select: {
           id: true, name: true, email: true,
           profilePictureUrl: true, role: true, orgLevel: true,
@@ -58,7 +64,7 @@ export async function GET(req: NextRequest) {
         by: ["userId"],
         where: {
           date: { gte: start, lte: end },
-          status: { in: ["pending", "approved"] },
+          status: { in: ["pending", "partially_approved", "approved"] },
         },
         _count: { _all: true },
       }),
