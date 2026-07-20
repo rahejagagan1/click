@@ -191,11 +191,10 @@ export async function POST(req: NextRequest) {
     // employees can self-apply for any past IST date; future dates are
     // still rejected, and admin grants still bypass.
     //
-    // HR-team self-apply bypass: everyone in the HR team (orgLevel=
-    // hr_manager is set on all HR employees, not just the HR Manager
-    // role) skips the window on their OWN requests too — same set as
-    // isHRAdmin. Only the window is waived; the future-date block and
-    // the monthly quota still apply to them.
+    // HR-team self-apply bypass: everyone passing isHRAdmin (MANAGE_HR
+    // via designation) skips the window AND (since 2026-07-15) the
+    // monthly quota on their OWN requests. Only the future-date block
+    // still applies to them.
     if (!isAdminGrant) {
       const todayIst = istTodayDateOnly();
       const diff = dayDiff(todayIst, targetDateOnly);
@@ -225,8 +224,11 @@ export async function POST(req: NextRequest) {
 
     // Monthly quota — self-apply only. Admin grants bypass the cap but still
     // count toward the visible monthly total (on-book). Skipped entirely
-    // when the org-wide "unlimited" override is on.
-    if (!isAdminGrant && !unlimited) {
+    // when the org-wide "unlimited" override is on, and (since 2026-07-15,
+    // per HR) for the HR team's own self-applies — anyone whose designation
+    // passes isHRAdmin (MANAGE_HR) self-applies without a monthly cap, same
+    // set that already skips the 48h window above.
+    if (!isAdminGrant && !unlimited && !admin) {
       const { start, end } = istMonthRange(targetDateOnly);
       const usedThisMonth = await prisma.attendanceRegularization.count({
         where: {
