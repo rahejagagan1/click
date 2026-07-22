@@ -90,7 +90,7 @@ export const TAB_CATALOG: TabDef[] = [
   // Tab key kept as "departments" for backwards-compat with existing
   // UserTabPermission rows; only the user-facing label and URL changed.
   { key: "departments", label: "KPIs",           description: "Per-department KPIs (role-scoped)",  pathPrefixes: ["/dashboard/kpis"],                      defaultForNewUser: true  },
-  { key: "violations",  label: "Violation Log", description: "Attendance / policy violations",     pathPrefixes: ["/dashboard/violations"],                defaultForNewUser: false },
+  { key: "violations",  label: "Strike Log", description: "Attendance / policy strikes",     pathPrefixes: ["/dashboard/strikes"],                defaultForNewUser: false },
   // ── HR feature pages added by the coverage audit ─────────────────
   // Community / informational tabs default to ON for new employees;
   // admin / manager-only tabs default OFF and rely on ROLE overrides.

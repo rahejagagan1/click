@@ -12,6 +12,7 @@ import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
 import { isSingleStageApprovalEmployee } from "@/lib/hr/single-stage-approval";
 import { refundLopLwp } from "@/lib/hr/lop-lwp";
 import { isHRAdmin } from "@/lib/access";
+import { brandScopeSqlClause } from "@/lib/hr/brand-scope";
 
 // Schema covers both self-apply and admin-grant flavours of regularize POST.
 const RegularizePost = z.object({
@@ -78,7 +79,9 @@ export async function GET(req: NextRequest) {
     if (view === "team" && !admin) {
       whereSql = `u."managerId" = $1`;
     } else if (view === "all" && admin) {
-      whereSql = `1=1`;
+      // Org-wide brand isolation (2026-07-15): admin "all" views only show
+      // the caller's own brand unless they hold VIEW_ALL_BRANDS.
+      whereSql = `1=1${brandScopeSqlClause(user)}`;
       params = [];
     }
 
@@ -366,9 +369,8 @@ export async function PUT(req: NextRequest) {
       if (crossBrand) return crossBrand;
     }
 
-    // YT Labs: single-stage — the first authorised approver (direct
-    // manager OR HR/CEO) finalises the regularization outright, running
-    // the attendance rewrite below. NB Media keeps the L1 → L2 flow.
+    // Single-stage policy check — false for all brands since 2026-07-21
+    // (YT Labs re-joined the NB two-stage flow); see single-stage-approval.ts.
     const singleStage = await isSingleStageApprovalEmployee(reg.userId);
     // Fast-path: only the CEO approving at L1 collapses straight to approved
     // (running the attendance rewrite) instead of parking at partially_approved.

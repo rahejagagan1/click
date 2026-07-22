@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import useSWR, { mutate } from "swr";
 import { fetcher } from "@/lib/swr";
-import { canViewSalary, isSalaryDeveloper } from "@/lib/access";
+import { canViewSalary, isSalaryDeveloper, canViewAllBrands } from "@/lib/access";
 import { useSearchParams } from "next/navigation";
 import { brandFromSlug } from "@/lib/hr-brand-scope";
 import { readBrandStatus } from "@/lib/hr/payroll-run-status";
@@ -155,6 +155,20 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
     brandFromSlug(searchParams?.get("brand") ?? null) === "YT Labs" ? "YT Labs" : "NB Media",
   );
   const [entityOpen, setEntityOpen] = useState(false);
+
+  // Org-wide brand isolation (2026-07-15): only all-brands viewers
+  // (developers / VIEW_ALL_BRANDS designation holders) may switch the
+  // payroll entity. Everyone else — including a brand's HR Manager —
+  // is locked to their own brand, whatever ?brand= says. The payroll
+  // APIs clamp server-side too (resolveBrandScope); this keeps the UI
+  // honest about it.
+  const seesAllBrands = canViewAllBrands(user);
+  useEffect(() => {
+    if (user && !seesAllBrands) {
+      const own = (user as any)?.businessUnit === "YT Labs" ? "YT Labs" : "NB Media";
+      setPayrollEntity((cur) => (cur === own ? cur : own));
+    }
+  }, [user, seesAllBrands]);
 
   const isAdmin = !!user && canViewSalary(user);
   // Unlocking a locked payroll is restricted to the salary-trusted developer
@@ -395,13 +409,17 @@ export function RunPayrollPanel({ embedded = false }: { embedded?: boolean } = {
       <div className={embedded ? "space-y-5" : "mx-auto max-w-7xl space-y-5 p-6"}>
         <div className="relative flex items-center gap-2">
           <h1 className="text-[20px] font-bold text-slate-800">{payrollEntity}</h1>
-          <button
-            type="button"
-            className="text-slate-400 hover:text-slate-600"
-            aria-label="Switch entity"
-            onClick={() => setEntityOpen(o => !o)}
-          >▾</button>
-          {entityOpen && (
+          {/* Entity switcher — all-brands viewers only (org-wide brand
+              isolation, 2026-07-15). Scoped HR sees just their brand name. */}
+          {seesAllBrands && (
+            <button
+              type="button"
+              className="text-slate-400 hover:text-slate-600"
+              aria-label="Switch entity"
+              onClick={() => setEntityOpen(o => !o)}
+            >▾</button>
+          )}
+          {entityOpen && seesAllBrands && (
             <div className="absolute top-full left-0 mt-1 z-20 min-w-[200px] rounded-lg border border-slate-200 bg-white shadow-lg py-1">
               {(["NB Media", "YT Labs"] as const).map(opt => (
                 <button

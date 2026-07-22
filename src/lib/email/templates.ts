@@ -830,10 +830,10 @@ const SEVERITY_TINT: Record<string, { bg: string; border: string; text: string }
   critical: { bg: "#fee2e2", border: "#fca5a5", text: "#991b1b" },
 };
 const STATUS_LABEL: Record<string, string> = {
-  open: "Open", in_progress: "In progress", closed: "Closed",
+  open: "Open", in_progress: "In progress", paused: "Paused", closed: "Closed",
 };
 const STATUS_COLOR: Record<string, string> = {
-  open: "#ef4444", in_progress: "#0284c7", closed: "#10b981",
+  open: "#ef4444", in_progress: "#0284c7", paused: "#d97706", closed: "#10b981",
 };
 
 // Shared section card — used by description / action / notes blocks.
@@ -863,7 +863,7 @@ export function violationCreatedEmail(args: {
   violationDate?: string | Date | null;
 }): EmailContent {
   const subject = `A violation has been logged on your record`;
-  const link = `${appUrl()}/dashboard/violations`;
+  const link = `${appUrl()}/dashboard/strikes`;
   const sev   = SEVERITY_LABEL[args.severity] ?? args.severity;
   const stat  = STATUS_LABEL[args.status] ?? args.status;
   const statColor = STATUS_COLOR[args.status] ?? "#64748b";
@@ -949,7 +949,7 @@ export function violationStatusChangedEmail(args: {
   const oldColor  = STATUS_COLOR[args.oldStatus] ?? "#94a3b8";
 
   const subject = `Update on your violation: ${newStat}`;
-  const link = `${appUrl()}/dashboard/violations`;
+  const link = `${appUrl()}/dashboard/strikes`;
 
   // Two-pill status transition — old (greyed) on the left, arrow,
   // new (coloured + bold) on the right. Renders consistently across
@@ -1007,7 +1007,7 @@ export function violationInProgressReminderEmail(args: {
   actionTaken?: string | null;
 }): EmailContent {
   const subject = `Reminder: violation for ${args.affectedUserName} is still in progress`;
-  const link = `${appUrl()}/dashboard/violations`;
+  const link = `${appUrl()}/dashboard/strikes`;
   const sev = SEVERITY_LABEL[args.severity] ?? args.severity;
   const sevTint = SEVERITY_TINT[args.severity] ?? SEVERITY_TINT.medium;
 
@@ -1133,7 +1133,7 @@ export function docComplianceViolationEmail(args: {
   reportingManagerName: string | null;
 }): EmailContent {
   const subject = `Compliance violation logged: ${args.employeeName} — missing PAN / Aadhaar / Education`;
-  const link = `${appUrl()}/dashboard/violations${args.violationId ? `?focus=${args.violationId}` : ""}`;
+  const link = `${appUrl()}/dashboard/strikes${args.violationId ? `?focus=${args.violationId}` : ""}`;
   const redDot = `<span style="display:inline-block;width:7px;height:7px;background:#dc2626;border-radius:50%;vertical-align:middle;margin-right:8px"></span>`;
   const missingRows = args.missing.map((m) =>
     `<tr><td style="padding:6px 0;font-family:${FONT};font-size:13px;color:#1f2937">${redDot}${escape(m)}</td></tr>`
@@ -1191,7 +1191,7 @@ export function violationFollowUpEmail(args: {
   actionTaken?: string | null;
 }): EmailContent {
   const subject = `Follow-up: ${args.affectedUserName}'s violation · ${args.title}`;
-  const link = `${appUrl()}/dashboard/violations`;
+  const link = `${appUrl()}/dashboard/strikes`;
   const sev = SEVERITY_LABEL[args.severity] ?? args.severity;
   const sevTint = SEVERITY_TINT[args.severity] ?? SEVERITY_TINT.medium;
 

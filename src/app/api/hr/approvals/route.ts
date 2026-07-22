@@ -4,6 +4,7 @@ import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { serializeBigInt } from "@/lib/utils";
 import { parseYearMonth, istCalendarMonthRange } from "@/lib/ist-date";
 import { can, hasResolvedPermissions } from "@/lib/permissions/can";
+import { brandScopeUserWhere } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -82,6 +83,11 @@ export async function GET(req: NextRequest) {
     // the sub-clauses keeps both predicates active.
     const userClauses: any[] = [];
     if (!isFinalApprover) userClauses.push({ managerId: myId! });
+    // Org-wide brand isolation (2026-07-15): without VIEW_ALL_BRANDS the
+    // caller's queue only ever contains their OWN brand's employees,
+    // whatever ?brand= says. All-brands viewers pass through untouched.
+    const viewerClamp = brandScopeUserWhere(self);
+    if (Object.keys(viewerClamp).length) userClauses.push(viewerClamp);
     if (brand === "YT Labs") {
       userClauses.push({ employeeProfile: { businessUnit: "YT Labs" } });
     } else if (brand === "NB Media") {

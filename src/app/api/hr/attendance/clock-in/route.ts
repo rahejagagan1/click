@@ -196,10 +196,16 @@ export async function POST(req: NextRequest) {
       const [sh, sm] = userShift.shift.startTime.split(":").map(Number);
       const [eh, em] = userShift.shift.endTime.split(":").map(Number);
       const grace = Number.isFinite(userShift.shift.breakMinutes) ? userShift.shift.breakMinutes : 15;
+      // Half-day grace: dedicated per-shift window for second-half arrivals
+      // (first-half leave/WFH). NULL → inherit the main grace. Read via `as
+      // any` so a stale generated client (column added 2026-07-21) still runs.
+      const hdRaw = (userShift.shift as any).halfDayGraceMinutes;
+      const halfGrace = Number.isFinite(hdRaw) ? Number(hdRaw) : grace;
       const startMin = sh * 60 + sm;
       const midMin   = Math.round((startMin + (eh * 60 + em)) / 2);
-      // First-half off → expected from the mid-point; otherwise from shift start.
-      const lateCutoffMin = (isFirstHalfOff ? midMin : startMin) + grace;
+      // First-half off → expected from the mid-point (+ half-day grace);
+      // otherwise from shift start (+ main grace).
+      const lateCutoffMin = isFirstHalfOff ? midMin + halfGrace : startMin + grace;
       if (nowMin > lateCutoffMin) status = "late";
     } else if (nowMin >= (isFirstHalfOff ? 14 * 60 : 10 * 60)) {
       status = "late"; // no shift assigned → legacy cutoff (2 PM if first-half off, else 10 AM)

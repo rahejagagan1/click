@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth , serverError } from "@/lib/api-auth";
 import { isDeveloperEmail } from "@/lib/hr/notification-policy";
 import { userIdsWithPermission } from "@/lib/permissions/resolve-permissions";
+import { brandScopeUserWhere } from "@/lib/hr/brand-scope";
 
 export const dynamic = 'force-dynamic';
 
@@ -85,7 +86,13 @@ export async function GET(req: NextRequest) {
                 // When `?all=true` we drop the role/orgLevel gate so
                 // every active user is returned — used by the Edit
                 // Profile form's Reporting Manager dropdown.
-                ...(all ? {} : managerWhere),
+                // AND-composed with the org-wide brand isolation rule
+                // (2026-07-15): non-VIEW_ALL_BRANDS callers only see
+                // their own brand's people in every picker.
+                AND: [
+                    all ? {} : managerWhere,
+                    brandScopeUserWhere(viewer),
+                ],
                 ...(hideDev.length > 0 ? { NOT: { email: { in: hideDev } } } : {}),
             },
             orderBy: { name: "asc" },
