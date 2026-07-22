@@ -3,7 +3,7 @@
 //
 // There are TWO override values, both soft (not secrets), for when a laptop
 // isn't available:
-//   • ?desktop=11 — plain mobile bypass. Skips the desktop-only clock-in/out
+//   • ?desktop=13 — plain mobile bypass. Skips the desktop-only clock-in/out
 //                   block; the punch is recorded exactly like a normal web
 //                   punch (geofence decides office / remote).
 //   • ?desktop=12 — "at-office web override". Same mobile bypass, PLUS the
@@ -15,7 +15,7 @@
 //                   the office log — clearly marked as a web override, never
 //                   disguised as a face/fingerprint scan.
 //
-// When the user opens ANY page with `?desktop=11` or `?desktop=12`, we remember
+// When the user opens ANY page with `?desktop=13` or `?desktop=12`, we remember
 // it for the rest of the browser session (sessionStorage) and forward it to the
 // clock-in/out API in TWO ways:
 //   • the `x-desktop-bypass: <value>` request header, and
@@ -28,9 +28,9 @@
 // regularization request if used.
 
 const STORAGE_KEY = "desktop-bypass";
-const VALID = new Set(["11", "12"]);
+const VALID = new Set(["13", "12"]);
 
-/** The bypass value active for this session ("11" | "12"), or null. Reading it
+/** The bypass value active for this session ("13" | "12"), or null. Reading it
  *  from the URL also persists it so later navigations (which drop the query
  *  string) keep the override alive. */
 function activeBypassValue(): string | null {
@@ -49,7 +49,7 @@ function activeBypassValue(): string | null {
 }
 
 /**
- * True when EITHER desktop bypass is active for this session (`?desktop=11`
+ * True when EITHER desktop bypass is active for this session (`?desktop=13`
  * or `?desktop=12` in the URL, or set earlier in the session). Used by the
  * client mobile-detection so the Clock In button isn't hidden on a phone.
  */
@@ -76,7 +76,7 @@ export function withDesktopBypassParam(url: string): string {
 }
 
 /**
- * Server-side: the bypass value the caller opted into ("11" | "12" | null),
+ * Server-side: the bypass value the caller opted into ("13" | "12" | null),
  * read from the `x-desktop-bypass` header OR the `?desktop=` query param
  * (query params survive header-stripping proxies). Both clock-in and
  * clock-out use this so the two signals stay in lockstep.
@@ -84,11 +84,11 @@ export function withDesktopBypassParam(url: string): string {
 export function desktopBypassMode(
   headers: Headers | { get(name: string): string | null },
   searchParams?: URLSearchParams,
-): "11" | "12" | null {
+): "13" | "12" | null {
   const h = headers.get("x-desktop-bypass");
-  if (h === "11" || h === "12") return h;
+  if (h === "13" || h === "12") return h;
   const q = searchParams?.get("desktop") ?? null;
-  if (q === "11" || q === "12") return q;
+  if (q === "13" || q === "12") return q;
   return null;
 }
 
@@ -100,5 +100,5 @@ export function desktopBypassMode(
  */
 export function hasDesktopBypassHeader(headers: Headers | { get(name: string): string | null }): boolean {
   const v = headers.get("x-desktop-bypass");
-  return v === "11" || v === "12";
+  return v === "13" || v === "12";
 }

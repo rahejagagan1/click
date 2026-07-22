@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
-import { isFullHRAdmin } from "@/lib/access";
+import { isFullHRAdmin, canViewAllBrands } from "@/lib/access";
 import { REPORT_TEMPLATES } from "@/lib/reports/manager-report-format";
 import { inBrandScope } from "@/lib/hr-brand-scope";
 
@@ -54,6 +54,18 @@ export default function DesignationsPage() {
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [desigUsers, setDesigUsers] = useState<{ id: number; name: string; email: string; isActive: boolean; businessUnit: string | null }[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
+
+  // Org-wide brand isolation (2026-07-15): non-VIEW_ALL_BRANDS viewers are
+  // locked to their own brand's tab — the other brand's designation list
+  // (and the create form's brand dropdown) never shows for them.
+  const sUser = session?.user as any;
+  const seesAllBrands = canViewAllBrands(sUser);
+  const ownBrand: Brand = sUser?.businessUnit === "YT Labs" ? "YT Labs" : "NB Media";
+  const visibleBrands = seesAllBrands ? BRANDS : ([ownBrand] as readonly Brand[]);
+  useEffect(() => {
+    if (sUser && !seesAllBrands && brand !== ownBrand) { setBrand(ownBrand); setSelectedId(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sUser, seesAllBrands, ownBrand, brand]);
   // The brand toggle (state above) scopes BOTH the designation list and the
   // per-designation user list.
   const shownDesigUsers = useMemo(() => desigUsers.filter((u) => inBrandScope(u.businessUnit, brand)), [desigUsers, brand]);
@@ -229,9 +241,11 @@ export default function DesignationsPage() {
         </div>
       )}
 
-      {/* Brand toggle — each brand keeps its own designation list. */}
+      {/* Brand toggle — each brand keeps its own designation list. Org-wide
+          brand isolation (2026-07-15): non-VIEW_ALL_BRANDS viewers only see
+          their OWN brand's tab; the other brand's designations stay hidden. */}
       <div className="flex gap-1 mb-4 border-b border-slate-200">
-        {BRANDS.map((b) => (
+        {visibleBrands.map((b) => (
           <button
             key={b}
             onClick={() => { setBrand(b); setSelectedId(null); }}
@@ -303,7 +317,7 @@ export default function DesignationsPage() {
                   onChange={(e) => setDraft((d) => ({ ...d, businessUnit: e.target.value }))}
                   className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
                 >
-                  {BRANDS.map((b) => <option key={b} value={b}>{b}</option>)}
+                  {visibleBrands.map((b) => <option key={b} value={b}>{b}</option>)}
                 </select>
                 <span className="mt-1 block text-[11px] text-slate-400">Which brand’s list this designation appears in.</span>
               </label>

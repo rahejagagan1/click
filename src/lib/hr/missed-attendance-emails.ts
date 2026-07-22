@@ -55,9 +55,14 @@ export async function sendMissedClockInReminders(): Promise<number> {
   const dow = new Date(today).getUTCDay();
   if (dow === 0 || dow === 6) return 0;
 
-  // 1. Active users.
+  // 1. Active users. Excludes exited employees whose isActive flag was never
+  //    flipped (past last-working-day exit) — same test as the master-sheet
+  //    "active" filter — so leavers don't get clock-in nudges.
   const users = await prisma.user.findMany({
-    where: { isActive: true },
+    where: {
+      isActive: true,
+      NOT: { employeeExit: { lastWorkingDay: { lt: today } } },
+    },
     select: { id: true, name: true, email: true },
   });
 
@@ -177,8 +182,13 @@ export async function sendHrLateClockInSummary(
   const defaultCutoffIst = istTimeOnDate(today, opts.lateCutoffHour ?? 10, opts.lateCutoffMin ?? 0);
 
   const [users, todays, leaves, userShifts] = await Promise.all([
+    // Exclude exited employees whose isActive was never flipped (past
+    // last-working-day exit) so leavers stop appearing in the absent roster.
     prisma.user.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        NOT: { employeeExit: { lastWorkingDay: { lt: today } } },
+      },
       select: {
         id: true, name: true, email: true, managerId: true,
         employeeProfile: { select: { department: true, businessUnit: true } },
@@ -435,4 +445,67 @@ export async function sendMissedClockOutReminders(): Promise<number> {
     }
   }
   return sent;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  HR-summary trigger times — derived from the Shift table
+// ─────────────────────────────────────────────────────────────────────
+
+export type SummaryTrigger = { hour: number; minute: number; label: string };
+
+/** Minutes after a brand's grace window closes before the digest fires —
+ *  gives stragglers' punches time to land so the roster isn't a near-miss
+ *  snapshot (e.g. a 10:12 clock-in emailed as "absent" at 10:10). */
+const SUMMARY_FIRE_BUFFER_MIN = 10;
+
+/** Re-read the Shift table at most this often. HR editing a shift's start
+ *  time or grace moves the trigger on the next refresh — no restart. */
+const TRIGGER_CACHE_MS = 5 * 60 * 1000;
+let triggerCache: { at: number; value: { nb: SummaryTrigger; yt: SummaryTrigger } } | null = null;
+
+function istTimeLabel(hour: number, minute: number): string {
+  const h12 = ((hour + 11) % 12) + 1;
+  return `${h12}:${String(minute).padStart(2, "0")} ${hour < 12 ? "AM" : "PM"} IST`;
+}
+
+/**
+ * Per-brand HR-summary fire time: the LATEST grace-window end (startTime +
+ * breakMinutes-as-grace, matching the clock-in late rule) among the brand's
+ * shifts that have at least one active user, plus a 10-minute buffer. So the
+ * digest always fires after every employee of that brand has had their full
+ * grace window — and follows automatically when HR edits a shift template.
+ *
+ * Null-brand shifts bucket under NB Media (parent-brand convention). A brand
+ * with no assigned shifts falls back to the legacy fixed times (NB 10:10,
+ * YT 11:15).
+ */
+export async function resolveHrSummaryTriggers(): Promise<{ nb: SummaryTrigger; yt: SummaryTrigger }> {
+  if (triggerCache && Date.now() - triggerCache.at < TRIGGER_CACHE_MS) return triggerCache.value;
+
+  const shifts = await prisma.shift.findMany({
+    where: { userShifts: { some: { user: { isActive: true } } } },
+    select: { brand: true, startTime: true, breakMinutes: true },
+  });
+
+  const triggerFor = (brand: "NB Media" | "YT Labs", fallbackMin: number): SummaryTrigger => {
+    let latestGraceEnd: number | null = null;
+    for (const s of shifts) {
+      if ((s.brand || "NB Media") !== brand) continue;
+      const [hh, mm] = String(s.startTime).split(":").map((n) => Number(n) || 0);
+      const grace = Number.isFinite(s.breakMinutes) ? Number(s.breakMinutes) : 15;
+      const end = hh * 60 + mm + grace;
+      if (latestGraceEnd === null || end > latestGraceEnd) latestGraceEnd = end;
+    }
+    const total = latestGraceEnd === null ? fallbackMin : latestGraceEnd + SUMMARY_FIRE_BUFFER_MIN;
+    const hour = Math.floor(total / 60) % 24;
+    const minute = total % 60;
+    return { hour, minute, label: istTimeLabel(hour, minute) };
+  };
+
+  const value = {
+    nb: triggerFor("NB Media", 10 * 60 + 10),
+    yt: triggerFor("YT Labs", 11 * 60 + 15),
+  };
+  triggerCache = { at: Date.now(), value };
+  return value;
 }

@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
     // ANY non-dismissed On-Duty record covers today. Pending counts —
     // a user already off-site shouldn't be locked out of clock-out
     // just because HR hasn't clicked Approve yet. Same bypasses as
-    // clock-in: developers and the `?desktop=11` / `?desktop=12`
+    // clock-in: developers and the `?desktop=13` / `?desktop=12`
     // overrides (forwarded as the x-desktop-bypass header / query param)
     // skip the block entirely. (The office-log door entry is a clock-IN
     // concern only, so 11 and 12 behave identically on clock-out.)

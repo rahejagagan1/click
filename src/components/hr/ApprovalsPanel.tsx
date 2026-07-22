@@ -24,6 +24,7 @@ import {
 import { DEPARTMENTS } from "@/lib/departments";
 import { DEPARTMENTS_YT_LABS } from "@/lib/departments-yt-labs";
 import { getUserRoleLabel } from "@/lib/user-role-options";
+import { can, hasResolvedPermissions } from "@/lib/permissions/can";
 
 type TabKey =
   | "leave"
@@ -246,7 +247,12 @@ export default function ApprovalsPanel({
 }) {
   const { data: session } = useSession();
   const me = session?.user as any;
-  const isFinalApprover = me?.orgLevel === "ceo" || me?.isDeveloper || me?.orgLevel === "hr_manager";
+  // L2 finaliser gate — mirrors the server's isHRAdmin: RBAC-first
+  // (MANAGE_HR via designation permissions), legacy orgLevel fallback only
+  // for sessions without resolved permissions.
+  const isFinalApprover = hasResolvedPermissions(me)
+    ? can(me, "MANAGE_HR")
+    : (me?.orgLevel === "ceo" || me?.isDeveloper || me?.orgLevel === "hr_manager");
 
   const searchParams = useSearchParams();
   const router       = useRouter();
@@ -633,11 +639,11 @@ export default function ApprovalsPanel({
     </div>
   ) : null;
 
-  // YT Labs runs a single-stage approval flow (the first approver
-  // finalises), so there's no L2 step to show. Hide the "L2 Approval"
-  // column + cells when the view is scoped to YT Labs. NB Media and the
-  // combined "All" view keep both stages.
-  const hideL2 = companyTab === "YT Labs";
+  // Both brands run the two-stage L1 → L2 flow since 2026-07-21 (YT Labs
+  // re-joined the NB flow — see src/lib/hr/single-stage-approval.ts), so the
+  // "L2 Approval" column shows everywhere. Kept as a flag so a future
+  // single-stage brand can hide it again with a one-line change.
+  const hideL2 = false;
 
   const body = (
     <>

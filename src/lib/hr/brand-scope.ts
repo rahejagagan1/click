@@ -16,6 +16,7 @@
 //   const params = scope.allBrands ? [] : [scope.brand];
 
 import { canViewAllBrands } from "@/lib/access";
+import { can, hasResolvedPermissions } from "@/lib/permissions/can";
 
 export type BrandScope =
   | { allBrands: true;  brand: null; reason: "developer" | "allowlisted" }
@@ -28,6 +29,13 @@ export function getBrandScope(user: any): BrandScope {
     return { allBrands: true, brand: null, reason: "developer" };
   }
   if (canViewAllBrands(user)) {
+    return { allBrands: true, brand: null, reason: "allowlisted" };
+  }
+  // Brand-less platform admins (e.g. the mock dev-login account): a user
+  // whose designation carries SYSTEM_ADMIN but who has no businessUnit is
+  // a platform account, not an employee — treat as all-brands rather than
+  // fail-closed. Real CEOs / admins carry a businessUnit and stay scoped.
+  if (!user.businessUnit && hasResolvedPermissions(user) && can(user, "SYSTEM_ADMIN")) {
     return { allBrands: true, brand: null, reason: "allowlisted" };
   }
   const bu = user.businessUnit;
@@ -69,6 +77,49 @@ export function resolveBrandScope(user: any, requestedRaw: string | null | undef
   // callers keep their own (already-safe) scope regardless of the param.
   if (!base.allBrands || !requested) return base;
   return { allBrands: false, brand: requested, reason: "own_brand" };
+}
+
+/**
+ * Prisma where-fragment limiting USER rows to the caller's brand unless
+ * they're an all-brands viewer (developer / VIEW_ALL_BRANDS holder /
+ * brand-less SYSTEM_ADMIN). This is the org-wide isolation rule
+ * (2026-07-15): without "See all brands", every list on the site shows
+ * only the caller's own brand. NULL businessUnit buckets under NB Media
+ * (parent-brand default, same convention as the rest of the app).
+ *
+ * Use directly on `prisma.user` queries; for request tables that relate
+ * to User, nest it: `{ user: brandScopeUserWhere(viewer) }`.
+ */
+export function brandScopeUserWhere(user: any): Record<string, any> {
+  const scope = getBrandScope(user);
+  if (scope.allBrands) return {};
+  const brand = scope.brand ?? "NB Media";
+  if (brand === "YT Labs") return { employeeProfile: { businessUnit: "YT Labs" } };
+  return {
+    OR: [
+      { employeeProfile: { businessUnit: "NB Media" } },
+      { employeeProfile: { businessUnit: null } },
+      { employeeProfile: null },
+    ],
+  };
+}
+
+/**
+ * Raw-SQL twin of {@link brandScopeUserWhere} for queries that join "User"
+ * directly (alias `u` by default). Returns "" for all-brands viewers, else
+ * an ` AND …` fragment. Brand values come from a fixed two-value enum, so
+ * the literal interpolation is injection-safe.
+ */
+export function brandScopeSqlClause(user: any, userAlias = "u"): string {
+  const scope = getBrandScope(user);
+  if (scope.allBrands) return "";
+  const brand = scope.brand ?? "NB Media";
+  if (brand === "YT Labs") {
+    return ` AND EXISTS (SELECT 1 FROM "EmployeeProfile" _bsep WHERE _bsep."userId" = ${userAlias}."id" AND _bsep."businessUnit" = 'YT Labs')`;
+  }
+  // NB Media bucket = everyone who is NOT explicitly YT Labs (covers null
+  // businessUnit and missing profile rows — parent-brand default).
+  return ` AND NOT EXISTS (SELECT 1 FROM "EmployeeProfile" _bsep WHERE _bsep."userId" = ${userAlias}."id" AND _bsep."businessUnit" = 'YT Labs')`;
 }
 
 /** Convenience: builds a SQL fragment + param array for the

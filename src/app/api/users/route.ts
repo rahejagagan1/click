@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, serverError } from "@/lib/api-auth";
 import { can, hasResolvedPermissions } from "@/lib/permissions/can";
+import { brandScopeUserWhere } from "@/lib/hr/brand-scope";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { sendEmail } from "@/lib/email/sender";
@@ -68,6 +69,14 @@ export async function GET(request: Request) {
             .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
         if (!viewerIsDev && devEmails.length > 0) {
             where.AND = [{ NOT: { email: { in: devEmails } } }];
+        }
+
+        // Org-wide brand isolation (2026-07-15): without VIEW_ALL_BRANDS the
+        // caller only ever sees their OWN brand's users in the admin table
+        // and every dropdown this endpoint feeds.
+        const brandClamp = brandScopeUserWhere(viewer);
+        if (Object.keys(brandClamp).length) {
+            where.AND = [...(where.AND ?? []), brandClamp];
         }
 
         const users = await prisma.user.findMany({

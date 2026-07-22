@@ -36,7 +36,7 @@ interface Violation {
     title: string;
     description: string | null;
     severity: "low" | "medium" | "high" | "critical";
-    status: "open" | "in_progress" | "closed";
+    status: "open" | "in_progress" | "paused" | "closed";
     category: string | null;
     actionTaken: string | null;
     // Legacy single-file columns — only populated for pre-migration
@@ -63,6 +63,7 @@ interface Summary {
     total: number;
     open: number;
     inProgress: number;
+    paused: number;
     closed: number;
     highCritical: number;
 }
@@ -79,6 +80,7 @@ const SEVERITY_CONFIG: Record<string, { label: string; color: string; dot: strin
 const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
     open: { label: "Open", color: "bg-red-100 dark:bg-red-500/10 text-red-600 dark:text-red-400 border-red-200 dark:border-red-500/20", dot: "bg-red-500" },
     in_progress: { label: "In Progress", color: "bg-blue-100 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-500/20", dot: "bg-blue-500" },
+    paused: { label: "Paused", color: "bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/20", dot: "bg-amber-500" },
     closed: { label: "Closed", color: "bg-emerald-100 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20", dot: "bg-emerald-500" },
 };
 
@@ -93,7 +95,7 @@ const VIOLATION_TYPE_OPTIONS = [
 export default function ViolationsPage() {
     const { data: session } = useSession();
     const sessionUser = session?.user as any;
-    // Mirrors the DELETE gate in /api/violations: admin tier only
+    // Mirrors the DELETE gate in /api/strikes: admin tier only
     // (CEO / dev / special_access / role=admin). Was narrower before —
     // role=admin and special_access users couldn't see the delete
     // button even though they're admins.
@@ -104,7 +106,7 @@ export default function ViolationsPage() {
         sessionUser?.isDeveloper === true;
 
     const [violations, setViolations] = useState<Violation[]>([]);
-    const [summary, setSummary] = useState<Summary>({ total: 0, open: 0, inProgress: 0, closed: 0, highCritical: 0 });
+    const [summary, setSummary] = useState<Summary>({ total: 0, open: 0, inProgress: 0, paused: 0, closed: 0, highCritical: 0 });
     const [loading, setLoading] = useState(true);
     const [filterStatus, setFilterStatus] = useState<string>("");
     const [filterSeverity, setFilterSeverity] = useState<string>("");
@@ -214,11 +216,11 @@ export default function ViolationsPage() {
         if (brand) params.set("brand", brand);
         // Severity filter is applied client-side now so the L0-L3 tab
         // strip can show accurate per-tier counts without re-fetching.
-        fetch(`/api/violations?${params}`)
+        fetch(`/api/strikes?${params}`)
             .then(r => r.json())
             .then(d => {
                 setViolations(d.violations || []);
-                setSummary(d.summary || { total: 0, open: 0, inProgress: 0, closed: 0, highCritical: 0 });
+                setSummary(d.summary || { total: 0, open: 0, inProgress: 0, paused: 0, closed: 0, highCritical: 0 });
             })
             .catch(() => { })
             .finally(() => setLoading(false));
@@ -260,7 +262,7 @@ export default function ViolationsPage() {
             fd.set("reportedById",        String(newViolation.reportedById || ""));
             for (const f of actionTakenFiles) fd.append("actionTakenFile", f);
 
-            const res = await fetch("/api/violations", {
+            const res = await fetch("/api/strikes", {
                 method: "POST",
                 body:   fd,
             });
@@ -348,9 +350,9 @@ export default function ViolationsPage() {
                 fd.set("responsiblePersonId", String(editData.responsiblePersonId || ""));
                 for (const f of newFiles) fd.append("actionTakenFile", f);
                 for (const rid of removedFileIds) fd.append("removeFileIds", String(rid));
-                res = await fetch("/api/violations", { method: "PATCH", body: fd });
+                res = await fetch("/api/strikes", { method: "PATCH", body: fd });
             } else {
-                res = await fetch("/api/violations", {
+                res = await fetch("/api/strikes", {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ id, ...editData }),
@@ -381,7 +383,7 @@ export default function ViolationsPage() {
     const changeStatus = async (e: React.MouseEvent, id: number, newStatus: string) => {
         e.stopPropagation();
         setStatusDropdownId(null);
-        await fetch("/api/violations", {
+        await fetch("/api/strikes", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id, status: newStatus }),
@@ -390,8 +392,8 @@ export default function ViolationsPage() {
     };
     const handleDelete = async (e: React.MouseEvent, id: number) => {
         e.stopPropagation();
-        if (!confirm("Are you sure you want to delete this violation?")) return;
-        const res = await fetch("/api/violations", {
+        if (!confirm("Are you sure you want to delete this strike?")) return;
+        const res = await fetch("/api/strikes", {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id }),
@@ -447,7 +449,7 @@ export default function ViolationsPage() {
                     </div>
                     <div>
                         <h1 className="text-[22px] font-bold tracking-tight text-slate-800 dark:text-white inline-flex items-center gap-2">
-                            System Violation Log
+                            System Strike Log
                             {brand && (
                                 <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600">
                                     {brand === "yt-labs" ? "YT Labs" : "NB Media"}
@@ -456,10 +458,10 @@ export default function ViolationsPage() {
                         </h1>
                         <p className="mt-0.5 text-[13px] text-slate-500 dark:text-slate-400">
                             {brand === "yt-labs"
-                                ? "YT Labs policy violations only"
+                                ? "YT Labs policy strikes only"
                                 : brand === "nb-media"
-                                    ? "NB Media policy violations only"
-                                    : "Track and manage policy violations across the organization"}
+                                    ? "NB Media policy strikes only"
+                                    : "Track and manage policy strikes across the organization"}
                         </p>
                     </div>
                 </div>
@@ -470,7 +472,7 @@ export default function ViolationsPage() {
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
                     </svg>
-                    Report Violation
+                    Report Strike
                 </button>
             </div>
 
@@ -505,11 +507,12 @@ export default function ViolationsPage() {
 
             {/* ── Summary Cards ── pastel tints + dark text, matches the
                 KPI department-breakdown style for a consistent look. */}
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
                 {[
                     { label: "Total",           value: summary.total,        tint: "#64748b", iconPath: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" },
                     { label: "Open Cases",      value: summary.open,         tint: "#dc2626", iconPath: "M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636" },
                     { label: "In Progress",     value: summary.inProgress,   tint: "#0284c7", iconPath: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" },
+                    { label: "Paused",          value: summary.paused,       tint: "#d97706", iconPath: "M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" },
                     { label: "Closed Cases",    value: summary.closed,       tint: "#059669", iconPath: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
                     { label: "L2 / L3",         value: summary.highCritical, tint: "#d97706", iconPath: "M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" },
                 ].map((card) => (
@@ -544,6 +547,7 @@ export default function ViolationsPage() {
                     <option value="">All Status</option>
                     <option value="open">Open</option>
                     <option value="in_progress">In Progress</option>
+                    <option value="paused">Paused</option>
                     <option value="closed">Closed</option>
                 </select>
                 {/* Severity filter is now driven by the L0–L3 tab strip
@@ -568,7 +572,7 @@ export default function ViolationsPage() {
                     <svg className="w-4 h-4 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                     </svg>
-                    <h2 className="text-[13px] font-bold text-slate-800 dark:text-white">Violation Records</h2>
+                    <h2 className="text-[13px] font-bold text-slate-800 dark:text-white">Strike Records</h2>
                     <span className="ml-auto text-[11px] text-slate-400 tabular-nums">
                         {filteredViolations.length} {filteredViolations.length === 1 ? "entry" : "entries"}
                     </span>
@@ -623,7 +627,7 @@ export default function ViolationsPage() {
                 {loading ? (
                     <div className="p-12 text-center">
                         <div className="inline-block w-7 h-7 rounded-full border-2 border-rose-200 border-t-rose-500 animate-spin" />
-                        <p className="mt-3 text-[12.5px] text-slate-500">Loading violations…</p>
+                        <p className="mt-3 text-[12.5px] text-slate-500">Loading strikes…</p>
                     </div>
                 ) : filteredViolations.length === 0 ? (
                     <div className="px-6 py-14 text-center">
@@ -632,11 +636,11 @@ export default function ViolationsPage() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                         </div>
-                        <p className="text-[14px] font-semibold text-slate-700 dark:text-slate-200">No violations found</p>
+                        <p className="text-[14px] font-semibold text-slate-700 dark:text-slate-200">No strikes found</p>
                         <p className="mt-1 text-[12px] text-slate-500">
                             {filterStatus || filterSeverity || filterMonth
                                 ? "Try clearing the filters above."
-                                : "All clear — no policy violations have been logged."}
+                                : "All clear — no policy strikes have been logged."}
                         </p>
                     </div>
                 ) : (
@@ -656,18 +660,21 @@ export default function ViolationsPage() {
                                             {/* Severity dot */}
                                             <div className={`w-2.5 h-2.5 rounded-full ${sev.dot} shrink-0`} />
 
-                                            {/* User */}
-                                            <div className="flex items-center gap-2.5 min-w-[160px]">
+                                            {/* User — FIXED width + truncation so the Title
+                                                column starts at the same x on every row (long
+                                                names like "Ashima Santoshkumar Rajput" no longer
+                                                bleed into the reason). */}
+                                            <div className="flex items-center gap-2.5 w-[210px] sm:w-[240px] shrink-0">
                                                 <UserAvatar name={v.user.name} src={v.user.profilePictureUrl} size="sm" />
-                                                <div>
-                                                    <p className="text-sm font-semibold text-slate-900 dark:text-white">{v.user.name}</p>
-                                                    <p className="text-[10px] text-slate-500">{v.user.teamCapsule || v.user.role}</p>
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-semibold text-slate-900 dark:text-white truncate" title={v.user.name}>{v.user.name}</p>
+                                                    <p className="text-[10px] text-slate-500 truncate">{v.user.teamCapsule || v.user.role}</p>
                                                 </div>
                                             </div>
 
-                                    {/* Title */}
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{v.title}</p>
+                                    {/* Title / reason */}
+                                    <div className="flex-1 min-w-0 pr-3">
+                                        <p className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate" title={v.title}>{v.title}</p>
                                         {v.category && (
                                             <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">
                                                 {VIOLATION_TYPE_OPTIONS.find(c => c.value === v.category)?.label || v.category}
@@ -689,7 +696,7 @@ export default function ViolationsPage() {
                                             </span>
                                             {statusDropdownId === v.id && (
                                                 <div className="absolute right-0 top-full mt-1 bg-white dark:bg-[#1a1a35] border border-slate-200 dark:border-white/10 rounded-lg shadow-xl z-[100] py-1 min-w-[120px]">
-                                                    {(["open", "in_progress", "closed"] as const).map((s) => {
+                                                    {(["open", "in_progress", "paused", "closed"] as const).map((s) => {
                                                         const sc = STATUS_CONFIG[s];
                                                         return (
                                                             <button key={s} onClick={(e) => changeStatus(e, v.id, s)}
@@ -741,6 +748,7 @@ export default function ViolationsPage() {
                                             className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
                                             <option value="open">Open</option>
                                             <option value="in_progress">In Progress</option>
+                                            <option value="paused">Paused</option>
                                             <option value="closed">Closed</option>
                                         </select>
                                     </div>
@@ -797,8 +805,8 @@ export default function ViolationsPage() {
                                                         {!marked && (
                                                             <a
                                                                 href={f.id === "legacy"
-                                                                    ? `/api/violations/${editingId}/file`
-                                                                    : `/api/violations/${editingId}/file?fileId=${f.id}`}
+                                                                    ? `/api/strikes/${editingId}/file`
+                                                                    : `/api/strikes/${editingId}/file?fileId=${f.id}`}
                                                                 target="_blank" rel="noreferrer"
                                                                 className="text-[11px] font-semibold text-violet-600 dark:text-violet-400 hover:underline"
                                                             >
@@ -908,7 +916,7 @@ export default function ViolationsPage() {
                                         {v.violationDate && (
                                             <div className="mb-3">
                                                 <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">
-                                                    {v.category === "attendance" ? "Violation Month" : "Violation Date"}
+                                                    {v.category === "attendance" ? "Strike Month" : "Strike Date"}
                                                 </p>
                                                 <p className="text-sm text-slate-700 dark:text-slate-300">
                                                     {v.category === "attendance"
@@ -965,8 +973,8 @@ export default function ViolationsPage() {
                                                             <a
                                                                 key={String(f.id)}
                                                                 href={f.id === "legacy"
-                                                                    ? `/api/violations/${v.id}/file`
-                                                                    : `/api/violations/${v.id}/file?fileId=${f.id}`}
+                                                                    ? `/api/strikes/${v.id}/file`
+                                                                    : `/api/strikes/${v.id}/file?fileId=${f.id}`}
                                                                 className="inline-flex items-center gap-1.5 text-[12px] font-medium text-violet-600 dark:text-violet-400 hover:underline"
                                                             >
                                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -987,8 +995,8 @@ export default function ViolationsPage() {
                                                         <a
                                                             key={String(f.id)}
                                                             href={f.id === "legacy"
-                                                                ? `/api/violations/${v.id}/file`
-                                                                : `/api/violations/${v.id}/file?fileId=${f.id}`}
+                                                                ? `/api/strikes/${v.id}/file`
+                                                                : `/api/strikes/${v.id}/file?fileId=${f.id}`}
                                                             className="inline-flex items-center gap-1.5 text-[13px] font-medium text-violet-600 dark:text-violet-400 hover:underline"
                                                         >
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1030,7 +1038,7 @@ export default function ViolationsPage() {
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowNewForm(false)}>
             <div className="bg-white dark:bg-[#1a1a35] rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-white/10 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-slate-100 dark:border-white/5 flex items-center justify-between shrink-0">
-                    <h3 className="text-base font-bold text-slate-900 dark:text-white">Report New Violation</h3>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">Report New Strike</h3>
                     <button onClick={() => setShowNewForm(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1060,7 +1068,7 @@ export default function ViolationsPage() {
                                 day-level DateField. */}
                             {newViolation.category === "attendance" ? (
                                 <>
-                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Month of Violation</label>
+                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Month of Strike</label>
                                     <input
                                         type="month"
                                         value={newViolation.violationDate ? newViolation.violationDate.slice(0, 7) : ""}
@@ -1075,7 +1083,7 @@ export default function ViolationsPage() {
                                 </>
                             ) : (
                                 <>
-                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Date of Violation</label>
+                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Date of Strike</label>
                                     <DateField value={newViolation.violationDate} onChange={(v) => setNewViolation(p => ({ ...p, violationDate: v }))}
                                         className="w-full" />
                                 </>
@@ -1086,7 +1094,7 @@ export default function ViolationsPage() {
                     {/* Row: Violation Type + Manager */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Violation Type</label>
+                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Strike Type</label>
                             <select value={newViolation.category} onChange={e => {
                                 const nextCategory = e.target.value;
                                 setNewViolation(p => {
@@ -1120,9 +1128,9 @@ export default function ViolationsPage() {
                     {/* Custom violation type (shown only when "other" is selected) */}
                     {newViolation.category === "other" && (
                         <div>
-                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Specify Violation Type</label>
+                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Specify Strike Type</label>
                             <input value={newViolation.customCategory} onChange={e => setNewViolation(p => ({ ...p, customCategory: e.target.value }))}
-                                placeholder="Enter the violation type..."
+                                placeholder="Enter the strike type..."
                                 className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30" />
                         </div>
                     )}
@@ -1171,6 +1179,7 @@ export default function ViolationsPage() {
                                 className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
                                 <option value="open">Open</option>
                                 <option value="in_progress">In Progress</option>
+                                <option value="paused">Paused</option>
                                 <option value="closed">Closed</option>
                             </select>
                         </div>
@@ -1255,7 +1264,7 @@ export default function ViolationsPage() {
                     </button>
                     <button onClick={handleCreate} disabled={saving || !newViolation.userId || actionTakenFiles.length === 0 || !newViolation.notes.trim()}
                         className="px-4 py-2 text-sm font-semibold text-white bg-rose-500 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm">
-                        {saving ? "Saving..." : "Submit Violation"}
+                        {saving ? "Saving..." : "Submit Strike"}
                     </button>
                 </div>
             </div>
