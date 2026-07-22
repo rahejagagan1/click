@@ -80,7 +80,9 @@ export async function GET(request: NextRequest) {
                 ] } };
 
         const where: any = { ...brandUserClause };
-        if (status) where.status = status;
+        // `status` is filtered in JS after fetch (see below) rather than in the
+        // typed where — a stale prisma client (pre-`paused` regeneration) would
+        // reject the new "paused" enum value here and break the whole list.
         if (severity) where.severity = severity;
         if (category) where.category = category;
         // Counts use the same brand-clause so the summary cards stay
@@ -92,7 +94,7 @@ export async function GET(request: NextRequest) {
             // the list payload. Each Violation's attached files are
             // exposed as a metadata-only `actionFiles` list (id + name
             // + mime), so the UI can list them without downloading any
-            // bytes. The dedicated `/api/violations/[id]/file?fileId=N`
+            // bytes. The dedicated `/api/strikes/[id]/file?fileId=N`
             // route streams the actual blob.
             //
             // The cast-to-any wraps both the typed-client lag from the
@@ -143,6 +145,12 @@ export async function GET(request: NextRequest) {
                 prisma.violation.count({ where: countBase }),
                 prisma.violation.count({ where: { ...countBase, status: "open" } }),
                 prisma.violation.count({ where: { ...countBase, status: "in_progress" } }),
+                // `paused` was added to the enum recently; on a dev box whose
+                // prisma client hasn't been regenerated yet the typed client
+                // rejects the value and throws. Swallow that to 0 so the WHOLE
+                // list load can't be taken down by the summary — it self-heals
+                // to the real count once `prisma generate` has run.
+                (prisma.violation.count({ where: { ...countBase, status: "paused" } as any }) as Promise<number>).catch(() => 0),
                 prisma.violation.count({ where: { ...countBase, status: "closed" } }),
                 prisma.violation.count({ where: { ...countBase, severity: { in: ["high", "critical"] } } }),
             ]),
@@ -170,14 +178,22 @@ export async function GET(request: NextRequest) {
             return v;
         });
 
+        // Status filter applied here (not in the DB where) so the "paused"
+        // enum value works even on a stale prisma client. The per-brand row
+        // set is small, so filtering in memory is cheap.
+        const filteredViolations = status
+            ? violations.filter((v: any) => v.status === status)
+            : violations;
+
         return NextResponse.json({
-            violations,
+            violations: filteredViolations,
             summary: {
                 total: summary[0],
                 open: summary[1],
                 inProgress: summary[2],
-                closed: summary[3],
-                highCritical: summary[4],
+                paused: summary[3],
+                closed: summary[4],
+                highCritical: summary[5],
             },
         });
     } catch (error: any) {
@@ -271,8 +287,8 @@ export async function POST(request: NextRequest) {
         }
 
         const title = body.title || (body.category
-            ? body.category.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()) + " Violation"
-            : "Violation Report");
+            ? body.category.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()) + " Strike"
+            : "Strike Report");
 
         // The reporter defaults to the logged-in user but the form
         // lets HR pick anyone in the directory — they may be filing
@@ -293,13 +309,16 @@ export async function POST(request: NextRequest) {
         // the next clean `prisma generate` runs. New uploads go to the
         // side `ViolationActionFile` table (handled below); the legacy
         // single-file columns on Violation stay null on new rows.
+        // Create with the DB-default status ("open"); the requested status is
+        // applied via raw SQL below so the recently-added "paused" enum value
+        // works even on a stale prisma client (which would reject it here).
+        const requestedStatus = body.status || "open";
         const data: any = {
             userId: body.userId,
             reportedBy,
             title,
             description: body.description || null,
             severity: body.severity || "medium",
-            status: body.status || "open",
             category: body.category || null,
             actionTaken: body.actionTaken || null,
             notes: body.notes || null,
@@ -315,6 +334,15 @@ export async function POST(request: NextRequest) {
                 responsiblePerson: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
             },
         });
+
+        // Apply a non-default requested status (in_progress / paused / closed).
+        if (requestedStatus !== "open") {
+            await prisma.$executeRawUnsafe(
+                `UPDATE "Violation" SET "status" = $1::"ViolationStatus" WHERE id = $2`,
+                requestedStatus, violation.id,
+            );
+            (violation as any).status = requestedStatus; // reflect in response + email
+        }
 
         // Persist each uploaded file as its own ViolationActionFile row,
         // sequentially. Using `createMany` would be tidier but the
@@ -455,7 +483,10 @@ export async function PATCH(request: NextRequest) {
         const before = await prisma.violation.findUnique({ where: { id }, select: { status: true } });
 
         const data: any = {};
-        if (status) data.status = status;
+        // NOTE: `status` is intentionally NOT written through the typed client
+        // here — it's applied via raw SQL below so the newly-added "paused"
+        // enum value works even on a dev box with a stale `prisma generate`
+        // cache (the typed client would reject an unknown enum value).
         if (actionTaken !== undefined) data.actionTaken = actionTaken;
         if (notes !== undefined) data.notes = notes;
         if (severity) data.severity = severity;
@@ -502,15 +533,28 @@ export async function PATCH(request: NextRequest) {
             }
         }
 
-        const violation = await prisma.violation.update({
-            where: { id },
-            data,
-            include: {
-                user: { select: { id: true, name: true, email: true, role: true, profilePictureUrl: true, teamCapsule: true } },
-                reporter: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
-                responsiblePerson: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
-            },
-        });
+        // Apply the status via raw SQL (client-agnostic enum cast) so any
+        // value — including the recently-added "paused" — is written even
+        // when the generated prisma client is stale. Runs before the typed
+        // update so the returned row reflects the new status.
+        if (status) {
+            await prisma.$executeRawUnsafe(
+                `UPDATE "Violation" SET "status" = $1::"ViolationStatus" WHERE id = $2`,
+                status, id,
+            );
+        }
+
+        // The typed update carries the remaining (non-status) fields. When
+        // only the status changed, `data` is empty and we just re-read the
+        // row with its relations for the response / email below.
+        const includeRel = {
+            user: { select: { id: true, name: true, email: true, role: true, profilePictureUrl: true, teamCapsule: true } },
+            reporter: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
+            responsiblePerson: { select: { id: true, name: true, role: true, profilePictureUrl: true } },
+        } as const;
+        const violation = Object.keys(data).length > 0
+            ? await prisma.violation.update({ where: { id }, data, include: includeRel })
+            : (await prisma.violation.findUnique({ where: { id }, include: includeRel }))!;
 
         // Email the affected employee if the status actually changed.
         // Same fire-and-forget pattern as the create path.

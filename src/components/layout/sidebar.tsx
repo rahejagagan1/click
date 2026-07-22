@@ -8,7 +8,7 @@ import { useState, useEffect, useRef, useCallback, type MutableRefObject, type R
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { canViewFeedbackInbox } from "@/lib/feedback-inbox-access";
-import { canUseFeedback, isAdmin as isAdminFn, isHRAdmin as isHRAdminFn, canSeeReports as canSeeReportsFn } from "@/lib/access";
+import { canUseFeedback, isAdmin as isAdminFn, isHRAdmin as isHRAdminFn, canSeeReports as canSeeReportsFn, canViewAllBrands } from "@/lib/access";
 import { can } from "@/lib/permissions/can";
 import { canUseMissingFields } from "@/lib/missing-fields/access";
 
@@ -675,10 +675,10 @@ export default function Sidebar() {
                 {/* System Violation Log — HR, Special Access, CEO, Developer
                     AND tab-permission allows it. */}
                 {canSeeViolationLog && (() => {
-                    const isActive = pathname.startsWith("/dashboard/violations");
+                    const isActive = pathname.startsWith("/dashboard/strikes");
                     return (
                         <Link
-                            href="/dashboard/violations"
+                            href="/dashboard/strikes"
                             className={cn(
                                 "flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 mx-0.5 rounded-xl text-[11px] font-medium transition-all duration-150 text-center leading-tight min-h-[54px]",
                                 isActive
@@ -691,7 +691,7 @@ export default function Sidebar() {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                                 </svg>
                             </span>
-                            Violation Log
+                            Strike Log
                         </Link>
                     );
                 })()}
@@ -1046,19 +1046,25 @@ export default function Sidebar() {
                                                 </Link>
                                             );
                                         };
-                                        return (
+                                        // Org-wide brand isolation (2026-07-15): only
+                                        // all-brands viewers (developers + VIEW_ALL_BRANDS
+                                        // designation holders) get the brand switcher.
+                                        // Everyone else — including the other brand's HR
+                                        // Manager and the CEOs — sees a single entry for
+                                        // their OWN brand. The server clamps the data
+                                        // anyway; this keeps the UI honest about it.
+                                        const seesAll = canViewAllBrands(user as any);
+                                        const ownSlug = user?.businessUnit === "YT Labs" ? "yt-labs" : "nb-media";
+                                        const ownLabel = user?.businessUnit === "YT Labs" ? "YT Labs" : "NB Media";
+                                        return seesAll ? (
                                             <>
                                                 {brandEntry("nb-media", "NB Media")}
                                                 {brandEntry("yt-labs",  "YT Labs")}
-                                                {/* Developer-only — CEOs are deliberately
-                                                    excluded so they stay brand-scoped. */}
-                                                {user?.isDeveloper === true && (
-                                                    <>
-                                                        <div className="my-1 mx-3 border-t border-[#d1dae5]" />
-                                                        {brandEntry("all", "All brands")}
-                                                    </>
-                                                )}
+                                                <div className="my-1 mx-3 border-t border-[#d1dae5]" />
+                                                {brandEntry("all", "All brands")}
                                             </>
+                                        ) : (
+                                            <>{brandEntry(ownSlug, ownLabel)}</>
                                         );
                                     })()}
                                 </div>,

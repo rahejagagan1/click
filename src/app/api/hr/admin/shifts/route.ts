@@ -32,25 +32,50 @@ async function setSaturday(shiftId: number, policy: string, weeks: number[]) {
   );
 }
 
+// Half-day grace (minutes past the shift mid-point before a second-half
+// arrival counts as late). Parsed from the request body; "" / null / absent
+// all mean "inherit breakMinutes" and store NULL. Written via raw SQL for the
+// same stale-prisma-client reason as the saturday columns.
+//   returns: { set: boolean; value: number | null; error?: string }
+function parseHalfDayGrace(body: any): { set: boolean; value: number | null; error?: string } {
+  if (!("halfDayGraceMinutes" in (body ?? {}))) return { set: false, value: null };
+  const raw = body.halfDayGraceMinutes;
+  if (raw === null || raw === undefined || raw === "") return { set: true, value: null };
+  const parsed = Number.parseInt(String(raw), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return { set: false, value: null, error: "halfDayGraceMinutes must be a non-negative integer" };
+  }
+  return { set: true, value: parsed };
+}
+
+async function setHalfDayGrace(shiftId: number, value: number | null) {
+  // ::int cast so a NULL parameter has an unambiguous type for Postgres.
+  await prisma.$executeRawUnsafe(
+    `UPDATE "Shift" SET "halfDayGraceMinutes" = $1::int WHERE id = $2`,
+    value, shiftId,
+  );
+}
+
 export async function GET(req: NextRequest) {
   // HR-admin only — this is the admin shift template manager. The
   // employee-facing path (their own assigned shift) goes through
   // /api/hr/me/shift, which stays open to any logged-in user.
-  const { errorResponse } = await requireHRAdmin();
+  const { session, errorResponse } = await requireHRAdmin();
   if (errorResponse) return errorResponse;
   try {
-    // Brand filter is URL-driven. `?brand=NB%20Media` returns that
-    // brand's shifts (plus any pre-brand-column legacy NULL rows);
-    // no brand param returns everything. HR-admin gate above means
-    // only vetted HR users can hit this — cross-brand browsing is
-    // intentional per HR direction so an NB Media HR Manager can
-    // still see YT Labs shifts via the outer brand tab in the URL.
+    // Brand filter: URL-driven for ALL-BRANDS viewers (developer /
+    // VIEW_ALL_BRANDS holders), but clamped to the caller's own brand for
+    // everyone else — org-wide brand isolation (2026-07-15) supersedes the
+    // earlier "cross-brand browsing is intentional" rule: an NB Media HR
+    // Manager only ever sees NB Media shifts (plus legacy NULL-brand rows).
     const url = new URL(req.url);
     const rawBrand = (url.searchParams.get("brand") || "").trim();
-    const brand =
+    const requested =
       rawBrand === "NB Media" || rawBrand === "nb_media" || rawBrand === "nb-media" ? "NB Media" :
       rawBrand === "YT Labs"  || rawBrand === "yt_labs"  || rawBrand === "yt-labs"  ? "YT Labs"  :
       null;
+    const scope = getBrandScope(session!.user);
+    const brand = scope.allBrands ? requested : ((scope.brand as "NB Media" | "YT Labs" | null) ?? "NB Media");
     let shifts: any;
     if (brand) {
       shifts = await prisma.$queryRawUnsafe(
@@ -94,17 +119,21 @@ export async function POST(req: NextRequest) {
       body.brand === "NB Media" || body.brand === "YT Labs" ? body.brand : null;
     const brand = scope.allBrands ? (explicitBrand ?? null) : (scope.brand ?? null);
 
+    const hdGrace = parseHalfDayGrace(body);
+    if (hdGrace.error) return NextResponse.json({ error: hdGrace.error }, { status: 400 });
+
     const shift = await prisma.shift.create({
       data: { name, startTime, endTime, breakMinutes, workDays },
     });
     await setSaturday(shift.id, policy, weeks);
+    if (hdGrace.set) await setHalfDayGrace(shift.id, hdGrace.value);
     if (brand) {
       await prisma.$executeRawUnsafe(
         `UPDATE "Shift" SET brand = $1 WHERE id = $2`,
         brand, shift.id,
       );
     }
-    return NextResponse.json({ ...shift, saturdayPolicy: policy, saturdayWeeks: weeks, brand }, { status: 201 });
+    return NextResponse.json({ ...shift, saturdayPolicy: policy, saturdayWeeks: weeks, halfDayGraceMinutes: hdGrace.set ? hdGrace.value : null, brand }, { status: 201 });
   } catch (e) { return serverError(e, "POST /api/hr/admin/shifts"); }
 }
 
@@ -127,16 +156,20 @@ export async function PUT(req: NextRequest) {
       breakMinutes = parsed;
     }
     const workDays = body.workDays ?? body.workingDays;
+    const hdGrace = parseHalfDayGrace(body);
+    if (hdGrace.error) return NextResponse.json({ error: hdGrace.error }, { status: 400 });
     const shift = await prisma.shift.update({
       where: { id: shiftId },
       data: { name, startTime, endTime, breakMinutes, workDays },
     });
+    if (hdGrace.set) await setHalfDayGrace(shiftId, hdGrace.value);
+    const hdEcho = hdGrace.set ? { halfDayGraceMinutes: hdGrace.value } : {};
     // Update the Saturday rule whenever it was supplied (the form always sends it).
     if (body.saturdayPolicy !== undefined || body.saturdayWeeks !== undefined) {
       const { policy, weeks } = parseSaturday(body);
       await setSaturday(shiftId, policy, weeks);
-      return NextResponse.json({ ...shift, saturdayPolicy: policy, saturdayWeeks: weeks });
+      return NextResponse.json({ ...shift, saturdayPolicy: policy, saturdayWeeks: weeks, ...hdEcho });
     }
-    return NextResponse.json(shift);
+    return NextResponse.json({ ...shift, ...hdEcho });
   } catch (e) { return serverError(e, "PUT /api/hr/admin/shifts"); }
 }

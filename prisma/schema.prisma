@@ -1088,6 +1088,7 @@ enum ViolationSeverity {
 enum ViolationStatus {
   open
   in_progress
+  paused
   closed
 }
 
@@ -1377,6 +1378,11 @@ model Shift {
   startTime      String // "09:00"
   endTime        String // "18:00"
   breakMinutes   Int      @default(60)
+  /// Grace minutes for a SECOND-HALF arrival (first-half leave/WFH day) —
+  /// applied on top of the shift mid-point when computing the half-day late
+  /// cutoff. Null → falls back to breakMinutes (the full-day grace).
+  /// The half boundary itself is always the mid-point of start/end.
+  halfDayGraceMinutes Int?
   workDays       Json     @db.JsonB // ["Mon","Tue","Wed","Thu","Fri"]
   // Saturday handling when "Sat" is in workDays:
   //   "all"       — every Saturday works (default, back-compat).

@@ -9,6 +9,7 @@ import { pocAssignmentEmail } from "@/lib/email/templates";
 import { assertSameBrandOrSuperAdmin } from "@/lib/hr/cross-brand-guard";
 import { isSingleStageApprovalEmployee } from "@/lib/hr/single-stage-approval";
 import { isHRAdmin } from "@/lib/access";
+import { brandScopeUserWhere } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -28,9 +29,11 @@ export async function GET(req: NextRequest) {
     if (!myId && view !== "all") return NextResponse.json([]);
     if (!myId && view === "all" && !isAdmin) return NextResponse.json([]);
 
+    // Org-wide brand isolation (2026-07-15): admin "all" views only show
+    // the caller's own brand unless they hold VIEW_ALL_BRANDS.
     const where =
       view === "team" && !isAdmin ? { user: { managerId: myId! } } :
-      view === "all"  && isAdmin  ? {} :
+      view === "all"  && isAdmin  ? { user: brandScopeUserWhere(user) } :
                                     { userId: myId! };
 
     const reqs = await prisma.onDutyRequest.findMany({
@@ -264,7 +267,8 @@ export async function PUT(req: NextRequest) {
       if (crossBrand) return crossBrand;
     }
 
-    // YT Labs: single-stage — first authorised approver finalises outright.
+    // Single-stage policy check — false for all brands since 2026-07-21
+    // (YT Labs re-joined the NB two-stage flow); see single-stage-approval.ts.
     const singleStage = await isSingleStageApprovalEmployee(record.userId);
     // Fast-path: only the CEO approving at L1 collapses straight to approved
     // instead of parking at partially_approved. HR Managers still finalise at L2.

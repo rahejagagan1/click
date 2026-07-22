@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import useSWR, { mutate } from "swr";
 import LeaveRequestForm, { LeaveRequestKind } from "@/components/LeaveRequestForm";
 import ChannelViewsTargetsPanel from "@/components/hr/ChannelViewsTargetsPanel";
+import StrikeScoreCard from "@/components/hr/StrikeScoreCard";
 import { fetcher } from "@/lib/swr";
 import SelectField from "@/components/ui/SelectField";
 import { useSession } from "next-auth/react";
@@ -3012,14 +3013,14 @@ export default function HRHomePage() {
   //   1. Developers (`DEVELOPER_EMAILS` in env → `user.isDeveloper`) —
   //      stable bypass for the platform team; tied to identity, not
   //      knowledge of a URL trick.
-  //   2. `?desktop=11` query param — short-term emergency override for
+  //   2. `?desktop=13` query param — short-term emergency override for
   //      anyone whose laptop is unavailable. NOT a secret; treat it
   //      as "I know what I'm doing, let me through" and follow up
   //      with regularization if used.
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   useEffect(() => {
     const isDev = user?.isDeveloper === true;
-    // isDesktopBypassActive() persists `?desktop=11` for the session, so the
+    // isDesktopBypassActive() persists `?desktop=13` for the session, so the
     // override survives navigation that drops the query string.
     setIsMobileDevice(detectMobileDevice() && !isDev && !isDesktopBypassActive());
   }, [user]);
@@ -3294,6 +3295,11 @@ export default function HRHomePage() {
           <WelcomeBanner name={user?.name} />
 
           <div className="no-scrollbar space-y-3 min-h-0 overflow-y-auto pr-1">
+            {/* Employee's own strike score out of the limit (e.g. 2 / 3) —
+                sits ABOVE Quick Access so it's the first thing they see.
+                Self-only via /api/me/strike-score. */}
+            <StrikeScoreCard />
+
             <p className={`pb-0.5 pt-1 text-[13px] font-semibold leading-none ${C.t1}`}>
               Quick Access
             </p>

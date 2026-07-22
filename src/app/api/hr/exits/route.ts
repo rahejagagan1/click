@@ -19,6 +19,7 @@ export const dynamic = "force-dynamic";
 // RBAC-designation-driven (policy 2026-07-14): shared isHRAdmin resolves
 // MANAGE_HR from the caller's designation. Replaced a local legacy copy.
 import { isHRAdmin } from "@/lib/access";
+import { brandScopeSqlClause } from "@/lib/hr/brand-scope";
 function canManage(session: any): boolean {
   return isHRAdmin(session?.user);
 }
@@ -111,13 +112,16 @@ export async function GET(request: NextRequest) {
                        JOIN "User" u ON u.id = e."userId"
                   LEFT JOIN "EmployeeProfile" ep ON ep."userId" = e."userId"`;
 
+    // Org-wide brand isolation (2026-07-15): non-VIEW_ALL_BRANDS callers
+    // only see their own brand's exits, whatever ?brand= says.
+    const clamp = brandScopeSqlClause(session!.user, "u");
     const rows = brandToShow
       ? await prisma.$queryRawUnsafe<any[]>(
-          `${baseSql} WHERE ep."businessUnit" = $1 ORDER BY e."createdAt" DESC`,
+          `${baseSql} WHERE ep."businessUnit" = $1${clamp} ORDER BY e."createdAt" DESC`,
           brandToShow,
         )
       : await prisma.$queryRawUnsafe<any[]>(
-          `${baseSql} ORDER BY e."createdAt" DESC`,
+          `${baseSql} WHERE 1=1${clamp} ORDER BY e."createdAt" DESC`,
         );
 
     return NextResponse.json(rows);

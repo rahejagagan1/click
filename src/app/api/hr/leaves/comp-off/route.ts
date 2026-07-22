@@ -170,7 +170,8 @@ export async function PUT(req: NextRequest) {
       if (crossBrand) return crossBrand;
     }
 
-    // YT Labs: single-stage — first authorised approver finalises outright.
+    // Single-stage policy check — false for all brands since 2026-07-21
+    // (YT Labs re-joined the NB two-stage flow); see single-stage-approval.ts.
     const singleStage = await isSingleStageApprovalEmployee(record.userId);
     // Fast-path: only the CEO approving at L1 collapses straight to approved
     // instead of parking at partially_approved. HR Managers still finalise at L2.

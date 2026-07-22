@@ -62,6 +62,15 @@ const ADMIN_TABS: Array<AdminTabDef & { permKey: string }> = [
 
 const DAYS_LABEL = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
+// "HH:MM" → minutes-of-day (null when malformed) and back. Used by the shift
+// form to preview the half-day boundary (mid-point of start/end) live.
+const hmToMin = (hm: string): number | null => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hm || "");
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+};
+const minToHm = (min: number): string =>
+  `${String(Math.floor(min / 60) % 24).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+
 export default function HRAdminPage() {
   const { data: session } = useSession();
   const user = session?.user as any;
@@ -294,7 +303,7 @@ export default function HRAdminPage() {
   // Shift form
   const [showShiftForm, setShowShiftForm] = useState(false);
   const [editShift, setEditShift] = useState<any>(null);
-  const [shiftForm, setShiftForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", gracePeriodMinutes: "15", workingDays: [1,2,3,4,5], saturdayPolicy: "all", saturdayWeeks: [] as number[] });
+  const [shiftForm, setShiftForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", gracePeriodMinutes: "15", halfDayGraceMinutes: "", workingDays: [1,2,3,4,5], saturdayPolicy: "all", saturdayWeeks: [] as number[] });
   // Apply-shift-to-employees modal state.
   const [applyShift, setApplyShift] = useState<any>(null);
   const [applyScope, setApplyScope] = useState<"all" | "nb_media" | "yt_labs" | "specific">("all");
@@ -351,6 +360,8 @@ export default function HRAdminPage() {
       startTime: s.startTime,
       endTime: s.endTime,
       gracePeriodMinutes: String(breakRaw),
+      // Empty string = "inherit the main grace" (stored NULL).
+      halfDayGraceMinutes: s.halfDayGraceMinutes == null ? "" : String(s.halfDayGraceMinutes),
       workingDays,
       saturdayPolicy: s.saturdayPolicy ?? "all",
       saturdayWeeks: Array.isArray(s.saturdayWeeks) ? s.saturdayWeeks : [],
@@ -383,15 +394,24 @@ export default function HRAdminPage() {
       startTime: shiftForm.startTime,
       endTime: shiftForm.endTime,
       breakMinutes: shiftForm.gracePeriodMinutes,
+      // "" → NULL (inherit breakMinutes) server-side.
+      halfDayGraceMinutes: shiftForm.halfDayGraceMinutes,
       workDays,
       saturdayPolicy: satSelected ? shiftForm.saturdayPolicy : "all",
       saturdayWeeks: satSelected && shiftForm.saturdayPolicy === "weeks" ? shiftForm.saturdayWeeks : [],
+      // Brand stamp: an all-brands admin creates the shift for the brand
+      // tab they're on (NB / YT). Scoped HR can send anything — the server
+      // always stamps their OWN brand. On the "All brands" tab this stays
+      // undefined → a deliberately shared (both-brands) template.
+      brand: initialBrand && initialBrand !== "all" ? initialBrand : undefined,
     };
     const body = editShift ? { ...payload, id: editShift.id } : payload;
     const res = await fetch("/api/hr/admin/shifts", {
       method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
-    if (res.ok) { setShowShiftForm(false); setEditShift(null); mutate("/api/hr/admin/shifts"); }
+    // Revalidate the SAME key the list reads — it's brand-suffixed, so a
+    // bare "/api/hr/admin/shifts" mutate would never refresh a brand view.
+    if (res.ok) { setShowShiftForm(false); setEditShift(null); mutate(`/api/hr/admin/shifts${shiftsBrandParam}`); }
     else alert((await res.json()).error);
   };
 
@@ -836,7 +856,7 @@ export default function HRAdminPage() {
             <>
               <div className="flex items-center justify-between">
                 <h2 className="text-[14px] font-bold text-slate-800 dark:text-white">Shift Templates</h2>
-                <button onClick={() => { setEditShift(null); setShiftForm({ name:"",startTime:"09:00",endTime:"18:00",gracePeriodMinutes:"15",workingDays:[1,2,3,4,5],saturdayPolicy:"all",saturdayWeeks:[] }); setShowShiftForm(true); }}
+                <button onClick={() => { setEditShift(null); setShiftForm({ name:"",startTime:"09:00",endTime:"18:00",gracePeriodMinutes:"15",halfDayGraceMinutes:"",workingDays:[1,2,3,4,5],saturdayPolicy:"all",saturdayWeeks:[] }); setShowShiftForm(true); }}
                   className="flex items-center gap-1.5 h-8 px-4 bg-[#008CFF] hover:bg-[#0077dd] text-white rounded-lg text-[12px] font-semibold">
                   <Plus className="w-3.5 h-3.5" />Add Shift
                 </button>
@@ -851,6 +871,12 @@ export default function HRAdminPage() {
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                           {s.startTime} – {s.endTime}
                           {" · "}Grace: {s.breakMinutes ?? s.gracePeriodMinutes ?? 0}min
+                          {(() => {
+                            const st = hmToMin(s.startTime), en = hmToMin(s.endTime);
+                            if (st === null || en === null || en <= st) return null;
+                            return <>{" · "}2nd half: {minToHm(Math.round((st + en) / 2))}</>;
+                          })()}
+                          {s.halfDayGraceMinutes != null && <>{" · "}½-day grace: {s.halfDayGraceMinutes}min</>}
                           {" · "}{(Array.isArray(s.workDays) ? s.workDays : [])
                             .map((d: unknown) => typeof d === "number" ? DAYS_LABEL[d] : String(d))
                             .filter(Boolean)
@@ -1350,11 +1376,38 @@ export default function HRAdminPage() {
                   </div>
                 ))}
               </div>
-              <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Grace Period (minutes)</label>
-                <input type="number" value={shiftForm.gracePeriodMinutes} onChange={e => setShiftForm(f => ({ ...f, gracePeriodMinutes: e.target.value }))}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-[13px] text-slate-800 dark:text-white" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Grace Period (minutes)</label>
+                  <input type="number" min={0} value={shiftForm.gracePeriodMinutes} onChange={e => setShiftForm(f => ({ ...f, gracePeriodMinutes: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-[13px] text-slate-800 dark:text-white" />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Half-Day Grace (minutes)</label>
+                  <input type="number" min={0} value={shiftForm.halfDayGraceMinutes} placeholder="Same as grace"
+                    onChange={e => setShiftForm(f => ({ ...f, halfDayGraceMinutes: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-[13px] text-slate-800 dark:text-white placeholder:text-slate-400" />
+                </div>
               </div>
+
+              {/* Live half-day boundary preview — mid-point of start/end, plus
+                  the second-half late cutoff derived from the half-day grace
+                  (falling back to the main grace when blank). */}
+              {(() => {
+                const s = hmToMin(shiftForm.startTime), e = hmToMin(shiftForm.endTime);
+                if (s === null || e === null || e <= s) return null;
+                const mid = Math.round((s + e) / 2);
+                const mainGrace = Number.parseInt(shiftForm.gracePeriodMinutes, 10);
+                const hdRaw = Number.parseInt(shiftForm.halfDayGraceMinutes, 10);
+                const hdGrace = Number.isFinite(hdRaw) ? hdRaw : (Number.isFinite(mainGrace) ? mainGrace : 0);
+                return (
+                  <div className="rounded-lg bg-slate-50 dark:bg-white/5 px-3 py-2 text-[11.5px] text-slate-600 dark:text-slate-300">
+                    1st half <span className="font-semibold">{shiftForm.startTime}–{minToHm(mid)}</span>
+                    {" · "}2nd half <span className="font-semibold">{minToHm(mid)}–{shiftForm.endTime}</span>
+                    {" · "}2nd-half arrivals late after <span className="font-semibold">{minToHm(mid + hdGrace)}</span>
+                  </div>
+                );
+              })()}
               <div>
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2 block">Working Days</label>
                 <div className="flex gap-2">

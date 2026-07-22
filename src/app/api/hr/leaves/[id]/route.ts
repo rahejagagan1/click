@@ -55,9 +55,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
          self.role === "admin" ||
          self.role === "hr_manager");
     const isDirectManager = application.user?.managerId === myId;
-    // YT Labs: single-stage approval — any authorised approver (the direct
-    // manager OR HR/CEO) finalises the leave on the first approve instead
-    // of going through the L1 → L2 handoff. NB Media keeps two stages.
+    // Single-stage policy check — returns false for ALL brands since
+    // 2026-07-21 (YT Labs re-joined the NB two-stage flow); see
+    // src/lib/hr/single-stage-approval.ts.
     const singleStage = await isSingleStageApprovalEmployee(application.userId);
     const year = new Date(application.fromDate).getFullYear();
     const totalDays = parseFloat(application.totalDays.toString());

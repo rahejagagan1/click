@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { requireAuth, resolveUserId, serverError } from "@/lib/api-auth";
 import { parseYearMonth, istCalendarMonthRange } from "@/lib/ist-date";
 import { can, hasResolvedPermissions } from "@/lib/permissions/can";
+import { brandScopeUserWhere } from "@/lib/hr/brand-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +72,10 @@ export async function GET(req: NextRequest) {
     // brand filter doesn't clobber a manager's team scope.
     const userClauses: any[] = [];
     if (!isFinalApprover) userClauses.push({ managerId: myId! });
+    // Org-wide brand isolation (2026-07-15) — matches /api/hr/approvals so
+    // the badge counts agree with the rows the caller can actually see.
+    const viewerClamp = brandScopeUserWhere(self);
+    if (Object.keys(viewerClamp).length) userClauses.push(viewerClamp);
     if (brand === "YT Labs") {
       userClauses.push({ employeeProfile: { businessUnit: "YT Labs" } });
     } else if (brand === "NB Media") {

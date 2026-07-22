@@ -581,10 +581,18 @@ export async function GET(req: NextRequest) {
     // the full org. Slug form matches what the HR-admin sidebar
     // generates so the URL stays consistent end-to-end.
     const brandRaw = (req.nextUrl.searchParams.get("brand") || "").toLowerCase();
-    const brand: BrandFilter =
+    const brandRequested: BrandFilter =
       brandRaw === "yt-labs" || brandRaw === "yt"      ? "YT Labs" :
       brandRaw === "nb-media" || brandRaw === "nb"     ? "NB Media" :
       null;
+    // Org-wide brand isolation (2026-07-15): EVERY sheet is clamped to the
+    // viewer's brand scope. All-brands viewers (developer / VIEW_ALL_BRANDS)
+    // export whatever brand they asked for; a single-brand HR Manager only
+    // ever exports their own brand, whatever the URL says.
+    const viewerScope = getBrandScope(user);
+    const brand: BrandFilter = viewerScope.allBrands
+      ? brandRequested
+      : ((viewerScope.brand as BrandFilter) ?? "NB Media");
 
     // Employee status — "active" (default) exports the regular on-the-books
     // workforce (no exited employees); "exited" exports only those who've left;

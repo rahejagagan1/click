@@ -7,7 +7,7 @@
 // /api/hr/admin/master-sheet so we never have to ship Prisma data
 // to the browser.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -23,7 +23,7 @@ import {
   AlertCircle,
   ArrowLeft,
 } from "lucide-react";
-import { isHRAdmin, canViewSalary, isLeadershipOrHR } from "@/lib/access";
+import { isHRAdmin, canViewSalary, isLeadershipOrHR, canViewAllBrands } from "@/lib/access";
 import SelectField from "@/components/ui/SelectField";
 
 type BrandScope = "all" | "nb-media" | "yt-labs";
@@ -109,6 +109,19 @@ export default function MasterSheetPage() {
   const [empStatus, setEmpStatus] = useState<StatusScope>("active");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>("");
+
+  // Org-wide brand isolation (2026-07-15): non-VIEW_ALL_BRANDS viewers are
+  // locked to their own brand — the scope selector collapses to a single
+  // option and any ?brand= trick is snapped back. The export API clamps
+  // server-side too; this keeps the UI honest about it.
+  const seesAllBrands = canViewAllBrands(user);
+  const ownBrandScope: BrandScope = user?.businessUnit === "YT Labs" ? "yt-labs" : "nb-media";
+  useEffect(() => {
+    if (user && !seesAllBrands && brand !== ownBrandScope) setBrand(ownBrandScope);
+  }, [user, seesAllBrands, ownBrandScope, brand]);
+  const visibleBrandOptions = seesAllBrands
+    ? BRAND_OPTIONS
+    : BRAND_OPTIONS.filter((o) => o.value === ownBrandScope);
 
   if (status === "loading") {
     return <div className="p-6 text-[13px] text-slate-500">Loading…</div>;
@@ -274,7 +287,7 @@ export default function MasterSheetPage() {
             Filters every sheet to employees from the chosen brand. Choose <strong>All brands</strong> for the full org.
           </p>
           <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-            {BRAND_OPTIONS.map((o) => {
+            {visibleBrandOptions.map((o) => {
               const on = brand === o.value;
               return (
                 <button

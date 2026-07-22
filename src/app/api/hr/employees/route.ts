@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { requireAuth, requireHRAdmin, isHRAdmin, serverError } from "@/lib/api-auth";
 import { canViewExitBadge } from "@/lib/access";
+import { brandScopeUserWhere } from "@/lib/hr/brand-scope";
 import { serializeBigInt } from "@/lib/utils";
 import { isDeveloperEmail } from "@/lib/hr/notification-policy";
 import { probationWindow } from "@/lib/hr/probation";
@@ -62,6 +63,10 @@ export async function GET(req: NextRequest) {
           department ? { employeeProfile: { department: { contains: department, mode: "insensitive" } } } : {},
           employmentType ? { employeeProfile: { employmentType } } : {},
           businessUnit ? { employeeProfile: { businessUnit } } : {},
+          // Org-wide brand isolation (2026-07-15): without VIEW_ALL_BRANDS
+          // the caller only ever sees their OWN brand's employees, whatever
+          // ?businessUnit= says. All-brands viewers pass through untouched.
+          brandScopeUserWhere(viewer),
           brand === "YT Labs"  ? { employeeProfile: { businessUnit: "YT Labs" } } : {},
           brand === "NB Media" ? { NOT: { employeeProfile: { businessUnit: "YT Labs" } } } : {},
           // Non-HR can only ever see active employees — ignore any
