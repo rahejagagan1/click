@@ -165,6 +165,45 @@ export async function POST(req: NextRequest) {
         { status: 403 },
       );
     }
+    // Floater Leave is date-locked to the optional-holiday calendar
+    // (2026-07-22): it can ONLY be taken on dates listed with
+    // type="optional" (Pongal, Raksha Bandhan, …). The lock is
+    // one-directional — other leave types stay applicable on those days,
+    // which remain ordinary working days for everyone who doesn't book
+    // the floater. Matched by code "FL" with a name fallback.
+    const isFloater = leaveType.code === "FL" || /floater/i.test(leaveType.name);
+    if (isFloater) {
+      const optionals = await prisma.holidayCalendar.findMany({
+        where: { type: "optional", date: { gte: from, lte: to } },
+        select: { date: true },
+      });
+      const optionalSet = new Set(optionals.map((h) => h.date.toISOString().slice(0, 10)));
+      // EVERY calendar day in the requested range must be an optional
+      // holiday — in practice a floater is a single such date.
+      let allOptional = true;
+      const cur = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
+      const end = Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
+      while (cur.getTime() <= end) {
+        if (!optionalSet.has(cur.toISOString().slice(0, 10))) { allOptional = false; break; }
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+      if (!allOptional) {
+        const upcoming = await prisma.holidayCalendar.findMany({
+          where: { type: "optional", date: { gte: new Date() } },
+          orderBy: { date: "asc" },
+          take: 4,
+          select: { date: true, name: true },
+        });
+        const hint = upcoming
+          .map((h) => `${h.date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", timeZone: "UTC" })} (${h.name.split("/")[0].trim()})`)
+          .join(", ");
+        return NextResponse.json(
+          { error: `Floater Leave can only be taken on an optional-holiday date.${hint ? ` Upcoming: ${hint}.` : ""}` },
+          { status: 400 },
+        );
+      }
+    }
+
     // Note: we intentionally do NOT gate applications by user.leavePolicyId.
     // HR manages balances manually in the Leave Balances matrix and can
     // grant any type to any user; the balance check below is the canonical
