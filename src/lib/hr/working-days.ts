@@ -3,7 +3,11 @@ import { isWorkingDay, type ShiftWorkRule } from "@/lib/hr/shift-working-days";
 
 /**
  * Count the working days between `from` and `to` inclusive, excluding
- * non-working days and any HolidayCalendar row in that window.
+ * non-working days and full (public/company) HolidayCalendar rows in that
+ * window. OPTIONAL (floater) holidays count as working days — they're
+ * exactly the dates Floater Leave is applied on, so excluding them zeroed
+ * out those requests with "all non-working days" (bug fixed 2026-07-22).
+ * Same semantic as the attendance-month-summary working-day set.
  *
  * `shift` (optional) decides which days are working. When omitted/null the
  * legacy Mon–Fri rule applies (every existing 2-arg caller keeps today's
@@ -22,7 +26,8 @@ export async function countWorkingDays(from: Date, to: Date, shift?: ShiftWorkRu
     `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 
   const holidays = await prisma.holidayCalendar.findMany({
-    where: { date: { gte: from, lte: to } }, select: { date: true },
+    where: { date: { gte: from, lte: to }, NOT: { type: "optional" } },
+    select: { date: true },
   });
   const holidaySet = new Set(holidays.map((h) => isoKey(h.date)));
 

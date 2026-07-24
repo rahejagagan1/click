@@ -82,9 +82,12 @@ export async function runAutoLOP(): Promise<AutoLOPSummary> {
     dates.push(new Date(cur));
   }
 
-  // Holidays in window — single query, set lookup per date.
+  // Holidays in window — single query, set lookup per date. Optional
+  // (floater) holidays are still working days (2026-07-22): whoever didn't
+  // book a floater is expected in, exactly like the month-summary counts it.
+  // Anyone who DID take the floater is shielded by their approved leave.
   const holidays = await prisma.holidayCalendar.findMany({
-    where: { date: { gte: scanStart, lte: latestEligible } },
+    where: { date: { gte: scanStart, lte: latestEligible }, NOT: { type: "optional" } },
     select: { date: true },
   });
   const holidaySet = new Set(holidays.map((h) => isoKey(h.date)));

@@ -84,10 +84,13 @@ export async function sendMissedClockInReminders(): Promise<number> {
       },
       select: { userId: true },
     }),
-    prisma.holidayCalendar.findFirst({ where: { date: today }, select: { id: true } }),
+    // Optional (floater) holidays are still working days — only full
+    // public/company holidays silence the reminders (2026-07-22, matches
+    // the working-day semantic in attendance-month-summary).
+    prisma.holidayCalendar.findFirst({ where: { date: today, NOT: { type: "optional" } }, select: { id: true } }),
   ]);
 
-  // No emails on a public holiday — nobody's expected to clock in.
+  // No emails on a full (public/company) holiday — nobody's expected to clock in.
   if (holidayHit) return 0;
 
   const clockedInIds = new Set(todays.map(a => a.userId));
@@ -171,7 +174,9 @@ export async function sendHrLateClockInSummary(
   const dow = new Date(today).getUTCDay();
   if (dow === 0 || dow === 6) return 0;
 
-  const holidayHit = await prisma.holidayCalendar.findFirst({ where: { date: today } });
+  // Optional (floater) holidays stay working days — only full holidays
+  // suppress the digest (2026-07-22).
+  const holidayHit = await prisma.holidayCalendar.findFirst({ where: { date: today, NOT: { type: "optional" } } });
   if (holidayHit) return 0;
 
   // Fallback IST cutoff — used for any user without a UserShift row.
